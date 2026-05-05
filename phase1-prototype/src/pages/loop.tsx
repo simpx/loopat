@@ -772,9 +772,9 @@ function ArtifactCard(props: { item: Extract<ChatItem, { kind: "artifact" }>; on
         <span class="text-[11px] text-gray-500">created · {props.item.lines} lines</span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </div>
-      <pre class="mt-2 font-mono text-[11px] leading-snug text-gray-500 line-clamp-3 whitespace-pre-wrap">
+      <div class="mt-2 font-mono text-[11px] leading-snug text-gray-500 line-clamp-3 whitespace-pre-wrap">
         {props.item.preview}
-      </pre>
+      </div>
     </button>
   )
 }
@@ -792,9 +792,11 @@ function CommandCard(props: { item: Extract<ChatItem, { kind: "command" }> }) {
         </Show>
         <span class="text-gray-400">{props.item.time}</span>
       </header>
-      <pre class="px-3 py-2 font-mono text-[12px] leading-snug text-gray-700 bg-gray-50 overflow-auto">
-        <For each={props.item.output}>{(line) => <div>{line}</div>}</For>
-      </pre>
+      <div class="px-3 py-2 font-mono text-[12px] leading-snug text-gray-700 bg-gray-50 overflow-auto">
+        <For each={props.item.output}>
+          {(line) => <div class="whitespace-pre">{line || "\u00A0"}</div>}
+        </For>
+      </div>
     </div>
   )
 }
