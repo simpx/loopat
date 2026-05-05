@@ -39,13 +39,20 @@ src/
 ## 当前状态
 
 - [x] Vite + Solid + Tailwind 脚手架
-- [x] 4-tab shell，signal 驱动切换
-- [x] Loop 列表 + fork 演示（点 fork → 新 loop 出现在列表顶部）
-- [ ] Loop chat（含 driver-transfer 系统标记）
-- [ ] Loop attach UI（多 client mirror 演示）
-- [ ] Focus tab（pinned / focus / active loops 三段，复杂真实 mock）
-- [ ] Context tab（Knowledge / Agents / Repos sub-nav）
-- [ ] Chat tab（channels + DMs + spawn loop）
+- [x] 4-tab shell（左 logo+tabs / 右 user），signal 驱动；🦄 logo + favicon
+- [x] Loop tab：
+  - chat-first 布局；右 panel 可 toggle（files / editor / terminal）50/50 split
+  - 6 个真实 archetype loop：code 讨论（loopctl）/ research（llama-research）/ 线上问题（mirror-llama-3）/ context 整理（ccx-refine）/ 设计（1001-design）/ 上线（gateway-launch，他人 driver）
+  - 富 chat 内容：text / diff card / todo card / artifact card / command card / 系统 marker（driver-change / RFD / claim）
+  - **driver 状态机**：driver=ME → 显示 "release (RFD)"；rfd=true → 显示 "RFD · 可被认领"；他人 + rfd → "claim drive"
+  - **context 显示**：每个 loop 头部 chips 显示 knowledge 范围 + mounted repos
+  - **CodeMirror 6 编辑器**（python / markdown / js syntax highlight）
+  - fork 永远可用
+- [x] Focus tab：pinned / focus（8d expires）/ active loops 三段
+- [x] Context tab：Knowledge / Agents / Repos sub-nav；Knowledge 含 wikilink + backlinks
+- [x] Chat tab：channels + DMs + 消息流
+- [ ] Loop attach UI（多 client mirror 演示）— 还没加
+- [ ] 更复杂真实的 Focus mock
 
 ## 跟根目录文档的关系
 

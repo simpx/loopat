@@ -9,6 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "codemirror": "^6.0.2",
+    "marked": "^18.0.3",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {
