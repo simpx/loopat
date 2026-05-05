@@ -7,8 +7,26 @@
  * file in the editor with proper content.
  */
 export type FileNode =
-  | { kind: "folder"; name: string; children: FileNode[] }
-  | { kind: "file"; name: string; path: string; modified?: boolean; staged?: boolean }
+  | {
+      kind: "folder"
+      name: string
+      children: FileNode[]
+      mount?: "ro" | "rw" | "selective"
+      revision?: string
+      secret?: boolean
+      onSync?: () => void
+      display?: "section"
+      hint?: string
+    }
+  | {
+      kind: "file"
+      name: string
+      path: string
+      modified?: boolean
+      staged?: boolean
+      readonly?: boolean
+      linkTo?: string
+    }
 
 export type LoopWorkspace = {
   fileTree: FileNode[]
@@ -343,7 +361,7 @@ const llamaResearch: LoopWorkspace = {
   fileContents: {
     "knowledge/llama-3-long-context.md": `# Llama-3 Long Context
 
-> 由泰兰德整理，2026-05-04
+> 由伊利丹整理，2026-05-04
 
 ## 关键发现
 
@@ -364,7 +382,7 @@ const llamaResearch: LoopWorkspace = {
 `,
     "knowledge/llama-3-attention.md": `# Llama-3 Attention 实现
 
-> 由泰兰德整理，2026-05-04
+> 由伊利丹整理，2026-05-04
 
 MLA (Multi-head Latent Attention) 把 KV cache 压缩成 latent vector，
 减少 IO 量。
@@ -382,7 +400,7 @@ MLA (Multi-head Latent Attention) 把 KV cache 压缩成 latent vector，
 `,
     "knowledge/llama-3-prefill-followups.md": `# Llama-3 Prefill 优化方向
 
-基于泰兰德的 attention 调研 + 今天的 trace 分析。
+基于伊利丹的 attention 调研 + 今天的 trace 分析。
 
 ## 候选方向
 

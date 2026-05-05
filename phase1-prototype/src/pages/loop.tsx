@@ -8,32 +8,37 @@
  * Driver state model:
  *   - active + driver = ME      → can release (RFD)
  *   - active + driver = other   → just shows their name
- *   - rfd                       → "可被认领" + (others see "claim drive")
+ *   - rfd                       → anyone (incl. self) can claim drive
  *   - fork is always available, regardless of state
  *
  * Right panel (toggleable, 50/50 split when open):
  *   files / editor (CodeMirror) / terminal
  */
-import { createSignal, For, Show } from "solid-js"
+import { createSignal, createEffect, For, Show } from "solid-js"
+import { useParams, useNavigate } from "@solidjs/router"
 import { Icon } from "../components/icon"
 import { Markdown } from "../components/markdown"
 import { CodeEditor } from "../components/code-editor"
 import {
   ME,
   loops,
-  currentLoopId,
-  setCurrentLoopId,
   forkLoop,
   releaseRfd,
   claimDrive,
-  createLoop,
+  previewSlug,
+  setNewLoopDialogOpen,
+  setLoopPersonal,
+  mountRevisions,
+  syncMount,
   chats,
+  type CreateLoopOpts,
 } from "../state"
+import { REPOS, VAULT_DOCS, flattenVaultFiles, type DocNode } from "./context"
 import type { ChatItem, Loop, TimelineEvent } from "../state"
 import { getWorkspace } from "../mock/files"
 import type { FileNode } from "../mock/files"
 
-type RightMode = "files" | "editor" | "terminal" | "info"
+type RightMode = "workdir" | "editor" | "terminal" | "info"
 
 const TERMINAL_LINES = [
   "$ pytest tests/test_gateway.py::test_rdma_register -xvs",
@@ -49,12 +54,15 @@ const TERMINAL_LINES = [
 ]
 
 export function LoopPage() {
+  const params = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [scope, setScope] = createSignal<"mine" | "all">("mine")
   const [rightOpen, setRightOpen] = createSignal(false)
-  const [rightMode, setRightMode] = createSignal<RightMode>("files")
+  const [rightMode, setRightMode] = createSignal<RightMode>("workdir")
   const [editingPath, setEditingPath] = createSignal<string>("")
   const [fileEdits, setFileEdits] = createSignal<Record<string, Record<string, string>>>({})
-  const [openFolders, setOpenFolders] = createSignal(new Set<string>())
+  const [openFolders, setOpenFolders] = createSignal(new Set<string>(["context", "main"]))
+  const [addContextOpen, setAddContextOpen] = createSignal(false)
 
   const toggleFolder = (name: string) => {
     const next = new Set(openFolders())
@@ -63,11 +71,27 @@ export function LoopPage() {
     setOpenFolders(next)
   }
 
+  const sortKey = (l: Loop) => {
+    if (l.inFocus?.includes("pinned")) return 0
+    if (l.rfd) return 2
+    return 1
+  }
   const filtered = () =>
-    loops().filter((l) => (scope() === "mine" ? l.driver === ME : l.status !== "archived"))
+    loops()
+      .filter((l) => (scope() === "mine" ? l.driver === ME : l.status !== "archived"))
+      .slice()
+      .sort((a, b) => sortKey(a) - sortKey(b))
 
-  const current = () => loops().find((l) => l.id === currentLoopId()) ?? loops()[0]
+  const current = () => loops().find((l) => l.id === params.id) ?? loops()[0]
   const workspace = () => getWorkspace(current().id)
+
+  const toggleMode = (m: RightMode) => {
+    if (rightOpen() && rightMode() === m) setRightOpen(false)
+    else {
+      setRightOpen(true)
+      setRightMode(m)
+    }
+  }
 
   const openFile = (path: string) => {
     setEditingPath(path)
@@ -100,11 +124,35 @@ export function LoopPage() {
 
   return (
     <div class="flex h-full w-full">
-      <LoopsList scope={scope} setScope={setScope} filtered={filtered} />
+      <LoopsList
+        scope={scope}
+        setScope={setScope}
+        filtered={filtered}
+        currentId={() => params.id}
+        onSelect={(id) => navigate(`/loop/${id}`)}
+        onNewClick={() => setNewLoopDialogOpen(true)}
+      />
 
       <div class="flex-1 min-w-0 min-h-0 flex">
         <main class="flex-1 min-w-0 flex flex-col bg-white min-h-0">
-          <LoopHeader loop={current()} />
+          <LoopHeader
+            loop={current()}
+            rightOpen={rightOpen}
+            rightMode={rightMode}
+            toggleMode={toggleMode}
+            onAddContext={() => setAddContextOpen(true)}
+          />
+
+          <Show when={addContextOpen()}>
+            <AddContextDialog
+              loop={current()}
+              onClose={() => setAddContextOpen(false)}
+              onSave={(paths) => {
+                setLoopPersonal(current().id, paths)
+                setAddContextOpen(false)
+              }}
+            />
+          </Show>
 
           <div class="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3">
             <Show
@@ -119,23 +167,15 @@ export function LoopPage() {
             </Show>
           </div>
 
-          <ChatInput
-            current={current}
-            rightOpen={rightOpen}
-            rightMode={rightMode}
-            setRightOpen={setRightOpen}
-            setRightMode={setRightMode}
-          />
+          <ChatInput />
         </main>
 
         <Show when={rightOpen()}>
           <RightPanel
             current={current}
             rightMode={rightMode}
-            setRightMode={setRightMode}
             setRightOpen={setRightOpen}
             editingPath={editingPath}
-            setEditingPath={setEditingPath}
             fileText={fileText}
             setFileText={setFileText}
             isEdited={isEdited}
@@ -157,6 +197,9 @@ function LoopsList(props: {
   scope: () => "mine" | "all"
   setScope: (v: "mine" | "all") => void
   filtered: () => Loop[]
+  currentId: () => string
+  onSelect: (id: string) => void
+  onNewClick: () => void
 }) {
   return (
     <aside class="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
@@ -166,7 +209,7 @@ function LoopsList(props: {
           type="button"
           class="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-sm leading-none"
           title="new loop"
-          onClick={() => createLoop()}
+          onClick={() => props.onNewClick()}
         >
           +
         </button>
@@ -199,11 +242,11 @@ function LoopsList(props: {
       <div class="flex-1 min-h-0 overflow-auto py-2">
         <For each={props.filtered()}>
           {(loop) => {
-            const sel = () => currentLoopId() === loop.id
+            const sel = () => props.currentId() === loop.id
             return (
               <button
                 type="button"
-                onClick={() => setCurrentLoopId(loop.id)}
+                onClick={() => props.onSelect(loop.id)}
                 class={
                   sel()
                     ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
@@ -227,7 +270,7 @@ function LoopsList(props: {
                   </div>
                 </div>
                 <Show when={loop.rfd}>
-                  <span title="RFD · 可被认领" class="text-amber-600 text-[11px]">RFD</span>
+                  <span title="RFD" class="text-amber-600 text-[11px]">RFD</span>
                 </Show>
                 <Show when={loop.inFocus?.includes("pinned")}>
                   <span title="pinned in focus" class="text-gray-500">📌</span>
@@ -259,9 +302,28 @@ function ArchetypeIcon(props: { a: Loop["archetype"] }) {
 // Loop header (driver state + context chips)
 // ============================================================================
 
-function LoopHeader(props: { loop: Loop }) {
+function LoopHeader(props: {
+  loop: Loop
+  rightOpen: () => boolean
+  rightMode: () => RightMode
+  toggleMode: (m: RightMode) => void
+  onAddContext: () => void
+}) {
+  const navigate = useNavigate()
   const loop = () => props.loop
   const isMine = () => loop().driver === ME
+  const modeBtn = (label: string, m: RightMode) => (
+    <button
+      class={
+        props.rightOpen() && props.rightMode() === m
+          ? "px-2 py-0.5 rounded bg-gray-100 text-gray-900"
+          : "px-2 py-0.5 rounded hover:text-gray-900"
+      }
+      onClick={() => props.toggleMode(m)}
+    >
+      {label}
+    </button>
+  )
   return (
     <header class="px-5 pt-3 pb-2 shrink-0 border-b border-gray-200">
       <div class="flex items-center gap-2 flex-wrap">
@@ -275,7 +337,7 @@ function LoopHeader(props: { loop: Loop }) {
         />
         <Show when={loop().rfd}>
           <span class="text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-            RFD · 可被认领
+            RFD
           </span>
         </Show>
         <Show when={loop().status === "idle" && !loop().rfd}>
@@ -290,7 +352,7 @@ function LoopHeader(props: { loop: Loop }) {
         {/* Always visible */}
         <button
           type="button"
-          onClick={() => forkLoop(loop().id)}
+          onClick={() => navigate(`/loop/${forkLoop(loop().id)}`)}
           class="px-3 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700"
         >
           fork
@@ -307,19 +369,19 @@ function LoopHeader(props: { loop: Loop }) {
             RFD
           </button>
         </Show>
-        <Show when={!isMine() && loop().rfd}>
+        <Show when={loop().rfd}>
           <button
             type="button"
             onClick={() => claimDrive(loop().id)}
             class="px-3 h-7 rounded text-xs bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
-            title="take over driving this loop"
+            title={isMine() ? "re-drive this loop" : "take over driving this loop"}
           >
             drive
           </button>
         </Show>
       </div>
 
-      {/* workdir + branch */}
+      {/* workdir + branch + mode toggles */}
       <div class="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
         <span>{loop().workdir}</span>
         <Show when={loop().branch}>
@@ -331,6 +393,13 @@ function LoopHeader(props: { loop: Loop }) {
         </Show>
         <span>·</span>
         <span>{loop().participants} viewing</span>
+        <div class="flex-1" />
+        <div class="flex items-center gap-1 text-[11px]">
+          {modeBtn("ℹ info", "info")}
+          {modeBtn("▤ workdir", "workdir")}
+          {modeBtn("✎ editor", "editor")}
+          {modeBtn("▷ terminal", "terminal")}
+        </div>
       </div>
 
       {/* context chips */}
@@ -338,12 +407,43 @@ function LoopHeader(props: { loop: Loop }) {
         <span class="text-gray-400">context:</span>
         <ContextChip
           label="knowledge"
-          value={loop().context.knowledge === "all" ? "all" : `${loop().context.knowledge.length} dirs`}
+          value={loop().context.knowledge === "all" ? "all" : `${loop().context.knowledge.length}`}
         />
-        <button class="text-gray-400 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-50">
-          + scope
+        <ContextChip
+          label="notes"
+          value={loop().context.notes === "all" ? "all" : `${loop().context.notes.length}`}
+        />
+        <ContextChip
+          label="personal"
+          value={
+            loop().context.personal && loop().context.personal!.length > 0
+              ? `${loop().context.personal!.length}`
+              : "—"
+          }
+        />
+        <button
+          type="button"
+          onClick={() => props.onAddContext()}
+          class="text-gray-500 hover:text-gray-900 px-1.5 py-0.5 rounded hover:bg-gray-100"
+          title="add context"
+        >
+          +
         </button>
       </div>
+
+      {/* focus chips */}
+      <Show when={loop().focuses && loop().focuses!.length > 0}>
+        <div class="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
+          <span class="text-gray-400">focus:</span>
+          <For each={loop().focuses}>
+            {(name) => (
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-gray-100 text-[11px] font-medium text-gray-900">
+                {name}
+              </span>
+            )}
+          </For>
+        </div>
+      </Show>
     </header>
   )
 }
@@ -363,13 +463,7 @@ function ContextChip(props: { label: string; value: string }) {
 
 type PastedImage = { url: string; name: string }
 
-function ChatInput(props: {
-  current: () => Loop
-  rightOpen: () => boolean
-  rightMode: () => RightMode
-  setRightOpen: (v: boolean) => void
-  setRightMode: (m: RightMode) => void
-}) {
+function ChatInput() {
   const [pasted, setPasted] = createSignal<PastedImage[]>([])
 
   const handlePaste = (e: ClipboardEvent) => {
@@ -393,26 +487,6 @@ function ChatInput(props: {
   }
 
   const removePasted = (idx: number) => setPasted(pasted().filter((_, i) => i !== idx))
-
-  const toggleMode = (m: RightMode) => {
-    if (props.rightOpen() && props.rightMode() === m) props.setRightOpen(false)
-    else {
-      props.setRightOpen(true)
-      props.setRightMode(m)
-    }
-  }
-  const modeBtn = (label: string, m: RightMode) => (
-    <button
-      class={
-        props.rightOpen() && props.rightMode() === m
-          ? "px-1.5 py-0.5 rounded bg-gray-100 text-gray-900"
-          : "px-1.5 py-0.5 rounded hover:text-gray-900"
-      }
-      onClick={() => toggleMode(m)}
-    >
-      {label}
-    </button>
-  )
 
   return (
     <div class="px-5 pb-3 pt-2 shrink-0 border-t border-gray-200">
@@ -454,14 +528,6 @@ function ChatInput(props: {
           send
         </button>
       </div>
-      <div class="flex items-center justify-end mt-2 text-[11px] text-gray-500">
-        <div class="flex items-center gap-2">
-          {modeBtn("ℹ info", "info")}
-          {modeBtn("▤ files", "files")}
-          {modeBtn("✎ editor", "editor")}
-          {modeBtn("▷ terminal", "terminal")}
-        </div>
-      </div>
     </div>
   )
 }
@@ -473,10 +539,8 @@ function ChatInput(props: {
 function RightPanel(props: {
   current: () => Loop
   rightMode: () => RightMode
-  setRightMode: (m: RightMode) => void
   setRightOpen: (v: boolean) => void
   editingPath: () => string
-  setEditingPath: (p: string) => void
   fileText: (p: string) => string
   setFileText: (p: string, v: string) => void
   isEdited: (p: string) => boolean
@@ -486,13 +550,10 @@ function RightPanel(props: {
 }) {
   return (
     <aside class="flex-1 min-w-0 border-l border-gray-200 bg-white flex flex-col">
-      <header class="px-3 h-10 shrink-0 border-b border-gray-200 flex items-center gap-1">
-        <ModeTab label="ℹ info" active={props.rightMode() === "info"} onClick={() => props.setRightMode("info")} />
-        <ModeTab label="▤ files" active={props.rightMode() === "files"} onClick={() => props.setRightMode("files")} />
-        <ModeTab label="✎ editor" active={props.rightMode() === "editor"} onClick={() => props.setRightMode("editor")} />
-        <ModeTab label="▷ terminal" active={props.rightMode() === "terminal"} onClick={() => props.setRightMode("terminal")} />
+      <header class="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
+        <span class="capitalize">{props.rightMode()}</span>
         <Show when={props.rightMode() === "editor"}>
-          <span class="ml-2 text-[11px] text-gray-500 truncate">
+          <span class="ml-2 truncate">
             {props.editingPath() || "(no file)"}
             <Show when={props.editingPath() && props.isEdited(props.editingPath())}>
               <span class="text-orange-600"> ●</span>
@@ -513,9 +574,9 @@ function RightPanel(props: {
         <InfoPanel loop={props.current()} />
       </Show>
 
-      <Show when={props.rightMode() === "files"}>
+      <Show when={props.rightMode() === "workdir"}>
         <div class="flex-1 min-h-0 overflow-auto py-2">
-          <For each={getWorkspace(props.current().id).fileTree}>
+          <For each={buildLoopWorkdir(props.current())}>
             {(node) => (
               <FileTreeNode
                 node={node}
@@ -527,9 +588,6 @@ function RightPanel(props: {
               />
             )}
           </For>
-          <Show when={getWorkspace(props.current().id).fileTree.length === 0}>
-            <div class="px-4 py-3 text-[12px] text-gray-500">workdir 还是空的</div>
-          </Show>
         </div>
         <div class="border-t border-gray-200 px-3 py-2 text-[11px] text-gray-500">
           ⑂ <span class="text-gray-900">{props.current().branch ?? "main"}</span>
@@ -541,7 +599,7 @@ function RightPanel(props: {
           when={props.editingPath()}
           fallback={
             <div class="flex-1 min-h-0 flex items-center justify-center text-[13px] text-gray-500 px-8 text-center">
-              没打开文件 · 在 ▤ files 里点一个，或在 chat 里点 artifact card
+              没打开文件 · 在 ▤ workdir 里点一个，或在 chat 里点 artifact card
             </div>
           }
         >
@@ -708,44 +766,90 @@ function countFiles(nodes: FileNode[]): number {
   return n
 }
 
-function ModeTab(props: { label: string; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      class={
-        props.active
-          ? "px-2.5 h-7 rounded text-xs bg-gray-100 text-gray-900"
-          : "px-2.5 h-7 rounded text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-900"
-      }
-    >
-      {props.label}
-    </button>
-  )
-}
-
 function FileTreeNode(props: {
   node: FileNode
   depth: number
+  pathKey?: string
   openFolders: () => Set<string>
   toggleFolder: (name: string) => void
   onOpen: (path: string) => void
   currentPath: () => string
 }) {
   if (props.node.kind === "folder") {
-    const opened = () => props.openFolders().has(props.node.name)
     const folder = props.node
+    const key = () => props.pathKey ?? folder.name
+    const opened = () => props.openFolders().has(key())
+    const isSection = folder.display === "section"
     return (
       <>
         <button
           type="button"
-          class="w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
+          class={
+            isSection
+              ? folder.name === "context"
+                ? "w-full py-1.5 flex items-center gap-1.5 bg-cyan-50/50 hover:bg-cyan-50 text-left border-y border-cyan-100/70"
+                : "w-full py-1.5 flex items-center gap-1.5 bg-emerald-50/40 hover:bg-emerald-50 text-left border-y border-emerald-100/70"
+              : "w-full py-1 flex items-center gap-1.5 hover:bg-gray-50 text-left"
+          }
           style={{ "padding-left": `${0.5 + props.depth * 0.75}rem`, "padding-right": "0.5rem" }}
-          onClick={() => props.toggleFolder(folder.name)}
+          onClick={() => props.toggleFolder(key())}
         >
           <Icon name={opened() ? "chevron-down" : "chevron-right"} class="text-gray-500" />
-          <Icon name="folder" class="text-gray-500" />
-          <span class="text-[13px] text-gray-900">{folder.name}</span>
+          <Show
+            when={folder.secret}
+            fallback={
+              <Show
+                when={isSection}
+                fallback={<Icon name="folder" class="text-gray-500" />}
+              >
+                <span class="text-[12px]">
+                  {folder.name === "context" ? "🧷" : "▣"}
+                </span>
+              </Show>
+            }
+          >
+            <span class="text-[12px]">🔐</span>
+          </Show>
+          <span
+            class={
+              isSection
+                ? "text-[11px] uppercase tracking-wider font-semibold text-gray-700"
+                : "text-[13px] text-gray-900 truncate"
+            }
+          >
+            {folder.name}
+          </span>
+          <Show when={folder.hint}>
+            <span class="text-[10px] text-gray-500 italic">{folder.hint}</span>
+          </Show>
+          <Show when={folder.mount}>
+            <MountBadge mount={folder.mount!} />
+          </Show>
+          <Show when={folder.revision}>
+            <span
+              class={
+                folder.onSync
+                  ? "text-[10px] text-gray-400 font-mono ml-auto"
+                  : "text-[10px] text-gray-400 font-mono ml-auto pr-1"
+              }
+            >
+              {folder.revision}
+            </span>
+          </Show>
+          <Show when={folder.onSync}>
+            <span
+              role="button"
+              tabIndex={0}
+              class="text-[11px] text-gray-400 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
+              title="sync (git pull --rebase)"
+              onClick={(e) => {
+                e.stopPropagation()
+                folder.onSync?.()
+              }}
+            >
+              ↻
+            </span>
+          </Show>
         </button>
         <Show when={opened()}>
           <For each={folder.children}>
@@ -753,6 +857,7 @@ function FileTreeNode(props: {
               <FileTreeNode
                 node={child}
                 depth={props.depth + 1}
+                pathKey={`${key()}/${child.kind === "folder" ? child.name : child.name}`}
                 openFolders={props.openFolders}
                 toggleFolder={props.toggleFolder}
                 onOpen={props.onOpen}
@@ -766,19 +871,31 @@ function FileTreeNode(props: {
   }
   const file = props.node
   const sel = () => props.currentPath() === file.path
+  const navigate = useNavigate()
+  const handleClick = () => {
+    if (file.linkTo) navigate(file.linkTo)
+    else props.onOpen(file.path)
+  }
   return (
     <button
       type="button"
       class={
         sel()
           ? "w-full py-1 flex items-center gap-2 text-left bg-gray-100"
-          : "w-full py-1 flex items-center gap-2 text-left hover:bg-gray-50"
+          : file.linkTo
+            ? "w-full py-1 flex items-center gap-2 text-left hover:bg-gray-50 italic text-gray-500"
+            : "w-full py-1 flex items-center gap-2 text-left hover:bg-gray-50"
       }
       style={{ "padding-left": `${0.5 + props.depth * 0.75}rem`, "padding-right": "0.5rem" }}
-      onClick={() => props.onOpen(file.path)}
+      onClick={handleClick}
     >
       <span class="w-4" />
-      <span class="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{file.name}</span>
+      <span class={file.linkTo ? "text-[12px] flex-1 min-w-0 truncate" : "text-[13px] text-gray-900 flex-1 min-w-0 truncate"}>
+        {file.name}
+      </span>
+      <Show when={file.readonly && !file.linkTo}>
+        <span class="text-[10px] text-gray-400" title="read-only">ro</span>
+      </Show>
       <Show when={file.staged}>
         <span class="text-[11px] text-emerald-600" title="staged">A</span>
       </Show>
@@ -787,6 +904,114 @@ function FileTreeNode(props: {
       </Show>
     </button>
   )
+}
+
+function MountBadge(props: { mount: "ro" | "rw" | "selective" }) {
+  const cls = () => {
+    switch (props.mount) {
+      case "ro":
+        return "text-[10px] uppercase tracking-wide px-1 rounded bg-gray-100 text-gray-600"
+      case "rw":
+        return "text-[10px] uppercase tracking-wide px-1 rounded bg-cyan-100 text-cyan-800"
+      case "selective":
+        return "text-[10px] uppercase tracking-wide px-1 rounded bg-purple-100 text-purple-800"
+    }
+  }
+  return <span class={cls()}>{props.mount}</span>
+}
+
+function buildLoopWorkdir(loop: Loop): FileNode[] {
+  const main = getWorkspace(loop.id).fileTree
+  const revs = mountRevisions()
+  const ctx: FileNode[] = []
+  ctx.push({
+    kind: "folder",
+    name: "knowledge",
+    mount: "ro",
+    revision: revs.knowledge,
+    onSync: () => syncMount("knowledge"),
+    children: [
+      {
+        kind: "file",
+        name: "→ all team knowledge",
+        path: "context/knowledge/__link__",
+        linkTo: "/context/knowledge",
+        readonly: true,
+      },
+    ],
+  })
+  ctx.push({
+    kind: "folder",
+    name: "notes",
+    mount: "rw",
+    revision: revs.notes,
+    onSync: () => syncMount("notes"),
+    children: [
+      {
+        kind: "file",
+        name: "→ all team notes",
+        path: "context/notes/__link__",
+        linkTo: "/context/notes",
+      },
+    ],
+  })
+  if (loop.context.personal && loop.context.personal.length > 0) {
+    ctx.push({
+      kind: "folder",
+      name: "personal",
+      mount: "selective",
+      revision: revs.personal,
+      children: pathsToTreeFlat(loop.context.personal, "context/personal"),
+    })
+  }
+  return [
+    {
+      kind: "folder",
+      name: "context",
+      display: "section",
+      hint: "mounted from sources",
+      children: ctx,
+    },
+    {
+      kind: "folder",
+      name: "main",
+      display: "section",
+      hint: "agent's cwd",
+      children: main,
+    },
+  ]
+}
+
+function pathsToTreeFlat(paths: string[], prefix: string): FileNode[] {
+  type T = { children: Record<string, T>; isFile?: boolean; full?: string }
+  const root: T = { children: {} }
+  for (const p of paths) {
+    const parts = p.split("/")
+    let cur = root
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      if (i === parts.length - 1) {
+        cur.children[part] = { children: {}, isFile: true, full: `${prefix}/${p}` }
+      } else {
+        if (!cur.children[part]) cur.children[part] = { children: {} }
+        cur = cur.children[part]
+      }
+    }
+  }
+  const toNodes = (n: T): FileNode[] =>
+    Object.entries(n.children).map(([name, child]): FileNode => {
+      if (child.isFile) {
+        return { kind: "file", name, path: child.full!, readonly: name.toUpperCase() === name && !name.includes(".") }
+      }
+      const isSecrets = name === "secrets"
+      return {
+        kind: "folder",
+        name,
+        children: toNodes(child),
+        secret: isSecrets || undefined,
+      }
+    })
+  return toNodes(root)
 }
 
 // ============================================================================
@@ -806,7 +1031,7 @@ function ChatRow(props: { item: ChatItem; onOpenFile: (path: string) => void }) 
     return <SystemMarker text={`${item.time}  driver: ${item.from} → ${item.to}`} />
   }
   if (item.kind === "rfd") {
-    return <SystemMarker text={`${item.time}  ${item.by} 释放 driver · loop 进入 RFD（任何人可认领）`} accent="amber" />
+    return <SystemMarker text={`${item.time}  ${item.by} 释放 driver · 进入 RFD`} accent="amber" />
   }
   if (item.kind === "claim") {
     return <SystemMarker text={`${item.time}  ${item.by} 认领了 driver`} accent="emerald" />
@@ -937,6 +1162,370 @@ function ArtifactCard(props: { item: Extract<ChatItem, { kind: "artifact" }>; on
         {props.item.preview}
       </div>
     </button>
+  )
+}
+
+// ============================================================================
+// New loop dialog — pick repo / inject context / optional name
+// ============================================================================
+
+export function NewLoopDialog(props: {
+  onClose: () => void
+  onCreate: (opts: CreateLoopOpts) => void
+}) {
+  const [name, setName] = createSignal("")
+  const [repo, setRepo] = createSignal("")
+  const [personal, setPersonal] = createSignal<Set<string>>(new Set())
+
+  const personalFiles = () => flattenVaultFiles(VAULT_DOCS.personal)
+  const allPersonalSelected = () =>
+    personalFiles().length > 0 && personalFiles().every((f) => personal().has(f.path))
+  const togglePersonal = (path: string) => {
+    const next = new Set(personal())
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    setPersonal(next)
+  }
+  const toggleAllPersonal = () => {
+    if (allPersonalSelected()) setPersonal(new Set<string>())
+    else setPersonal(new Set(personalFiles().map((f) => f.path)))
+  }
+
+  const slugPreview = () =>
+    previewSlug({
+      name: name() || undefined,
+      repo: repo() || undefined,
+    })
+
+  const handleCreate = () => {
+    props.onCreate({
+      name: name().trim() || undefined,
+      repo: repo() || undefined,
+      injectPersonal: personal().size > 0 ? [...personal()] : undefined,
+    })
+  }
+
+  return (
+    <div
+      class="fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
+      onClick={props.onClose}
+    >
+      <div
+        class="bg-white rounded-lg shadow-xl w-[640px] max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header class="px-5 h-11 shrink-0 border-b border-gray-200 flex items-center">
+          <span class="text-[14px] font-medium text-gray-900">New loop</span>
+          <span class="ml-auto text-[11px] text-gray-500">
+            URL: <code class="font-mono text-gray-900">/loop/{slugPreview()}</code>
+          </span>
+          <button
+            type="button"
+            onClick={props.onClose}
+            class="ml-3 text-gray-500 hover:text-gray-900 p-1 rounded hover:bg-gray-100"
+            title="cancel"
+          >
+            <Icon name="close-small" />
+          </button>
+        </header>
+
+        <div class="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-5">
+          <DialogField label="Repo" hint="决定 workdir。可选。">
+            <select
+              class="w-full text-[13px] border border-gray-200 rounded px-2 h-8 bg-white"
+              value={repo()}
+              onChange={(e) => setRepo(e.currentTarget.value)}
+            >
+              <option value="">— none —</option>
+              <For each={REPOS}>
+                {(r) => <option value={r.name}>{r.name}</option>}
+              </For>
+            </select>
+          </DialogField>
+
+          <DialogField label="Context">
+            <div class="border border-gray-200 rounded">
+              <div class="px-3 h-8 flex items-center gap-2 text-[12px] text-gray-700 border-b border-gray-200 bg-gray-50">
+                <span class="text-emerald-600">✓</span>
+                <span class="font-medium">knowledge</span>
+                <span class="text-gray-500">+</span>
+                <span class="font-medium">notes</span>
+                <span class="text-gray-500 ml-1">— public, 默认全注入</span>
+              </div>
+              <div class="px-3 h-8 flex items-center gap-2 border-b border-gray-200">
+                <span class="text-[12px] font-medium text-gray-900">personal</span>
+                <span class="text-[11px] text-gray-500">
+                  {personal().size} / {personalFiles().length} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleAllPersonal}
+                  class="ml-auto text-[11px] text-gray-600 hover:text-gray-900 px-2 h-6 rounded hover:bg-gray-100"
+                >
+                  {allPersonalSelected() ? "clear" : "select all"}
+                </button>
+              </div>
+              <div class="px-3 py-1 max-h-56 overflow-auto">
+                <For each={personalFiles()}>
+                  {(f) => (
+                    <label class="flex items-center gap-2 py-1 text-[12px] cursor-pointer hover:bg-gray-50 rounded px-1">
+                      <input
+                        type="checkbox"
+                        class="shrink-0"
+                        checked={personal().has(f.path)}
+                        onChange={() => togglePersonal(f.path)}
+                      />
+                      <Show when={f.secret}>
+                        <span class="text-amber-600 text-[11px]">🔒</span>
+                      </Show>
+                      <span class="font-mono text-[11px] text-gray-700 truncate">{f.path}</span>
+                    </label>
+                  )}
+                </For>
+              </div>
+            </div>
+          </DialogField>
+
+          <DialogField label="Name" hint="可选。slug 优先用 name，没则 repo，没则 hex。">
+            <input
+              type="text"
+              class="w-full text-[13px] border border-gray-200 rounded px-2 h-8 bg-white outline-none focus:border-gray-400"
+              placeholder="e.g. gateway-rdma-fix"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+            />
+          </DialogField>
+        </div>
+
+        <footer class="px-5 h-12 shrink-0 border-t border-gray-200 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={props.onClose}
+            class="px-3 h-7 rounded text-xs text-gray-600 hover:bg-gray-100"
+          >
+            cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleCreate}
+            class="px-3 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700"
+          >
+            create
+          </button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+function DialogField(props: { label: string; hint?: string; children: any }) {
+  return (
+    <div>
+      <div class="flex items-baseline gap-2 mb-1.5">
+        <label class="text-[12px] font-medium text-gray-900">{props.label}</label>
+        <Show when={props.hint}>
+          <span class="text-[11px] text-gray-500">{props.hint}</span>
+        </Show>
+      </div>
+      {props.children}
+    </div>
+  )
+}
+
+// ============================================================================
+// Add-context dialog — opened from LoopHeader's "+", lets driver mount more
+// personal paths into the loop's workdir.
+// ============================================================================
+
+function AddContextDialog(props: {
+  loop: Loop
+  onClose: () => void
+  onSave: (paths: string[]) => void
+}) {
+  const [selected, setSelected] = createSignal<Set<string>>(
+    new Set(props.loop.context.personal ?? []),
+  )
+  return (
+    <div
+      class="fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
+      onClick={props.onClose}
+    >
+      <div
+        class="bg-white rounded-lg shadow-xl w-[640px] max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header class="px-5 h-11 shrink-0 border-b border-gray-200 flex items-center">
+          <span class="text-[14px] font-medium text-gray-900">+ context</span>
+          <span class="ml-3 text-[11px] text-gray-500">into <code class="font-mono">{props.loop.id}</code></span>
+          <button
+            type="button"
+            onClick={props.onClose}
+            class="ml-auto text-gray-500 hover:text-gray-900 p-1 rounded hover:bg-gray-100"
+            title="cancel"
+          >
+            <Icon name="close-small" />
+          </button>
+        </header>
+
+        <div class="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-4">
+          <div class="border border-gray-200 rounded">
+            <div class="px-3 h-8 flex items-center gap-2 text-[12px] text-gray-700 border-b border-gray-200 bg-gray-50">
+              <span class="text-emerald-600">✓</span>
+              <span class="font-medium">knowledge</span>
+              <span class="text-gray-500">+</span>
+              <span class="font-medium">notes</span>
+              <span class="text-gray-500 ml-1">— public，已默认全注入</span>
+            </div>
+            <div class="px-3 py-2 text-[12px] text-gray-700">
+              <div class="font-medium text-gray-900 mb-1.5">personal</div>
+              <div class="text-[11px] text-gray-500 mb-2">
+                选目录即选中所有子项。已选 {selected().size} 项。
+              </div>
+              <TreeChecklist
+                nodes={VAULT_DOCS.personal}
+                selected={selected}
+                onChange={setSelected}
+              />
+            </div>
+          </div>
+        </div>
+
+        <footer class="px-5 h-12 shrink-0 border-t border-gray-200 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={props.onClose}
+            class="px-3 h-7 rounded text-xs text-gray-600 hover:bg-gray-100"
+          >
+            cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onSave([...selected()])}
+            class="px-3 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700"
+          >
+            save
+          </button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+function TreeChecklist(props: {
+  nodes: DocNode[]
+  selected: () => Set<string>
+  onChange: (s: Set<string>) => void
+}) {
+  const leavesOf = (n: DocNode): string[] =>
+    n.kind === "file" ? [n.path] : n.children.flatMap(leavesOf)
+
+  const stateOf = (n: DocNode): "all" | "some" | "none" => {
+    if (n.kind === "file") return props.selected().has(n.path) ? "all" : "none"
+    const leaves = leavesOf(n)
+    if (leaves.length === 0) return "none"
+    const hits = leaves.filter((p) => props.selected().has(p)).length
+    if (hits === 0) return "none"
+    if (hits === leaves.length) return "all"
+    return "some"
+  }
+
+  const toggle = (n: DocNode) => {
+    const next = new Set(props.selected())
+    if (n.kind === "file") {
+      if (next.has(n.path)) next.delete(n.path)
+      else next.add(n.path)
+    } else {
+      const leaves = leavesOf(n)
+      const allChecked = leaves.length > 0 && leaves.every((p) => next.has(p))
+      if (allChecked) leaves.forEach((p) => next.delete(p))
+      else leaves.forEach((p) => next.add(p))
+    }
+    props.onChange(next)
+  }
+
+  return (
+    <div>
+      <For each={props.nodes}>
+        {(n) => <TreeChecklistNode node={n} depth={0} stateOf={stateOf} toggle={toggle} />}
+      </For>
+    </div>
+  )
+}
+
+function TreeChecklistNode(props: {
+  node: DocNode
+  depth: number
+  stateOf: (n: DocNode) => "all" | "some" | "none"
+  toggle: (n: DocNode) => void
+}) {
+  const [open, setOpen] = createSignal(true)
+  const indent = () => `${props.depth * 0.9}rem`
+  if (props.node.kind === "folder") {
+    const f = props.node
+    const state = () => props.stateOf(f)
+    return (
+      <>
+        <div
+          class="flex items-center gap-1.5 py-0.5 hover:bg-gray-50 rounded"
+          style={{ "padding-left": indent() }}
+        >
+          <button
+            type="button"
+            class="text-gray-500 hover:text-gray-900"
+            onClick={() => setOpen(!open())}
+          >
+            <Icon name={open() ? "chevron-down" : "chevron-right"} />
+          </button>
+          <Tristate state={state()} onChange={() => props.toggle(f)} />
+          <Show when={f.marker === "secrets"}>
+            <span class="text-[11px]">🔐</span>
+          </Show>
+          <span class="text-[12px] text-gray-900 font-medium">{f.name}</span>
+        </div>
+        <Show when={open()}>
+          <For each={f.children}>
+            {(c) => (
+              <TreeChecklistNode
+                node={c}
+                depth={props.depth + 1}
+                stateOf={props.stateOf}
+                toggle={props.toggle}
+              />
+            )}
+          </For>
+        </Show>
+      </>
+    )
+  }
+  const file = props.node
+  const state = () => props.stateOf(file)
+  return (
+    <div
+      class="flex items-center gap-1.5 py-0.5 hover:bg-gray-50 rounded"
+      style={{ "padding-left": `calc(${indent()} + 1.1rem)` }}
+    >
+      <Tristate state={state()} onChange={() => props.toggle(file)} />
+      <Show when={file.secret}>
+        <span class="text-amber-600 text-[10px]">🔒</span>
+      </Show>
+      <span class="font-mono text-[11px] text-gray-700 truncate">{file.name}</span>
+    </div>
+  )
+}
+
+function Tristate(props: { state: "all" | "some" | "none"; onChange: () => void }) {
+  let ref: HTMLInputElement | undefined
+  createEffect(() => {
+    if (ref) ref.indeterminate = props.state === "some"
+  })
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      class="shrink-0"
+      checked={props.state === "all"}
+      onChange={() => props.onChange()}
+    />
   )
 }
 

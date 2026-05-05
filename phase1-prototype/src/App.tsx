@@ -1,9 +1,16 @@
-import { createSignal, Show } from "solid-js"
+import { Show } from "solid-js"
+import { Router, Route, Navigate, useLocation, useNavigate, A } from "@solidjs/router"
 import "./index.css"
-import { LoopPage } from "./pages/loop"
+import { LoopPage, NewLoopDialog } from "./pages/loop"
 import { FocusPage } from "./pages/focus"
 import { ContextPage } from "./pages/context"
 import { ChatPage } from "./pages/chat"
+import {
+  loops,
+  createLoop,
+  newLoopDialogOpen,
+  setNewLoopDialogOpen,
+} from "./state"
 
 type Tab = "loop" | "focus" | "context" | "chat"
 
@@ -14,8 +21,10 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "chat", label: "Chat", icon: "✦" },
 ]
 
-function App() {
-  const [tab, setTab] = createSignal<Tab>("loop")
+function Layout(props: { children?: any }) {
+  const loc = useLocation()
+  const navigate = useNavigate()
+  const activeTab = () => (loc.pathname.split("/")[1] || "loop") as Tab
   return (
     <div class="h-full w-full flex flex-col bg-gray-50 text-gray-900">
       <header class="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-4 gap-4">
@@ -27,21 +36,29 @@ function App() {
         </div>
         <nav class="flex items-center gap-1">
           {TABS.map((t) => (
-            <button
-              type="button"
-              onClick={() => setTab(t.id)}
+            <A
+              href={`/${t.id}`}
               class={
-                tab() === t.id
+                activeTab() === t.id
                   ? "px-3 h-8 rounded text-sm bg-gray-900 text-white flex items-center gap-1.5"
                   : "px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 flex items-center gap-1.5"
               }
             >
               <span class="opacity-70">{t.icon}</span>
               <span>{t.label}</span>
-            </button>
+            </A>
           ))}
         </nav>
         <div class="flex-1" />
+        <button
+          type="button"
+          onClick={() => setNewLoopDialogOpen(true)}
+          class="flex items-center gap-1.5 px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
+          title="create new loop (⌘N)"
+        >
+          <span class="text-base leading-none">+</span>
+          <span>New Loop</span>
+        </button>
         <button
           type="button"
           class="flex items-center gap-2 px-2 h-8 rounded hover:bg-gray-100"
@@ -54,21 +71,34 @@ function App() {
           <span class="text-gray-400 text-xs">▾</span>
         </button>
       </header>
-      <main class="flex-1 min-h-0 min-w-0 overflow-hidden">
-        <Show when={tab() === "loop"}>
-          <LoopPage />
-        </Show>
-        <Show when={tab() === "focus"}>
-          <FocusPage />
-        </Show>
-        <Show when={tab() === "context"}>
-          <ContextPage />
-        </Show>
-        <Show when={tab() === "chat"}>
-          <ChatPage />
-        </Show>
-      </main>
+      <main class="flex-1 min-h-0 min-w-0 overflow-hidden">{props.children}</main>
+
+      <Show when={newLoopDialogOpen()}>
+        <NewLoopDialog
+          onClose={() => setNewLoopDialogOpen(false)}
+          onCreate={(opts) => {
+            const id = createLoop(opts)
+            setNewLoopDialogOpen(false)
+            navigate(`/loop/${id}`)
+          }}
+        />
+      </Show>
     </div>
+  )
+}
+
+function App() {
+  return (
+    <Router root={Layout}>
+      <Route path="/" component={() => <Navigate href="/loop" />} />
+      <Route path="/loop" component={() => <Navigate href={`/loop/${loops()[0].id}`} />} />
+      <Route path="/loop/:id" component={LoopPage} />
+      <Route path="/focus" component={FocusPage} />
+      <Route path="/context" component={() => <Navigate href="/context/knowledge" />} />
+      <Route path="/context/:sub" component={ContextPage} />
+      <Route path="/context/:sub/*path" component={ContextPage} />
+      <Route path="/chat" component={ChatPage} />
+    </Router>
   )
 }
 

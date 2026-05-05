@@ -33,10 +33,10 @@ const CHANNELS: Conversation[] = [
     kind: "channel",
     name: "general",
     topic: "team-wide updates · workspace announcements",
-    members: ["simpx", "阿尔萨斯", "泰兰德", "无厚", "coo-bot"],
+    members: ["simpx", "阿尔萨斯", "伊利丹", "泰兰德", "coo-bot"],
     messages: [
       { id: "m1", author: "coo-bot", isAi: true, text: "📋 周一站会 reminder · 9:30 · #standup", time: "9:00" },
-      { id: "m2", author: "无厚", text: "今天我先离开会议室，需要看一下 RDMA trace", time: "9:15" },
+      { id: "m2", author: "泰兰德", text: "今天我先离开会议室，需要看一下 RDMA trace", time: "9:15" },
     ],
   },
   {
@@ -46,7 +46,7 @@ const CHANNELS: Conversation[] = [
     unread: 4,
     active: true,
     topic: "gateway 上线 · llama-3 a100 · pd 适配",
-    members: ["simpx", "阿尔萨斯", "泰兰德", "coo-bot"],
+    members: ["simpx", "阿尔萨斯", "伊利丹", "coo-bot"],
     messages: [
       { id: "k1", author: "阿尔萨斯", text: "早 ✋ trace 已上传 S3", time: "08:42" },
       { id: "k2", author: "simpx", isMe: true, text: "@coo-bot 看下 trace.log，重点找 mr_register 那段", time: "08:45" },
@@ -58,7 +58,7 @@ const CHANNELS: Conversation[] = [
           "已分析 trace.log（120k 行）。发现 mr_register 平均耗时 110s，主因是 cuda alignment 跟 RDMA page size 不匹配。\n\n详细分析已写入 [knowledge/rdma-mr-register.md](#)。",
         time: "08:46",
       },
-      { id: "k4", author: "泰兰德", text: "我也看到了，跟我之前怀疑的对得上。今天能改吗？", time: "08:50" },
+      { id: "k4", author: "伊利丹", text: "我也看到了，跟我之前怀疑的对得上。今天能改吗？", time: "08:50" },
       { id: "k5", author: "simpx", isMe: true, text: "可以，我开个 loop 推这件事", time: "08:51" },
       {
         id: "k6",
@@ -85,8 +85,8 @@ const CHANNELS: Conversation[] = [
     kind: "channel",
     name: "turbo-quant",
     topic: "turbo quant 推进",
-    members: ["simpx", "泰兰德", "如霖", "coo-bot"],
-    messages: [{ id: "t1", author: "如霖", text: "明天可以一起过一下", time: "12:00" }],
+    members: ["simpx", "伊利丹", "佛丁", "coo-bot"],
+    messages: [{ id: "t1", author: "佛丁", text: "明天可以一起过一下", time: "12:00" }],
   },
 ]
 
@@ -107,8 +107,8 @@ const DMS: Conversation[] = [
       },
     ],
   },
-  { id: "dm-zongyan", kind: "dm", name: "阿尔萨斯", unread: 1, messages: [{ id: "z1", author: "阿尔萨斯", text: "晚上要不要试一下 develop 那个版本？", time: "17:02" }] },
-  { id: "dm-minmin", kind: "dm", name: "泰兰德", messages: [] },
+  { id: "dm-阿尔萨斯", kind: "dm", name: "阿尔萨斯", unread: 1, messages: [{ id: "z1", author: "阿尔萨斯", text: "晚上要不要试一下 develop 那个版本？", time: "17:02" }] },
+  { id: "dm-伊利丹", kind: "dm", name: "伊利丹", messages: [] },
 ]
 
 export function ChatPage() {
