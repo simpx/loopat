@@ -716,23 +716,17 @@ function ReadCard(props: { item: Extract<ChatItem, { kind: "read" }>; onOpen: ()
         </span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <div class="overflow-auto">
-        <table class="font-mono text-[12px] leading-snug border-collapse w-full text-gray-800">
-          <tbody>
-            <For each={props.item.lines}>
-              {(text, i) => (
-                <tr>
-                  <td class="w-10 text-right pr-2 py-[1px] text-gray-400 select-none border-r border-gray-100 align-top">
-                    {start() + i()}
-                  </td>
-                  <td class="pl-3 pr-3 py-[1px] whitespace-pre align-top">
-                    {text || "\u00A0"}
-                  </td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
+      <div class="overflow-auto font-mono text-[12px] leading-snug py-1 text-gray-800">
+        <For each={props.item.lines}>
+          {(text, i) => (
+            <div class="whitespace-pre">
+              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none">
+                {start() + i()}
+              </span>
+              <span>{text || "\u00A0"}</span>
+            </div>
+          )}
+        </For>
       </div>
     </div>
   )
