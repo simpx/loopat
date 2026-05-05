@@ -63,3 +63,11 @@ body {
   text-align: left;
 }
 .prose th { background: #f9fafb; font-weight: 600; }
+
+/* prose-chat: in-chat variant — trim outer margins, keep tables compact */
+.prose-chat > :first-child { margin-top: 0; }
+.prose-chat > :last-child { margin-bottom: 0; }
+.prose-chat p { margin: 0.4em 0; }
+.prose-chat ul, .prose-chat ol { margin: 0.4em 0; }
+.prose-chat table { margin: 0.5em 0; font-size: 12.5px; }
+.prose-chat th, .prose-chat td { padding: 3px 8px; }

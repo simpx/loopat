@@ -16,6 +16,7 @@
  */
 import { createSignal, For, Show } from "solid-js"
 import { Icon } from "../components/icon"
+import { Markdown } from "../components/markdown"
 import { CodeEditor } from "../components/code-editor"
 import {
   ME,
@@ -84,7 +85,7 @@ export function LoopPage() {
     <div class="flex h-full w-full">
       <LoopsList scope={scope} setScope={setScope} filtered={filtered} />
 
-      <div class="flex-1 min-w-0 flex">
+      <div class="flex-1 min-w-0 min-h-0 flex">
         <main class="flex-1 min-w-0 flex flex-col bg-white min-h-0">
           <LoopHeader loop={current()} />
 
@@ -611,7 +612,7 @@ function ChatRow(props: { item: ChatItem; onOpenFile: (path: string) => void }) 
   if (item.kind === "user") {
     return (
       <div class="rounded-md bg-gray-100 px-4 py-3">
-        <div class="text-[14px] text-gray-900 whitespace-pre-wrap leading-relaxed">{item.text}</div>
+        <Markdown text={item.text} class="prose-chat" />
         <div class="text-[11px] text-gray-500 mt-2">{item.time}</div>
       </div>
     )
@@ -620,7 +621,7 @@ function ChatRow(props: { item: ChatItem; onOpenFile: (path: string) => void }) 
   if (item.kind === "ai") {
     return (
       <div class="px-4 py-2">
-        <div class="text-[14px] text-gray-900 whitespace-pre-wrap leading-relaxed">{item.text}</div>
+        <Markdown text={item.text} class="prose-chat" />
         <div class="text-[11px] text-gray-500 mt-2">{item.time}</div>
       </div>
     )

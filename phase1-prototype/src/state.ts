@@ -99,8 +99,8 @@ const initialLoops: Loop[] = [
     context: { knowledge: "all", repos: ["llama_research", "vllm"] },
   },
   {
-    id: "ccx-refine",
-    name: "ccx-refine",
+    id: "knowledge-refine",
+    name: "knowledge-refine",
     archetype: "context-refine",
     workdir: "~/workspace/ccx",
     driver: ME,
@@ -235,6 +235,100 @@ const LOOPCTL_CHAT: ChatItem[] = [
       { done: false, text: "open MR + ping reviewers" },
     ],
   },
+  {
+    kind: "ai",
+    text:
+      "顺手扫了一下调用 `api.ListShards` 的地方 — 有 4 个 e2e 测试还在用旧签名（无 cursor）。两种处理方式：\n\n1. **Break**：直接改测试，干净但 0.x 用户脚本会断\n2. **Deprecate**：保留旧签名 + 打 warning log，下个 release 再删\n\n推荐 #2，影响面更小。",
+    time: "13:09",
+  },
+  {
+    kind: "artifact",
+    path: "audit/e2e-list-shards-callers.md",
+    lines: 36,
+    time: "13:10",
+    preview:
+      "# api.ListShards old-signature callers\n\n- tests/e2e/runtime/list_test.go:42\n- tests/e2e/region/migrate_test.go:118\n- tests/e2e/quota/audit_test.go:61\n- contrib/scripts/dump_shards.go:23",
+  },
+  { kind: "user", text: "走 #2，加 deprecation log，下个 release 再删，CHANGELOG 提醒一下", time: "13:11" },
+  {
+    kind: "diff",
+    file: "api/runtime/list.go",
+    time: "13:12",
+    lines: [
+      { kind: "hunk", text: "@@ -18,6 +18,12 @@ func ListShards(region string) ([]Shard, error) {" },
+      { kind: "ctx", text: "\t// Deprecated: use ListShardsCursor; will be removed in v0.7." },
+      { kind: "add", text: '\tdeprecation.Warn("api.ListShards", "use ListShardsCursor instead")' },
+      { kind: "add", text: '\tshards, _, err := ListShardsCursor(region, "", 0)' },
+      { kind: "del", text: "\treturn legacyListShards(region)" },
+      { kind: "add", text: "\treturn shards, err" },
+      { kind: "hunk", text: "@@ -32,6 +38,18 @@ func ListShards(region string) ([]Shard, error) {" },
+      { kind: "add", text: "func ListShardsCursor(region, cursor string, limit int) ([]Shard, string, error) {" },
+      { kind: "add", text: "\t// new paginated implementation" },
+      { kind: "add", text: "\t…" },
+      { kind: "add", text: "}" },
+    ],
+  },
+  {
+    kind: "command",
+    cmd: "go test ./tests/e2e/...",
+    ok: true,
+    time: "13:14",
+    output: [
+      "DEPRECATION  api.ListShards: use ListShardsCursor instead (4 callers)",
+      "ok  \tloopctl/tests/e2e/fleet\t1.24s",
+      "ok  \tloopctl/tests/e2e/region\t0.92s",
+      "ok  \tloopctl/tests/e2e/quota\t1.17s",
+      "ok  \tloopctl/tests/e2e/router\t0.81s",
+      "PASS",
+    ],
+  },
+  { kind: "user", text: "deprecation log 看着 OK。CHANGELOG 帮我起草一下", time: "13:16" },
+  {
+    kind: "artifact",
+    path: "CHANGELOG.md",
+    lines: 18,
+    time: "13:17",
+    preview:
+      "## [Unreleased]\n\n### Added\n- `loopctl fleet list-shards` 支持 `--cursor` / `--limit` 参数\n- `api.ListShardsCursor` — paginated 版本的 ListShards\n\n### Deprecated\n- `api.ListShards` (无分页版) — v0.7 将移除，建议改用 `ListShardsCursor`",
+  },
+  {
+    kind: "user",
+    text: "再确认一件事 — quota 那条命令也是同样的形态对吧？要不要顺手把它也改了？",
+    time: "13:21",
+  },
+  {
+    kind: "ai",
+    text:
+      "`quota list` 是的，签名一致。但 quota 的数据规模比 shards 小一个数量级（最多 ~200 条/region），分页收益不大。\n\n建议**只标记 deprecation 不动逻辑**，等 v0.7 跟 ListShards 一起统一升级。",
+    time: "13:21",
+  },
+  { kind: "user", text: "同意。这次只改 runtime，quota 列入下个迭代", time: "13:22" },
+  {
+    kind: "command",
+    cmd: "git push origin feat/fleet-shards",
+    ok: true,
+    time: "13:24",
+    output: [
+      "Enumerating objects: 14, done.",
+      "Counting objects: 100% (14/14), done.",
+      "Writing objects: 100% (8/8), 2.41 KiB | 2.41 MiB/s, done.",
+      "remote: Create MR for branch feat/fleet-shards:",
+      "remote:   https://git.example.com/loopctl/-/merge_requests/new",
+      "To git.example.com:loopctl/loopctl.git",
+      " * [new branch]      feat/fleet-shards -> feat/fleet-shards",
+    ],
+  },
+  {
+    kind: "todo",
+    title: "next iteration (v0.7)",
+    time: "13:25",
+    items: [
+      { done: false, text: "迁移 quota list 到 cursor 分页" },
+      { done: false, text: "正式删除 api.ListShards (legacy)" },
+      { done: false, text: "更新 README 命令说明" },
+      { done: false, text: "通知 contrib/scripts 维护者升级" },
+    ],
+  },
 ]
 
 const MIRROR_CHAT: ChatItem[] = [
@@ -301,7 +395,7 @@ const LLAMA_RESEARCH_CHAT: ChatItem[] = [
   },
 ]
 
-const CCX_REFINE_CHAT: ChatItem[] = [
+const KNOWLEDGE_REFINE_CHAT: ChatItem[] = [
   { kind: "user", text: "帮我把 docs/loopey/ 下的 12 个 md 重新分类，太乱了", time: "11:00" },
   {
     kind: "todo",
@@ -374,6 +468,6 @@ export const chats: Record<string, ChatItem[]> = {
   "loopctl": LOOPCTL_CHAT,
   "mirror-llama-3": MIRROR_CHAT,
   "llama-research": LLAMA_RESEARCH_CHAT,
-  "ccx-refine": CCX_REFINE_CHAT,
+  "knowledge-refine": KNOWLEDGE_REFINE_CHAT,
   "1001-design": DESIGN_CHAT,
 }
