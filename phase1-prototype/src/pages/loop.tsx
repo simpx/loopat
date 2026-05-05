@@ -302,9 +302,9 @@ function LoopHeader(props: { loop: Loop }) {
             type="button"
             onClick={() => releaseRfd(loop().id)}
             class="px-3 h-7 rounded text-xs bg-amber-100 text-amber-900 hover:bg-amber-200"
-            title="release driver — others can claim"
+            title="release this loop — anyone can claim drive"
           >
-            release (RFD)
+            RFD
           </button>
         </Show>
         <Show when={!isMine() && loop().rfd}>
@@ -312,8 +312,9 @@ function LoopHeader(props: { loop: Loop }) {
             type="button"
             onClick={() => claimDrive(loop().id)}
             class="px-3 h-7 rounded text-xs bg-emerald-100 text-emerald-900 hover:bg-emerald-200"
+            title="take over driving this loop"
           >
-            claim drive
+            drive
           </button>
         </Show>
       </div>
@@ -335,12 +336,12 @@ function LoopHeader(props: { loop: Loop }) {
       {/* context chips */}
       <div class="mt-2 flex items-center gap-1.5 flex-wrap text-[11px]">
         <span class="text-gray-400">context:</span>
-        <ContextChip label="knowledge" value={loop().context.knowledge === "all" ? "all" : `${loop().context.knowledge.length} dirs`} />
-        <For each={loop().context.repos}>
-          {(repo) => <ContextChip label="repo" value={repo} />}
-        </For>
+        <ContextChip
+          label="knowledge"
+          value={loop().context.knowledge === "all" ? "all" : `${loop().context.knowledge.length} dirs`}
+        />
         <button class="text-gray-400 hover:text-gray-700 px-1.5 py-0.5 rounded hover:bg-gray-50">
-          + mount
+          + scope
         </button>
       </div>
     </header>
@@ -360,6 +361,8 @@ function ContextChip(props: { label: string; value: string }) {
 // Chat input + bottom toolbar
 // ============================================================================
 
+type PastedImage = { url: string; name: string }
+
 function ChatInput(props: {
   current: () => Loop
   rightOpen: () => boolean
@@ -367,6 +370,30 @@ function ChatInput(props: {
   setRightOpen: (v: boolean) => void
   setRightMode: (m: RightMode) => void
 }) {
+  const [pasted, setPasted] = createSignal<PastedImage[]>([])
+
+  const handlePaste = (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      if (it.kind !== "file" || !it.type.startsWith("image/")) continue
+      const blob = it.getAsFile()
+      if (!blob) continue
+      e.preventDefault()
+      const reader = new FileReader()
+      reader.onload = () => {
+        setPasted([
+          ...pasted(),
+          { url: reader.result as string, name: blob.name || `pasted-${Date.now()}.png` },
+        ])
+      }
+      reader.readAsDataURL(blob)
+    }
+  }
+
+  const removePasted = (idx: number) => setPasted(pasted().filter((_, i) => i !== idx))
+
   const toggleMode = (m: RightMode) => {
     if (props.rightOpen() && props.rightMode() === m) props.setRightOpen(false)
     else {
@@ -386,14 +413,42 @@ function ChatInput(props: {
       {label}
     </button>
   )
+
   return (
     <div class="px-5 pb-3 pt-2 shrink-0 border-t border-gray-200">
+      <Show when={pasted().length > 0}>
+        <div class="flex flex-wrap gap-2 mb-2">
+          <For each={pasted()}>
+            {(p, i) => (
+              <div class="relative group">
+                <img
+                  src={p.url}
+                  alt={p.name}
+                  class="w-16 h-16 object-cover rounded border border-gray-200"
+                />
+                <button
+                  type="button"
+                  onClick={() => removePasted(i())}
+                  class="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-900 text-white text-[11px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="remove"
+                >
+                  ×
+                </button>
+                <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] truncate px-1 rounded-b">
+                  {p.name}
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
       <div class="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 flex items-center gap-2">
         <Icon name="prompt" class="text-gray-500" />
         <input
           type="text"
           class="flex-1 bg-transparent outline-none text-[13px] text-gray-900 placeholder:text-gray-500"
-          placeholder="type message…"
+          placeholder="type message · ⌘V to paste image"
+          onPaste={handlePaste}
         />
         <button class="px-3 py-1 rounded bg-gray-200 text-gray-900 text-xs hover:bg-gray-300">
           send
@@ -563,14 +618,6 @@ function InfoPanel(props: { loop: Loop }) {
             props.loop.context.knowledge === "all"
               ? "all (public)"
               : `scoped to ${props.loop.context.knowledge.length} dirs`
-          }
-        />
-        <Row
-          label="repos"
-          value={
-            props.loop.context.repos.length === 0
-              ? "(none mounted)"
-              : props.loop.context.repos.join(", ")
           }
         />
       </Section>

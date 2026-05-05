@@ -10,7 +10,9 @@ export type LoopStatus = "active" | "idle" | "archived"
 
 export type LoopContext = {
   knowledge: "all" | string[]   // "all" = full public knowledge; otherwise scoped paths
-  repos: string[]               // mounted git repos available as read material
+  // Note: no `repos` field — repos live under workdir (= where work happens),
+  // not as a separate "mounted reference" concept. Team-level Repos registry
+  // is in the Context tab, independent of any single loop.
   // future: skills, mcp servers
 }
 
@@ -79,7 +81,7 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "14m",
     status: "active",
     inFocus: ["pinned"],
-    context: { knowledge: "all", repos: ["loopey-runtime", "vllm"] },
+    context: { knowledge: "all" },
     createdAt: "2026-04-28 09:12",
     createdBy: "阿尔萨斯",
     timeline: [
@@ -100,7 +102,7 @@ const initialLoops: Loop[] = [
     participants: 1,
     lastActivityAgo: "3h",
     status: "active",
-    context: { knowledge: "all", repos: ["loopctl"] },
+    context: { knowledge: "all" },
     createdAt: "2026-05-05 13:02",
     createdBy: ME,
     timeline: [
@@ -119,10 +121,7 @@ const initialLoops: Loop[] = [
     status: "active",
     inFocus: ["listed"],
     rfd: true,
-    context: {
-      knowledge: "all",
-      repos: ["shadow-llama-3-70b", "loopey-runtime"],
-    },
+    context: { knowledge: "all" },
     createdAt: "2026-05-05 10:11",
     createdBy: ME,
     timeline: [
@@ -140,7 +139,7 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "8h",
     status: "active",
     inFocus: ["listed"],
-    context: { knowledge: "all", repos: ["llama_research", "vllm"] },
+    context: { knowledge: "all" },
     createdAt: "2026-05-04 16:20",
     createdBy: "泰兰德",
     timeline: [
@@ -158,7 +157,7 @@ const initialLoops: Loop[] = [
     participants: 1,
     lastActivityAgo: "2h",
     status: "active",
-    context: { knowledge: "all", repos: [] },
+    context: { knowledge: "all" },
     createdAt: "2026-05-05 11:00",
     createdBy: ME,
     timeline: [
@@ -175,7 +174,7 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "26m",
     status: "active",
     inFocus: ["pinned"],
-    context: { knowledge: "all", repos: ["1001"] },
+    context: { knowledge: "all" },
     createdAt: "2026-05-03 20:48",
     createdBy: ME,
     timeline: [
@@ -241,7 +240,7 @@ export function createLoop(): string {
     participants: 1,
     lastActivityAgo: "just now",
     status: "active",
-    context: { knowledge: "all", repos: [] },
+    context: { knowledge: "all" },
     createdAt: ts,
     createdBy: ME,
     timeline: [{ time: ts, kind: "create", by: ME }],
