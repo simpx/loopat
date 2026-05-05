@@ -32,19 +32,39 @@ body {
   font-size: 0.9em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+/* hljs code blocks own the visual styling; <pre> is just a wrapper */
 .prose pre {
-  background: #f3f4f6;
+  margin: 0.6em 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  overflow: visible;
+}
+.prose pre code.hljs {
+  display: block;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 10px 12px;
-  overflow: auto;
   font-size: 12.5px;
-  line-height: 1.5;
+  line-height: 1.55;
+  overflow-x: auto;
+  background: #fafafa;
 }
-.prose pre code {
-  background: transparent;
-  padding: 0;
-  border-radius: 0;
+/* GitHub-style diff line backgrounds (full row tint) */
+.prose pre code.language-diff .hljs-addition {
+  display: block;
+  background: #e6ffec;
+  color: #1a7f37;
+}
+.prose pre code.language-diff .hljs-deletion {
+  display: block;
+  background: #ffebe9;
+  color: #cf222e;
+}
+.prose pre code.language-diff .hljs-meta {
+  display: block;
+  background: #ddf4ff;
+  color: #0969da;
 }
 .prose blockquote {
   border-left: 3px solid #d1d5db;
@@ -72,22 +92,3 @@ body {
 .prose-chat table { margin: 0.5em 0; font-size: 12.5px; }
 .prose-chat th, .prose-chat td { padding: 3px 8px; }
 
-/* Tighter diff2html — defaults are too tall / large for in-chat use */
-.diff-card-body .d2h-wrapper { font-size: 12px; }
-.diff-card-body .d2h-file-header { display: none; }
-.diff-card-body .d2h-file-wrapper {
-  border: none;
-  border-radius: 0;
-  margin-bottom: 0;
-}
-.diff-card-body .d2h-code-line,
-.diff-card-body .d2h-code-side-line {
-  padding: 0 4px 0 4em;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.diff-card-body .d2h-code-linenumber {
-  font-size: 11px;
-  width: 4em;
-}
-.diff-card-body .d2h-info { font-size: 11px; padding: 2px 8px; }

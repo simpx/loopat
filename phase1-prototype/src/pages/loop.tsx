@@ -15,8 +15,6 @@
  *   files / editor (CodeMirror) / terminal
  */
 import { createSignal, For, Show } from "solid-js"
-import { html as diff2htmlRender } from "diff2html"
-import "diff2html/bundles/css/diff2html.min.css"
 import { Icon } from "../components/icon"
 import { Markdown } from "../components/markdown"
 import { CodeEditor } from "../components/code-editor"
@@ -611,40 +609,75 @@ function ChatRow(props: { item: ChatItem; onOpenFile: (path: string) => void }) 
     return <SystemMarker text={`${item.time}  ${item.by} 认领了 driver`} accent="emerald" />
   }
 
-  if (item.kind === "user") {
-    return (
-      <div class="rounded-md bg-gray-100 px-4 py-3">
-        <Markdown text={item.text} class="prose-chat" />
-        <div class="text-[11px] text-gray-500 mt-2">{item.time}</div>
-      </div>
-    )
-  }
+  if (item.kind === "todo") return <TodoCard item={item} />
+  if (item.kind === "artifact") return <ArtifactCard item={item} onOpen={() => props.onOpenFile(item.path)} />
 
-  if (item.kind === "ai") {
-    return (
-      <div class="px-4 py-2">
-        <Markdown text={item.text} class="prose-chat" />
-        <div class="text-[11px] text-gray-500 mt-2">{item.time}</div>
-      </div>
-    )
-  }
+  // Everything else (user / ai / diff / read / command) → markdown.
+  // The Markdown component (marked + highlight.js) handles all the
+  // layout: code fences, syntax-coloring, diff +/- backgrounds, lists.
+  const md = toMarkdown(item)
+  const isUser = item.kind === "user"
+  return (
+    <div class={isUser ? "rounded-md bg-gray-100 px-4 py-3" : "px-4 py-2"}>
+      <Markdown text={md} class="prose-chat" />
+      <div class="text-[11px] text-gray-500 mt-2">{item.time}</div>
+    </div>
+  )
+}
+
+const LANG_BY_EXT: Record<string, string> = {
+  py: "python",
+  go: "go",
+  ts: "typescript",
+  tsx: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  sh: "bash",
+  bash: "bash",
+  yaml: "yaml",
+  yml: "yaml",
+  json: "json",
+  md: "markdown",
+  toml: "",
+}
+const langFromPath = (path: string) => {
+  const ext = path.split(".").pop()?.toLowerCase() ?? ""
+  return LANG_BY_EXT[ext] ?? ""
+}
+
+function toMarkdown(item: ChatItem): string {
+  if (item.kind === "user" || item.kind === "ai") return item.text
 
   if (item.kind === "diff") {
-    return <DiffCard item={item} />
+    const body = item.lines
+      .map((l) =>
+        l.kind === "hunk"
+          ? l.text
+          : l.kind === "add"
+            ? "+" + l.text.replace(/^[+-]?\t?/, "")
+            : l.kind === "del"
+              ? "-" + l.text.replace(/^[+-]?\t?/, "")
+              : " " + l.text,
+      )
+      .join("\n")
+    return `**Edit** \`${item.file}\`\n\n\`\`\`diff\n${body}\n\`\`\``
   }
+
   if (item.kind === "read") {
-    return <ReadCard item={item} onOpen={() => props.onOpenFile(item.path)} />
+    const lang = langFromPath(item.path)
+    const start = item.startLine ?? 1
+    const end = start + item.lines.length - 1
+    const range = item.startLine ? ` · L${start}-${end}` : ""
+    const total = item.total ? ` of ${item.total}` : ""
+    return `**Read** \`${item.path}\`${range}${total}\n\n\`\`\`${lang}\n${item.lines.join("\n")}\n\`\`\``
   }
-  if (item.kind === "todo") {
-    return <TodoCard item={item} />
-  }
-  if (item.kind === "artifact") {
-    return <ArtifactCard item={item} onOpen={() => props.onOpenFile(item.path)} />
-  }
+
   if (item.kind === "command") {
-    return <CommandCard item={item} />
+    const ok = item.ok === false ? " ✗" : item.ok === true ? " ✓" : ""
+    return `**\`$ ${item.cmd}\`**${ok}\n\n\`\`\`\n${item.output.join("\n")}\n\`\`\``
   }
-  return null
+
+  return ""
 }
 
 function SystemMarker(props: { text: string; accent?: "amber" | "emerald" }) {
@@ -659,75 +692,6 @@ function SystemMarker(props: { text: string; accent?: "amber" | "emerald" }) {
       <span class="flex-1 h-px bg-gray-200" />
       <span class={color}>{props.text}</span>
       <span class="flex-1 h-px bg-gray-200" />
-    </div>
-  )
-}
-
-function buildUnifiedDiff(file: string, lines: { kind: string; text: string }[]): string {
-  const out: string[] = [`--- a/${file}`, `+++ b/${file}`]
-  for (const line of lines) {
-    if (line.kind === "hunk") out.push(line.text)
-    else if (line.kind === "add") out.push("+" + line.text.replace(/^[+-]?\t?/, ""))
-    else if (line.kind === "del") out.push("-" + line.text.replace(/^[+-]?\t?/, ""))
-    else out.push(" " + line.text)
-  }
-  return out.join("\n")
-}
-
-function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
-  const html = () =>
-    diff2htmlRender(buildUnifiedDiff(props.item.file, props.item.lines), {
-      drawFileList: false,
-      matching: "lines",
-      outputFormat: "line-by-line",
-    })
-  return (
-    <div class="rounded-md border border-gray-200 overflow-hidden bg-white mx-1">
-      <header class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
-        <span class="text-[11px] text-gray-500">diff</span>
-        <span class="text-[12px] font-mono text-gray-900">{props.item.file}</span>
-        <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
-      </header>
-      <div class="diff-card-body text-[12px]" innerHTML={html()} />
-    </div>
-  )
-}
-
-function ReadCard(props: { item: Extract<ChatItem, { kind: "read" }>; onOpen: () => void }) {
-  const start = () => props.item.startLine ?? 1
-  const range = () => `L${start()}-${start() + props.item.lines.length - 1}`
-  return (
-    <div class="rounded-md border border-gray-200 overflow-hidden bg-white mx-1">
-      <header class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
-        <span class="text-[11px] text-gray-500">read</span>
-        <button
-          type="button"
-          onClick={props.onOpen}
-          class="text-[12px] font-mono text-gray-900 hover:underline"
-          title="open in editor"
-        >
-          {props.item.path}
-        </button>
-        <span class="text-[11px] text-gray-500">
-          {range()}
-          <Show when={props.item.total}>
-            <span> of {props.item.total}</span>
-          </Show>
-        </span>
-        <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
-      </header>
-      <div class="overflow-auto font-mono text-[12px] leading-snug py-1 text-gray-800">
-        <For each={props.item.lines}>
-          {(text, i) => (
-            <div class="whitespace-pre">
-              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none">
-                {start() + i()}
-              </span>
-              <span>{text || "\u00A0"}</span>
-            </div>
-          )}
-        </For>
-      </div>
     </div>
   )
 }
@@ -773,24 +737,3 @@ function ArtifactCard(props: { item: Extract<ChatItem, { kind: "artifact" }>; on
   )
 }
 
-function CommandCard(props: { item: Extract<ChatItem, { kind: "command" }> }) {
-  return (
-    <div class="rounded-md border border-gray-200 overflow-hidden bg-white mx-1">
-      <header class="px-3 py-1.5 bg-gray-900 text-gray-100 flex items-center gap-2 font-mono text-[12px]">
-        <span class="text-gray-400">$</span>
-        <span class="flex-1 truncate">{props.item.cmd}</span>
-        <Show when={props.item.ok !== undefined}>
-          <span class={props.item.ok ? "text-emerald-400" : "text-red-400"}>
-            {props.item.ok ? "✓" : "✗"}
-          </span>
-        </Show>
-        <span class="text-gray-400">{props.item.time}</span>
-      </header>
-      <div class="px-3 py-2 font-mono text-[12px] leading-snug text-gray-700 bg-gray-50 overflow-auto">
-        <For each={props.item.output}>
-          {(line) => <div class="whitespace-pre">{line || "\u00A0"}</div>}
-        </For>
-      </div>
-    </div>
-  )
-}
