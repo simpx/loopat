@@ -26,13 +26,14 @@ import {
   forkLoop,
   releaseRfd,
   claimDrive,
+  createLoop,
   chats,
 } from "../state"
-import type { ChatItem, Loop } from "../state"
-import { FILE_TREE, FILE_CONTENT } from "../mock/files"
+import type { ChatItem, Loop, TimelineEvent } from "../state"
+import { getWorkspace } from "../mock/files"
 import type { FileNode } from "../mock/files"
 
-type RightMode = "files" | "editor" | "terminal"
+type RightMode = "files" | "editor" | "terminal" | "info"
 
 const TERMINAL_LINES = [
   "$ pytest tests/test_gateway.py::test_rdma_register -xvs",
@@ -51,9 +52,9 @@ export function LoopPage() {
   const [scope, setScope] = createSignal<"mine" | "all">("mine")
   const [rightOpen, setRightOpen] = createSignal(false)
   const [rightMode, setRightMode] = createSignal<RightMode>("files")
-  const [editingPath, setEditingPath] = createSignal<string>("runtime/gateway.py")
-  const [fileEdits, setFileEdits] = createSignal<Record<string, string>>({})
-  const [openFolders, setOpenFolders] = createSignal(new Set(["runtime", "tests"]))
+  const [editingPath, setEditingPath] = createSignal<string>("")
+  const [fileEdits, setFileEdits] = createSignal<Record<string, Record<string, string>>>({})
+  const [openFolders, setOpenFolders] = createSignal(new Set<string>())
 
   const toggleFolder = (name: string) => {
     const next = new Set(openFolders())
@@ -66,6 +67,7 @@ export function LoopPage() {
     loops().filter((l) => (scope() === "mine" ? l.driver === ME : l.status !== "archived"))
 
   const current = () => loops().find((l) => l.id === currentLoopId()) ?? loops()[0]
+  const workspace = () => getWorkspace(current().id)
 
   const openFile = (path: string) => {
     setEditingPath(path)
@@ -73,11 +75,26 @@ export function LoopPage() {
     setRightOpen(true)
   }
 
-  const fileText = (path: string) => fileEdits()[path] ?? FILE_CONTENT[path] ?? `// ${path}\n`
-  const setFileText = (path: string, value: string) =>
-    setFileEdits({ ...fileEdits(), [path]: value })
-  const isEdited = (path: string) =>
-    path in fileEdits() && fileEdits()[path] !== (FILE_CONTENT[path] ?? "")
+  const fileText = (path: string) => {
+    const lid = current().id
+    return (
+      fileEdits()[lid]?.[path] ??
+      workspace().fileContents[path] ??
+      `// ${path}\n(no content)`
+    )
+  }
+  const setFileText = (path: string, value: string) => {
+    const lid = current().id
+    const next = { ...fileEdits() }
+    next[lid] = { ...(next[lid] ?? {}), [path]: value }
+    setFileEdits(next)
+  }
+  const isEdited = (path: string) => {
+    const lid = current().id
+    const edited = fileEdits()[lid]?.[path]
+    if (edited === undefined) return false
+    return edited !== (workspace().fileContents[path] ?? "")
+  }
 
   const currentChat = (): ChatItem[] => chats[current().id] ?? []
 
@@ -111,7 +128,7 @@ export function LoopPage() {
           />
         </main>
 
-        <Show when={rightOpen() && current().workdir}>
+        <Show when={rightOpen()}>
           <RightPanel
             current={current}
             rightMode={rightMode}
@@ -145,8 +162,13 @@ function LoopsList(props: {
     <aside class="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
       <div class="px-3 h-10 flex items-center justify-between border-b border-gray-200">
         <span class="text-xs text-gray-500">Loops</span>
-        <button class="text-gray-500 hover:text-gray-900 p-0.5 rounded hover:bg-gray-100">
-          <Icon name="enter" />
+        <button
+          type="button"
+          class="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-sm leading-none"
+          title="new loop"
+          onClick={() => createLoop()}
+        >
+          +
         </button>
       </div>
       <div class="px-2 pt-2 flex items-center gap-1">
@@ -298,18 +320,13 @@ function LoopHeader(props: { loop: Loop }) {
 
       {/* workdir + branch */}
       <div class="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
-        <Show
-          when={loop().workdir}
-          fallback={<span class="text-gray-400 italic">no workdir · pure design</span>}
-        >
-          <span>{loop().workdir}</span>
-          <Show when={loop().branch}>
-            <span>·</span>
-            <span class="flex items-center gap-1">
-              <Icon name="fork" />
-              {loop().branch}
-            </span>
-          </Show>
+        <span>{loop().workdir}</span>
+        <Show when={loop().branch}>
+          <span>·</span>
+          <span class="flex items-center gap-1">
+            <Icon name="fork" />
+            {loop().branch}
+          </span>
         </Show>
         <span>·</span>
         <span>{loop().participants} viewing</span>
@@ -382,21 +399,13 @@ function ChatInput(props: {
           send
         </button>
       </div>
-      <div class="flex items-center justify-between mt-2 text-[11px] text-gray-500">
-        <div class="flex items-center gap-3">
-          <button class="hover:text-gray-900">+ fresh chat</button>
-          <button class="hover:text-gray-900" onClick={() => forkLoop(props.current().id)}>
-            ⑂ fork loop
-          </button>
-          <button class="hover:text-gray-900">▾ history (3)</button>
+      <div class="flex items-center justify-end mt-2 text-[11px] text-gray-500">
+        <div class="flex items-center gap-2">
+          {modeBtn("ℹ info", "info")}
+          {modeBtn("▤ files", "files")}
+          {modeBtn("✎ editor", "editor")}
+          {modeBtn("▷ terminal", "terminal")}
         </div>
-        <Show when={props.current().workdir}>
-          <div class="flex items-center gap-2">
-            {modeBtn("▤ files", "files")}
-            {modeBtn("✎ editor", "editor")}
-            {modeBtn("▷ terminal", "terminal")}
-          </div>
-        </Show>
       </div>
     </div>
   )
@@ -423,13 +432,14 @@ function RightPanel(props: {
   return (
     <aside class="flex-1 min-w-0 border-l border-gray-200 bg-white flex flex-col">
       <header class="px-3 h-10 shrink-0 border-b border-gray-200 flex items-center gap-1">
+        <ModeTab label="ℹ info" active={props.rightMode() === "info"} onClick={() => props.setRightMode("info")} />
         <ModeTab label="▤ files" active={props.rightMode() === "files"} onClick={() => props.setRightMode("files")} />
         <ModeTab label="✎ editor" active={props.rightMode() === "editor"} onClick={() => props.setRightMode("editor")} />
         <ModeTab label="▷ terminal" active={props.rightMode() === "terminal"} onClick={() => props.setRightMode("terminal")} />
         <Show when={props.rightMode() === "editor"}>
           <span class="ml-2 text-[11px] text-gray-500 truncate">
-            {props.editingPath()}
-            <Show when={props.isEdited(props.editingPath())}>
+            {props.editingPath() || "(no file)"}
+            <Show when={props.editingPath() && props.isEdited(props.editingPath())}>
               <span class="text-orange-600"> ●</span>
             </Show>
           </span>
@@ -444,9 +454,13 @@ function RightPanel(props: {
         </button>
       </header>
 
+      <Show when={props.rightMode() === "info"}>
+        <InfoPanel loop={props.current()} />
+      </Show>
+
       <Show when={props.rightMode() === "files"}>
         <div class="flex-1 min-h-0 overflow-auto py-2">
-          <For each={FILE_TREE}>
+          <For each={getWorkspace(props.current().id).fileTree}>
             {(node) => (
               <FileTreeNode
                 node={node}
@@ -458,28 +472,39 @@ function RightPanel(props: {
               />
             )}
           </For>
+          <Show when={getWorkspace(props.current().id).fileTree.length === 0}>
+            <div class="px-4 py-3 text-[12px] text-gray-500">workdir 还是空的</div>
+          </Show>
         </div>
         <div class="border-t border-gray-200 px-3 py-2 text-[11px] text-gray-500">
           ⑂ <span class="text-gray-900">{props.current().branch ?? "main"}</span>
-          {" · 2 files modified"}
         </div>
       </Show>
 
       <Show when={props.rightMode() === "editor"}>
-        <div class="flex-1 min-h-0">
-          <CodeEditor
-            path={props.editingPath()}
-            value={props.fileText(props.editingPath())}
-            onChange={(v) => props.setFileText(props.editingPath(), v)}
-          />
-        </div>
-        <div class="border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 flex items-center gap-3">
-          <span>{props.editingPath()}</span>
-          <Show when={props.isEdited(props.editingPath())}>
-            <span class="text-orange-600">unsaved (mock)</span>
-          </Show>
-          <span class="ml-auto">utf-8 · LF</span>
-        </div>
+        <Show
+          when={props.editingPath()}
+          fallback={
+            <div class="flex-1 min-h-0 flex items-center justify-center text-[13px] text-gray-500 px-8 text-center">
+              没打开文件 · 在 ▤ files 里点一个，或在 chat 里点 artifact card
+            </div>
+          }
+        >
+          <div class="flex-1 min-h-0">
+            <CodeEditor
+              path={props.editingPath()}
+              value={props.fileText(props.editingPath())}
+              onChange={(v) => props.setFileText(props.editingPath(), v)}
+            />
+          </div>
+          <div class="border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 flex items-center gap-3">
+            <span>{props.editingPath()}</span>
+            <Show when={props.isEdited(props.editingPath())}>
+              <span class="text-orange-600">unsaved (mock)</span>
+            </Show>
+            <span class="ml-auto">utf-8 · LF</span>
+          </div>
+        </Show>
       </Show>
 
       <Show when={props.rightMode() === "terminal"}>
@@ -503,6 +528,137 @@ function RightPanel(props: {
       </Show>
     </aside>
   )
+}
+
+// ============================================================================
+// Info panel — loop metadata + timeline
+// ============================================================================
+
+function InfoPanel(props: { loop: Loop }) {
+  const ws = () => getWorkspace(props.loop.id)
+  const fileCount = () => countFiles(ws().fileTree)
+  return (
+    <div class="flex-1 min-h-0 overflow-auto px-5 py-4 text-[13px] text-gray-900">
+      <Section label="basics">
+        <Row label="created" value={`${props.loop.createdAt} · by ${props.loop.createdBy}`} />
+        <Row label="archetype" value={props.loop.archetype} />
+        <Row label="status" value={statusLabel(props.loop)} />
+        <Row label="driver" value={props.loop.driver + (props.loop.driver === ME ? " (you)" : "")} />
+        <Row label="participants" value={`${props.loop.participants}`} />
+        <Row label="last activity" value={props.loop.lastActivityAgo} />
+      </Section>
+
+      <Section label="workdir">
+        <Row label="path" value={props.loop.workdir} mono />
+        <Show when={props.loop.branch}>
+          <Row label="branch" value={props.loop.branch!} mono />
+        </Show>
+        <Row label="files" value={`${fileCount()} tracked`} />
+      </Section>
+
+      <Section label="context">
+        <Row
+          label="knowledge"
+          value={
+            props.loop.context.knowledge === "all"
+              ? "all (public)"
+              : `scoped to ${props.loop.context.knowledge.length} dirs`
+          }
+        />
+        <Row
+          label="repos"
+          value={
+            props.loop.context.repos.length === 0
+              ? "(none mounted)"
+              : props.loop.context.repos.join(", ")
+          }
+        />
+      </Section>
+
+      <Show when={props.loop.inFocus && props.loop.inFocus.length > 0}>
+        <Section label="focus">
+          <Row label="state" value={props.loop.inFocus!.includes("pinned") ? "📌 pinned" : "listed"} />
+        </Section>
+      </Show>
+
+      <Section label="timeline">
+        <ol class="flex flex-col gap-2 mt-1">
+          <For each={[...props.loop.timeline].reverse()}>
+            {(ev) => <TimelineRow ev={ev} />}
+          </For>
+        </ol>
+      </Section>
+    </div>
+  )
+}
+
+function Section(props: { label: string; children: any }) {
+  return (
+    <section class="mb-5">
+      <h3 class="text-[11px] uppercase tracking-wide text-gray-400 mb-2">{props.label}</h3>
+      <div class="flex flex-col gap-1.5">{props.children}</div>
+    </section>
+  )
+}
+
+function Row(props: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div class="flex items-baseline gap-3">
+      <span class="text-[12px] text-gray-500 w-20 shrink-0">{props.label}</span>
+      <span class={props.mono ? "font-mono text-[12px]" : "text-[13px]"}>{props.value}</span>
+    </div>
+  )
+}
+
+function TimelineRow(props: { ev: TimelineEvent }) {
+  const ev = props.ev
+  const summary = (() => {
+    switch (ev.kind) {
+      case "create":
+        return `created by ${ev.by}`
+      case "fork":
+        return `forked by ${ev.by}${ev.note ? ` · ${ev.note}` : ""}`
+      case "driver-change":
+        return `driver: ${ev.from} → ${ev.to}`
+      case "rfd":
+        return `${ev.by} released (RFD)${ev.note ? ` · ${ev.note}` : ""}`
+      case "claim":
+        return `${ev.by} claimed${ev.from ? ` from ${ev.from}` : ""}${ev.note ? ` · ${ev.note}` : ""}`
+      case "focus-pin":
+        return `pinned to focus${ev.note ? ` · ${ev.note}` : ""}`
+    }
+  })()
+  const dot =
+    ev.kind === "create"
+      ? "bg-emerald-500"
+      : ev.kind === "rfd"
+        ? "bg-amber-500"
+        : ev.kind === "claim"
+          ? "bg-emerald-500"
+          : ev.kind === "fork"
+            ? "bg-purple-500"
+            : "bg-gray-400"
+  return (
+    <li class="flex items-baseline gap-2.5">
+      <span class={`w-1.5 h-1.5 rounded-full shrink-0 ${dot} translate-y-[3px]`} />
+      <span class="font-mono text-[11px] text-gray-500 shrink-0 w-32">{ev.time}</span>
+      <span class="text-[12px] text-gray-900">{summary}</span>
+    </li>
+  )
+}
+
+function statusLabel(l: Loop): string {
+  if (l.rfd) return "active · RFD"
+  return l.status
+}
+
+function countFiles(nodes: FileNode[]): number {
+  let n = 0
+  for (const node of nodes) {
+    if (node.kind === "file") n++
+    else n += countFiles(node.children)
+  }
+  return n
 }
 
 function ModeTab(props: { label: string; active: boolean; onClick: () => void }) {

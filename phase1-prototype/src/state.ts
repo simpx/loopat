@@ -14,11 +14,20 @@ export type LoopContext = {
   // future: skills, mcp servers
 }
 
+export type TimelineEvent = {
+  time: string
+  kind: "create" | "driver-change" | "rfd" | "claim" | "fork" | "focus-pin"
+  by: string
+  from?: string
+  to?: string
+  note?: string
+}
+
 export type Loop = {
   id: string
   name: string
   archetype: "code" | "research" | "online" | "context-refine" | "design"
-  workdir?: string             // optional — pure-discussion loops have none
+  workdir: string              // every loop has a workdir
   branch?: string
   driver: string
   participants: number
@@ -28,6 +37,9 @@ export type Loop = {
   forkedFrom?: string
   rfd?: boolean                // true = driver has released; anyone can claim
   context: LoopContext
+  createdAt: string            // display string
+  createdBy: string
+  timeline: TimelineEvent[]    // sorted oldest → newest
 }
 
 export type DiffLine = {
@@ -68,6 +80,15 @@ const initialLoops: Loop[] = [
     status: "active",
     inFocus: ["pinned"],
     context: { knowledge: "all", repos: ["loopey-runtime", "vllm"] },
+    createdAt: "2026-04-28 09:12",
+    createdBy: "阿尔萨斯",
+    timeline: [
+      { time: "2026-04-28 09:12", kind: "create", by: "阿尔萨斯" },
+      { time: "2026-04-28 10:30", kind: "focus-pin", by: "阿尔萨斯", note: "上线 gateway" },
+      { time: "2026-05-05 08:42", kind: "driver-change", by: "system", from: "阿尔萨斯", to: "simpx" },
+      { time: "2026-05-05 14:32", kind: "driver-change", by: "system", from: "simpx", to: "阿尔萨斯" },
+      { time: "2026-05-05 16:00", kind: "driver-change", by: "system", from: "阿尔萨斯", to: "simpx" },
+    ],
   },
   {
     id: "loopctl",
@@ -80,6 +101,11 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "3h",
     status: "active",
     context: { knowledge: "all", repos: ["loopctl"] },
+    createdAt: "2026-05-05 13:02",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-05 13:02", kind: "create", by: ME },
+    ],
   },
   {
     id: "mirror-llama-3",
@@ -97,6 +123,12 @@ const initialLoops: Loop[] = [
       knowledge: "all",
       repos: ["shadow-llama-3-70b", "loopey-runtime"],
     },
+    createdAt: "2026-05-05 10:11",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-05 10:11", kind: "create", by: ME },
+      { time: "2026-05-05 10:16", kind: "rfd", by: ME, note: "我有个会先 release" },
+    ],
   },
   {
     id: "llama-research",
@@ -104,11 +136,18 @@ const initialLoops: Loop[] = [
     archetype: "research",
     workdir: "~/workspace/llama_research",
     driver: ME,
-    participants: 1,
-    lastActivityAgo: "1d",
-    status: "idle",
+    participants: 2,
+    lastActivityAgo: "8h",
+    status: "active",
     inFocus: ["listed"],
     context: { knowledge: "all", repos: ["llama_research", "vllm"] },
+    createdAt: "2026-05-04 16:20",
+    createdBy: "泰兰德",
+    timeline: [
+      { time: "2026-05-04 16:20", kind: "create", by: "泰兰德" },
+      { time: "2026-05-04 17:30", kind: "rfd", by: "泰兰德", note: "下周再看，先放着" },
+      { time: "2026-05-05 08:00", kind: "claim", by: ME, note: "我接手 prefill 优化方向" },
+    ],
   },
   {
     id: "knowledge-refine",
@@ -120,18 +159,29 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "2h",
     status: "active",
     context: { knowledge: "all", repos: [] },
+    createdAt: "2026-05-05 11:00",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-05 11:00", kind: "create", by: ME },
+    ],
   },
   {
     id: "1001-design",
     name: "1001-design",
     archetype: "design",
-    // no workdir — pure design discussion drawing on knowledge
+    workdir: "~/workspace/1001",
     driver: ME,
     participants: 2,
     lastActivityAgo: "26m",
     status: "active",
     inFocus: ["pinned"],
-    context: { knowledge: "all", repos: [] },
+    context: { knowledge: "all", repos: ["1001"] },
+    createdAt: "2026-05-03 20:48",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-03 20:48", kind: "create", by: ME },
+      { time: "2026-05-04 09:00", kind: "focus-pin", by: ME, note: "1001 系统设计" },
+    ],
   },
 ]
 
@@ -142,10 +192,23 @@ const updateLoop = (id: string, patch: Partial<Loop>) => {
   setLoops(loops().map((l) => (l.id === id ? { ...l, ...patch } : l)))
 }
 
+function nowDisplay() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+const appendTimeline = (id: string, ev: TimelineEvent) => {
+  const loop = loops().find((l) => l.id === id)
+  if (!loop) return
+  updateLoop(id, { timeline: [...loop.timeline, ev] })
+}
+
 export function forkLoop(sourceId: string): string {
   const source = loops().find((l) => l.id === sourceId)
   if (!source) return sourceId
   const newId = `${source.id}-fork-${Date.now().toString(36).slice(-4)}`
+  const ts = nowDisplay()
   const newLoop: Loop = {
     ...source,
     id: newId,
@@ -157,18 +220,46 @@ export function forkLoop(sourceId: string): string {
     status: "active",
     forkedFrom: source.id,
     rfd: false,
+    createdAt: ts,
+    createdBy: ME,
+    timeline: [{ time: ts, kind: "fork", by: ME, note: `forked from ${source.id}` }],
   }
   setLoops([newLoop, ...loops()])
   setCurrentLoopId(newId)
   return newId
 }
 
+export function createLoop(): string {
+  const id = `untitled-${Date.now().toString(36).slice(-4)}`
+  const ts = nowDisplay()
+  const newLoop: Loop = {
+    id,
+    name: "untitled",
+    archetype: "code",
+    workdir: "~/workspace",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "just now",
+    status: "active",
+    context: { knowledge: "all", repos: [] },
+    createdAt: ts,
+    createdBy: ME,
+    timeline: [{ time: ts, kind: "create", by: ME }],
+  }
+  setLoops([newLoop, ...loops()])
+  setCurrentLoopId(id)
+  return id
+}
+
 export function releaseRfd(id: string) {
   updateLoop(id, { rfd: true })
+  appendTimeline(id, { time: nowDisplay(), kind: "rfd", by: ME })
 }
 
 export function claimDrive(id: string) {
+  const prev = loops().find((l) => l.id === id)?.driver
   updateLoop(id, { driver: ME, rfd: false })
+  appendTimeline(id, { time: nowDisplay(), kind: "claim", by: ME, from: prev })
 }
 
 // ============================================================================
@@ -510,6 +601,7 @@ const MIRROR_CHAT: ChatItem[] = [
 ]
 
 const LLAMA_RESEARCH_CHAT: ChatItem[] = [
+  // ----- 泰兰德 phase (creator + initial driver) -----
   { kind: "user", text: "调研一下 llama-3 long-context 表现", time: "yesterday 16:20" },
   {
     kind: "ai",
@@ -533,6 +625,47 @@ const LLAMA_RESEARCH_CHAT: ChatItem[] = [
     time: "yesterday 17:30",
     preview:
       "# Llama-3 Attention 实现\n\nMLA (Multi-head Latent Attention) 把 KV cache 压缩成 latent vector...",
+  },
+  { kind: "user", text: "下周开会再看 prefill 优化空间。先 release，谁先有空谁接", time: "yesterday 17:35" },
+  { kind: "rfd", by: "泰兰德", time: "yesterday 17:35" },
+
+  // ----- claim transition: simpx takes over -----
+  { kind: "claim", by: ME, time: "today 08:00" },
+
+  // ----- simpx phase (current driver) -----
+  { kind: "user", text: "泰兰德说让我接 prefill。先看下现在 prefill 在 64k 上的 tps", time: "today 08:01" },
+  {
+    kind: "ai",
+    text: "扫一下 traces 里的 prefill 数据：",
+    time: "today 08:02",
+  },
+  {
+    kind: "command",
+    cmd: "jq '.[] | select(.phase==\"prefill\") | {len, ms, gpu_util}' traces/long_context_eval.json | head -20",
+    ok: true,
+    time: "today 08:02",
+    output: [
+      '{"len": 65536, "ms": 4820, "gpu_util": 0.41}',
+      '{"len": 65536, "ms": 4910, "gpu_util": 0.39}',
+      '{"len": 98304, "ms": 8240, "gpu_util": 0.36}',
+      '{"len": 131072, "ms": 12940, "gpu_util": 0.33}',
+      '{"len": 131072, "ms": 13110, "gpu_util": 0.32}',
+    ],
+  },
+  {
+    kind: "ai",
+    text:
+      "Prefill 阶段 GPU util 只有 30-40%，明显 IO bound。结合泰兰德写的 attention 文档，瓶颈在 attention IO，不是 compute。\n\n几个可能方向：\n1. **chunked prefill** —— 切 block 流水化\n2. **shared prefix cache** —— 同 prompt 前缀复用\n3. **flash-attention v3 + paged kv** —— 减 IO trip 数",
+    time: "today 08:05",
+  },
+  { kind: "user", text: "把这些写进 follow-up notes，我下午再深入看 #1", time: "today 08:08" },
+  {
+    kind: "artifact",
+    path: "knowledge/llama-3-prefill-followups.md",
+    lines: 38,
+    time: "today 08:10",
+    preview:
+      "# Llama-3 Prefill 优化方向\n\n基于泰兰德的 attention 调研 + 今天的 trace 分析。\n\n## 候选方向\n1. chunked prefill\n2. shared prefix cache\n3. flash-attention v3 + paged kv",
   },
 ]
 
