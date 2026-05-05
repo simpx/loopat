@@ -96,7 +96,7 @@ Loop ↔ Focus = 多对多
 
 ## 哲学回顾
 
-详细见 `1001.md`：
+详细见 `1001-mvp.md`：
 
 > Loop is everything.
 > Runtime is the membrane.
