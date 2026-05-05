@@ -71,3 +71,23 @@ body {
 .prose-chat ul, .prose-chat ol { margin: 0.4em 0; }
 .prose-chat table { margin: 0.5em 0; font-size: 12.5px; }
 .prose-chat th, .prose-chat td { padding: 3px 8px; }
+
+/* Tighter diff2html — defaults are too tall / large for in-chat use */
+.diff-card-body .d2h-wrapper { font-size: 12px; }
+.diff-card-body .d2h-file-header { display: none; }
+.diff-card-body .d2h-file-wrapper {
+  border: none;
+  border-radius: 0;
+  margin-bottom: 0;
+}
+.diff-card-body .d2h-code-line,
+.diff-card-body .d2h-code-side-line {
+  padding: 0 4px 0 4em;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.diff-card-body .d2h-code-linenumber {
+  font-size: 11px;
+  width: 4em;
+}
+.diff-card-body .d2h-info { font-size: 11px; padding: 2px 8px; }

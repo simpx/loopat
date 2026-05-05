@@ -15,6 +15,8 @@
  *   files / editor (CodeMirror) / terminal
  */
 import { createSignal, For, Show } from "solid-js"
+import { html as diff2htmlRender } from "diff2html"
+import "diff2html/bundles/css/diff2html.min.css"
 import { Icon } from "../components/icon"
 import { Markdown } from "../components/markdown"
 import { CodeEditor } from "../components/code-editor"
@@ -661,7 +663,24 @@ function SystemMarker(props: { text: string; accent?: "amber" | "emerald" }) {
   )
 }
 
+function buildUnifiedDiff(file: string, lines: { kind: string; text: string }[]): string {
+  const out: string[] = [`--- a/${file}`, `+++ b/${file}`]
+  for (const line of lines) {
+    if (line.kind === "hunk") out.push(line.text)
+    else if (line.kind === "add") out.push("+" + line.text.replace(/^[+-]?\t?/, ""))
+    else if (line.kind === "del") out.push("-" + line.text.replace(/^[+-]?\t?/, ""))
+    else out.push(" " + line.text)
+  }
+  return out.join("\n")
+}
+
 function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
+  const html = () =>
+    diff2htmlRender(buildUnifiedDiff(props.item.file, props.item.lines), {
+      drawFileList: false,
+      matching: "lines",
+      outputFormat: "line-by-line",
+    })
   return (
     <div class="rounded-md border border-gray-200 overflow-hidden bg-white mx-1">
       <header class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
@@ -669,31 +688,7 @@ function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
         <span class="text-[12px] font-mono text-gray-900">{props.item.file}</span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <div class="font-mono text-[12px] leading-snug overflow-auto py-1">
-        <For each={props.item.lines}>
-          {(line) => (
-            <div
-              class={
-                line.kind === "add"
-                  ? "bg-emerald-50 text-emerald-900 flex"
-                  : line.kind === "del"
-                    ? "bg-red-50 text-red-900 flex"
-                    : line.kind === "hunk"
-                      ? "bg-gray-100 text-gray-500 flex"
-                      : "text-gray-700 flex"
-              }
-            >
-              <span class="w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
-                {line.ln ?? ""}
-              </span>
-              <span class="w-5 text-center text-gray-400 select-none shrink-0">
-                {line.kind === "add" ? "+" : line.kind === "del" ? "-" : line.kind === "hunk" ? "@" : " "}
-              </span>
-              <span class="pl-2 pr-3 whitespace-pre">{line.text.replace(/^[+-]?\t?/, "") || "\u00A0"}</span>
-            </div>
-          )}
-        </For>
-      </div>
+      <div class="diff-card-body text-[12px]" innerHTML={html()} />
     </div>
   )
 }
@@ -721,17 +716,23 @@ function ReadCard(props: { item: Extract<ChatItem, { kind: "read" }>; onOpen: ()
         </span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <div class="font-mono text-[12px] leading-snug overflow-auto py-1 text-gray-800">
-        <For each={props.item.lines}>
-          {(text, i) => (
-            <div class="flex">
-              <span class="w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
-                {start() + i()}
-              </span>
-              <span class="pl-2 pr-3 whitespace-pre">{text || "\u00A0"}</span>
-            </div>
-          )}
-        </For>
+      <div class="overflow-auto">
+        <table class="font-mono text-[12px] leading-snug border-collapse w-full text-gray-800">
+          <tbody>
+            <For each={props.item.lines}>
+              {(text, i) => (
+                <tr>
+                  <td class="w-10 text-right pr-2 py-[1px] text-gray-400 select-none border-r border-gray-100 align-top">
+                    {start() + i()}
+                  </td>
+                  <td class="pl-3 pr-3 py-[1px] whitespace-pre align-top">
+                    {text || "\u00A0"}
+                  </td>
+                </tr>
+              )}
+            </For>
+          </tbody>
+        </table>
       </div>
     </div>
   )
