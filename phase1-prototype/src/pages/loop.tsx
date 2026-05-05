@@ -669,7 +669,7 @@ function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
         <span class="text-[12px] font-mono text-gray-900">{props.item.file}</span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1 m-0">
+      <div class="font-mono text-[12px] leading-snug overflow-auto py-1">
         <For each={props.item.lines}>
           {(line) => (
             <div
@@ -683,17 +683,17 @@ function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
                       : "text-gray-700 flex"
               }
             >
-              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
+              <span class="w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
                 {line.ln ?? ""}
               </span>
-              <span class="inline-block w-5 text-center text-gray-400 select-none shrink-0">
+              <span class="w-5 text-center text-gray-400 select-none shrink-0">
                 {line.kind === "add" ? "+" : line.kind === "del" ? "-" : line.kind === "hunk" ? "@" : " "}
               </span>
-              <span class="pr-3 whitespace-pre">{line.text.replace(/^[+-]?\t?/, "")}</span>
+              <span class="pl-2 pr-3 whitespace-pre">{line.text.replace(/^[+-]?\t?/, "") || "\u00A0"}</span>
             </div>
           )}
         </For>
-      </pre>
+      </div>
     </div>
   )
 }
@@ -721,18 +721,18 @@ function ReadCard(props: { item: Extract<ChatItem, { kind: "read" }>; onOpen: ()
         </span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1 text-gray-800">
+      <div class="font-mono text-[12px] leading-snug overflow-auto py-1 text-gray-800">
         <For each={props.item.lines}>
           {(text, i) => (
             <div class="flex">
-              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
+              <span class="w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
                 {start() + i()}
               </span>
-              <span class="pl-2 pr-3 whitespace-pre">{text}</span>
+              <span class="pl-2 pr-3 whitespace-pre">{text || "\u00A0"}</span>
             </div>
           )}
         </For>
-      </pre>
+      </div>
     </div>
   )
 }
