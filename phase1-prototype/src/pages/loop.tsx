@@ -669,7 +669,7 @@ function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
         <span class="text-[12px] font-mono text-gray-900">{props.item.file}</span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1">
+      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1 m-0">
         <For each={props.item.lines}>
           {(line) => (
             <div
