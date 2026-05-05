@@ -630,6 +630,9 @@ function ChatRow(props: { item: ChatItem; onOpenFile: (path: string) => void }) 
   if (item.kind === "diff") {
     return <DiffCard item={item} />
   }
+  if (item.kind === "read") {
+    return <ReadCard item={item} onOpen={() => props.onOpenFile(item.path)} />
+  }
   if (item.kind === "todo") {
     return <TodoCard item={item} />
   }
@@ -666,24 +669,66 @@ function DiffCard(props: { item: Extract<ChatItem, { kind: "diff" }> }) {
         <span class="text-[12px] font-mono text-gray-900">{props.item.file}</span>
         <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
       </header>
-      <pre class="font-mono text-[12px] leading-snug overflow-auto">
+      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1">
         <For each={props.item.lines}>
           {(line) => (
             <div
               class={
                 line.kind === "add"
-                  ? "bg-emerald-50 text-emerald-900 px-3"
+                  ? "bg-emerald-50 text-emerald-900 flex"
                   : line.kind === "del"
-                    ? "bg-red-50 text-red-900 px-3"
+                    ? "bg-red-50 text-red-900 flex"
                     : line.kind === "hunk"
-                      ? "bg-gray-50 text-gray-500 px-3"
-                      : "text-gray-700 px-3"
+                      ? "bg-gray-100 text-gray-500 flex"
+                      : "text-gray-700 flex"
               }
             >
-              <span class="inline-block w-4 text-gray-400">
+              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
+                {line.ln ?? ""}
+              </span>
+              <span class="inline-block w-5 text-center text-gray-400 select-none shrink-0">
                 {line.kind === "add" ? "+" : line.kind === "del" ? "-" : line.kind === "hunk" ? "@" : " "}
               </span>
-              <span>{line.text.replace(/^[+-]?\t?/, "")}</span>
+              <span class="pr-3 whitespace-pre">{line.text.replace(/^[+-]?\t?/, "")}</span>
+            </div>
+          )}
+        </For>
+      </pre>
+    </div>
+  )
+}
+
+function ReadCard(props: { item: Extract<ChatItem, { kind: "read" }>; onOpen: () => void }) {
+  const start = () => props.item.startLine ?? 1
+  const range = () => `L${start()}-${start() + props.item.lines.length - 1}`
+  return (
+    <div class="rounded-md border border-gray-200 overflow-hidden bg-white mx-1">
+      <header class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center gap-2">
+        <span class="text-[11px] text-gray-500">read</span>
+        <button
+          type="button"
+          onClick={props.onOpen}
+          class="text-[12px] font-mono text-gray-900 hover:underline"
+          title="open in editor"
+        >
+          {props.item.path}
+        </button>
+        <span class="text-[11px] text-gray-500">
+          {range()}
+          <Show when={props.item.total}>
+            <span> of {props.item.total}</span>
+          </Show>
+        </span>
+        <span class="ml-auto text-[11px] text-gray-500">{props.item.time}</span>
+      </header>
+      <pre class="font-mono text-[12px] leading-snug overflow-auto py-1 text-gray-800">
+        <For each={props.item.lines}>
+          {(text, i) => (
+            <div class="flex">
+              <span class="inline-block w-10 text-right pr-2 text-gray-400 select-none shrink-0 border-r border-gray-100">
+                {start() + i()}
+              </span>
+              <span class="pl-2 pr-3 whitespace-pre">{text}</span>
             </div>
           )}
         </For>
