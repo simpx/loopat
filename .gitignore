@@ -7,3 +7,8 @@ opencode/
 .*.swp
 .*.swo
 *~
+
+# JS build artifacts
+node_modules/
+dist/
+.vite/
