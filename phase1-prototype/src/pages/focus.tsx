@@ -25,7 +25,7 @@ const PINNED: FocusItem[] = [
     loops: [
       { name: "gateway-launch", driver: "阿尔萨斯", ago: "14m" },
       { name: "rdma-fix", driver: "simpx", ago: "2h" },
-      { name: "gateway-pd-adapt", driver: "泰兰德", ago: "1d" },
+      { name: "gateway-pd-adapt", driver: "伊利丹", ago: "1d" },
     ],
   },
   {

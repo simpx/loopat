@@ -9,10 +9,12 @@ export const ME = "simpx"
 export type LoopStatus = "active" | "idle" | "archived"
 
 export type LoopContext = {
-  knowledge: "all" | string[]   // "all" = full public knowledge; otherwise scoped paths
-  // Note: no `repos` field — repos live under workdir (= where work happens),
-  // not as a separate "mounted reference" concept. Team-level Repos registry
-  // is in the Context tab, independent of any single loop.
+  // Knowledge + notes are public, default-all. We carry the field so future
+  // private/scoped overrides have somewhere to land, but for now both stay "all".
+  knowledge: "all" | string[]
+  notes: "all" | string[]
+  // Personal is private — only injects what the driver explicitly picks.
+  personal?: string[]
   // future: skills, mcp servers
 }
 
@@ -36,6 +38,7 @@ export type Loop = {
   lastActivityAgo: string
   status: LoopStatus
   inFocus?: ("pinned" | "listed")[]
+  focuses?: string[]           // names of focus items this loop belongs to
   forkedFrom?: string
   rfd?: boolean                // true = driver has released; anyone can claim
   context: LoopContext
@@ -81,7 +84,8 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "14m",
     status: "active",
     inFocus: ["pinned"],
-    context: { knowledge: "all" },
+    focuses: ["上线 gateway"],
+    context: { knowledge: "all", notes: "all" },
     createdAt: "2026-04-28 09:12",
     createdBy: "阿尔萨斯",
     timeline: [
@@ -102,7 +106,11 @@ const initialLoops: Loop[] = [
     participants: 1,
     lastActivityAgo: "3h",
     status: "active",
-    context: { knowledge: "all" },
+    context: {
+      knowledge: "all",
+      notes: "all",
+      personal: ["secrets/LOOPEY_API_KEY", "secrets/OPENAI_API_KEY", "style/voice-tone.md"],
+    },
     createdAt: "2026-05-05 13:02",
     createdBy: ME,
     timeline: [
@@ -120,8 +128,9 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "1h",
     status: "active",
     inFocus: ["listed"],
+    focuses: ["调研 llama-3"],
     rfd: true,
-    context: { knowledge: "all" },
+    context: { knowledge: "all", notes: "all" },
     createdAt: "2026-05-05 10:11",
     createdBy: ME,
     timeline: [
@@ -139,12 +148,13 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "8h",
     status: "active",
     inFocus: ["listed"],
-    context: { knowledge: "all" },
+    focuses: ["调研 llama-3"],
+    context: { knowledge: "all", notes: "all" },
     createdAt: "2026-05-04 16:20",
-    createdBy: "泰兰德",
+    createdBy: "伊利丹",
     timeline: [
-      { time: "2026-05-04 16:20", kind: "create", by: "泰兰德" },
-      { time: "2026-05-04 17:30", kind: "rfd", by: "泰兰德", note: "下周再看，先放着" },
+      { time: "2026-05-04 16:20", kind: "create", by: "伊利丹" },
+      { time: "2026-05-04 17:30", kind: "rfd", by: "伊利丹", note: "下周再看，先放着" },
       { time: "2026-05-05 08:00", kind: "claim", by: ME, note: "我接手 prefill 优化方向" },
     ],
   },
@@ -157,7 +167,7 @@ const initialLoops: Loop[] = [
     participants: 1,
     lastActivityAgo: "2h",
     status: "active",
-    context: { knowledge: "all" },
+    context: { knowledge: "all", notes: "all" },
     createdAt: "2026-05-05 11:00",
     createdBy: ME,
     timeline: [
@@ -174,7 +184,8 @@ const initialLoops: Loop[] = [
     lastActivityAgo: "26m",
     status: "active",
     inFocus: ["pinned"],
-    context: { knowledge: "all" },
+    focuses: ["1001 系统设计"],
+    context: { knowledge: "all", notes: "all" },
     createdAt: "2026-05-03 20:48",
     createdBy: ME,
     timeline: [
@@ -185,7 +196,33 @@ const initialLoops: Loop[] = [
 ]
 
 export const [loops, setLoops] = createSignal<Loop[]>(initialLoops)
-export const [currentLoopId, setCurrentLoopId] = createSignal<string>("loopctl")
+
+export const [newLoopDialogOpen, setNewLoopDialogOpen] = createSignal(false)
+
+export function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+function randHex(n: number): string {
+  const bytes = new Uint8Array(n)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+function uniqueSlug(base: string): string {
+  const baseSlug = slugify(base)
+  if (!baseSlug) return randHex(4)
+  const taken = new Set(loops().map((l) => l.id))
+  if (!taken.has(baseSlug)) return baseSlug
+  return `${baseSlug}-${randHex(2)}`
+}
 
 const updateLoop = (id: string, patch: Partial<Loop>) => {
   setLoops(loops().map((l) => (l.id === id ? { ...l, ...patch } : l)))
@@ -206,7 +243,7 @@ const appendTimeline = (id: string, ev: TimelineEvent) => {
 export function forkLoop(sourceId: string): string {
   const source = loops().find((l) => l.id === sourceId)
   if (!source) return sourceId
-  const newId = `${source.id}-fork-${Date.now().toString(36).slice(-4)}`
+  const newId = uniqueSlug(`${source.name}-fork`)
   const ts = nowDisplay()
   const newLoop: Loop = {
     ...source,
@@ -221,37 +258,143 @@ export function forkLoop(sourceId: string): string {
     rfd: false,
     createdAt: ts,
     createdBy: ME,
-    timeline: [{ time: ts, kind: "fork", by: ME, note: `forked from ${source.id}` }],
+    timeline: [{ time: ts, kind: "fork", by: ME, note: `forked from ${source.name}` }],
   }
   setLoops([newLoop, ...loops()])
-  setCurrentLoopId(newId)
   return newId
 }
 
-export function createLoop(): string {
-  const id = `untitled-${Date.now().toString(36).slice(-4)}`
+export type CreateLoopOpts = {
+  name?: string
+  repo?: string
+  // Only personal needs explicit picking; knowledge + notes are public/all.
+  injectPersonal?: string[]
+}
+
+export function createLoop(opts: CreateLoopOpts = {}): string {
+  const base = opts.name?.trim() || opts.repo?.trim() || ""
+  const id = uniqueSlug(base)
   const ts = nowDisplay()
   const newLoop: Loop = {
     id,
-    name: "untitled",
+    name: opts.name?.trim() || opts.repo?.trim() || "untitled",
     archetype: "code",
-    workdir: "~/workspace",
+    workdir: opts.repo ? `~/workspace/${opts.repo}` : "~/workspace",
     driver: ME,
     participants: 1,
     lastActivityAgo: "just now",
     status: "active",
-    context: { knowledge: "all" },
+    context: {
+      knowledge: "all",
+      notes: "all",
+      personal: opts.injectPersonal?.length ? opts.injectPersonal : undefined,
+    },
     createdAt: ts,
     createdBy: ME,
     timeline: [{ time: ts, kind: "create", by: ME }],
   }
   setLoops([newLoop, ...loops()])
-  setCurrentLoopId(id)
   return id
 }
 
+export function createPromoteLoop(filePath: string): string {
+  const basename = filePath.split("/").pop()?.replace(/\.md$/, "") || filePath
+  const id = uniqueSlug(`promote-${basename}`)
+  const ts = nowDisplay()
+  const newLoop: Loop = {
+    id,
+    name: `promote ${basename}`,
+    archetype: "context-refine",
+    workdir: "(vault)",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "just now",
+    status: "active",
+    context: { knowledge: "all", notes: "all" },
+    createdAt: ts,
+    createdBy: ME,
+    timeline: [{ time: ts, kind: "create", by: ME, note: `把 ${filePath} 提炼到 knowledge` }],
+  }
+  setLoops([newLoop, ...loops()])
+  const time = ts.split(" ")[1] ?? ts
+  chats[id] = [
+    {
+      kind: "user",
+      text: `把 \`${filePath}\` 提炼一下放进 knowledge。先读一遍当前内容，给一个目标路径建议（loop/ / ai-org/ / gateway/ / ml/ / conventions/ / skills/ 选一个），再讨论怎么 restructure。`,
+      time,
+    },
+  ]
+  return id
+}
+
+export function createEditLoop(filePath: string): string {
+  const basename = filePath.split("/").pop()?.replace(/\.md$/, "") || filePath
+  const id = uniqueSlug(`edit-${basename}`)
+  const ts = nowDisplay()
+  const newLoop: Loop = {
+    id,
+    name: `edit ${basename}`,
+    archetype: "context-refine",
+    workdir: "(vault)",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "just now",
+    status: "active",
+    context: { knowledge: "all", notes: "all" },
+    createdAt: ts,
+    createdBy: ME,
+    timeline: [{ time: ts, kind: "create", by: ME, note: `编辑 ${filePath}` }],
+  }
+  setLoops([newLoop, ...loops()])
+  const time = ts.split(" ")[1] ?? ts
+  chats[id] = [
+    {
+      kind: "user",
+      text: `准备编辑 \`${filePath}\`，先帮我读一下当前内容，待会我说要改什么。`,
+      time,
+    },
+  ]
+  return id
+}
+
+// Per-mount revisions tracked in this loop's view of context.
+// Sync = git pull --rebase semantics; updates the visible revision.
+export const [mountRevisions, setMountRevisions] = createSignal<Record<string, string>>({
+  knowledge: "@8a4c1b",
+  notes: "@c2e174",
+  personal: "@f0b385",
+})
+
+export function syncMount(source: string) {
+  const next = new Uint8Array(3)
+  crypto.getRandomValues(next)
+  const hex = Array.from(next, (b) => b.toString(16).padStart(2, "0")).join("")
+  setMountRevisions({ ...mountRevisions(), [source]: `@${hex}` })
+}
+
+export function setLoopPersonal(id: string, paths: string[]) {
+  const loop = loops().find((l) => l.id === id)
+  if (!loop) return
+  updateLoop(id, {
+    context: { ...loop.context, personal: paths.length > 0 ? paths : undefined },
+  })
+}
+
+export function previewSlug(opts: CreateLoopOpts): string {
+  const base = opts.name?.trim() || opts.repo?.trim() || ""
+  if (!base) return "<random-hex>"
+  return slugify(base) || "<random-hex>"
+}
+
 export function releaseRfd(id: string) {
-  updateLoop(id, { rfd: true })
+  const loop = loops().find((l) => l.id === id)
+  if (!loop) return
+  // RFD strips personal context — driver-specific secrets / paths shouldn't
+  // hand over to whoever claims next.
+  updateLoop(id, {
+    rfd: true,
+    context: { ...loop.context, personal: undefined },
+  })
   appendTimeline(id, { time: nowDisplay(), kind: "rfd", by: ME })
 }
 
@@ -600,7 +743,7 @@ const MIRROR_CHAT: ChatItem[] = [
 ]
 
 const LLAMA_RESEARCH_CHAT: ChatItem[] = [
-  // ----- 泰兰德 phase (creator + initial driver) -----
+  // ----- 伊利丹 phase (creator + initial driver) -----
   { kind: "user", text: "调研一下 llama-3 long-context 表现", time: "yesterday 16:20" },
   {
     kind: "ai",
@@ -626,13 +769,13 @@ const LLAMA_RESEARCH_CHAT: ChatItem[] = [
       "# Llama-3 Attention 实现\n\nMLA (Multi-head Latent Attention) 把 KV cache 压缩成 latent vector...",
   },
   { kind: "user", text: "下周开会再看 prefill 优化空间。先 release，谁先有空谁接", time: "yesterday 17:35" },
-  { kind: "rfd", by: "泰兰德", time: "yesterday 17:35" },
+  { kind: "rfd", by: "伊利丹", time: "yesterday 17:35" },
 
   // ----- claim transition: simpx takes over -----
   { kind: "claim", by: ME, time: "today 08:00" },
 
   // ----- simpx phase (current driver) -----
-  { kind: "user", text: "泰兰德说让我接 prefill。先看下现在 prefill 在 64k 上的 tps", time: "today 08:01" },
+  { kind: "user", text: "伊利丹说让我接 prefill。先看下现在 prefill 在 64k 上的 tps", time: "today 08:01" },
   {
     kind: "ai",
     text: "扫一下 traces 里的 prefill 数据：",
@@ -654,7 +797,7 @@ const LLAMA_RESEARCH_CHAT: ChatItem[] = [
   {
     kind: "ai",
     text:
-      "Prefill 阶段 GPU util 只有 30-40%，明显 IO bound。结合泰兰德写的 attention 文档，瓶颈在 attention IO，不是 compute。\n\n几个可能方向：\n1. **chunked prefill** —— 切 block 流水化\n2. **shared prefix cache** —— 同 prompt 前缀复用\n3. **flash-attention v3 + paged kv** —— 减 IO trip 数",
+      "Prefill 阶段 GPU util 只有 30-40%，明显 IO bound。结合伊利丹写的 attention 文档，瓶颈在 attention IO，不是 compute。\n\n几个可能方向：\n1. **chunked prefill** —— 切 block 流水化\n2. **shared prefix cache** —— 同 prompt 前缀复用\n3. **flash-attention v3 + paged kv** —— 减 IO trip 数",
     time: "today 08:05",
   },
   { kind: "user", text: "把这些写进 follow-up notes，我下午再深入看 #1", time: "today 08:08" },
@@ -664,7 +807,7 @@ const LLAMA_RESEARCH_CHAT: ChatItem[] = [
     lines: 38,
     time: "today 08:10",
     preview:
-      "# Llama-3 Prefill 优化方向\n\n基于泰兰德的 attention 调研 + 今天的 trace 分析。\n\n## 候选方向\n1. chunked prefill\n2. shared prefix cache\n3. flash-attention v3 + paged kv",
+      "# Llama-3 Prefill 优化方向\n\n基于伊利丹的 attention 调研 + 今天的 trace 分析。\n\n## 候选方向\n1. chunked prefill\n2. shared prefix cache\n3. flash-attention v3 + paged kv",
   },
 ]
 
@@ -845,7 +988,7 @@ const DESIGN_CHAT: ChatItem[] = [
 
 export const chats: Record<string, ChatItem[]> = {
   "gateway-launch": GATEWAY_CHAT,
-  "loopctl": LOOPCTL_CHAT,
+  loopctl: LOOPCTL_CHAT,
   "mirror-llama-3": MIRROR_CHAT,
   "llama-research": LLAMA_RESEARCH_CHAT,
   "knowledge-refine": KNOWLEDGE_REFINE_CHAT,
