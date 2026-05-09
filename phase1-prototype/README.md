@@ -39,7 +39,7 @@ src/
 ## 当前状态
 
 - [x] Vite + Solid + Tailwind 脚手架
-- [x] 4-tab shell（左 logo+tabs / 右 user），signal 驱动；🦄 logo + favicon
+- [x] 4-tab shell（左 logo+tabs / 右 user），signal 驱动；🧶 logo + favicon
 - [x] Loop tab：
   - chat-first 布局；右 panel 可 toggle（files / editor / terminal）50/50 split
   - 6 个真实 archetype loop：code 讨论（loopctl）/ research（llama-research）/ 线上问题（mirror-llama-3）/ context 整理（ccx-refine）/ 设计（1001-design）/ 上线（gateway-launch，他人 driver）

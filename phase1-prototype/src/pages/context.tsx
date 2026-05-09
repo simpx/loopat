@@ -38,8 +38,6 @@ export function ContextPage() {
   return (
     <div class="flex flex-col h-full w-full">
       <nav class="flex items-center gap-1 px-3 h-9 shrink-0 border-b border-gray-200 bg-white">
-        <span class="text-xs text-gray-500 mr-2">Context</span>
-        <span class="w-px h-4 bg-gray-200 mx-2" />
         <For each={SUB_TABS}>
           {(t) => (
             <button
@@ -130,11 +128,13 @@ export function flattenVaultFiles(nodes: DocNode[]): { path: string; secret?: bo
 const KNOWLEDGE_DOCS: DocNode[] = [
   {
     kind: "folder",
-    name: "loop",
+    name: "loopat",
     children: [
-      { kind: "file", name: "overview.md", path: "loop/overview.md", updatedAgo: "2h" },
-      { kind: "file", name: "lifecycle.md", path: "loop/lifecycle.md", updatedAgo: "1d" },
-      { kind: "file", name: "rfd-and-claim.md", path: "loop/rfd-and-claim.md", updatedAgo: "4d" },
+      { kind: "file", name: "concepts.md", path: "loopat/concepts.md", updatedAgo: "2h" },
+      { kind: "file", name: "architecture.md", path: "loopat/architecture.md", updatedAgo: "1d" },
+      { kind: "file", name: "phase-roadmap.md", path: "loopat/phase-roadmap.md", updatedAgo: "3d" },
+      { kind: "file", name: "naming.md", path: "loopat/naming.md", updatedAgo: "5d" },
+      { kind: "file", name: "attach-protocol-spec.md", path: "loopat/attach-protocol-spec.md", updatedAgo: "12h" },
     ],
   },
   {
@@ -144,31 +144,17 @@ const KNOWLEDGE_DOCS: DocNode[] = [
       { kind: "file", name: "vision.md", path: "ai-org/vision.md", updatedAgo: "5d" },
       { kind: "file", name: "1001-philosophy.md", path: "ai-org/1001-philosophy.md", updatedAgo: "3d" },
       { kind: "file", name: "three-scarce-resources.md", path: "ai-org/three-scarce-resources.md", updatedAgo: "1w" },
-    ],
-  },
-  {
-    kind: "folder",
-    name: "gateway",
-    children: [
-      { kind: "file", name: "cache-strategies.md", path: "gateway/cache-strategies.md", updatedAgo: "1w" },
-      { kind: "file", name: "rdma-mr-register.md", path: "gateway/rdma-mr-register.md", updatedAgo: "2w" },
-    ],
-  },
-  {
-    kind: "folder",
-    name: "ml",
-    children: [
-      { kind: "file", name: "long-context-techniques.md", path: "ml/long-context-techniques.md", updatedAgo: "3w" },
-      { kind: "file", name: "speculative-decoding.md", path: "ml/speculative-decoding.md", updatedAgo: "1mo" },
+      { kind: "file", name: "loop-is-everything.md", path: "ai-org/loop-is-everything.md", updatedAgo: "2w" },
     ],
   },
   {
     kind: "folder",
     name: "conventions",
     children: [
-      { kind: "file", name: "git-style.md", path: "conventions/git-style.md", updatedAgo: "2mo" },
-      { kind: "file", name: "code-style-go.md", path: "conventions/code-style-go.md", updatedAgo: "2mo" },
-      { kind: "file", name: "code-style-python.md", path: "conventions/code-style-python.md", updatedAgo: "2mo" },
+      { kind: "file", name: "loop-naming.md", path: "conventions/loop-naming.md", updatedAgo: "2w" },
+      { kind: "file", name: "commit-messages.md", path: "conventions/commit-messages.md", updatedAgo: "2mo" },
+      { kind: "file", name: "code-style-ts.md", path: "conventions/code-style-ts.md", updatedAgo: "1mo" },
+      { kind: "file", name: "knowledge-layout.md", path: "conventions/knowledge-layout.md", updatedAgo: "1w" },
     ],
   },
   {
@@ -191,19 +177,9 @@ const KNOWLEDGE_DOCS: DocNode[] = [
       },
       {
         kind: "folder",
-        name: "code-review-checklist",
+        name: "spawn-from-chat",
         children: [
-          { kind: "file", name: "SKILL.md", path: "skills/code-review-checklist/SKILL.md", updatedAgo: "2w" },
-          { kind: "file", name: "examples.md", path: "skills/code-review-checklist/examples.md", updatedAgo: "2w" },
-        ],
-      },
-      {
-        kind: "folder",
-        name: "incident-triage",
-        children: [
-          { kind: "file", name: "SKILL.md", path: "skills/incident-triage/SKILL.md", updatedAgo: "1mo" },
-          { kind: "file", name: "runbook-template.md", path: "skills/incident-triage/runbook-template.md", updatedAgo: "1mo" },
-          { kind: "file", name: "grafana-cheatsheet.md", path: "skills/incident-triage/grafana-cheatsheet.md", updatedAgo: "1mo" },
+          { kind: "file", name: "SKILL.md", path: "skills/spawn-from-chat/SKILL.md", updatedAgo: "3d" },
         ],
       },
     ],
@@ -212,32 +188,33 @@ const KNOWLEDGE_DOCS: DocNode[] = [
 
 // ----- Notes: team · public; 任何人 / AI 都可以写入 -----
 const NOTES_DOCS: DocNode[] = [
+  { kind: "file", name: "inbox.md", path: "inbox.md", updatedAgo: "12m" },
+  { kind: "file", name: "focus.md", path: "focus.md", updatedAgo: "2d" },
+  {
+    kind: "folder",
+    name: "research",
+    children: [
+      { kind: "file", name: "opencode-deep-dive.md", path: "research/opencode-deep-dive.md", updatedAgo: "5h" },
+      { kind: "file", name: "claude-code-internals.md", path: "research/claude-code-internals.md", updatedAgo: "2d" },
+      { kind: "file", name: "pi-dev-eval.md", path: "research/pi-dev-eval.md", updatedAgo: "4d" },
+      { kind: "file", name: "next-auth-beta-notes.md", path: "research/next-auth-beta-notes.md", updatedAgo: "1d" },
+    ],
+  },
   {
     kind: "folder",
     name: "memory",
     marker: "ai-write",
     children: [
-      { kind: "file", name: "team-conventions-2026-05.md", path: "memory/team-conventions-2026-05.md", updatedAgo: "3h" },
-      { kind: "file", name: "1001-design-snapshot.md", path: "memory/1001-design-snapshot.md", updatedAgo: "1d" },
-      { kind: "file", name: "llama-3-rollout-status.md", path: "memory/llama-3-rollout-status.md", updatedAgo: "5h" },
-    ],
-  },
-  {
-    kind: "folder",
-    name: "todo",
-    children: [
-      { kind: "file", name: "active.md", path: "todo/active.md", updatedAgo: "30m" },
-      { kind: "file", name: "blocked.md", path: "todo/blocked.md", updatedAgo: "2d" },
-      { kind: "file", name: "this-week.md", path: "todo/this-week.md", updatedAgo: "1d" },
+      { kind: "file", name: "weekly-snapshot-2026-05-09.md", path: "memory/weekly-snapshot-2026-05-09.md", updatedAgo: "3h" },
+      { kind: "file", name: "spike-comparison.md", path: "memory/spike-comparison.md", updatedAgo: "1d" },
     ],
   },
   {
     kind: "folder",
     name: "meeting",
     children: [
-      { kind: "file", name: "2026-05-05-standup.md", path: "meeting/2026-05-05-standup.md", updatedAgo: "5h" },
-      { kind: "file", name: "2026-05-04-arch-review.md", path: "meeting/2026-05-04-arch-review.md", updatedAgo: "1d" },
-      { kind: "file", name: "2026-05-02-quarterly-plan.md", path: "meeting/2026-05-02-quarterly-plan.md", updatedAgo: "3d" },
+      { kind: "file", name: "2026-05-09-spike-decision.md", path: "meeting/2026-05-09-spike-decision.md", updatedAgo: "5h" },
+      { kind: "file", name: "2026-05-02-kickoff.md", path: "meeting/2026-05-02-kickoff.md", updatedAgo: "1w" },
     ],
   },
   {
@@ -301,7 +278,7 @@ const PERSONAL_DOCS: DocNode[] = [
     name: "secrets",
     marker: "secrets",
     children: [
-      { kind: "file", name: "LOOPEY_API_KEY", path: "secrets/LOOPEY_API_KEY", secret: true, updatedAgo: "12d" },
+      { kind: "file", name: "LOOPAT_API_KEY", path: "secrets/LOOPAT_API_KEY", secret: true, updatedAgo: "12d" },
       { kind: "file", name: "GITHUB_TOKEN", path: "secrets/GITHUB_TOKEN", secret: true, updatedAgo: "1mo" },
       { kind: "file", name: "OPENAI_API_KEY", path: "secrets/OPENAI_API_KEY", secret: true, updatedAgo: "2mo" },
     ],
@@ -316,13 +293,13 @@ export const VAULT_DOCS: Record<VaultId, DocNode[]> = {
 
 const VAULT_META: Record<VaultId, { initialPath: string; defaultOpen: string[]; footer: string }> = {
   knowledge: {
-    initialPath: "ai-org/vision.md",
-    defaultOpen: ["loop", "ai-org", "gateway", "conventions", "skills"],
+    initialPath: "loopat/concepts.md",
+    defaultOpen: ["loopat", "ai-org", "conventions", "skills"],
     footer: "team's distilled materials",
   },
   notes: {
-    initialPath: "memory/team-conventions-2026-05.md",
-    defaultOpen: ["memory", "meeting"],
+    initialPath: "research/opencode-deep-dive.md",
+    defaultOpen: ["research", "memory", "meeting"],
     footer: "team · public",
   },
   personal: {
@@ -781,9 +758,336 @@ oncall 默认看 api-latency 那张。`,
 - 修完再 commit`,
     backlinks: [],
   },
+  "loopat/concepts.md": {
+    frontmatter: { title: "loopat 4 一级概念", tags: ["loopat", "core"], updated: "2h", driver: "simpx" },
+    body: `# loopat 4 一级概念
+
+> 对外品牌 loopat，内部 codename 1001。
+
+## Loop（驱动力）
+
+first-class 工作单元 = **context + ai + workdir**。绑定一个长程任务和一个 driver。
+
+强单人语义但允许"无 driver 出生"（rfd from creation）—— 这正是 incident queue 的形态。
+
+参考 [[loopat/architecture.md]] §2。
+
+## Focus（注意力）
+
+团队当下"什么重要"的派生 view。**不是 entity**，状态预算只有 \`notes/focus.md\` 几行 pinned/listed。
+其余从 \`loop.focuses[]\` 派生。
+
+参考 [[ai-org/three-scarce-resources.md]]。
+
+## Context（熵减能力）
+
+team's distilled materials，三种形态：
+
+- **Knowledge** — 沉淀文档（你正在读的）
+- **Notes** — 团队 prose（含 inbox.md 稀碎）
+- **Repos** — git 仓
+- **Agents** — 可执行外壳，配置在 Context，调用在 Chat
+
+(Personal 是私人的，跟 team Context 隔离)
+
+## Chat（sync 协调）
+
+ephemeral context。通过 \`loop.context.chats[]\` 被 loop ingest 后变成 first-class context source。
+
+参考 [[loopat/architecture.md]] §3。`,
+    backlinks: [
+      { path: "loopat/architecture.md", preview: "...4 一级概念见 [[loopat/concepts.md]]..." },
+      { path: "ai-org/loop-is-everything.md", preview: "...[[loopat/concepts.md]] 是产品落地..." },
+    ],
+  },
+  "loopat/architecture.md": {
+    frontmatter: { title: "loopat 架构", tags: ["loopat"], updated: "1d", driver: "panlilu" },
+    body: `# loopat 架构
+
+## 1. C/S 架构
+
+每个 loop 跑在某个 server 上（本机或云端）。client 走同一套 attach 协议。
+0.1 即采用 c/s，避免 0.2 协作时返工。
+
+## 2. Loop = AI runtime + Context + Workdir
+
+\`\`\`
+loop {
+  driver: who's driving (or null = rfd-from-birth / incident)
+  context: { knowledge, notes, personal, chats[] }
+  workdir: git worktree
+  timeline: events (create / driver-change / rfd / claim / fork)
+}
+\`\`\`
+
+## 3. Attach 协议（草稿）
+
+ws topic \`/loop/<id>\`：subscriber 立刻收 snapshot + 增量 event。
+driver-transfer 是事件，所有 client 同步。close 是 send-only。
+
+参考 [[loopat/attach-protocol-spec.md]]。
+
+## 已决问题
+
+- ChatMount 走 mutate（@@id([loopId, channelId])），不做 versioning（先简单）
+- driver 字段挂在 session metadata 而不是另起 model
+- attach SSE → ws，多 subscriber
+
+## 未决
+
+- workspace 隔离 + 权限边界
+- agent 的 trigger / 安全沙箱`,
+    backlinks: [
+      { path: "loopat/concepts.md", preview: "...参考 [[loopat/architecture.md]] §2..." },
+      { path: "loopat/attach-protocol-spec.md", preview: "...扩展自 [[loopat/architecture.md]] §3..." },
+    ],
+  },
+  "loopat/phase-roadmap.md": {
+    frontmatter: { title: "loopat phase roadmap", tags: ["loopat", "planning"], updated: "3d" },
+    body: `# Phase Roadmap
+
+> 1001-mvp.md §2 的精简版。
+
+## Phase 1 — 高保真原型 ← **目前在做**
+
+产出：4 tab UI 原型 + 说明文档。reviewer 看完能讲清 1001 是什么。
+
+## Phase 2 — 架构选型
+
+候选：
+1. fork \`sst/opencode\`（simpx 在做 spike）
+2. 自建 Next.js + tRPC + Prisma + Postgres + WS（panlilu 在做 spike）
+3. pi.dev 等 — 待评估
+
+周末 close 取舍。
+
+## Phase 3 — 0.1 单人版
+
+100% 替代 simpx 本地 ccx，连续用一周不回退。c/s 架构从 0.1 开始。
+
+## Phase 4 — 0.2 多人协作
+
+attach 别人 loop。两人完成 spawn → attach → close 流程。`,
+    backlinks: [
+      { path: "ai-org/vision.md", preview: "...phase 计划见 [[loopat/phase-roadmap.md]]..." },
+    ],
+  },
+  "loopat/naming.md": {
+    frontmatter: { title: "loopat 命名由来", tags: ["loopat", "brand"], updated: "5d" },
+    body: `# loopat 命名
+
+\`loopat.ai\` —— 内嵌两个语义资产：
+
+1. **loop**（项目核心概念）
+2. **pat**（隐藏词）—— 计划做成产品 UX 动词：用户给 AI response 一个 "pat"，比 thumbs-up 更具身。
+   跟 RLHF 反馈语义吻合。
+
+放弃了"loop at AI"作为短语解读 —— "loop at" 不是英语 idiom，硬解牵强。
+
+logo emoji **🧶**（毛线团）—— loop 的有机/暖感呈现，跟 brand 软调性一致。
+
+workspace 内部 codename 仍叫 \`1001\`（Scheherazade 起源典故）。`,
+    backlinks: [],
+  },
+  "loopat/attach-protocol-spec.md": {
+    frontmatter: { title: "Attach 协议草稿", tags: ["loopat", "spec"], updated: "12h", driver: "simpx" },
+    body: `# Attach 协议（草稿 v0）
+
+> 状态：草稿，simpx 写，明早跟 panlilu 对一遍。
+
+## 目标
+
+让多个 client 实时 mirror 同一个 loop —— driver 操作 + AI 回复 + chat 增量 全部同步。
+
+## Topic
+
+\`/loop/<id>\` — ws subscription
+
+## 消息类型
+
+| event | direction | payload |
+|---|---|---|
+| \`snapshot\` | s→c | 完整 loop state（订阅时立刻发） |
+| \`message\` | s→c | 新 chat 增量 |
+| \`timeline\` | s→c | driver-change / rfd / claim / fork 等系统事件 |
+| \`tool-call\` | s→c | AI 调工具的中间状态 |
+| \`user-input\` | c→s | 当前 driver 发的消息 |
+| \`claim\` | c→s | 非 driver 想 claim drive |
+
+## 权限
+
+非 driver 只能 sub + 发 \`claim\`。driver 改了之后，rfd=false，原 driver 失去 user-input 权限。
+
+## 待办
+
+- [ ] 跟 panlilu 对齐 ws message envelope 格式
+- [ ] 决定 reconnect / replay 策略
+- [ ] sub auth：workspace token + loop visibility check`,
+    backlinks: [
+      { path: "loopat/architecture.md", preview: "...细节见 [[loopat/attach-protocol-spec.md]]..." },
+    ],
+  },
+  "ai-org/loop-is-everything.md": {
+    frontmatter: { title: "Loop is everything", tags: ["ai-org", "philosophy"], updated: "2w" },
+    body: `# Loop is everything
+
+> Loop is everything. Runtime is the membrane. Knowledge is the flow.
+
+## Loop is everything
+
+任何长程工作都装在 loop 里 —— 而不是 todo / issue / channel。
+loop 有 driver、有 workdir、有 context、有 timeline，是一个完整的"工作单元"。
+
+## Runtime is the membrane
+
+好的 runtime（如 dashctl）把分散文档收敛进 CLI 自描述接口，降低 AI context footprint。
+Loop 通过 runtime 跟外界交互（git / file system / agent api）。
+
+## Knowledge is the flow
+
+knowledge 不是仓库里的死文档，是 loop 沉淀出的"流"——
+loop 完成 → distill → knowledge 增长 → 下一个 loop 启动时拉到的 context 更密、更准。`,
+    backlinks: [
+      { path: "loopat/concepts.md", preview: "...[[ai-org/loop-is-everything.md]] 的产品落地..." },
+    ],
+  },
+  "conventions/loop-naming.md": {
+    frontmatter: { title: "Loop 命名约定", tags: ["conventions"], updated: "2w" },
+    body: `# Loop 命名
+
+- **kebab-case** —— \`loopat-runtime-spike\`，不混 camelCase / 下划线
+- **动词优先**: \`research-opencode\`, \`fix-callback-5xx\`, \`spike-trpc-router\`
+- **scope 在前，subject 在后**: \`prototype-hifi\`, \`loopat-ts-mvp\`
+- **incident**: 以 \`incident-\` 或描述性词如 \`site-uptime-spike\` 开头`,
+    backlinks: [],
+  },
+  "conventions/commit-messages.md": {
+    frontmatter: { title: "Commit message 约定", tags: ["conventions"], updated: "2mo" },
+    body: `# Commit Messages
+
+\`type(scope): subject\`
+
+第一行 ≤ 60 字符。type 候选：
+- \`feat\` 新功能
+- \`fix\` bug 修复
+- \`refactor\` 内部重构
+- \`docs\` 文档
+- \`test\` 测试
+- \`chore\` 工程杂项
+
+例：
+- \`feat(focus): derive section from loop.focuses[]\`
+- \`fix(chat): merge contacts into dms section\``,
+    backlinks: [],
+  },
+  "conventions/code-style-ts.md": {
+    frontmatter: { title: "TypeScript 风格", tags: ["conventions"], updated: "1mo" },
+    body: `# TypeScript Style
+
+## 命名
+- \`PascalCase\` for types/components
+- \`camelCase\` for functions/variables
+- \`UPPER_SNAKE\` for module-level constants
+
+## 注释
+默认不写。只在 WHY 非显然时写一行。
+不写 WHAT（命名好就够了）。
+
+## SolidJS 约定
+- 组件名 PascalCase
+- signal getter 末尾 \`()\`，setter 用 \`setX\`
+- module-level signal 走 \`createSignal\` + export
+- props 严禁 destructure（破坏响应性）`,
+    backlinks: [],
+  },
+  "conventions/knowledge-layout.md": {
+    frontmatter: { title: "Knowledge 目录约定", tags: ["conventions"], updated: "1w" },
+    body: `# Knowledge Layout
+
+## 主题目录 + CLAUDE.md 索引
+
+每个主题一个目录。目录下的 CLAUDE.md 是索引（一行一文件 + 简述）。
+AI 加载主题时只读索引，需要时再深入。
+
+## 内部链接用 wikilink
+
+\`[[topic/file.md]]\` 而不是相对路径。backlinks 自动维护。
+
+## 命名
+- 文件名 kebab-case
+- 一个文件 one topic
+- frontmatter 含 \`title / tags / updated / driver\`
+
+## inbox 与 sediment
+
+\`notes/inbox.md\` 是高熵稀碎的家。沉淀后进 \`knowledge/<topic>/\`。
+\`notes/\` 是公开 prose；\`personal/\` 是私人。`,
+    backlinks: [],
+  },
+  "skills/spawn-from-chat/SKILL.md": {
+    frontmatter: { title: "Spawn loop from chat message", tags: ["skill"], updated: "3d" },
+    body: `# Spawn loop from chat message
+
+## 触发
+讨论开始变深入；某条消息值得有 driver 跟到底。
+
+## 步骤
+1. 选中消息或 reply 时按 \`⌘L\`（or 右键 → spawn loop）
+2. 自动填充：title = 消息前 50 字；context.chats = [{id: this channel, upTo: now}]
+3. driver 默认 = 当前用户；可选填 focus tag
+4. 跳到新 loop 的 chat 视图，原 channel 留一条系统消息 \`✓ spawned loop xxx\`
+
+## anti-pattern
+- 不要 spawn loop 当 todo —— 稀碎走 \`notes/inbox.md\`
+- 不要 spawn loop 当 group chat —— 临时多人聊就直接在 channel 里
+
+## 谁能做
+任何 workspace member。AI agent 也可以（如 coo 发现讨论变深入时主动建议）。`,
+    backlinks: [
+      { path: "loopat/concepts.md", preview: "...spawn 流程见 [[skills/spawn-from-chat/SKILL.md]]..." },
+    ],
+  },
 }
 
 const NOTES_CONTENT: Record<string, DocPage> = {
+  "inbox.md": {
+    frontmatter: { tags: ["inbox"], updated: "12m" },
+    body: `# 团队稀碎 inbox
+
+> 一行一个 bullet，没有 status / assignee / due date —— 想做就 spawn loop，不想做直接删。
+> 这不是 todo list，是 prose；腐烂时直接删，不维护"open 数量"。
+
+- 看了下 sst/opencode v0.7 release notes，有几个 hook 点变了，回头确认 fork 还能不能 rebase
+- tweetdeck 上看到一个聊 'AI org' 的 thread，截图存了 personal/inbox/
+- @panlilu next-auth beta 的 session expire callback 跟 5.0 final 行为不一样，注意
+- 把 1001-mvp.md §3 重写一版，加 c/s 协议的边界
+- https://github.com/sst/opencode/discussions/482 有人问怎么加 attach，回头看下他们怎么想的
+- loopat.ai 域名转 cloudflare 的事还没办，等 panlilu 那边 deployment 决定
+- demo 视频先录第一版（2 分钟），上 hn show 用
+- 周三跟 panlilu 把两条 spike 的取舍讨论 closed，下周二之前定方向`,
+    backlinks: [],
+  },
+  "focus.md": {
+    frontmatter: { tags: ["meta"], updated: "2d" },
+    body: `# Focus 配置
+
+> Focus tab 的唯一"真存"。其余都从 \`loop.focuses[]\` 派生。
+
+## pinned
+
+永不从当下消失，即使 8d 无活动。Focus tab 顶部的 📌 段。
+
+- 产品侧高保真原型
+- 可自举的MVP
+
+## listed
+
+当前还没绑定 loop 的 meta focus，作为占位出现。当任意 loop 给自己打上对应 tag 时，自动转为正常 focus。
+
+- 初版上线
+`,
+    backlinks: [],
+  },
   "memory/team-conventions-2026-05.md": {
     frontmatter: { tags: ["memory"], updated: "3h", driver: "ai" },
     body: `# Team conventions (2026-05 snapshot)
@@ -897,7 +1201,7 @@ const NOTES_CONTENT: Record<string, DocPage> = {
 ## 阿尔萨斯
 - gateway RDMA alignment 跑通了
 - 在做 NUMA pinning
-- 阻塞：需要 loopey-runtime repo 写权限确认
+- 阻塞：需要 loopat-runtime repo 写权限确认
 
 ## 伊利丹
 - llama-3 long-context eval 跑完
@@ -934,12 +1238,200 @@ const NOTES_CONTENT: Record<string, DocPage> = {
 - **M3** (7月) — 多人 loop 协作压测`,
     backlinks: [],
   },
+  "research/opencode-deep-dive.md": {
+    frontmatter: { tags: ["research", "opencode"], updated: "5h", driver: "simpx" },
+    body: `# opencode 深度调研
+
+> simpx 在 \`research-opencode\` loop 里写的笔记。
+
+## stack
+- TypeScript 全栈 monorepo
+- packages: server (express+ws) / desktop (Tauri) / cli
+- session = chat history + tool calls + working state
+- project = workdir，1:N session
+- attach: SSE 单 subscriber
+
+## 适配 1001 概念
+
+| 1001 | opencode 现状 | 改动 |
+|---|---|---|
+| Loop | session × project 组合 | 加 driver / rfd 字段 |
+| Focus | 无 | workspace-level 派生 view |
+| Context.chats | 无 | session.contextSources 扩展 |
+| Attach (multi-client) | SSE 单 sub | 改 ws + 多 sub |
+
+## 风险
+- upstream 节奏快（v0.7 hooks 系统重构），fork 容易脱节
+- desktop 是 Tauri，1001 想要 web-first 的话还要拆
+
+## 结论倾向
+fork 时间短（3-4w）但有 upstream 风险。看 panlilu 自建那条进度。`,
+    backlinks: [
+      { path: "memory/spike-comparison.md", preview: "...细节见 [[research/opencode-deep-dive.md]]..." },
+    ],
+  },
+  "research/claude-code-internals.md": {
+    frontmatter: { tags: ["research", "claude-code"], updated: "2d" },
+    body: `# Claude Code SDK 调研
+
+## 形态
+单进程 CLI。无 multi-client attach。
+
+## 扩展机制
+- **hooks**: pre-tool / post-tool / on-stop 注入用户行为
+- **skills**: SKILL.md 描述 + AI 按需加载
+- **MCP**: 接外部 server
+
+## 对 loopat 的启示
+- skills 系统值得抄 —— SKILL.md 自描述、按需加载
+- hooks 比 opencode 的 tool 系统灵活
+- 但他们的 single-process 模型对 attach 不友好
+
+## 不适合直接 fork
+跟 1001 c/s 协作架构错位。可以借鉴 skills 系统。`,
+    backlinks: [],
+  },
+  "research/pi-dev-eval.md": {
+    frontmatter: { tags: ["research", "pi-dev"], updated: "4d" },
+    body: `# pi.dev 评估
+
+> 候选架构 #3。
+
+试用 30 分钟印象：
+- 类 cursor 的 IDE-内嵌形态
+- 强调 individual productivity，不是团队 loop
+- 没有 driver / focus / attach 的概念
+
+不匹配 1001 团队协作语义。**否决。**
+
+只剩 opencode-fork vs 自建二选一。`,
+    backlinks: [],
+  },
+  "research/next-auth-beta-notes.md": {
+    frontmatter: { tags: ["research", "next-auth"], updated: "1d", driver: "panlilu" },
+    body: `# next-auth 5.0-beta 注意点
+
+> panlilu 写的，集成时遇到的坑。
+
+## session expire callback 行为变化
+beta.25 的 \`session.maxAge\` 默认 30d，但 callback 触发时机跟 5.0 final 不一样。
+我们的 staging 出 5xx 抖动很可能就是这个 —— 老 token 在 callback 里被刷成空。
+
+## prisma adapter 注意
+- \`@auth/prisma-adapter\` 跟 \`@prisma/client@6\` 兼容
+- 但 schema 必须用 NextAuth 推荐的字段名（不能改 \`Account.userId\` → \`Account.user_id\`）
+
+## TODO
+等 5.0 final release，重测 callback 行为。`,
+    backlinks: [],
+  },
+  "memory/weekly-snapshot-2026-05-09.md": {
+    frontmatter: { tags: ["memory"], updated: "3h", driver: "ai" },
+    body: `# Weekly Snapshot · 2026-05-09
+
+> coo 自动整理。每周日生成。
+
+## 这周做了什么
+
+- prototype hi-fi 4 tab 主体完成（simpx）
+  - Loop / Focus / Chat / Context 都跑通核心交互
+  - Focus 改成纯派生 view（删 archive 视图）
+  - Chat tab：channel ↔ loop 双向引用
+- loopat-ts spike 推进（panlilu）
+  - prisma schema 完成 9 个 model
+  - trpc routers 进行中
+  - staging.loopat.ai 部署成功
+- opencode fork spike（simpx）
+  - 加完 driver / rfd 字段
+  - attach SSE → ws 设计中
+
+## 决策
+
+- ChatMount 走 mutate（不做 versioning）
+- pi.dev 否决，只剩 opencode-fork vs 自建
+- 周末面对面 close 取舍
+
+## 风险
+
+- opencode upstream v0.7 重构 hooks，fork rebase 成本上升
+- next-auth beta 的 callback 行为引起 staging 5xx 抖动`,
+    backlinks: [],
+  },
+  "memory/spike-comparison.md": {
+    frontmatter: { tags: ["memory"], updated: "1d", driver: "ai" },
+    body: `# Spike Comparison
+
+> coo 整理。两条 MVP spike 的实时对照。
+
+| 维度 | fork opencode (simpx) | 自建 ts (panlilu) |
+|---|---|---|
+| 时间预估 | 3-4w | 8-12w |
+| 风险 | upstream 撕裂 | 时间不够 |
+| stack | TS / Tauri / SSE | Next.js / tRPC / Prisma / WS |
+| driver/rfd | 加在 session metadata | 一等公民 model |
+| attach | SSE → ws 改造 | 原生 ws 设计 |
+| 当前进度 | driver 字段加完 | schema 完成 + staging 部署 |
+
+## 决策建议
+
+如果 attach 协议**两边对得上**且**Loop semantic 在 fork 上不别扭**，倾向 fork（时间窗口考虑）。
+否则走 panlilu 的自建。
+
+> 周末 simpx 出 attach spec 草稿，panlilu 验证可对齐性。`,
+    backlinks: [
+      { path: "research/opencode-deep-dive.md", preview: "...对照表见 [[memory/spike-comparison.md]]..." },
+    ],
+  },
+  "meeting/2026-05-09-spike-decision.md": {
+    frontmatter: { tags: ["meeting"], updated: "5h" },
+    body: `# Spike 取舍 weekend session（2026-05-10）
+
+参与：simpx · panlilu · coo (旁听 + 记录)
+
+## 议程
+1. 两条 spike 进度同步（30min）
+2. attach 协议双向对齐（30min）
+3. 决定 phase 2 走哪条（30min）
+
+## 讨论点
+- ChatMount 的 versioning：先 mutate，后期再加（已决）
+- driver 字段位置：session metadata vs 一等 model
+- workspace 隔离边界：先单 workspace，phase 4 再考虑
+
+## 决策待办（周日定）
+- [ ] 选 fork or 自建
+- [ ] 写 phase 2 文档（架构选型 + 妥协）
+- [ ] 各自下周开 phase 3 实现 loop`,
+    backlinks: [],
+  },
+  "meeting/2026-05-02-kickoff.md": {
+    frontmatter: { tags: ["meeting"], updated: "1w" },
+    body: `# Kickoff 会议（2026-05-02）
+
+参与：simpx · panlilu
+
+## 决议
+- 项目 codename **1001**，对外 brand **loopat.ai**
+- Phase 1：高保真原型（simpx 主导，2 周）
+- Phase 2：架构选型（两人各跑一条 spike，1 周内出对照）
+- Phase 3-4：根据 phase 2 结论再排
+
+## 各自分工
+- **simpx**: prototype + opencode fork spike
+- **panlilu**: loopat-ts 自建 spike
+
+## 工具
+- workspace = 1001
+- chat = 这个 prototype 的 chat tab（先用 mock）
+- knowledge / notes / personal 都放本地，git 同步`,
+    backlinks: [],
+  },
 }
 
 const PERSONAL_CONTENT: Record<string, DocPage> = {
-  "secrets/LOOPEY_API_KEY": {
+  "secrets/LOOPAT_API_KEY": {
     frontmatter: { tags: ["secret"], updated: "12d" },
-    body: "sk-fake-loopey-1a2b3c4d5e6f7g8h9i0j",
+    body: "sk-fake-loopat-1a2b3c4d5e6f7g8h9i0j",
     backlinks: [],
   },
   "secrets/GITHUB_TOKEN": {
@@ -1062,7 +1554,7 @@ backlink 已经有了，下一步：
 
 ## 杂感
 - "可被 AI 检索 ≠ 沉淀"——这个洞察可能值得写一篇
-- 团队 standup 里 [[meeting/2026-05-05-standup.md]] 提到的 NUMA 阻塞，跟阿尔萨斯私聊一下能不能我帮忙申请权限`,
+- 跟 panlilu DM 里聊到 attach 协议，他偏向走 ws 而不是 SSE，我倾向同意`,
     backlinks: [],
   },
   "daily/2026-05-04.md": {
@@ -1187,8 +1679,7 @@ function VaultPane(props: {
   return (
     <div class="flex h-full w-full">
       <aside class="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-        <div class="px-3 h-9 flex items-center justify-between border-b border-gray-200">
-          <span class="text-[11px] text-gray-500">files</span>
+        <div class="px-3 h-9 flex items-center justify-end border-b border-gray-200">
           <button class="text-gray-500 hover:text-gray-900 p-0.5 rounded hover:bg-gray-100">
             <Icon name="magnifying-glass" />
           </button>
@@ -1552,7 +2043,7 @@ function DocView(props: {
 // Agents
 // ============================================================================
 
-type Agent = {
+export type Agent = {
   id: string
   name: string
   emoji: string
@@ -1567,84 +2058,77 @@ type Agent = {
   recentInvocations: { when: string; channel: string; preview: string }[]
 }
 
-const AGENTS: Agent[] = [
+export const AGENTS: Agent[] = [
   {
-    id: "coo-bot",
-    name: "coo-bot",
-    emoji: "🤖",
+    id: "coo",
+    name: "coo",
+    emoji: "🎩",
     charter:
-      "Channel triage + work attribution. Reads chat traffic, routes summaries to the right loop / focus, creates loops for serious-looking discussions.",
+      "Team's secretary. Channel triage + context distill + loop spawn. 任何成员都可以 DM 它问问题、让它整理、让它创建 loop。",
     status: "running",
-    runsOn: "ergo host · python loop · since 2026-04-19",
-    tools: ["chat.read", "chat.post", "loop.create", "focus.update"],
-    subscribesTo: ["#general", "#gateway-launch", "#1001-design", "#turbo-quant"],
+    runsOn: "loopat staging · python loop · since 2026-04-19",
+    tools: ["chat.read", "chat.post", "loop.create", "focus.update", "knowledge.write", "loop.read"],
+    subscribesTo: ["#all", "#dev", "#ops"],
     trigger: "mention",
-    lastActivityAgo: "14m",
+    lastActivityAgo: "12m",
     systemPrompt:
-      "你是 coo-bot，团队的运营官。当被 @ 或检测到讨论开始变深入，主动建议 spawn loop 并归类到 focus。简洁、不啰嗦。",
+      "你是 coo，1001 团队的秘书。任务：1）整理混乱（chat → loop / knowledge）2）回答信息检索类问题 3）被 @ 时 spawn loop。简洁、不啰嗦。\n\n规则：\n- 听到讨论开始变深入，主动 dm 当事人建议 spawn loop\n- 重大决策同步进 knowledge/loopat/ 对应文档的'已决问题'段\n- 不主动评价，只整理 + 引用",
     recentInvocations: [
-      { when: "14m", channel: "#gateway-launch", preview: "✓ 已创建 loop gateway-rdma-fix · driver: simpx" },
-      { when: "2h", channel: "#general", preview: "📋 周一站会 reminder · 9:30 · #standup" },
-      { when: "1d", channel: "#gateway-launch", preview: "已分析 trace.log（120k 行），mr_register 平均..." },
+      { when: "12m", channel: "dm-simpx", preview: "Pulled panlilu's #dev message at 15:02 about prisma schema..." },
+      { when: "26m", channel: "#dev", preview: "记到 knowledge/loopat/architecture.md 的'已决问题'段" },
+      { when: "2h", channel: "#all", preview: "@simpx 同步 panlilu trpc routers 进展到 #all 摘要" },
+      { when: "8h", channel: "memory/", preview: "✓ generated weekly-snapshot-2026-05-09.md" },
     ],
   },
   {
-    id: "daily-digest",
-    name: "daily-digest",
-    emoji: "📰",
-    charter: "每天早上 9 点发送昨日 channel 摘要到 #general，整理跨 channel 的关键讨论与 loop 进展。",
-    status: "idle",
-    runsOn: "cron @ 09:00 · 1001 cloud",
-    tools: ["chat.read", "chat.post", "focus.read", "loop.read"],
-    subscribesTo: ["#general"],
-    trigger: "schedule",
-    lastActivityAgo: "8h",
-    systemPrompt:
-      "Generate a 5-bullet digest of yesterday's significant activity across all channels. Skip noise. Highlight: closed loops, new pinned focus, blocking issues.",
-    recentInvocations: [
-      { when: "8h", channel: "#general", preview: "📊 昨日摘要：3 个 loop 推进，1 个 close（loopctl-deploy），..." },
-      { when: "1d8h", channel: "#general", preview: "📊 昨日摘要：gateway trace 上传，rdma-fix loop spawn..." },
-    ],
-  },
-  {
-    id: "gateway-monitor",
-    name: "gateway-monitor",
-    emoji: "📈",
+    id: "ops-bot",
+    name: "ops-bot",
+    emoji: "🛠",
     charter:
-      "Watch SLS metrics for KV cache services. Page on cache hit rate < 70% or RDMA register failure rate > 1%.",
+      "Watches loopat.ai uptime. Deploys staging / prod on push. Pages on 5xx spike, latency degradation, or build failure. Spawns rfd-loops for unclaimed incidents.",
     status: "running",
-    runsOn: "k8s · loopey cluster · 2 replicas",
-    tools: ["sls.query", "chat.post", "loop.create"],
-    subscribesTo: ["#gateway-launch"],
+    runsOn: "github actions + cloudflare workers · since 2026-05-02",
+    tools: ["sls.query", "chat.post", "loop.create", "deploy.trigger", "rollback.trigger"],
+    subscribesTo: ["#dev", "#ops"],
     trigger: "event",
-    lastActivityAgo: "3h",
+    lastActivityAgo: "8m",
     systemPrompt:
-      "Monitor metrics. Be quiet when normal. When abnormal, post a structured alert and suggest a loop if recovery isn't auto.",
+      "Monitor metrics + deployment. Be quiet when normal. On anomaly, post structured alert to #ops; if no human claims in 10min, also @simpx in #dev. Always include grafana link + suggest rollback if recent deploy.",
     recentInvocations: [
-      { when: "3h", channel: "#gateway-launch", preview: "⚠ rdma_register fail rate 1.8% (last 5min) — see grafana" },
-      { when: "1d", channel: "#gateway-launch", preview: "✓ all green for 24h" },
+      { when: "8m", channel: "#ops", preview: "🚨 5xx spike on loopat.ai (342 errors / 7min) — spawn site-uptime-spike rfd loop" },
+      { when: "26m", channel: "#dev", preview: "🚀 deploy: panlilu/loopat-ts main → staging (87s)" },
+      { when: "1d", channel: "#ops", preview: "📊 weekly site report: uptime 99.94%, p99 142ms" },
     ],
   },
   {
-    id: "pr-reviewer",
-    name: "pr-reviewer",
-    emoji: "🔍",
+    id: "growth-bot",
+    name: "growth-bot",
+    emoji: "📡",
     charter:
-      "Auto-review PRs against team's coding standards (from knowledge/coding-style.md). Comments on github + posts summary to relevant channel.",
-    status: "error",
-    runsOn: "github actions · disabled (auth expired 2d ago)",
-    tools: ["github.read", "github.comment", "chat.post"],
-    subscribesTo: ["#general"],
-    trigger: "event",
-    lastActivityAgo: "2d",
-    systemPrompt: "...",
-    recentInvocations: [{ when: "2d", channel: "#general", preview: "❌ auth token expired, please re-authorize" }],
+      "Watches HN / Twitter / Reddit / Producthunt for 'AI org' / 'AI for teams' / 'loop / focus' related discussions. Posts daily digest to #all. Tracks loopat.ai mentions and signups.",
+    status: "running",
+    runsOn: "cron @ 09:00, 17:00 · ergo host",
+    tools: ["hn.search", "twitter.search", "reddit.search", "chat.post", "knowledge.read"],
+    subscribesTo: ["#all"],
+    trigger: "schedule",
+    lastActivityAgo: "2h",
+    systemPrompt:
+      "Track discussions about AI organization, team productivity tools, loop / focus / context concepts. Filter signal from noise. Post 3-5 most relevant items per digest. Skip if nothing interesting.",
+    recentInvocations: [
+      {
+        when: "2h",
+        channel: "#all",
+        preview: "📡 'show hn: a unified todo + chat hybrid' (37pts/12c) — overlap with our Loop / Focus 哲学",
+      },
+      { when: "8h", channel: "#all", preview: "📡 daily digest: 2 mentions of 'AI org', 0 loopat.ai signups today" },
+      { when: "1d", channel: "#all", preview: "📡 reddit /r/programming: 'why slack channels rot' — relevant to our spawn-from-chat skill" },
+    ],
   },
 ]
 
 function AgentsPane(props: { urlId: () => string; onNavigate: (id: string) => void }) {
   const selectedId = () =>
-    AGENTS.find((a) => a.id === props.urlId())?.id ?? "coo-bot"
+    AGENTS.find((a) => a.id === props.urlId())?.id ?? "coo"
   const setSelected = (id: string) => props.onNavigate(id)
   const current = () => AGENTS.find((a) => a.id === selectedId()) ?? AGENTS[0]
   return (
@@ -1798,51 +2282,24 @@ export type Repo = {
 
 export const REPOS: Repo[] = [
   {
-    id: "loopey-runtime",
-    name: "loopey-runtime",
-    remote: "git.example.com/.../loopey-runtime",
+    id: "loopat",
+    name: "loopat",
+    remote: "github.com/simpx/loopat",
     branch: "main",
     status: "online",
     recentLoops: [
-      { name: "gateway-launch", branch: "feat/gateway", driver: "阿尔萨斯", ago: "14m" },
-      { name: "rdma-fix", branch: "feat/rdma-fix", driver: "simpx", ago: "2h" },
+      { name: "prototype-hifi", branch: "main", driver: "simpx", ago: "just now" },
+      { name: "loopat-runtime-spike", branch: "feat/runtime-spike", driver: "simpx", ago: "1h" },
+      { name: "loopat-ts-mvp", branch: "main", driver: "panlilu", ago: "26m" },
     ],
     readme:
-      "# loopey-runtime\n\n推理服务主仓。包含 LLM serving runtime、scheduler、MaaS API 等。\n\n关键模块：\n- runtime/    LLM 推理\n- scheduler/  请求调度\n- api/        RESTful + RPC 入口",
-  },
-  {
-    id: "vllm",
-    name: "vllm",
-    remote: "github.com/vllm-project/vllm",
-    branch: "main",
-    status: "online",
-    recentLoops: [{ name: "kvcache-trace", branch: "kvcache-trace", driver: "simpx", ago: "1w" }],
-    readme:
-      "# vllm\n\nA high-throughput and memory-efficient inference engine for LLMs.\n\n本地 fork 用于 KV cache 实验和 PD 适配。",
-  },
-  {
-    id: "1001",
-    name: "1001",
-    remote: "(local only)",
-    branch: "main",
-    status: "online",
-    recentLoops: [{ name: "1001-design", branch: "main", driver: "simpx", ago: "26m" }],
-    readme: "# 1001\n\nAI 协作系统的设计仓。本地思考 + blog 系列源材料。",
-  },
-  {
-    id: "openclaw",
-    name: "openclaw",
-    remote: "github.com/openclaw/openclaw",
-    branch: "main",
-    status: "offline",
-    recentLoops: [],
-    readme: "# openclaw\n\n多 channel personal AI gateway。已评估，暂不采用。",
+      "# loopat\n\nThe team's home repo. Contains:\n\n- `phase1-prototype/` — 高保真原型（Vite + Solid + Tailwind）\n- `1001-mvp.md` — 内部 MVP 工作文档\n- `1001-story.md` — 对外故事\n- `thoughts/` — 早期思考脉络\n- `loopat-ts/` — panlilu 的自建 spike (将合入)\n\n## Phase\n\n- [x] Phase 1: hi-fi prototype\n- [ ] Phase 2: 架构选型 (opencode-fork vs 自建 ts spike, 周末 close)\n- [ ] Phase 3: 0.1 单人版\n- [ ] Phase 4: 0.2 多人协作",
   },
 ]
 
 function ReposPane(props: { urlId: () => string; onNavigate: (id: string) => void }) {
   const selectedId = () =>
-    REPOS.find((r) => r.id === props.urlId())?.id ?? "loopey-runtime"
+    REPOS.find((r) => r.id === props.urlId())?.id ?? "loopat"
   const setSelected = (id: string) => props.onNavigate(id)
   const current = () => REPOS.find((r) => r.id === selectedId()) ?? REPOS[0]
   return (
