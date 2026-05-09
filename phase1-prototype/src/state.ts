@@ -297,13 +297,13 @@ export function createLoop(opts: CreateLoopOpts = {}): string {
   return id
 }
 
-export function createPromoteLoop(filePath: string): string {
+export function createDistillLoop(filePath: string): string {
   const basename = filePath.split("/").pop()?.replace(/\.md$/, "") || filePath
-  const id = uniqueSlug(`promote-${basename}`)
+  const id = uniqueSlug(`distill-${basename}`)
   const ts = nowDisplay()
   const newLoop: Loop = {
     id,
-    name: `promote ${basename}`,
+    name: `distill ${basename}`,
     archetype: "context-refine",
     workdir: "(vault)",
     driver: ME,
@@ -313,14 +313,14 @@ export function createPromoteLoop(filePath: string): string {
     context: { knowledge: "all", notes: "all" },
     createdAt: ts,
     createdBy: ME,
-    timeline: [{ time: ts, kind: "create", by: ME, note: `把 ${filePath} 提炼到 knowledge` }],
+    timeline: [{ time: ts, kind: "create", by: ME, note: `把 ${filePath} 蒸馏到 knowledge` }],
   }
   setLoops([newLoop, ...loops()])
   const time = ts.split(" ")[1] ?? ts
   chats[id] = [
     {
       kind: "user",
-      text: `把 \`${filePath}\` 提炼一下放进 knowledge。先读一遍当前内容，给一个目标路径建议（loop/ / ai-org/ / gateway/ / ml/ / conventions/ / skills/ 选一个），再讨论怎么 restructure。`,
+      text: `把 \`${filePath}\` 蒸馏一下放进 knowledge。先读一遍当前内容，给一个目标路径建议（loop/ / ai-org/ / gateway/ / ml/ / conventions/ / skills/ 选一个），再讨论怎么 restructure。`,
       time,
     },
   ]

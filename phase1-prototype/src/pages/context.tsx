@@ -11,7 +11,7 @@ import { useParams, useNavigate } from "@solidjs/router"
 import { Icon } from "../components/icon"
 import { Markdown } from "../components/markdown"
 import { CodeEditor } from "../components/code-editor"
-import { createEditLoop, createPromoteLoop } from "../state"
+import { createEditLoop, createDistillLoop } from "../state"
 
 type SubTab = "knowledge" | "notes" | "personal" | "agents" | "repos"
 
@@ -184,9 +184,9 @@ const KNOWLEDGE_DOCS: DocNode[] = [
       },
       {
         kind: "folder",
-        name: "promote-to-knowledge",
+        name: "distill-to-knowledge",
         children: [
-          { kind: "file", name: "SKILL.md", path: "skills/promote-to-knowledge/SKILL.md", updatedAgo: "5d" },
+          { kind: "file", name: "SKILL.md", path: "skills/distill-to-knowledge/SKILL.md", updatedAgo: "5d" },
         ],
       },
       {
@@ -640,19 +640,21 @@ driver 主动 \`release\`，或被指派接手 loop 时。
 \`\`\``,
     backlinks: [],
   },
-  "skills/promote-to-knowledge/SKILL.md": {
-    frontmatter: { title: "Promote to Knowledge", tags: ["skill"], updated: "5d" },
+  "skills/distill-to-knowledge/SKILL.md": {
+    frontmatter: { title: "Distill to Knowledge", tags: ["skill"], updated: "5d" },
     body: `---
-name: promote-to-knowledge
+name: distill-to-knowledge
 description: 把 notes / loop 产物里成熟的内容沉淀进 knowledge
 trigger: ai-suggest
 ---
 
-# Promote to Knowledge
+# Distill to Knowledge
+
+> 熵减只能由人完成。AI 提示候选，最终是用户决定蒸馏什么、丢什么。
 
 ## 何时触发
 
-AI 看到一段 notes 内容反复被引用、被多个 loop 命中、被 backlink 多次——提示用户考虑 promote。
+AI 看到一段 notes 内容反复被引用、被多个 loop 命中、被 backlink 多次——提示用户考虑 distill。
 
 ## 评估清单
 
@@ -665,7 +667,7 @@ AI 看到一段 notes 内容反复被引用、被多个 loop 命中、被 backli
 
 - 选目标路径（loop/ / ai-org/ / gateway/ / ml/ / conventions/ / skills/）
 - 必要时 reorg、加 frontmatter、补 backlinks
-- commit \`docs(knowledge): promote <topic> from notes\``,
+- commit \`docs(knowledge): distill <topic> from notes\``,
     backlinks: [],
   },
   "skills/code-review-checklist/SKILL.md": {
@@ -792,7 +794,7 @@ const NOTES_CONTENT: Record<string, DocPage> = {
 - **commit 信息** 第一行 ≤ 60 字符，type: scope: subject 风格
 - **CHANGELOG.md** 一律放仓库根目录，按 Unreleased / [version] 分段
 - **Deprecation** 通过 \`internal/deprecation\` 包做 runtime warn，不靠 README
-- **Knowledge promote** 来自 loop 时，AI 会主动建议路径而不是用户选`,
+- **Knowledge distill** 来自 loop 时，AI 会主动建议路径而不是用户选`,
     backlinks: [],
   },
   "memory/1001-design-snapshot.md": {
@@ -928,7 +930,7 @@ const NOTES_CONTENT: Record<string, DocPage> = {
 ## 关键里程碑
 
 - **M1** (5月底) — 1001 phase1 内部用起来
-- **M2** (6月中) — Knowledge 自动 promote 跑通
+- **M2** (6月中) — Knowledge 自动 distill 跑通
 - **M3** (7月) — 多人 loop 协作压测`,
     backlinks: [],
   },
@@ -983,7 +985,7 @@ For READMEs / commit messages / public docs:
 - Loop 移交后的 context leak 其实不应该完全避免，反而是协作的"信号"
 - Personal notes 用 obsidian + git，可能比自己造轮子靠谱
 - secrets 暂时明文存，先跑起来再说；以后上 sops/age
-- "knowledge promote" 这个动作要不要 AI 主动 propose？还是用户主动？倾向前者
+- "knowledge distill" 这个动作要不要 AI 主动 propose？还是用户主动？倾向前者 —— 但蒸馏本身只能人来做，AI 只 propose 候选
 - 三种 context source 之外，还有 "tool source" — MCP servers 之类，但这是另一轴`,
     backlinks: [],
   },
@@ -1355,7 +1357,7 @@ function DocView(props: {
   const isSecret = () => isSecretPath(props.path)
   const allowDirectEdit = () => props.vault !== "knowledge"
   const allowLoopEdit = () => !isSecret()
-  const allowPromote = () => props.vault === "notes" && !isSecret()
+  const allowDistill = () => props.vault === "notes" && !isSecret()
   const bodyWithLinks = () => {
     const body = page().body
     return body.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, p, alias) => {
@@ -1367,8 +1369,8 @@ function DocView(props: {
     const id = createEditLoop(props.path)
     navigate(`/loop/${id}`)
   }
-  const handlePromote = () => {
-    const id = createPromoteLoop(props.path)
+  const handleDistill = () => {
+    const id = createDistillLoop(props.path)
     navigate(`/loop/${id}`)
   }
   return (
@@ -1400,15 +1402,15 @@ function DocView(props: {
               save
             </button>
           </Show>
-          <Show when={!isEditing() && allowPromote()}>
+          <Show when={!isEditing() && allowDistill()}>
             <button
               type="button"
-              onClick={handlePromote}
+              onClick={handleDistill}
               class="px-2.5 h-7 rounded text-xs bg-amber-100 text-amber-900 hover:bg-amber-200 flex items-center gap-1"
-              title="open a loop to promote this notes file into knowledge"
+              title="open a loop to distill this notes file into knowledge — entropy reduction is human work"
             >
               <span>↑</span>
-              <span>promote</span>
+              <span>distill</span>
             </button>
           </Show>
           <Show when={!isEditing() && allowLoopEdit()}>
@@ -1416,7 +1418,7 @@ function DocView(props: {
               type="button"
               onClick={handleEditByLoop}
               class={
-                allowPromote()
+                allowDistill()
                   ? "px-2.5 h-7 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-900 flex items-center gap-1"
                   : "px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 flex items-center gap-1"
               }
