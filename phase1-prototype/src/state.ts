@@ -8,14 +8,16 @@ export const ME = "simpx"
 
 export type LoopStatus = "active" | "idle" | "archived"
 
+export type ChatMount = {
+  id: string
+  upTo: number
+}
+
 export type LoopContext = {
-  // Knowledge + notes are public, default-all. We carry the field so future
-  // private/scoped overrides have somewhere to land, but for now both stay "all".
   knowledge: "all" | string[]
   notes: "all" | string[]
-  // Personal is private — only injects what the driver explicitly picks.
   personal?: string[]
-  // future: skills, mcp servers
+  chats?: ChatMount[]
 }
 
 export type TimelineEvent = {
@@ -31,26 +33,25 @@ export type Loop = {
   id: string
   name: string
   archetype: "code" | "research" | "online" | "context-refine" | "design"
-  workdir: string              // every loop has a workdir
+  workdir: string
   branch?: string
   driver: string
   participants: number
   lastActivityAgo: string
   status: LoopStatus
-  inFocus?: ("pinned" | "listed")[]
-  focuses?: string[]           // names of focus items this loop belongs to
+  focuses?: string[]
   forkedFrom?: string
-  rfd?: boolean                // true = driver has released; anyone can claim
+  rfd?: boolean
   context: LoopContext
-  createdAt: string            // display string
+  createdAt: string
   createdBy: string
-  timeline: TimelineEvent[]    // sorted oldest → newest
+  timeline: TimelineEvent[]
 }
 
 export type DiffLine = {
   kind: "ctx" | "add" | "del" | "hunk"
   text: string
-  ln?: number  // display line number (single column, optional)
+  ln?: number
 }
 
 export type ChatItem =
@@ -74,123 +75,229 @@ export type ChatItem =
 
 const initialLoops: Loop[] = [
   {
-    id: "gateway-launch",
-    name: "gateway-launch",
-    archetype: "code",
-    workdir: "~/workspace/loopey-runtime",
-    branch: "feat/gateway",
-    driver: "阿尔萨斯",
-    participants: 4,
-    lastActivityAgo: "14m",
+    id: "prototype-hifi",
+    name: "prototype-hifi",
+    archetype: "design",
+    workdir: "~/workspace/1001/phase1-prototype",
+    branch: "main",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "just now",
     status: "active",
-    inFocus: ["pinned"],
-    focuses: ["上线 gateway"],
-    context: { knowledge: "all", notes: "all" },
-    createdAt: "2026-04-28 09:12",
-    createdBy: "阿尔萨斯",
+    focuses: ["产品侧高保真原型"],
+    context: {
+      knowledge: "all",
+      notes: "all",
+      chats: [
+        { id: "all", upTo: 12 },
+        { id: "dm-coo", upTo: 24 },
+      ],
+    },
+    createdAt: "2026-05-05 16:20",
+    createdBy: ME,
     timeline: [
-      { time: "2026-04-28 09:12", kind: "create", by: "阿尔萨斯" },
-      { time: "2026-04-28 10:30", kind: "focus-pin", by: "阿尔萨斯", note: "上线 gateway" },
-      { time: "2026-05-05 08:42", kind: "driver-change", by: "system", from: "阿尔萨斯", to: "simpx" },
-      { time: "2026-05-05 14:32", kind: "driver-change", by: "system", from: "simpx", to: "阿尔萨斯" },
-      { time: "2026-05-05 16:00", kind: "driver-change", by: "system", from: "阿尔萨斯", to: "simpx" },
+      { time: "2026-05-05 16:20", kind: "create", by: ME },
+      { time: "2026-05-05 16:25", kind: "focus-pin", by: ME, note: "产品侧高保真原型" },
     ],
   },
   {
-    id: "loopctl",
-    name: "loopctl",
+    id: "loopat-runtime-spike",
+    name: "loopat-runtime-spike",
+    archetype: "research",
+    workdir: "~/workspace/loopat",
+    branch: "feat/runtime-spike",
+    driver: ME,
+    participants: 2,
+    lastActivityAgo: "1h",
+    status: "active",
+    focuses: ["可自举的MVP"],
+    context: {
+      knowledge: "all",
+      notes: "all",
+      chats: [
+        { id: "dev", upTo: 86 },
+        { id: "dm-panlilu", upTo: 38 },
+      ],
+    },
+    createdAt: "2026-05-04 14:00",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-04 14:00", kind: "create", by: ME },
+      { time: "2026-05-04 14:30", kind: "focus-pin", by: ME, note: "可自举的MVP" },
+    ],
+  },
+  {
+    id: "loopat-ts-mvp",
+    name: "loopat-ts-mvp",
     archetype: "code",
-    workdir: "~/workspace/loopctl",
-    branch: "feat/fleet-shards",
+    workdir: "~/workspace/loopat-ts",
+    branch: "main",
+    driver: "panlilu",
+    participants: 1,
+    lastActivityAgo: "26m",
+    status: "active",
+    focuses: ["可自举的MVP"],
+    context: {
+      knowledge: "all",
+      notes: "all",
+      chats: [
+        { id: "dev", upTo: 86 },
+        { id: "dm-panlilu", upTo: 38 },
+      ],
+    },
+    createdAt: "2026-05-02 10:00",
+    createdBy: "panlilu",
+    timeline: [
+      { time: "2026-05-02 10:00", kind: "create", by: "panlilu" },
+      { time: "2026-05-02 10:30", kind: "focus-pin", by: "panlilu", note: "可自举的MVP" },
+    ],
+  },
+  {
+    id: "research-opencode",
+    name: "research-opencode",
+    archetype: "research",
+    workdir: "~/workspace/opencode-fork",
+    branch: "1001-prototype",
     driver: ME,
     participants: 1,
+    lastActivityAgo: "5h",
+    status: "active",
+    context: { knowledge: "all", notes: "all" },
+    createdAt: "2026-05-03 11:00",
+    createdBy: ME,
+    timeline: [{ time: "2026-05-03 11:00", kind: "create", by: ME }],
+  },
+  {
+    id: "research-claude-code",
+    name: "research-claude-code",
+    archetype: "research",
+    workdir: "~/workspace/claude-code-internals",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "2d",
+    status: "active",
+    context: { knowledge: "all", notes: "all" },
+    createdAt: "2026-05-07 09:30",
+    createdBy: ME,
+    timeline: [{ time: "2026-05-07 09:30", kind: "create", by: ME }],
+  },
+  {
+    id: "site-uptime-spike",
+    name: "site-uptime-spike",
+    archetype: "online",
+    workdir: "(待认领)",
+    driver: "(未认领)",
+    participants: 0,
+    lastActivityAgo: "8m",
+    status: "active",
+    rfd: true,
+    context: {
+      knowledge: "all",
+      notes: "all",
+      chats: [{ id: "ops", upTo: 6 }],
+    },
+    createdAt: "2026-05-09 09:42",
+    createdBy: "ops-bot",
+    timeline: [
+      { time: "2026-05-09 09:42", kind: "create", by: "ops-bot", note: "loopat.ai 5xx 抖动告警" },
+      { time: "2026-05-09 09:42", kind: "rfd", by: "ops-bot", note: "等人接" },
+    ],
+  },
+  {
+    id: "demo-video-script",
+    name: "demo-video-script",
+    archetype: "design",
+    workdir: "~/workspace/loopat/demo",
+    branch: "main",
+    driver: ME,
+    participants: 1,
+    lastActivityAgo: "30m",
+    status: "active",
+    focuses: ["初版上线"],
+    context: {
+      knowledge: "all",
+      notes: "all",
+      chats: [{ id: "all", upTo: 12 }, { id: "dm-coo", upTo: 24 }],
+    },
+    createdAt: "2026-05-10 08:30",
+    createdBy: ME,
+    timeline: [
+      { time: "2026-05-10 08:30", kind: "create", by: ME, note: "HN show video draft" },
+      { time: "2026-05-10 09:15", kind: "focus-pin", by: ME, note: "初版上线" },
+    ],
+  },
+  {
+    id: "attach-spec-review",
+    name: "attach-spec-review",
+    archetype: "design",
+    workdir: "~/workspace/loopat",
+    branch: "spec/attach-v0",
+    driver: "panlilu",
+    participants: 2,
     lastActivityAgo: "3h",
     status: "active",
     context: {
       knowledge: "all",
       notes: "all",
-      personal: ["secrets/LOOPEY_API_KEY", "secrets/OPENAI_API_KEY", "style/voice-tone.md"],
+      chats: [{ id: "dev", upTo: 86 }],
     },
-    createdAt: "2026-05-05 13:02",
+    createdAt: "2026-05-09 22:00",
     createdBy: ME,
     timeline: [
-      { time: "2026-05-05 13:02", kind: "create", by: ME },
+      { time: "2026-05-09 22:00", kind: "create", by: ME, note: "把 attach spec 草稿单开 loop 让 panlilu review" },
+      { time: "2026-05-09 22:30", kind: "rfd", by: ME, note: "我先睡了，明早 panlilu 看完接" },
+      { time: "2026-05-10 09:18", kind: "claim", by: "panlilu", from: ME, note: "我接，今天 review 完出意见" },
     ],
   },
   {
-    id: "mirror-llama-3",
-    name: "mirror-llama-3-70b",
-    archetype: "online",
-    workdir: "~/workspace/shadow-llama-3-70b",
-    branch: "main",
-    driver: ME,
-    participants: 3,
-    lastActivityAgo: "1h",
-    status: "active",
-    inFocus: ["listed"],
-    focuses: ["调研 llama-3"],
-    rfd: true,
-    context: { knowledge: "all", notes: "all" },
-    createdAt: "2026-05-05 10:11",
-    createdBy: ME,
-    timeline: [
-      { time: "2026-05-05 10:11", kind: "create", by: ME },
-      { time: "2026-05-05 10:16", kind: "rfd", by: ME, note: "我有个会先 release" },
-    ],
-  },
-  {
-    id: "llama-research",
-    name: "llama-research",
+    id: "feature-pricing-sketch",
+    name: "feature-pricing-sketch",
     archetype: "research",
-    workdir: "~/workspace/llama_research",
-    driver: ME,
-    participants: 2,
-    lastActivityAgo: "8h",
-    status: "active",
-    inFocus: ["listed"],
-    focuses: ["调研 llama-3"],
-    context: { knowledge: "all", notes: "all" },
-    createdAt: "2026-05-04 16:20",
-    createdBy: "伊利丹",
-    timeline: [
-      { time: "2026-05-04 16:20", kind: "create", by: "伊利丹" },
-      { time: "2026-05-04 17:30", kind: "rfd", by: "伊利丹", note: "下周再看，先放着" },
-      { time: "2026-05-05 08:00", kind: "claim", by: ME, note: "我接手 prefill 优化方向" },
-    ],
-  },
-  {
-    id: "knowledge-refine",
-    name: "knowledge-refine",
-    archetype: "context-refine",
-    workdir: "~/workspace/ccx",
+    workdir: "~/workspace/loopat-pricing",
     driver: ME,
     participants: 1,
-    lastActivityAgo: "2h",
-    status: "active",
+    lastActivityAgo: "4d",
+    status: "idle",
     context: { knowledge: "all", notes: "all" },
-    createdAt: "2026-05-05 11:00",
+    createdAt: "2026-05-06 14:20",
     createdBy: ME,
     timeline: [
-      { time: "2026-05-05 11:00", kind: "create", by: ME },
+      { time: "2026-05-06 14:20", kind: "create", by: ME, note: "猜个大概的定价模型，看 Linear / Notion 怎么收的" },
     ],
   },
   {
-    id: "1001-design",
-    name: "1001-design",
+    id: "naming-brainstorm",
+    name: "naming-brainstorm",
     archetype: "design",
-    workdir: "~/workspace/1001",
+    workdir: "(vault)",
     driver: ME,
-    participants: 2,
-    lastActivityAgo: "26m",
-    status: "active",
-    inFocus: ["pinned"],
-    focuses: ["1001 系统设计"],
+    participants: 1,
+    lastActivityAgo: "1d",
+    status: "archived",
     context: { knowledge: "all", notes: "all" },
-    createdAt: "2026-05-03 20:48",
+    createdAt: "2026-05-08 21:00",
     createdBy: ME,
     timeline: [
-      { time: "2026-05-03 20:48", kind: "create", by: ME },
-      { time: "2026-05-04 09:00", kind: "focus-pin", by: ME, note: "1001 系统设计" },
+      { time: "2026-05-08 21:00", kind: "create", by: ME, note: "brand 名 brainstorm" },
+      { time: "2026-05-09 02:00", kind: "create", by: ME, note: "decision: loopat.ai" },
+    ],
+  },
+  {
+    id: "prototype-hifi-fork-test",
+    name: "prototype-hifi-fork-test",
+    archetype: "design",
+    workdir: "~/workspace/1001/phase1-prototype-fork",
+    branch: "main-fork",
+    driver: "panlilu",
+    participants: 1,
+    lastActivityAgo: "5h",
+    status: "active",
+    forkedFrom: "prototype-hifi",
+    context: { knowledge: "all", notes: "all" },
+    createdAt: "2026-05-10 04:30",
+    createdBy: "panlilu",
+    timeline: [
+      { time: "2026-05-10 04:30", kind: "fork", by: "panlilu", note: "forked from prototype-hifi · 想试 react 改写看可行性" },
     ],
   },
 ]
@@ -267,7 +374,6 @@ export function forkLoop(sourceId: string): string {
 export type CreateLoopOpts = {
   name?: string
   repo?: string
-  // Only personal needs explicit picking; knowledge + notes are public/all.
   injectPersonal?: string[]
 }
 
@@ -320,7 +426,7 @@ export function createDistillLoop(filePath: string): string {
   chats[id] = [
     {
       kind: "user",
-      text: `把 \`${filePath}\` 蒸馏一下放进 knowledge。先读一遍当前内容，给一个目标路径建议（loop/ / ai-org/ / gateway/ / ml/ / conventions/ / skills/ 选一个），再讨论怎么 restructure。`,
+      text: `把 \`${filePath}\` 蒸馏一下放进 knowledge。先读一遍当前内容，给一个目标路径建议（loopat/ / ai-org/ / conventions/ / skills/ 选一个），再讨论怎么 restructure。`,
       time,
     },
   ]
@@ -357,8 +463,6 @@ export function createEditLoop(filePath: string): string {
   return id
 }
 
-// Per-mount revisions tracked in this loop's view of context.
-// Sync = git pull --rebase semantics; updates the visible revision.
 export const [mountRevisions, setMountRevisions] = createSignal<Record<string, string>>({
   knowledge: "@8a4c1b",
   notes: "@c2e174",
@@ -389,8 +493,6 @@ export function previewSlug(opts: CreateLoopOpts): string {
 export function releaseRfd(id: string) {
   const loop = loops().find((l) => l.id === id)
   if (!loop) return
-  // RFD strips personal context — driver-specific secrets / paths shouldn't
-  // hand over to whoever claims next.
   updateLoop(id, {
     rfd: true,
     context: { ...loop.context, personal: undefined },
@@ -408,589 +510,628 @@ export function claimDrive(id: string) {
 // Chat content per loop
 // ============================================================================
 
-const GATEWAY_CHAT: ChatItem[] = [
-  { kind: "user", text: "trace 已上传 S3，重点看 mr_register 那段", time: "08:42" },
+const PROTOTYPE_HIFI_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "我们现在的目标是把 1001 想要的 4 个一级概念（loop / focus / context / chat）做成一个 hi-fi 原型，可以走通 fork / spawn / driver-transfer / context-mount 等核心交互，但全是 mock。",
+    time: "16:20",
+  },
+  {
+    kind: "ai",
+    text: "已读完根目录 1001-mvp.md 和 1001-story.md。建议技术栈 Vite + SolidJS + Tailwind，4 个一级概念各占一个 tab。先做架子，再细化每个 tab 内部。",
+    time: "16:21",
+  },
+  { kind: "user", text: "OK，先把目录结构和 4 tab shell 起起来", time: "16:22" },
+  {
+    kind: "command",
+    cmd: "bun create vite phase1-prototype --template solid-ts",
+    ok: true,
+    time: "16:24",
+    output: [
+      "Scaffolding project in ~/workspace/1001/phase1-prototype...",
+      "Done. Now run:",
+      "  cd phase1-prototype",
+      "  bun install",
+      "  bun run dev",
+    ],
+  },
+  {
+    kind: "artifact",
+    path: "src/App.tsx",
+    lines: 88,
+    time: "16:30",
+    preview:
+      "// 4-tab shell with router + workspace dropdown\nconst TABS = [\n  { id: 'loop', label: 'Loop' },\n  { id: 'focus', label: 'Focus' },\n  { id: 'chat', label: 'Chat' },\n  { id: 'context', label: 'Context' },\n]",
+  },
+  {
+    kind: "user",
+    text: "Focus tab 改成纯派生 view —— 只有 notes/focus.md 是真存，pinned/listed override；其他全部从 loops().focuses[] 算出来",
+    time: "18:14",
+  },
   {
     kind: "ai",
     text:
-      "已分析 trace.log（120k 行）。`mr_register` 平均耗时 110s，主因是 cuda alignment 跟 RDMA page size 不匹配。建议把 buffer 对齐到 4096 字节再 register。",
-    time: "08:46",
+      "已重构 focus.tsx：\n- 删除 PINNED / FOCUS_ITEMS 三个 hardcoded 数组\n- 加 deriveFocuses(loops, pinned, listed) helper\n- 新增 sections：📌 Pinned / focus / 未归类 / inbox preview",
+    time: "18:25",
   },
-  { kind: "user", text: "我们今晚试一下", time: "08:50" },
-  { kind: "driver-change", from: "simpx", to: "阿尔萨斯", time: "14:32" },
-  { kind: "user", text: "我先看看 cuda alignment 那块", time: "14:35" },
-  {
-    kind: "ai",
-    text: "alignment 通常是 4096 字节。dump 一下 page 表对照看，重点是 ibv_reg_mr 调用前 buffer 的对齐情况。",
-    time: "14:36",
-  },
-  { kind: "driver-change", from: "阿尔萨斯", to: "simpx", time: "16:00" },
-  { kind: "user", text: "我接手了。试着把 buffer pin 到 4K 边界看看", time: "16:01" },
-]
-
-const LOOPCTL_CHAT: ChatItem[] = [
   {
     kind: "user",
-    text: "Runtime 控制台命令我加进去了 — `loopctl fleet list-shards`。返回值要不要加分页？",
-    time: "13:02",
+    text: "未认领（rfd）从 Focus 段拿掉 —— rfd 是 automatic incoming，Focus 是 curated attention，方向相反不该混",
+    time: "18:33",
   },
-  { kind: "ai", text: "先看下当前实现，再决定怎么改。", time: "13:02" },
+  { kind: "ai", text: "明白。删了 unclaimed 段，rfd loops 通过 Loop tab 的 RFD filter 档暴露。mvp doc §1.2 同步。", time: "18:34" },
+  {
+    kind: "user",
+    text: "Chat tab：channel 的 metadata（spawn 出去的 loop）反向引用要做。loop 也要看到 chats 作为 context source",
+    time: "23:01",
+  },
+  {
+    kind: "ai",
+    text:
+      "做了 4 件事：\n1. LoopContext 加 chats: ChatMount[]，每个 mount 是 {id, upTo}\n2. chat conversation header 下方：📤 N loops 把这条 chat 作为 context（可折叠）\n3. loop header chips 加 chat: #channel:upTo 系列\n4. chatActive signal 跨 tab 共享，点 chip 跳到对应 channel",
+    time: "23:18",
+  },
+  { kind: "user", text: "好，去掉 dm 段的 + 号，因为 #all 就是成员目录，找新人去那里搜", time: "00:14" },
+  { kind: "ai", text: "已删。channel header 加可展开 + 搜索的成员面板，点名直接开 DM。", time: "00:18" },
+]
+
+const LOOPAT_RUNTIME_SPIKE_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "正式开始 runtime spike。两条候选路：\n1. fork opencode（TS、Tauri 桌面、SSE multi-client）\n2. 完全自建（按我们的 attach 协议）\n\n你帮我列对照表，决定 1-2 个月窗口里哪条能 ship。",
+    time: "14:00",
+  },
+  {
+    kind: "ai",
+    text:
+      "| 维度 | fork opencode | 完全自建 |\n|---|---|---|\n| 起点 | 现成 session/project/SSE | 0 |\n| 改动量 | 加 driver / focus / chat-mount 语义 | 全部 |\n| 风险 | 跟 upstream 撕裂 | 时间不够 |\n| 时间预估（1人） | 3-4w | 8-12w |\n| 学习曲线 | 看懂 ts 全栈 monorepo | 控制自己定的边界 |\n\n窗口期 1-2 月，单看时间 fork 占优。但要先确认 attach / driver 这些能否优雅塞进 opencode 的 session 模型。",
+    time: "14:08",
+  },
+  {
+    kind: "command",
+    cmd: "git clone https://github.com/sst/opencode ~/workspace/opencode-fork && cd ~/workspace/opencode-fork && git checkout -b 1001-prototype",
+    ok: true,
+    time: "14:12",
+    output: [
+      "Cloning into '~/workspace/opencode-fork'...",
+      "Receiving objects: 100% (12483/12483), 8.42 MiB | 4.1 MiB/s, done.",
+      "Switched to a new branch '1001-prototype'",
+    ],
+  },
   {
     kind: "read",
-    path: "api/runtime/list.go",
+    path: "packages/server/src/session.ts",
     startLine: 1,
-    total: 88,
-    time: "13:02",
+    total: 412,
+    time: "14:15",
     lines: [
-      "package runtime",
-      "",
-      "import (",
-      '\t"context"',
-      '\t"fmt"',
-      "",
-      '\t"loopctl/internal/api"',
-      ")",
-      "",
-      "// Shard 表示一个 runtime 数据分片",
-      "type Shard struct {",
-      "\tID       string",
-      "\tRegion   string",
-      "\tStatus   string",
+      "// opencode session = chat + project + working file state",
+      "export class Session {",
+      "  id: string",
+      "  projectId: string",
+      "  messages: Message[]",
+      "  // ...",
       "}",
       "",
-      "// ListShards 列出指定 region 下所有 shard",
-      "func ListShards(region string) ([]Shard, error) {",
-      "\treturn legacyListShards(region)",
-      "}",
-      "",
-      "// legacyListShards 直接返回完整列表",
-      "func legacyListShards(region string) ([]Shard, error) {",
-      "\treq := &api.FleetReq{Region: region}",
-      "\tresp, err := api.FleetClient.ListShards(context.Background(), req)",
-      '\tif err != nil { return nil, fmt.Errorf("list shards: %w", err) }',
-      "\treturn resp.Shards, nil",
-      "}",
-    ],
-  },
-  {
-    kind: "ai",
-    text: "确认现在没有分页 —— `ListShards` 直接返回完整 `[]Shard`。再看 CLI 包装：",
-    time: "13:03",
-  },
-  {
-    kind: "read",
-    path: "cmd/runtime.go",
-    startLine: 38,
-    total: 142,
-    time: "13:03",
-    lines: [
-      "func ListShards(c *cli.Context) error {",
-      '\tregion := c.String("region")',
-      "\tshards, err := api.ListShards(region)",
-      "\tif err != nil { return err }",
-      "\treturn render.Table(shards)",
-      "}",
-    ],
-  },
-  {
-    kind: "ai",
-    text: "CLI 也没传 cursor。shard 数量在生产能到几千 —— 加分页有必要。先扫一下所有调用方：",
-    time: "13:03",
-  },
-  {
-    kind: "command",
-    cmd: 'rg "api\\.ListShards" --type go',
-    ok: true,
-    time: "13:04",
-    output: [
-      "api/runtime/list.go:17:func ListShards(region string) ([]Shard, error) {",
-      "cmd/runtime.go:40:\tshards, err := api.ListShards(region)",
-      'tests/e2e/runtime/list_test.go:42:\tshards, err := api.ListShards("cn-hz")',
-      "tests/e2e/region/migrate_test.go:118:\tshards, _ := api.ListShards(src)",
-      'tests/e2e/quota/audit_test.go:61:\tall, _ := api.ListShards("cn-bj")',
-      "tests/e2e/router/route_test.go:88:\tshards, _ := api.ListShards(region)",
-      "contrib/scripts/dump_shards.go:23:\tshards, err := api.ListShards(*region)",
-      "",
-      "7 matches in 7 files",
+      "// session 跟 project 是 1:N；project = workdir。",
+      "// 没有 driver 概念；没有 focus 概念；attach 走 SSE 但只单 client。",
     ],
   },
   {
     kind: "ai",
     text:
-      "7 处调用 — 4 个 e2e 测试 + 1 个 contrib 脚本 + CLI 主流程 + 实现本身。先动主流程，加 cursor-based 分页；e2e + scripts 后面用 deprecation 处理（不强制 break）。改 `cmd/runtime.go`：",
-    time: "13:05",
+      "看完核心。结论：\n- session = 我们 loop 里 'context + ai' 那部分（已有）\n- project = workdir（已有）\n- driver / focus / chat-as-context / multi-client attach —— **要加**\n\ndriver 字段加在 session metadata 里；focus 是 workspace 级 derived view（不动 session model）；attach multi-client 要把 SSE 改成 ws + 多 subscriber。\n\n可行，但 attach 那块改动不小。",
+    time: "14:30",
   },
+  { kind: "user", text: "panlilu 那边走完全自建 + Next.js + tRPC + Prisma。我们各跑一周看哪边先出活的 demo", time: "14:35" },
+  { kind: "ai", text: "OK。我先在 fork 上加 driver 字段 + workspace-level focus 派生。一周后跟 panlilu 同步。", time: "14:36" },
   {
     kind: "diff",
-    file: "cmd/runtime.go",
-    time: "13:05",
+    file: "packages/server/src/session.ts",
+    time: "14:50",
     lines: [
-      { kind: "hunk", text: "@@ -38,8 +38,15 @@ func ListShards(c *cli.Context) error {" },
-      { kind: "ctx", ln: 38, text: "func ListShards(c *cli.Context) error {" },
-      { kind: "ctx", ln: 39, text: '\tregion := c.String("region")' },
-      { kind: "del", ln: 40, text: "\tshards, err := api.ListShards(region)" },
-      { kind: "add", ln: 40, text: '\tcursor := c.String("cursor")' },
-      { kind: "add", ln: 41, text: '\tlimit := c.Int("limit")' },
-      { kind: "add", ln: 42, text: "\tif limit == 0 { limit = 100 }" },
-      { kind: "add", ln: 43, text: "\tshards, next, err := api.ListShardsCursor(region, cursor, limit)" },
-      { kind: "ctx", ln: 44, text: "\tif err != nil { return err }" },
-      { kind: "add", ln: 45, text: '\tif next != "" {' },
-      { kind: "add", ln: 46, text: '\t\tfmt.Fprintln(os.Stderr, "next-cursor:", next)' },
-      { kind: "add", ln: 47, text: "\t}" },
-      { kind: "ctx", ln: 48, text: "\treturn render.Table(shards)" },
-      { kind: "ctx", ln: 49, text: "}" },
-    ],
-  },
-  {
-    kind: "ai",
-    text:
-      "再加一个 `ListShardsCursor` 实现到 `api/runtime/list.go`，旧 `ListShards` 保留并代理到新实现：",
-    time: "13:06",
-  },
-  {
-    kind: "diff",
-    file: "api/runtime/list.go",
-    time: "13:06",
-    lines: [
-      { kind: "hunk", text: "@@ -16,5 +16,9 @@ func ListShards(region string) ([]Shard, error) {" },
-      { kind: "ctx", ln: 16, text: "// ListShards 列出指定 region 下所有 shard" },
-      { kind: "add", ln: 17, text: "// Deprecated: 使用 ListShardsCursor。下个 release 会移除。" },
-      { kind: "ctx", ln: 18, text: "func ListShards(region string) ([]Shard, error) {" },
-      { kind: "del", ln: 19, text: "\treturn legacyListShards(region)" },
-      { kind: "add", ln: 19, text: '\tdeprecation.Warn("api.ListShards", "use ListShardsCursor instead")' },
-      { kind: "add", ln: 20, text: '\tshards, _, err := ListShardsCursor(region, "", 0)' },
-      { kind: "add", ln: 21, text: "\treturn shards, err" },
-      { kind: "ctx", ln: 22, text: "}" },
-      { kind: "hunk", text: "@@ -22,0 +30,12 @@" },
-      { kind: "add", ln: 30, text: "// ListShardsCursor 是分页版的 ListShards。" },
-      { kind: "add", ln: 31, text: "// limit=0 时由服务端默认（当前 100）。" },
-      { kind: "add", ln: 32, text: "func ListShardsCursor(region, cursor string, limit int) ([]Shard, string, error) {" },
-      { kind: "add", ln: 33, text: "\treq := &api.FleetReq{" },
-      { kind: "add", ln: 34, text: "\t\tRegion: region," },
-      { kind: "add", ln: 35, text: "\t\tCursor: cursor," },
-      { kind: "add", ln: 36, text: "\t\tLimit:  int32(limit)," },
-      { kind: "add", ln: 37, text: "\t}" },
-      { kind: "add", ln: 38, text: "\tresp, err := api.FleetClient.ListShards(context.Background(), req)" },
-      { kind: "add", ln: 39, text: '\tif err != nil { return nil, "", fmt.Errorf("list shards: %w", err) }' },
-      { kind: "add", ln: 40, text: "\treturn resp.Shards, resp.NextCursor, nil" },
-      { kind: "add", ln: 41, text: "}" },
-    ],
-  },
-  { kind: "user", text: "改之前先跑测试", time: "13:08" },
-  {
-    kind: "command",
-    cmd: "go test ./cmd/... ./api/...",
-    ok: true,
-    time: "13:08",
-    output: [
-      "ok  \tloopctl/cmd/fleet\t0.184s",
-      "ok  \tloopctl/cmd/router\t0.221s",
-      "ok  \tloopctl/cmd/quota\t0.097s",
-      "ok  \tloopctl/api/fleet\t0.412s",
-      "PASS",
-    ],
-  },
-  { kind: "user", text: "OK，commit", time: "13:10" },
-  {
-    kind: "command",
-    cmd: 'git commit -am "runtime: paginate list-shards (cursor + limit)"',
-    ok: true,
-    time: "13:10",
-    output: [
-      "[feat/fleet-shards 4f2c19a] runtime: paginate list-shards (cursor + limit)",
-      " 2 files changed, 38 insertions(+), 4 deletions(-)",
+      { kind: "hunk", text: "@@ -8,6 +8,8 @@ export class Session {" },
+      { kind: "ctx", ln: 8, text: "  id: string" },
+      { kind: "ctx", ln: 9, text: "  projectId: string" },
+      { kind: "add", ln: 10, text: "  driver: string  // 1001 extension: who drives this loop" },
+      { kind: "add", ln: 11, text: "  rfd: boolean    // 1001 extension: released for drive" },
+      { kind: "ctx", ln: 12, text: "  messages: Message[]" },
+      { kind: "ctx", ln: 13, text: "}" },
     ],
   },
   {
     kind: "todo",
-    title: "post-commit checklist",
-    time: "13:10",
+    title: "spike checklist",
+    time: "15:30",
     items: [
-      { done: true, text: "go test ./..." },
-      { done: true, text: "git commit -m 'runtime: paginate list-shards'" },
-      { done: false, text: "处理 e2e 4 个 deprecated callers" },
-      { done: false, text: "起草 CHANGELOG" },
-      { done: false, text: "git push + open MR" },
-    ],
-  },
-  {
-    kind: "ai",
-    text:
-      "现在处理 e2e 调用方 — 跑一遍看 deprecation log 出不出来：",
-    time: "13:12",
-  },
-  {
-    kind: "command",
-    cmd: "go test ./tests/e2e/...",
-    ok: true,
-    time: "13:13",
-    output: [
-      "DEPRECATION  api.ListShards: use ListShardsCursor instead",
-      "  → tests/e2e/runtime/list_test.go:42",
-      "  → tests/e2e/region/migrate_test.go:118",
-      "  → tests/e2e/quota/audit_test.go:61",
-      "  → tests/e2e/router/route_test.go:88",
-      "(4 callers, will be removed in v0.7)",
-      "",
-      "ok  \tloopctl/tests/e2e/fleet\t1.24s",
-      "ok  \tloopctl/tests/e2e/region\t0.92s",
-      "ok  \tloopctl/tests/e2e/quota\t1.17s",
-      "ok  \tloopctl/tests/e2e/router\t0.81s",
-      "PASS",
-    ],
-  },
-  { kind: "user", text: "deprecation log 看着 OK。CHANGELOG 帮我起草一下", time: "13:15" },
-  {
-    kind: "artifact",
-    path: "CHANGELOG.md",
-    lines: 18,
-    time: "13:16",
-    preview:
-      "## [Unreleased]\n\n### Added\n- `loopctl fleet list-shards` 支持 `--cursor` / `--limit` 参数\n- `api.ListShardsCursor` — paginated 版本的 ListShards\n\n### Deprecated\n- `api.ListShards` (无分页版) — v0.7 将移除，建议改用 `ListShardsCursor`",
-  },
-  {
-    kind: "user",
-    text: "再确认一件事 — quota 那条命令也是同样形态对吧？要不要顺手把它也改了？",
-    time: "13:19",
-  },
-  { kind: "ai", text: "扫一下 quota 那边的实现：", time: "13:19" },
-  {
-    kind: "read",
-    path: "api/quota/list.go",
-    startLine: 12,
-    total: 64,
-    time: "13:19",
-    lines: [
-      "// ListQuotas 列出 region 下所有 quota 项",
-      "func ListQuotas(region string) ([]Quota, error) {",
-      "\treq := &api.QuotaReq{Region: region}",
-      "\tresp, err := api.QuotaClient.List(context.Background(), req)",
-      '\tif err != nil { return nil, fmt.Errorf("list quotas: %w", err) }',
-      "\treturn resp.Items, nil",
-      "}",
-    ],
-  },
-  {
-    kind: "ai",
-    text:
-      "签名一致，但 quota 数据规模比 shards 小一个数量级（每 region ~200 条），分页收益不大。\n\n建议**只标记 deprecation 不动逻辑**，等 v0.7 跟 `ListShards` 一起统一升级。",
-    time: "13:20",
-  },
-  { kind: "user", text: "同意。这次只改 runtime，quota 列入下个迭代", time: "13:21" },
-  {
-    kind: "command",
-    cmd: "git push origin feat/fleet-shards",
-    ok: true,
-    time: "13:24",
-    output: [
-      "Enumerating objects: 14, done.",
-      "Counting objects: 100% (14/14), done.",
-      "Writing objects: 100% (8/8), 2.41 KiB | 2.41 MiB/s, done.",
-      "remote: Create MR for branch feat/fleet-shards:",
-      "remote:   https://git.example.com/loopctl/-/merge_requests/new",
-      "To git.example.com:loopctl/loopctl.git",
-      " * [new branch]      feat/fleet-shards -> feat/fleet-shards",
-    ],
-  },
-  {
-    kind: "todo",
-    title: "next iteration (v0.7)",
-    time: "13:25",
-    items: [
-      { done: false, text: "迁移 quota list 到 cursor 分页" },
-      { done: false, text: "正式删除 api.ListShards (legacy)" },
-      { done: false, text: "更新 README 命令说明" },
-      { done: false, text: "通知 contrib/scripts 维护者升级" },
+      { done: true, text: "clone fork opencode" },
+      { done: true, text: "读懂 session / project model" },
+      { done: true, text: "加 driver / rfd 字段（spike）" },
+      { done: false, text: "workspace-level focus 派生" },
+      { done: false, text: "改 SSE → ws + multi-subscriber" },
+      { done: false, text: "attach 协议 spec" },
+      { done: false, text: "跟 panlilu 周末同步进度" },
     ],
   },
 ]
 
-const MIRROR_CHAT: ChatItem[] = [
-  { kind: "user", text: "mirror env p99 latency 突然跳到 240ms（baseline 120ms）", time: "10:11" },
+const LOOPAT_TS_MVP_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "[panlilu] 我打算从零起 Next.js + tRPC + Prisma + Postgres + WebSocket 全栈。理由：opencode 模型不太对（session 不等于 loop），改 fork 会一直被 upstream 拉。自建慢但语义干净。",
+    time: "10:00",
+  },
   {
     kind: "ai",
     text:
-      "拉了 SLS：\n\n| metric | 1h ago | now |\n|---|---|---|\n| p99 | 124ms | 238ms |\n| qps | 410 | 408 |\n| cache_hit | 0.78 | 0.41 |\n\n看起来是 cache 命中率掉了。10:00 有过一次 model swap，怀疑是 warmup 没生效。",
-    time: "10:12",
+      "理由站得住 —— attach + driver + focus 这三件事 opencode 都没有，硬塞进去会伪。\n\n建议起手 stack：\n- Next.js 15 (app router) + React 19\n- tRPC 11 + react-query\n- Prisma + Postgres（domain models）\n- next-auth (beta) + Prisma adapter\n- ws 跨 client attach\n\n先写 schema 再写 UI，先类型再 query。",
+    time: "10:02",
   },
-  { kind: "user", text: "swap log 在哪", time: "10:13" },
   {
     kind: "command",
-    cmd: "kubectl logs deploy/mirror-llama -c sidecar | grep -i swap",
+    cmd: "npx create-t3-app@latest loopat-ts --noInstall --tailwind --trpc --prisma --nextAuth",
     ok: true,
+    time: "10:04",
+    output: [
+      "✓ scaffolded loopat-ts/",
+      "✓ prisma schema with NextAuth tables",
+      "✓ tRPC root router",
+      "next steps: bun install && bun db:push",
+    ],
+  },
+  {
+    kind: "artifact",
+    path: "prisma/schema.prisma",
+    lines: 162,
+    time: "11:30",
+    preview:
+      "model Loop {\n  id              String        @id @default(cuid())\n  name            String\n  archetype       LoopArchetype @default(code)\n  workdir         String\n  driverName      String\n  rfd             Boolean       @default(false)\n  forkedFrom      String?\n  // ...\n}\n\nenum LoopArchetype { code research online context_refine design }",
+  },
+  {
+    kind: "user",
+    text: "把 timeline event / focus / chat-mount 的 schema 也写完，然后 bun db:push 起 postgres",
+    time: "13:18",
+  },
+  {
+    kind: "diff",
+    file: "prisma/schema.prisma",
+    time: "13:45",
+    lines: [
+      { kind: "hunk", text: "@@ +103,30 @@ model Loop" },
+      { kind: "add", text: "model TimelineEvent {" },
+      { kind: "add", text: "  id      String            @id @default(cuid())" },
+      { kind: "add", text: "  loopId  String" },
+      { kind: "add", text: "  kind    TimelineEventKind" },
+      { kind: "add", text: "  byName  String" },
+      { kind: "add", text: "  fromVal String?" },
+      { kind: "add", text: "  toVal   String?" },
+      { kind: "add", text: "  note    String?" },
+      { kind: "add", text: "  loop    Loop @relation(fields: [loopId], references: [id])" },
+      { kind: "add", text: "}" },
+      { kind: "add", text: "" },
+      { kind: "add", text: "model ChatMount {" },
+      { kind: "add", text: "  loopId    String" },
+      { kind: "add", text: "  channelId String" },
+      { kind: "add", text: "  upTo      Int" },
+      { kind: "add", text: "  @@id([loopId, channelId])" },
+      { kind: "add", text: "}" },
+    ],
+  },
+  {
+    kind: "command",
+    cmd: "./start-database.sh && bun db:push",
+    ok: true,
+    time: "14:02",
+    output: [
+      "🐘 starting postgres on docker...",
+      "✓ container loopat-ts-postgres ready",
+      "Datasource \"db\": PostgreSQL database \"loopat-ts\"",
+      "🚀  Your database is now in sync with your Prisma schema. Done in 2.84s",
+    ],
+  },
+  {
+    kind: "user",
+    text: "trpc routers 写了 loopRouter.list / .get / .create / .fork。WebSocket attach 走 src/server/ws，每个 loop 一个 channel，subscribe 收 timeline 增量",
+    time: "16:20",
+  },
+  {
+    kind: "ai",
+    text: "attach 协议草稿：\n- ws topic: `/loop/<id>`\n- 客户端 sub 后立刻收 snapshot + 增量 event stream\n- driver-transfer 也是事件，所有 client 同步\n- close 是 send-only event，不影响 sub 状态",
+    time: "16:25",
+  },
+  {
+    kind: "todo",
+    title: "本周 panlilu 这条线",
+    time: "23:01",
+    items: [
+      { done: true, text: "scaffold + prisma schema" },
+      { done: true, text: "bun db:push + seed mock data" },
+      { done: false, text: "trpc routers (loop / focus / contact)" },
+      { done: false, text: "ws attach 协议 + 多 client mirror demo" },
+      { done: false, text: "Next.js dashboard 页面（list / detail）" },
+      { done: false, text: "周末跟 simpx 同步两条线进展" },
+    ],
+  },
+]
+
+const RESEARCH_OPENCODE_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text: "纯调研 —— 把 opencode 内部架构摸清，不一定要 fork。看完写到 knowledge/loopat/ 下",
+    time: "yesterday 11:00",
+  },
+  {
+    kind: "ai",
+    text:
+      "opencode = monorepo（packages/server + packages/desktop + packages/cli）+ Tauri 桌面壳。核心 model 是 session（chat history + tool calls）和 project（workdir）。\n\n关键观察：\n- session 跟 project 是 1:N\n- 没 driver 概念，单人语义\n- attach 用 SSE 但单 subscriber",
+    time: "yesterday 11:08",
+  },
+  {
+    kind: "command",
+    cmd: "git clone https://github.com/sst/opencode ~/workspace/opencode-fork --depth=1",
+    ok: true,
+    time: "yesterday 11:10",
+    output: [
+      "Cloning into '~/workspace/opencode-fork'...",
+      "remote: Enumerating objects: 1284, done.",
+      "remote: Counting objects: 100% (1284/1284), done.",
+      "Receiving objects: 100% (1284/1284), 5.18 MiB | 4.7 MiB/s, done.",
+      "Resolving deltas: 100% (382/382), done.",
+    ],
+  },
+  {
+    kind: "read",
+    path: "packages/server/src/session.ts",
+    startLine: 1,
+    total: 412,
+    time: "yesterday 11:18",
+    lines: [
+      "export class Session {",
+      "  id: string",
+      "  projectId: string",
+      "  messages: Message[]",
+      "  // 没有 driver / rfd / multi-client subscriber 概念",
+      "}",
+    ],
+  },
+  {
+    kind: "ai",
+    text:
+      "session 模型很轻，加 driver / rfd 字段不难。难的是 attach —— 现在的 SSE 只支持单 client，要改成 ws + 多 subscriber broadcast。\n\n继续读 cli + desktop 包，看用户视角的 'session' 怎么暴露。",
+    time: "yesterday 11:30",
+  },
+  {
+    kind: "todo",
+    title: "调研 checklist",
+    time: "yesterday 12:00",
+    items: [
+      { done: true, text: "读 server/src/session.ts" },
+      { done: true, text: "读 server/src/project.ts" },
+      { done: true, text: "扫 cli + desktop 包，看 session 怎么暴露给用户" },
+      { done: true, text: "整理对照表（1001 概念 vs opencode 现状）" },
+      { done: false, text: "看 v0.7 hooks 重构会不会影响我们的 fork" },
+      { done: false, text: "估改造 attach 的工作量（1人）" },
+    ],
+  },
+  {
+    kind: "artifact",
+    path: "knowledge/loopat/opencode-architecture.md",
+    lines: 96,
+    time: "yesterday 12:14",
+    preview:
+      "# opencode 架构摘要\n\n## 核心 model\n- session = chat history + tool calls + working state\n- project = git repo / workdir，1:N session\n\n## 1001 想加的语义\n- driver / rfd → 加在 session metadata\n- focus → workspace-level 派生\n- chat-mount → session.contextSources 扩展\n- attach multi-client → SSE 改 ws",
+  },
+  {
+    kind: "user",
+    text: "v0.7 release notes 我刚看了眼，hooks 系统重构了。fork 的话每次 rebase 可能都要重新对一遍 hooks 注册。注意",
+    time: "5h",
+  },
+  {
+    kind: "ai",
+    text: "记到 inbox.md 了。也加进 spike-comparison.md 的 '风险' 段。",
+    time: "5h",
+  },
+]
+
+const RESEARCH_CLAUDE_CODE_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text: "claude code SDK 的 agent loop / tool dispatch 流程读一下，对比 opencode",
+    time: "2d 09:30",
+  },
+  {
+    kind: "ai",
+    text:
+      "claude code 的核心是 hook 系统 + skill 系统 —— 不是把 agent 框死在某个 loop 模型里，而是通过 hooks 让用户在每个生命周期点（pre-tool / post-tool / on-stop）注入自定义行为。\n\n比 opencode 灵活，但**没有 multi-client attach** —— 它就是单进程 CLI。",
+    time: "2d 09:42",
+  },
+  {
+    kind: "read",
+    path: "settings.json (claude code config)",
+    startLine: 1,
+    total: 32,
+    time: "2d 10:00",
+    lines: [
+      "{",
+      '  "hooks": {',
+      '    "pre-tool": [{ "matcher": "Edit", "command": "echo $TOOL_INPUT > /tmp/last-edit.json" }],',
+      '    "on-stop": [{ "command": "git status --short | head -3" }]',
+      "  },",
+      '  "skills": {',
+      '    "enabled": ["./skills/distill-to-knowledge"]',
+      "  }",
+      "}",
+    ],
+  },
+  {
+    kind: "ai",
+    text:
+      "skill 加载机制很优雅 — SKILL.md frontmatter 描述触发条件，AI 加载时只读元信息，需要时再 inline。\n\n这套对 1001 的 \`knowledge/skills/\` 子目录直接照抄就行。",
+    time: "2d 10:08",
+  },
+  {
+    kind: "artifact",
+    path: "knowledge/loopat/claude-code-vs-opencode.md",
+    lines: 54,
+    time: "2d 10:18",
+    preview:
+      "# claude code vs opencode（对 1001 的启发）\n\n| 维度 | claude code | opencode |\n|---|---|---|\n| 部署形态 | CLI 单进程 | desktop + server |\n| multi-client attach | ✗ | SSE 单 subscriber |\n| 扩展机制 | hooks / skills | tools |\n| session 持久化 | 文件 jsonl | postgres |",
+  },
+  {
+    kind: "user",
+    text: "结论：不 fork，但抄 skills 系统。回头给 conventions/ 加一条 'SKILL.md 怎么写'",
+    time: "2d 10:30",
+  },
+]
+
+const SITE_UPTIME_SPIKE_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "[ops-bot] 🚨 loopat.ai 5xx 抖动告警\n\n- 检查窗口：09:35 – 09:42 (7min)\n- 5xx 总量：342 (baseline 8/min)\n- 受影响路径：/api/auth/callback (78%) · /api/loop (12%)\n- region: cn-shanghai\n- grafana: https://ops.loopat.ai/d/site-overview\n\n等人接 + 看是否需要 rollback。",
+    time: "09:42",
+  },
+  { kind: "rfd", by: "ops-bot", time: "09:42" },
+]
+
+const DEMO_VIDEO_SCRIPT_CHAT: ChatItem[] = [
+  { kind: "user", text: "HN show 视频先录第一版，2 分钟。帮我先列结构。", time: "08:30" },
+  {
+    kind: "ai",
+    text:
+      "建议结构：\n\n0:00–0:15 — hook：'AI 工具像 Slack 频道，但工作不该像聊天'\n0:15–0:45 — 4 一级概念扫一遍（Loop / Focus / Chat / Context）\n0:45–1:30 — 真实场景：从 chat spawn loop → driver transfer → 沉淀 knowledge 一镜到底\n1:30–1:50 — c/s 协议 + multi-client attach 演示\n1:50–2:00 — call-to-action（loopat.ai · early access）",
+    time: "08:31",
+  },
+  { kind: "user", text: "0:45-1:30 那段用今天我们做 prototype 这条 loop 当 demo —— self-referential", time: "08:35" },
+  { kind: "ai", text: "👍 self-referential 是好钩子。要不要把 chat → loop spawn 那段录得稍长一些（30s+），因为 reviewer 第一次看到这个动作会愣两秒。", time: "08:36" },
+  {
+    kind: "artifact",
+    path: "demo/script-v0.md",
+    lines: 42,
+    time: "09:02",
+    preview:
+      "# loopat 2-min demo · v0\n\n## Hook (0:00-0:15)\n> AI 工具像 Slack 频道，但工作不该像聊天。\n>\n> loopat 是一个让 AI 协作不再'频道化'的工具 —— 工作有 driver、有 context、有沉淀。",
+  },
+  { kind: "user", text: "找 panlilu 帮录 attach demo 那段，他自建那条 ws 接好了正合适", time: "09:14" },
+]
+
+const ATTACH_SPEC_REVIEW_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "[simpx] 把 attach spec 草稿单开 loop 让 panlilu review。我先睡了。\n\n关键问题：\n1. ws message envelope 格式（用 protobuf 还是纯 JSON？）\n2. reconnect 时 client 状态怎么 recover\n3. loop visibility check 放 ws auth 还是每条 message",
+    time: "yesterday 22:00",
+  },
+  { kind: "rfd", by: "simpx", time: "yesterday 22:30" },
+  { kind: "claim", by: "panlilu", time: "today 09:18" },
+  { kind: "user", text: "[panlilu] 接了。先回 1 / 2 / 3：", time: "09:18" },
+  {
+    kind: "ai",
+    text:
+      "好。我把 simpx 的 spec 草稿调出来，你边读边写：\n\n**spec/attach-v0** branch ready @ \`d8f3e2a\`",
+    time: "09:18",
+  },
+  {
+    kind: "read",
+    path: "ATTACH-SPEC.md",
+    startLine: 1,
+    total: 48,
+    time: "09:19",
+    lines: [
+      "# Attach 协议草稿",
+      "",
+      "## Topic",
+      "/loop/<id> — ws subscription",
+      "",
+      "## Events (server → client)",
+      "- snapshot — 完整 loop state",
+      "- message — 新 chat 增量",
+      "- timeline — driver-change / rfd / claim / fork",
+      "- tool-call — AI 调工具中间状态",
+    ],
+  },
+  {
+    kind: "user",
+    text:
+      "[panlilu] 我的意见：\n1. 用纯 JSON，protobuf 增加部署复杂度，p1 先不引入\n2. recover 走 'event id since' query，server 拉时间窗内 events 重放\n3. visibility check 在 sub auth 时一次性做，每条 message 不重复检查（trust the topic）",
+    time: "09:42",
+  },
+  { kind: "ai", text: "记下：JSON / event-id 增量 recover / topic-level auth。要不要写到 spec 里？", time: "09:43" },
+  {
+    kind: "diff",
+    file: "ATTACH-SPEC.md",
     time: "10:14",
-    output: [
-      "10:01:22 INFO  swap_request received: model=v4-pro -> v4-pro-quant",
-      "10:01:24 WARN  cache_warmup skipped (flag --warm-on-swap=false)",
-      "10:01:25 INFO  swap committed",
-    ],
-  },
-  { kind: "ai", text: "原因坐实 — `--warm-on-swap=false`。打 patch 改回 true：", time: "10:14" },
-  {
-    kind: "diff",
-    file: "deploy/mirror-llama.yaml",
-    time: "10:15",
     lines: [
-      { kind: "hunk", text: "@@ -23,7 +23,7 @@ args:" },
-      { kind: "ctx", text: '  - "--port=8080"' },
-      { kind: "del", text: '  - "--warm-on-swap=false"' },
-      { kind: "add", text: '  - "--warm-on-swap=true"' },
-      { kind: "ctx", text: '  - "--mirror-pct=10"' },
+      { kind: "hunk", text: "@@ +25,15 @@ ## 待办" },
+      { kind: "add", text: "## 决议（panlilu review @ 2026-05-10）" },
+      { kind: "add", text: "" },
+      { kind: "add", text: "1. **Envelope** — 纯 JSON。protobuf 推迟到 p1 之后" },
+      { kind: "add", text: "2. **Recover** — client 带 lastEventId，server 重放窗内事件" },
+      { kind: "add", text: "3. **Auth** — sub 时 workspace token + visibility check；每条 message 不重复" },
     ],
   },
-  { kind: "user", text: "我有个会，先 release 一下让别人接手 rollout", time: "10:16" },
-  { kind: "rfd", by: ME, time: "10:16" },
+  { kind: "user", text: "[panlilu] 等 simpx 醒了 confirm 一下我直接 close。@coo 帮我 ping", time: "10:20" },
+  { kind: "ai", text: "已 dm simpx。会议进 standup queue。", time: "10:20" },
 ]
 
-const LLAMA_RESEARCH_CHAT: ChatItem[] = [
-  // ----- 伊利丹 phase (creator + initial driver) -----
-  { kind: "user", text: "调研一下 llama-3 long-context 表现", time: "yesterday 16:20" },
+const FEATURE_PRICING_SKETCH_CHAT: ChatItem[] = [
   {
-    kind: "ai",
-    text:
-      "查了官方 tech report + recent papers。要点：\n- 32k 长度上 needle-in-haystack 95%+\n- 128k 长度 attention IO 是瓶颈\n- 超过 64k 后 quality 缓慢下降",
-    time: "yesterday 16:21",
-  },
-  {
-    kind: "artifact",
-    path: "knowledge/llama-3-long-context.md",
-    lines: 84,
-    time: "yesterday 16:23",
-    preview:
-      "# Llama-3 Long Context\n\n## 关键发现\n- 32k 内表现稳定，95%+ recall\n- 64k–128k 长度上 attention IO bound\n- ...",
-  },
-  { kind: "user", text: "attention 部分单独写一篇 deeper", time: "yesterday 17:02" },
-  {
-    kind: "artifact",
-    path: "knowledge/llama-3-attention.md",
-    lines: 132,
-    time: "yesterday 17:30",
-    preview:
-      "# Llama-3 Attention 实现\n\nMLA (Multi-head Latent Attention) 把 KV cache 压缩成 latent vector...",
-  },
-  { kind: "user", text: "下周开会再看 prefill 优化空间。先 release，谁先有空谁接", time: "yesterday 17:35" },
-  { kind: "rfd", by: "伊利丹", time: "yesterday 17:35" },
-
-  // ----- claim transition: simpx takes over -----
-  { kind: "claim", by: ME, time: "today 08:00" },
-
-  // ----- simpx phase (current driver) -----
-  { kind: "user", text: "伊利丹说让我接 prefill。先看下现在 prefill 在 64k 上的 tps", time: "today 08:01" },
-  {
-    kind: "ai",
-    text: "扫一下 traces 里的 prefill 数据：",
-    time: "today 08:02",
-  },
-  {
-    kind: "command",
-    cmd: "jq '.[] | select(.phase==\"prefill\") | {len, ms, gpu_util}' traces/long_context_eval.json | head -20",
-    ok: true,
-    time: "today 08:02",
-    output: [
-      '{"len": 65536, "ms": 4820, "gpu_util": 0.41}',
-      '{"len": 65536, "ms": 4910, "gpu_util": 0.39}',
-      '{"len": 98304, "ms": 8240, "gpu_util": 0.36}',
-      '{"len": 131072, "ms": 12940, "gpu_util": 0.33}',
-      '{"len": 131072, "ms": 13110, "gpu_util": 0.32}',
-    ],
+    kind: "user",
+    text: "猜个 loopat 的定价模型。先看 Linear / Notion / Slack 的对照",
+    time: "yesterday 14:20",
   },
   {
     kind: "ai",
     text:
-      "Prefill 阶段 GPU util 只有 30-40%，明显 IO bound。结合伊利丹写的 attention 文档，瓶颈在 attention IO，不是 compute。\n\n几个可能方向：\n1. **chunked prefill** —— 切 block 流水化\n2. **shared prefix cache** —— 同 prompt 前缀复用\n3. **flash-attention v3 + paged kv** —— 减 IO trip 数",
-    time: "today 08:05",
+      "拉了三家：\n\n| 工具 | 起步价 | 单位 | 主要 gating |\n|---|---|---|---|\n| Linear | $8/u/mo | seat | 私有 issue / SAML / API |\n| Notion | $10/u/mo | seat | 团队 workspace / version history |\n| Slack | $7.25/u/mo | seat | unlimited history / SSO / connect |\n\n都是 seat-based，不卖额度。",
+    time: "yesterday 14:35",
   },
-  { kind: "user", text: "把这些写进 follow-up notes，我下午再深入看 #1", time: "today 08:08" },
   {
     kind: "artifact",
-    path: "knowledge/llama-3-prefill-followups.md",
-    lines: 38,
-    time: "today 08:10",
+    path: "pricing-sketch-v0.md",
+    lines: 26,
+    time: "yesterday 16:00",
     preview:
-      "# Llama-3 Prefill 优化方向\n\n基于伊利丹的 attention 调研 + 今天的 trace 分析。\n\n## 候选方向\n1. chunked prefill\n2. shared prefix cache\n3. flash-attention v3 + paged kv",
+      "# loopat 定价（草稿 v0）\n\n## tier\n- **Free** — 5 人 workspace，1 active loop / 人，无 attach\n- **Team** — $10/u/mo，无限 loop，attach，agent 配额\n- **Enterprise** — 谈判，SSO/audit/private install",
   },
+  { kind: "user", text: "先放着，loop 还没跑通别想这事。Phase 3 之后再 revisit", time: "yesterday 16:05" },
 ]
 
-const KNOWLEDGE_REFINE_CHAT: ChatItem[] = [
-  { kind: "user", text: "帮我把 docs/loopey/ 下的 12 个 md 重新分类，太乱了", time: "11:00" },
+const NAMING_BRAINSTORM_CHAT: ChatItem[] = [
+  { kind: "user", text: "brand 名 brainstorm。约束：好读 / 好打 / 跟 loop 有关 / .ai 域名能注册", time: "yesterday 21:00" },
   {
     kind: "ai",
     text:
-      "扫了一遍 12 个文件，按主题归并大致是 4 类：\n\n| 主题 | 文件数 |\n|---|---|\n| introduction | 3 |\n| sls (日志服务) | 4 |\n| runtime (管控) | 3 |\n| modelboard | 2 |\n\n建议每类一个目录。",
-    time: "11:01",
-  },
-  {
-    kind: "todo",
-    title: "context refine plan",
-    time: "11:01",
-    items: [
-      { done: true, text: "读取 docs/loopey/* (12 files)" },
-      { done: true, text: "提议分类：introduction / sls / runtime / modelboard" },
-      { done: false, text: "执行 git mv" },
-      { done: false, text: "扫 broken 链接，修内部引用" },
-      { done: false, text: "更新 docs/loopey/CLAUDE.md 索引" },
-      { done: false, text: "verify: rg 旧路径无残留" },
-    ],
-  },
-  { kind: "user", text: "go", time: "11:03" },
-  {
-    kind: "diff",
-    file: "docs/loopey/ (renames)",
-    time: "11:04",
-    lines: [
-      { kind: "hunk", text: "@@ rename plan @@" },
-      { kind: "del", text: "- docs/loopey/intro-llm.md" },
-      { kind: "add", text: "+ docs/loopey/introduction/llm.md" },
-      { kind: "del", text: "- docs/loopey/sls-overview.md" },
-      { kind: "add", text: "+ docs/loopey/sls/overview.md" },
-      { kind: "del", text: "- docs/loopey/fleet-quota.md" },
-      { kind: "add", text: "+ docs/loopey/fleet/quota.md" },
-      { kind: "ctx", text: "  …(6 more renames)" },
-    ],
-  },
-  {
-    kind: "command",
-    cmd: "git status -s",
-    ok: true,
-    time: "11:05",
-    output: [
-      "R  docs/loopey/intro-llm.md -> docs/loopey/introduction/llm.md",
-      "R  docs/loopey/sls-overview.md -> docs/loopey/sls/overview.md",
-      "R  docs/loopey/fleet-quota.md -> docs/loopey/fleet/quota.md",
-      "R  …(6 more)",
-      " M docs/loopey/CLAUDE.md",
-    ],
-  },
-  {
-    kind: "ai",
-    text: "扫了一下文件**内部**引用，发现 4 处指向旧路径的 broken link。要不要一起修？",
-    time: "11:07",
+      "拉了一批候选：\n\n- pit 系（pithub / pitops）—— 有 'pithub→pornhub' 切分歧义，否\n- 造词系（melode / klyma）—— 用户嫌怪\n- 1001 系（1001loop / 1001days）—— 累赘\n- 其他：loopey / looped / loopat / loopin\n\n推 \`loopey.ai\` —— 一眼读懂，slack 拼写感（-ey 后缀）。",
+    time: "yesterday 21:40",
   },
   {
     kind: "artifact",
-    path: "_audit/broken-links-2026-05-05.md",
-    lines: 24,
-    time: "11:07",
+    path: "naming-decision-v1.md",
+    lines: 18,
+    time: "yesterday 22:00",
     preview:
-      "# Broken internal links (after rename)\n\n- docs/loopey/introduction/llm.md L42 → `[SLS](../sls-overview.md)` (旧)\n- docs/loopey/sls/overview.md L8 → `[Fleet quota](../fleet-quota.md)` (旧)\n- docs/loopey/fleet/quota.md L31 → `[introduction](../intro-llm.md)` (旧)\n- docs/loopey/modelboard/draft.md L19 → `[SLS](../sls-overview.md)` (旧)",
-  },
-  { kind: "user", text: "修，但保留 redirect 注释方便我以后追溯", time: "11:09" },
-  {
-    kind: "diff",
-    file: "docs/loopey/introduction/llm.md",
-    time: "11:10",
-    lines: [
-      { kind: "hunk", text: "@@ -40,7 +40,8 @@" },
-      { kind: "ctx", text: "## SLS 集成" },
-      { kind: "ctx", text: "" },
-      { kind: "del", text: "日志通过 [SLS](../sls-overview.md) 上报。" },
-      { kind: "add", text: "<!-- moved: ../sls-overview.md → ../sls/overview.md -->" },
-      { kind: "add", text: "日志通过 [SLS](../sls/overview.md) 上报。" },
-    ],
-  },
-  {
-    kind: "ai",
-    text: "另外 3 个文件同样修了。再更新 CLAUDE.md 索引：",
-    time: "11:12",
-  },
-  {
-    kind: "diff",
-    file: "docs/loopey/CLAUDE.md",
-    time: "11:13",
-    lines: [
-      { kind: "hunk", text: "@@ -3,12 +3,18 @@ # Loopey Knowledge Index" },
-      { kind: "del", text: "- intro-llm.md — LLM 介绍" },
-      { kind: "del", text: "- sls-overview.md — SLS 日志" },
-      { kind: "del", text: "- fleet-quota.md — Fleet 配额" },
-      { kind: "ctx", text: "" },
-      { kind: "add", text: "## introduction/" },
-      { kind: "add", text: "- llm.md — LLM 介绍" },
-      { kind: "add", text: "" },
-      { kind: "add", text: "## sls/" },
-      { kind: "add", text: "- overview.md — SLS 日志" },
-      { kind: "add", text: "" },
-      { kind: "add", text: "## runtime/" },
-      { kind: "add", text: "- quota.md — Fleet 配额" },
-      { kind: "ctx", text: "  …(同样 3 类目录展开)" },
-    ],
-  },
-  {
-    kind: "command",
-    cmd: "rg -l 'intro-llm.md|sls-overview.md|fleet-quota.md' docs/",
-    ok: true,
-    time: "11:15",
-    output: [
-      "(no matches)",
-      "✓ 旧路径在 docs/ 内已无残留",
-    ],
-  },
-  { kind: "user", text: "齐了，commit", time: "11:16" },
-  {
-    kind: "command",
-    cmd: "git add -A && git commit -m 'docs/loopey: reorg by topic + fix internal links'",
-    ok: true,
-    time: "11:17",
-    output: [
-      "[main 7c4a812] docs/loopey: reorg by topic + fix internal links",
-      " 17 files changed, 84 insertions(+), 71 deletions(-)",
-      " rename docs/loopey/{intro-llm.md => introduction/llm.md} (84%)",
-      " rename docs/loopey/{sls-overview.md => sls/overview.md} (91%)",
-      " rename docs/loopey/{fleet-quota.md => runtime/quota.md} (88%)",
-      " …(6 more renames)",
-    ],
-  },
-  {
-    kind: "ai",
-    text:
-      "顺手提一个：这次 refine 的 layout（**主题目录 + CLAUDE.md 索引 + 内部链接用相对路径**）其实是一个可复用约定。要不要抽成 `knowledge/conventions/loopey-style-knowledge-layout.md`，让其他 workspace 的 docs 也照这个走？",
-    time: "11:18",
+      "# 1001 brand 名（决议）\n\n选 **loopey.ai**\n\n理由：唯一同时满足 .ai TLD / 一眼读懂 / loop 暗扣 / 不需解释。",
   },
   {
     kind: "user",
-    text: "好主意 — 但这个属于跨 workspace 的事，单独开个 loop 推。先在这条 loop 里 close。",
-    time: "11:19",
+    text: "今天再过一下，发现 loopat 内嵌 'pat' 很妙 —— pat 可以做 AI 反馈动作（给 AI 一个 pat）",
+    time: "today 01:14",
   },
-  {
-    kind: "todo",
-    title: "follow-ups (out of this loop)",
-    time: "11:19",
-    items: [
-      { done: false, text: "spawn loop: knowledge-layout-convention" },
-      { done: false, text: "在 1001 docs 里加'约定 = 减熵'示例" },
-      { done: false, text: "巡检其他 workspace 的 docs/ 是否也乱" },
-    ],
-  },
-]
-
-const DESIGN_CHAT: ChatItem[] = [
-  { kind: "user", text: "再过一遍 4 个一级概念跟稀缺资源的对应", time: "10:30" },
   {
     kind: "ai",
     text:
-      "驱动力 ↔ Loop（决定做 X + 过程判断力 feedback）。\n注意力 ↔ Focus（识别什么重要、什么不该做）。\n熵减能力 ↔ Context（把混乱整理成清晰）。\nChat 是 sync 协调通道，不在稀缺资源轴上。",
-    time: "10:31",
-  },
-  { kind: "user", text: "Focus 那条要不要叫 vision/品位？", time: "10:35" },
-  {
-    kind: "ai",
-    text: "讨论过 — 最后保留'注意力'，因为呼应 Focus 这个词；但描述里强调它是'主动取舍'而不是'被动稀缺'。",
-    time: "10:35",
+      "你说服我了。loopat 比 loopey 强：\n- 同样满足 .ai / 好打 / loop 暗扣\n- 多一个 'pat' 隐藏词 —— UX 动词，比 thumbs-up 更具身\n- 'loop at AI' 短语解读虽不顺，但 brand 不靠这个\n\n更新 decision。",
+    time: "today 01:18",
   },
   {
     kind: "artifact",
-    path: "knowledge/ai-org/1001-philosophy.md",
-    lines: 47,
-    time: "10:38",
+    path: "naming-decision-v2.md",
+    lines: 22,
+    time: "today 01:30",
     preview:
-      "# 1001 Philosophy\n\n## Driver = human\n\nAI has no autonomous desire. The driver — the source of intent — must be human.",
+      "# 1001 brand 名（决议 v2，覆盖 v1）\n\n选 **loopat.ai**\n\n核心：\n1. loop（项目核心）\n2. pat（隐藏词，未来产品 UX 动词）\n\n放弃 'loop at AI' 短语解读 —— 不是英语 idiom。",
+  },
+  { kind: "user", text: "logo emoji 用 🧶 毛线团 —— loop 的有机/暖感呈现，跟软品牌内核一致", time: "today 01:45" },
+  { kind: "ai", text: "已记。准备 close 这条 loop，结论沉淀进 knowledge/loopat/naming.md。", time: "today 01:50" },
+  {
+    kind: "command",
+    cmd: "git mv naming-decision-v2.md ../knowledge/loopat/naming.md && git commit -m 'naming: archive brainstorm, sediment to loopat/naming.md'",
+    ok: true,
+    time: "today 02:00",
+    output: ["[main 7c4a812] naming: archive brainstorm, sediment to loopat/naming.md", " 1 file changed, 22 insertions(+)"],
+  },
+]
+
+const PROTOTYPE_HIFI_FORK_TEST_CHAT: ChatItem[] = [
+  {
+    kind: "user",
+    text:
+      "[panlilu] fork 一份 prototype 试试 React 改写 —— 不是要替代 simpx 这版，只是验证 'Solid 是否值得保留 vs React 一致性' 这个问题",
+    time: "04:30",
+  },
+  {
+    kind: "ai",
+    text:
+      "已 fork。注意几个 react 跟 solid 的语义差异：\n- props 在 react 默认 destructure（解开就行），solid 解开会破坏响应性\n- createSignal vs useState：solid 不重新执行组件\n- For 用 .map 替代\n\n这次 fork 主要为评估改写成本，不要做完整 port。",
+    time: "04:32",
+  },
+  { kind: "user", text: "先把 App.tsx + state.ts + chat.tsx 三个移植了，看看代码量差", time: "04:45" },
+  {
+    kind: "command",
+    cmd: "wc -l src/App.tsx src/state.ts src/pages/chat.tsx (solid version)",
+    ok: true,
+    time: "04:46",
+    output: [
+      "  168 src/App.tsx",
+      " 1064 src/state.ts",
+      "  370 src/pages/chat.tsx",
+      " 1602 total",
+    ],
+  },
+  { kind: "user", text: "react 版我估了一下大概会 +20% 行数，主要是 useEffect / useMemo 显式声明。值得吗？", time: "06:18" },
+  {
+    kind: "ai",
+    text:
+      "短期：值得性低（codebase 才 1.6k 行，react 一致性收益小）。\n长期：如果未来要写 SSR / 接 react 生态库（react-flow 等），solid 会卡。\n\n我建议先记结论 + 不动。等 phase 3 看 SSR 需求再 revisit。",
+    time: "06:21",
+  },
+  {
+    kind: "artifact",
+    path: "fork-eval.md",
+    lines: 18,
+    time: "07:00",
+    preview:
+      "# Fork eval: solid → react 改写值不值得？\n\n## 当前\n- codebase 1.6k 行 solid\n- 改 react 估计 +20% 行数 (react useEffect/useMemo 显式)\n\n## 决议\n短期不动。phase 3 SSR 需求评估时再看。",
   },
 ]
 
 export const chats: Record<string, ChatItem[]> = {
-  "gateway-launch": GATEWAY_CHAT,
-  loopctl: LOOPCTL_CHAT,
-  "mirror-llama-3": MIRROR_CHAT,
-  "llama-research": LLAMA_RESEARCH_CHAT,
-  "knowledge-refine": KNOWLEDGE_REFINE_CHAT,
-  "1001-design": DESIGN_CHAT,
+  "prototype-hifi": PROTOTYPE_HIFI_CHAT,
+  "loopat-runtime-spike": LOOPAT_RUNTIME_SPIKE_CHAT,
+  "loopat-ts-mvp": LOOPAT_TS_MVP_CHAT,
+  "research-opencode": RESEARCH_OPENCODE_CHAT,
+  "research-claude-code": RESEARCH_CLAUDE_CODE_CHAT,
+  "site-uptime-spike": SITE_UPTIME_SPIKE_CHAT,
+  "demo-video-script": DEMO_VIDEO_SCRIPT_CHAT,
+  "attach-spec-review": ATTACH_SPEC_REVIEW_CHAT,
+  "feature-pricing-sketch": FEATURE_PRICING_SKETCH_CHAT,
+  "naming-brainstorm": NAMING_BRAINSTORM_CHAT,
+  "prototype-hifi-fork-test": PROTOTYPE_HIFI_FORK_TEST_CHAT,
 }
+
+// ============================================================================
+// notes/focus.md — the only "real state" Focus has.
+// ============================================================================
+
+export type FocusFile = {
+  pinned: string[]
+  listed: string[]
+}
+
+export const [focusFile, setFocusFile] = createSignal<FocusFile>({
+  pinned: ["产品侧高保真原型", "可自举的MVP"],
+  listed: ["初版上线"],
+})
+
+// Currently selected chat conversation. Module-level so the Loop tab's
+// chat chips can drive Chat tab's selection on click.
+export const [chatActive, setChatActive] = createSignal<string>("all")
+
+// ============================================================================
+// notes/inbox.md — team scratch prose.
+// ============================================================================
+
+export const [inboxItems, setInboxItems] = createSignal<string[]>([
+  "看了下 sst/opencode v0.7 release notes，有几个 hook 点变了，回头确认 fork 还能不能 rebase",
+  "tweetdeck 上看到一个聊 'AI org' 的 thread，截图存了 personal/inbox/",
+  "@panlilu next-auth beta 的 session expire callback 跟 5.0 final 行为不一样，注意",
+  "把 1001-mvp.md §3 重写一版，加 c/s 协议的边界",
+  "https://github.com/sst/opencode/discussions/482 有人问怎么加 attach，回头看下他们怎么想的",
+  "loopat.ai 域名转 cloudflare 的事还没办，等 panlilu 那边 deployment 决定",
+  "demo 视频先录第一版（2 分钟），上 hn show 用",
+  "周三跟 panlilu 把两条 spike 的取舍讨论 closed，下周二之前定方向",
+])
