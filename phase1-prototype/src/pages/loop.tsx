@@ -31,6 +31,8 @@ import {
   mountRevisions,
   syncMount,
   chats,
+  focusFile,
+  setChatActive,
   type CreateLoopOpts,
 } from "../state"
 import { REPOS, VAULT_DOCS, flattenVaultFiles, type DocNode } from "./context"
@@ -44,7 +46,7 @@ const TERMINAL_LINES = [
   "$ pytest tests/test_gateway.py::test_rdma_register -xvs",
   "================================ test session starts ================================",
   "platform linux -- Python 3.10.13, pytest-8.0.1",
-  "rootdir: /home/simpx/workspace/loopey-runtime",
+  "rootdir: /home/simpx/workspace/loopat-runtime",
   "collected 1 item",
   "",
   "tests/test_gateway.py::test_rdma_register PASSED                                  [100%]",
@@ -56,7 +58,7 @@ const TERMINAL_LINES = [
 export function LoopPage() {
   const params = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [scope, setScope] = createSignal<"mine" | "all">("mine")
+  const [scope, setScope] = createSignal<"mine" | "all" | "rfd">("mine")
   const [rightOpen, setRightOpen] = createSignal(false)
   const [rightMode, setRightMode] = createSignal<RightMode>("workdir")
   const [editingPath, setEditingPath] = createSignal<string>("")
@@ -71,14 +73,22 @@ export function LoopPage() {
     setOpenFolders(next)
   }
 
+  const isPinned = (l: Loop) => {
+    const pins = new Set(focusFile().pinned)
+    return (l.focuses ?? []).some((f) => pins.has(f))
+  }
   const sortKey = (l: Loop) => {
-    if (l.inFocus?.includes("pinned")) return 0
+    if (isPinned(l)) return 0
     if (l.rfd) return 2
     return 1
   }
   const filtered = () =>
     loops()
-      .filter((l) => (scope() === "mine" ? l.driver === ME : l.status !== "archived"))
+      .filter((l) => {
+        if (scope() === "mine") return l.driver === ME
+        if (scope() === "rfd") return l.rfd && l.status !== "archived"
+        return l.status !== "archived"
+      })
       .slice()
       .sort((a, b) => sortKey(a) - sortKey(b))
 
@@ -194,27 +204,21 @@ export function LoopPage() {
 // ============================================================================
 
 function LoopsList(props: {
-  scope: () => "mine" | "all"
-  setScope: (v: "mine" | "all") => void
+  scope: () => "mine" | "all" | "rfd"
+  setScope: (v: "mine" | "all" | "rfd") => void
   filtered: () => Loop[]
   currentId: () => string
   onSelect: (id: string) => void
   onNewClick: () => void
 }) {
+  const rfdCount = () => loops().filter((l) => l.rfd && l.status !== "archived").length
+  const isPinned = (l: Loop) => {
+    const pins = new Set(focusFile().pinned)
+    return (l.focuses ?? []).some((f) => pins.has(f))
+  }
   return (
     <aside class="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-      <div class="px-3 h-10 flex items-center justify-between border-b border-gray-200">
-        <span class="text-xs text-gray-500">Loops</span>
-        <button
-          type="button"
-          class="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-sm leading-none"
-          title="new loop"
-          onClick={() => props.onNewClick()}
-        >
-          +
-        </button>
-      </div>
-      <div class="px-2 pt-2 flex items-center gap-1">
+      <div class="px-2 h-10 flex items-center gap-1 border-b border-gray-200">
         <button
           type="button"
           onClick={() => props.setScope("mine")}
@@ -236,6 +240,29 @@ function LoopsList(props: {
           }
         >
           全部
+        </button>
+        <button
+          type="button"
+          onClick={() => props.setScope("rfd")}
+          title="rfd / 未认领"
+          class={
+            props.scope() === "rfd"
+              ? "px-2 h-6 rounded text-[11px] flex items-center gap-1 bg-amber-600 text-white"
+              : "px-2 h-6 rounded text-[11px] flex items-center gap-1 text-amber-700 hover:bg-amber-50"
+          }
+        >
+          <span>RFD</span>
+          <Show when={rfdCount() > 0}>
+            <span
+              class={
+                props.scope() === "rfd"
+                  ? "text-[10px] px-1 rounded-full bg-white/20"
+                  : "text-[10px] px-1 rounded-full bg-amber-100 text-amber-700"
+              }
+            >
+              {rfdCount()}
+            </span>
+          </Show>
         </button>
         <span class="text-[11px] text-gray-400 ml-auto pr-1">{props.filtered().length}</span>
       </div>
@@ -272,7 +299,7 @@ function LoopsList(props: {
                 <Show when={loop.rfd}>
                   <span title="RFD" class="text-amber-600 text-[11px]">RFD</span>
                 </Show>
-                <Show when={loop.inFocus?.includes("pinned")}>
+                <Show when={isPinned(loop)}>
                   <span title="pinned in focus" class="text-gray-500">📌</span>
                 </Show>
               </button>
@@ -421,6 +448,27 @@ function LoopHeader(props: {
               : "—"
           }
         />
+        <For each={loop().context.chats ?? []}>
+          {(mount) => {
+            const isDm = mount.id.startsWith("dm-")
+            const display = isDm ? `@${mount.id.replace(/^dm-/, "")}` : `#${mount.id}`
+            return (
+              <button
+                type="button"
+                onClick={() => {
+                  setChatActive(mount.id)
+                  navigate("/chat")
+                }}
+                title={`${display} ingested up to msg #${mount.upTo} · click to open`}
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-[11px]"
+              >
+                <span class="text-gray-500">chat:</span>
+                <span class="text-gray-900 font-medium">{display}</span>
+                <span class="text-gray-400 font-mono">:{mount.upTo}</span>
+              </button>
+            )
+          }}
+        </For>
         <button
           type="button"
           onClick={() => props.onAddContext()}
@@ -678,11 +726,39 @@ function InfoPanel(props: { loop: Loop }) {
               : `scoped to ${props.loop.context.knowledge.length} dirs`
           }
         />
+        <Row
+          label="notes"
+          value={
+            props.loop.context.notes === "all"
+              ? "all (public)"
+              : `scoped to ${props.loop.context.notes.length} dirs`
+          }
+        />
+        <Show when={props.loop.context.personal && props.loop.context.personal.length > 0}>
+          <Row
+            label="personal"
+            value={`${props.loop.context.personal!.length} paths (private)`}
+          />
+        </Show>
+        <Show when={props.loop.context.chats && props.loop.context.chats.length > 0}>
+          <Row
+            label="chat"
+            value={props.loop.context
+              .chats!.map((c) => `${c.id}:${c.upTo}`)
+              .join(", ")}
+            mono
+          />
+        </Show>
       </Section>
 
-      <Show when={props.loop.inFocus && props.loop.inFocus.length > 0}>
+      <Show when={(props.loop.focuses ?? []).length > 0}>
         <Section label="focus">
-          <Row label="state" value={props.loop.inFocus!.includes("pinned") ? "📌 pinned" : "listed"} />
+          <For each={props.loop.focuses ?? []}>
+            {(name) => {
+              const pinned = new Set(focusFile().pinned).has(name)
+              return <Row label={pinned ? "📌 pinned" : "listed"} value={name} />
+            }}
+          </For>
         </Section>
       </Show>
 
