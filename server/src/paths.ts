@@ -1,8 +1,13 @@
-import { readdirSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
+/**
+ * LOOPAT_HOME *is* the workspace directory. Single-workspace by design — to
+ * run a second workspace, start a second loopat instance with a different
+ * LOOPAT_HOME. Default `~/.loopat`. The display/URL name is the basename
+ * with leading dots stripped (so `~/.loopat` → "loopat").
+ */
 export const LOOPAT_HOME = process.env.LOOPAT_HOME ?? join(homedir(), ".loopat")
 
 // loopat code install dir (contains node_modules/, helper binaries the sandbox needs)
@@ -11,36 +16,17 @@ const __DIRNAME = dirname(fileURLToPath(import.meta.url))
 export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
 export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
-/**
- * Resolve workspace name (the subdir of LOOPAT_HOME this server runs against).
- *
- * Order:
- *   1. `LOOPAT_WORKSPACE` env — explicit override
- *   2. If LOOPAT_HOME has exactly one workspace subdir, use that. So a single
- *      installation "just works" regardless of what the user named it.
- *   3. Fallback: "loopat" — created on bootstrap.
- */
-function resolveWorkspaceName(): string {
-  if (process.env.LOOPAT_WORKSPACE) return process.env.LOOPAT_WORKSPACE
-  try {
-    const entries = readdirSync(LOOPAT_HOME, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-    if (entries.length === 1) return entries[0].name
-  } catch {}
-  return "loopat"
-}
-
-export const WORKSPACE = resolveWorkspaceName()
+export const WORKSPACE = basename(LOOPAT_HOME).replace(/^\.+/, "") || "loopat"
 export const ME = process.env.LOOPAT_USER ?? process.env.USER ?? userInfo().username ?? "user"
 
-export const workspaceDir = () => join(LOOPAT_HOME, WORKSPACE)
-export const loopsDir = () => join(workspaceDir(), "loops")
-export const workspaceContextDir = () => join(workspaceDir(), "context")
+export const workspaceDir = () => LOOPAT_HOME
+export const loopsDir = () => join(LOOPAT_HOME, "loops")
+export const workspaceContextDir = () => join(LOOPAT_HOME, "context")
 export const workspaceKnowledgeDir = () => join(workspaceContextDir(), "knowledge")
 export const workspaceNotesDir = () => join(workspaceContextDir(), "notes")
 export const workspaceReposDir = () => join(workspaceContextDir(), "repos")
 export const workspaceRepoDir = (name: string) => join(workspaceReposDir(), name)
-export const personalDir = (user: string) => join(workspaceDir(), "personal", user)
+export const personalDir = (user: string) => join(LOOPAT_HOME, "personal", user)
 
 export const loopDir = (id: string) => join(loopsDir(), id)
 export const loopWorkdir = (id: string) => join(loopDir(id), "workdir")
