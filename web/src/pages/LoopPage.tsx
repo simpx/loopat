@@ -1,12 +1,11 @@
 /**
- * Loop tab. Layout & visuals ported from phase1-prototype/src/pages/loop.tsx
- * (LoopsList + LoopHeader + RightPanel). Chat area uses assistant-ui's
- * prebuilt Thread (kept to avoid re-building chat + markdown rendering).
+ * Loop tab — AI chat with Claude Code-like experience.
+ * Chat area uses assistant-ui runtime with custom claudecodeui-styled components.
  */
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { Thread } from "@/components/assistant-ui/thread"
+import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
@@ -153,7 +152,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         />
         <div className="flex-1 min-h-0">
           <AssistantRuntimeProvider runtime={runtime}>
-            <Thread />
+            <ChatInterface />
           </AssistantRuntimeProvider>
         </div>
       </main>
