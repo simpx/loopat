@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, getActiveProvider } from "./config"
+import { loadConfig, loadTeamClaudeJson, getActiveProvider } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { loadPersonalSecrets, substituteVars } from "./personal-secrets"
 import { getLoop } from "./loops"
@@ -145,10 +145,12 @@ class LoopSession {
     }
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
-    // Resolve ${VAR} refs in mcpServers from personal/<user>/secrets/. Server
-    // does the substitution on the host; secret files never enter the sandbox.
+    // Team Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
+    // Resolve ${VAR} refs against personal/<user>/secrets/ on the host; secret
+    // files themselves never enter the sandbox — only the substituted strings.
+    const team = await loadTeamClaudeJson()
     const secrets = await loadPersonalSecrets(meta.createdBy)
-    const mcpServers = cfg.mcpServers ? substituteVars(cfg.mcpServers, secrets) : undefined
+    const mcpServers = team.mcpServers ? substituteVars(team.mcpServers, secrets) : undefined
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
