@@ -1,13 +1,11 @@
 /**
- * Top-level shell. URL pattern: /<workspace>/<tab>...
- *
- * `/` redirects to `/<server-workspace>/loop` after a one-shot fetch of
- * /api/health. The :workspace param drives header display, NavLink targets,
- * and all in-app navigate() calls (subdomain-style routing without
- * subdomains — works on any host).
+ * Top-level shell. Single workspace per loopat instance — no workspace
+ * prefix in URL, no workspace switcher. The header just shows the
+ * workspace name fetched once from /api/health (which is basename of
+ * LOOPAT_HOME, server-side).
  */
-import { useEffect, useRef, useState } from "react"
-import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useParams } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
@@ -25,12 +23,6 @@ const TABS = [
   { id: "context", label: "Context", icon: "⌘" },
 ] as const
 
-/** Resolve the :workspace url param. Empty string means "not in a workspace route". */
-export function useWorkspaceName(): string {
-  const { workspace } = useParams<{ workspace: string }>()
-  return workspace ?? ""
-}
-
 function Layout() {
   const ws = useWorkspaceState()
   return (
@@ -42,73 +34,36 @@ function Layout() {
 
 function Shell({ ws }: { ws: WorkspaceState }) {
   const navigate = useNavigate()
-  const workspaceName = useWorkspaceName()
-  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
-  const workspaceRef = useRef<HTMLDivElement>(null)
+  const [workspaceName, setWorkspaceName] = useState("loopat")
 
   useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (workspaceRef.current && !workspaceRef.current.contains(e.target as Node)) {
-        setWorkspaceMenuOpen(false)
+    getServerWorkspace().then((name) => {
+      if (name) {
+        setWorkspaceName(name)
+        document.title = `${name} · loopat`
       }
-    }
-    document.addEventListener("click", onDocClick)
-    return () => document.removeEventListener("click", onDocClick)
+    })
   }, [])
 
   const handleCreate = async (opts: { title: string; repo?: string }) => {
     const m = await ws.createLoop(opts)
     ws.setNewLoopDialogOpen(false)
-    navigate(`/${workspaceName}/loop/${m.id}`)
+    navigate(`/loop/${m.id}`)
     return m.id
   }
 
   return (
     <div className="h-full w-full flex flex-col bg-gray-50 text-gray-900">
       <header className="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-4 gap-4">
-        <div className="relative shrink-0" ref={workspaceRef}>
-          <button
-            type="button"
-            onClick={() => setWorkspaceMenuOpen(!workspaceMenuOpen)}
-            className={
-              workspaceMenuOpen
-                ? "flex items-center gap-2 px-2 h-8 rounded bg-gray-100"
-                : "flex items-center gap-2 px-2 h-8 rounded hover:bg-gray-100"
-            }
-            title="workspace"
-          >
-            <span className="text-lg leading-none">🧶</span>
-            <span className="text-sm text-gray-900 font-medium">{workspaceName}</span>
-            <span className="text-gray-400 text-xs">{workspaceMenuOpen ? "▴" : "▾"}</span>
-          </button>
-          {workspaceMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg z-50 text-[13px]">
-              <div className="px-3 py-2.5 border-b border-gray-100">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">🧶</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-gray-900 font-medium">{workspaceName}</div>
-                    <div className="text-[11px] text-gray-500">single-user</div>
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled
-                className="w-full px-3 py-2 text-left flex items-center gap-2 text-gray-400 cursor-default"
-                title="future: multi-workspace"
-              >
-                <span>↪</span>
-                <span>switch workspace</span>
-              </button>
-            </div>
-          )}
+        <div className="flex items-center gap-2 px-2 h-8 shrink-0" title={`workspace: ${workspaceName}`}>
+          <span className="text-lg leading-none">🧶</span>
+          <span className="text-sm text-gray-900 font-medium">{workspaceName}</span>
         </div>
         <nav className="flex items-center gap-1">
           {TABS.map((t) => (
             <NavLink
               key={t.id}
-              to={`/${workspaceName}/${t.id}`}
+              to={`/${t.id}`}
               className={({ isActive }) =>
                 isActive
                   ? "px-3 h-8 rounded text-sm bg-gray-900 text-white flex items-center gap-1.5"
@@ -154,9 +109,8 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 
 function LoopRedirect() {
   const ws = useWorkspaceState()
-  const workspaceName = useWorkspaceName()
   if (ws.loops.length === 0) return <LoopEmpty onNew={() => ws.setNewLoopDialogOpen(true)} />
-  return <Navigate to={`/${workspaceName}/loop/${ws.loops[0].id}`} replace />
+  return <Navigate to={`/loop/${ws.loops[0].id}`} replace />
 }
 
 function LoopEmpty({ onNew }: { onNew: () => void }) {
@@ -173,39 +127,18 @@ function LoopEmpty({ onNew }: { onNew: () => void }) {
   )
 }
 
-/** Root: ask the server which workspace it's serving and redirect there. */
-function RootRedirect() {
-  const [ws, setWs] = useState<string | null>(null)
-  useEffect(() => {
-    getServerWorkspace().then(setWs)
-  }, [])
-  if (!ws) return <div className="h-full w-full flex items-center justify-center text-gray-400">…</div>
-  return <Navigate to={`/${ws}/loop`} replace />
-}
-
-function ContextRedirect() {
-  const workspaceName = useWorkspaceName()
-  return <Navigate to={`/${workspaceName}/context/knowledge`} replace />
-}
-
-function WorkspaceIndexRedirect() {
-  const workspaceName = useWorkspaceName()
-  return <Navigate to={`/${workspaceName}/loop`} replace />
-}
-
 export function App() {
   return (
     <TooltipProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<RootRedirect />} />
-          <Route path="/:workspace" element={<Layout />}>
-            <Route index element={<WorkspaceIndexRedirect />} />
-            <Route path="loop" element={<LoopRedirect />} />
-            <Route path="loop/:id" element={<LoopPage />} />
-            <Route path="focus" element={<FocusPage />} />
-            <Route path="context" element={<ContextRedirect />} />
-            <Route path="context/:sub" element={<ContextPage />} />
+          <Route element={<Layout />}>
+            <Route path="/" element={<Navigate to="/loop" replace />} />
+            <Route path="/loop" element={<LoopRedirect />} />
+            <Route path="/loop/:id" element={<LoopPage />} />
+            <Route path="/focus" element={<FocusPage />} />
+            <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
+            <Route path="/context/:sub" element={<ContextPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -9,7 +9,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useWorkspace } from "../ctx"
-import { useWorkspaceName } from "../App"
 import { readFocusData, type FocusData, type LoopMeta } from "../api"
 
 const ME = "simpx"
@@ -80,7 +79,6 @@ function deriveFocuses(loops: LoopMeta[], pinned: string[], listed: string[]): D
 
 export function FocusPage() {
   const navigate = useNavigate()
-  const workspaceName = useWorkspaceName()
   const ws = useWorkspace()
   const [data, setData] = useState<FocusData>({ pinned: [], listed: [], inbox: [] })
 
@@ -102,7 +100,7 @@ export function FocusPage() {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => navigate(`/${workspaceName}/context/notes`)}
+          onClick={() => navigate(`/context/notes`)}
           className="text-[11px] text-gray-500 hover:text-gray-900 flex items-center gap-1"
           title="Focus 唯一的真存：pinned 名单 + 空 meta focus"
         >
@@ -136,7 +134,7 @@ export function FocusPage() {
                 <button
                   key={loop.id}
                   type="button"
-                  onClick={() => navigate(`/${workspaceName}/loop/${loop.id}`)}
+                  onClick={() => navigate(`/loop/${loop.id}`)}
                   className="w-full text-left flex items-center gap-2 px-3 py-1.5 rounded hover:bg-gray-50"
                 >
                   <span className="text-gray-400">⑂</span>
@@ -156,7 +154,7 @@ export function FocusPage() {
             right={
               <button
                 type="button"
-                onClick={() => navigate(`/${workspaceName}/context/notes`)}
+                onClick={() => navigate(`/context/notes`)}
                 className="text-[11px] text-gray-500 hover:text-gray-900 flex items-center gap-1"
                 title="编辑入口在 Context tab"
               >
@@ -175,7 +173,7 @@ export function FocusPage() {
               {data.inbox.length > INBOX_PREVIEW_LIMIT && (
                 <li className="pt-1">
                   <button
-                    onClick={() => navigate(`/${workspaceName}/context/notes`)}
+                    onClick={() => navigate(`/context/notes`)}
                     className="text-[11px] text-gray-500 hover:text-gray-900"
                   >
                     … 还有 {data.inbox.length - INBOX_PREVIEW_LIMIT} 条 →
@@ -236,7 +234,6 @@ function Section({
 }
 
 function FocusRow({ item, navigate }: { item: DerivedFocus; navigate: (path: string) => void }) {
-  const workspaceName = useWorkspaceName()
   return (
     <div className="px-3 py-2 rounded hover:bg-gray-50">
       <div className="flex items-baseline gap-2">
@@ -254,7 +251,7 @@ function FocusRow({ item, navigate }: { item: DerivedFocus; navigate: (path: str
           {item.loops.map((loop) => (
             <li key={loop.id}>
               <button
-                onClick={() => navigate(`/${workspaceName}/loop/${loop.id}`)}
+                onClick={() => navigate(`/loop/${loop.id}`)}
                 className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-900"
               >
                 <span>⑂</span>
