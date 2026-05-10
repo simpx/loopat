@@ -158,4 +158,23 @@ Already filtered (commit `41f0153`) — empty assistant placeholders no longer r
 | `~/.loopat/loops/<id>/messages.jsonl` | Persistent transcript per loop. Replays on attach. |
 | `/api/health` | Sanity check — current workspace + LOOPAT_HOME |
 
-`LOOPAT_DEBUG_SPAWN=1` adds one log line per child spawn (full bwrap argv).
+**Verbose logging**
+
+```sh
+LOOPAT_DEBUG=1 bun run dev
+```
+
+prints, per loop session:
+- resolved provider / model / baseUrl / apiKey-length
+- full bwrap argv (one line per spawn)
+- spawned PID
+- every line of child stderr (`[sdk:<id>:stderr] ...`)
+- every line of child stdout (capped, `[sdk:<id>:stdout] ...`)
+- every SDK message type passing through (`[sdk:<id>] msg <type>`)
+- exit code + signal
+
+Plus, **always** (even without `LOOPAT_DEBUG`), child stderr is teed to `~/.loopat/loops/<id>/stderr.log`. So even if the terminal eats output (bun's filter multiplexer truncates, paste tools elide, etc.), this file has the full unfiltered text. After a code-1 exit the server log points at this file:
+
+```
+[sdk:abcd1234] child exited code=1; full stderr at /home/alice/.loopat/loops/<id>/stderr.log
+```
