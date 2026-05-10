@@ -267,16 +267,19 @@ app.get(
         await attachTerm(id, ws)
       },
       onMessage(event, ws) {
-        if (!canWrite) {
-          try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
-          return
-        }
         try {
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
           const msg = JSON.parse(data)
-          if (msg?.type === "data" && typeof msg.data === "string") writeTerm(id, msg.data)
-          else if (msg?.type === "resize" && typeof msg.cols === "number" && typeof msg.rows === "number")
+          // resize is harmless; allow anonymous so viewers don't trigger auth errors on connect
+          if (msg?.type === "resize" && typeof msg.cols === "number" && typeof msg.rows === "number") {
             resizeTerm(id, msg.cols, msg.rows)
+            return
+          }
+          if (!canWrite) {
+            try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
+            return
+          }
+          if (msg?.type === "data" && typeof msg.data === "string") writeTerm(id, msg.data)
         } catch (e) {
           console.error("term ws parse", e)
         }
