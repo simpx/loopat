@@ -52,7 +52,7 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 | var | default | use |
 |---|---|---|
 | `LOOPAT_HOME` | `~/.loopat` | data root (per-machine) |
-| `LOOPAT_WORKSPACE` | `loopat` | workspace name (subdir of `LOOPAT_HOME`) |
+| `LOOPAT_WORKSPACE` | auto | workspace name. If unset: pick the lone subdir of `LOOPAT_HOME` if there's exactly one; otherwise default to `loopat`. |
 | `LOOPAT_USER` | `$USER` | active driver name; also where `personal/` lives |
 | `PORT` | `7787` | server port |
 

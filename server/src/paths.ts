@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs"
 import { homedir, userInfo } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -10,10 +11,26 @@ const __DIRNAME = dirname(fileURLToPath(import.meta.url))
 export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
 export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
-// Workspace + user are env-overridable so a fresh machine "just works":
-//   LOOPAT_WORKSPACE=foo LOOPAT_USER=alice bun run dev
-// otherwise: WORKSPACE defaults to "loopat", ME defaults to $USER (OS account).
-export const WORKSPACE = process.env.LOOPAT_WORKSPACE ?? "loopat"
+/**
+ * Resolve workspace name (the subdir of LOOPAT_HOME this server runs against).
+ *
+ * Order:
+ *   1. `LOOPAT_WORKSPACE` env — explicit override
+ *   2. If LOOPAT_HOME has exactly one workspace subdir, use that. So a single
+ *      installation "just works" regardless of what the user named it.
+ *   3. Fallback: "loopat" — created on bootstrap.
+ */
+function resolveWorkspaceName(): string {
+  if (process.env.LOOPAT_WORKSPACE) return process.env.LOOPAT_WORKSPACE
+  try {
+    const entries = readdirSync(LOOPAT_HOME, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+    if (entries.length === 1) return entries[0].name
+  } catch {}
+  return "loopat"
+}
+
+export const WORKSPACE = resolveWorkspaceName()
 export const ME = process.env.LOOPAT_USER ?? process.env.USER ?? userInfo().username ?? "user"
 
 export const workspaceDir = () => join(LOOPAT_HOME, WORKSPACE)
