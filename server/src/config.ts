@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { workspaceDir, workspaceTeamClaudeJsonPath } from "./paths"
@@ -101,17 +101,23 @@ const TEMPLATE: WorkspaceConfig = {
 export const configPath = () => join(workspaceDir(), "config.json")
 
 let cached: WorkspaceConfig | null = null
+let cachedMtimeMs = 0
 
 export async function loadConfig(): Promise<WorkspaceConfig> {
-  if (cached) return cached
   const path = configPath()
   if (!existsSync(path)) {
     await mkdir(workspaceDir(), { recursive: true })
     await writeFile(path, JSON.stringify(TEMPLATE, null, 2) + "\n")
     console.warn(`[loopat] config: created template at ${path} — fill in apiKey then restart`)
     cached = TEMPLATE
+    cachedMtimeMs = statSync(path).mtimeMs
     return cached
   }
+  // Re-read when mtime changes so edits to config.json (apiKey rotation,
+  // model swap, provider switch) take effect on the next loop attach
+  // without needing to restart the server.
+  const mtimeMs = statSync(path).mtimeMs
+  if (cached && mtimeMs === cachedMtimeMs) return cached
   const raw = await readFile(path, "utf8")
   const parsed = JSON.parse(raw) as WorkspaceConfig
   if (!parsed.providers || typeof parsed.providers !== "object") {
@@ -121,6 +127,7 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
     throw new Error(`config.json: default "${parsed.default}" not in providers`)
   }
   cached = parsed
+  cachedMtimeMs = mtimeMs
   return cached
 }
 
