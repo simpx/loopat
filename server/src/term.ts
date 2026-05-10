@@ -1,6 +1,7 @@
 import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { buildOuterBwrapArgs } from "./outer-sandbox"
+import { getLoop } from "./loops"
 
 type Term = {
   proc: IPty
@@ -21,9 +22,11 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     // /loop/<id>, /context/*, /personal). Wrap inner shell with `script` so
     // it gets a fresh controlling tty (without this, the bash-in-bash chain
     // strips tty control).
+    const meta = await getLoop(loopId)
+    if (!meta) throw new Error(`loop ${loopId} not found`)
     const innerShell = process.env.SHELL ?? "/bin/bash"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
-    const bwrapArgs = await buildOuterBwrapArgs(loopId, { TERM: "xterm-256color" })
+    const bwrapArgs = await buildOuterBwrapArgs(loopId, meta.createdBy, { TERM: "xterm-256color" })
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
     const proc = spawn("bwrap", fullArgs, {
       name: "xterm-256color",
