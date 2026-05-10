@@ -1,9 +1,10 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir } from "node:fs/promises"
+import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopHistoryPath } from "./paths"
+import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, getActiveProvider } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
@@ -12,6 +13,20 @@ import { spawn as nodeSpawn } from "node:child_process"
 import { buildOuterBwrapArgs, V_LOOP, V_LOOP_CLAUDE } from "./outer-sandbox"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
+const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
+
+function maskEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue
+    if (/key|token|secret|password/i.test(k)) {
+      out[k] = v ? `<set len=${v.length}>` : "<empty>"
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
 
 function pushIterable<T>() {
   const queue: T[] = []
@@ -124,6 +139,12 @@ class LoopSession {
       ANTHROPIC_BASE_URL: provider.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
     })
+    if (DEBUG) {
+      const tag = loopId.slice(0, 8)
+      console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
+      console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
+      console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${CLAUDE_BINARY}`)
+    }
 
     this.q = query({
       prompt: this.input.iter,
@@ -154,23 +175,63 @@ class LoopSession {
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
           const fullArgs = [...bwrapBase, "--", command, ...args]
           const tag = loopId.slice(0, 8)
-          if (process.env.LOOPAT_DEBUG_SPAWN) {
-            console.error(`[sdk:${tag}] spawn: bwrap ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`)
+          // Always tee stderr to a per-loop file so it survives terminal
+          // truncation (bun --filter, tools that elide). Path also printed
+          // on non-zero exit.
+          mkdirSync(loopDir(loopId), { recursive: true })
+          const stderrLogPath = join(loopDir(loopId), "stderr.log")
+          const stderrFile = createWriteStream(stderrLogPath, { flags: "a" })
+          stderrFile.write(`\n=== ${new Date().toISOString()} spawn ===\n`)
+          stderrFile.write(`binary: ${command}\n`)
+          stderrFile.write(`bwrap argc: ${fullArgs.length}\n`)
+          if (DEBUG) {
+            const argvLine = `bwrap ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`
+            console.error(`[sdk:${tag}] binary: ${command}`)
+            console.error(`[sdk:${tag}] spawn cmd: ${argvLine}`)
+            stderrFile.write(`argv: ${argvLine}\n`)
           }
+
           const proc = nodeSpawn("bwrap", fullArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             signal,
           })
-          // surface bwrap / claude stderr directly so spawn failures are visible
-          // in `bun run dev` output (the SDK's own `stderr` cb only catches what
-          // the SDK explicitly forwards).
+
+          if (DEBUG) {
+            console.error(`[sdk:${tag}] spawned pid=${proc.pid}`)
+          }
+          proc.on("error", (e) => {
+            console.error(`[sdk:${tag}] spawn error:`, e?.message ?? e)
+            stderrFile.write(`spawn error: ${e?.message ?? e}\n`)
+          })
+
+          // pipe stderr to file (always) and to console (always, lossy if
+          // terminal eats it, lossless via the file).
           proc.stderr?.on("data", (chunk: Buffer) => {
-            for (const line of chunk.toString("utf8").split("\n")) {
+            stderrFile.write(chunk)
+            const text = chunk.toString("utf8")
+            for (const line of text.split("\n")) {
               if (line.trim()) console.error(`[sdk:${tag}:stderr] ${line}`)
             }
           })
+
+          if (DEBUG) {
+            // mirror stdout too — useful for seeing the SDK protocol if the
+            // SDK itself isn't surfacing what came back. Capped to avoid
+            // flooding when chat is healthy.
+            proc.stdout?.on("data", (chunk: Buffer) => {
+              const s = chunk.toString("utf8")
+              const head = s.length > 400 ? s.slice(0, 400) + `…+${s.length - 400}b` : s
+              for (const line of head.split("\n")) {
+                if (line.trim()) console.error(`[sdk:${tag}:stdout] ${line}`)
+              }
+            })
+          }
+
           proc.on("exit", (code, sig) => {
+            stderrFile.end(`=== exit code=${code} sig=${sig ?? ""} ===\n`)
             if (code !== 0 && code !== null) {
+              console.error(`[sdk:${tag}] child exited code=${code}${sig ? ` sig=${sig}` : ""}; full stderr at ${stderrLogPath}`)
+            } else if (DEBUG) {
               console.error(`[sdk:${tag}] child exited code=${code}${sig ? ` sig=${sig}` : ""}`)
             }
           })
@@ -185,8 +246,14 @@ class LoopSession {
   }
 
   private async consume(q: Query) {
+    const tag = this.id.slice(0, 8)
     try {
       for await (const msg of q) {
+        if (DEBUG) {
+          const subtype = (msg as any).subtype ? `/${(msg as any).subtype}` : ""
+          const event = (msg as any).event?.type ? ` event=${(msg as any).event.type}` : ""
+          console.error(`[sdk:${tag}] msg ${msg.type}${subtype}${event}`)
+        }
         // ephemeral live-feed events: don't persist or replay; just broadcast
         // so already-attached clients see the streaming.
         const ephemeral = msg.type === "stream_event" || msg.type === "tool_progress"
@@ -197,6 +264,8 @@ class LoopSession {
         this.broadcast(msg)
       }
     } catch (e: any) {
+      console.error(`[sdk:${tag}] consume error:`, e?.message ?? e)
+      if (DEBUG && e?.stack) console.error(e.stack)
       const err = { type: "error", message: e?.message ?? String(e) }
       this.history.push(err as any)
       this.persist(err)
