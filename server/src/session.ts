@@ -158,6 +158,7 @@ class LoopSession {
         },
         model: provider.model,
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
+        mcpServers: cfg.mcpServers,
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         permissionMode: "bypassPermissions",
