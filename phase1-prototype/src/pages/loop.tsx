@@ -32,7 +32,6 @@ import {
   syncMount,
   chats,
   focusFile,
-  setChatActive,
   type CreateLoopOpts,
 } from "../state"
 import { REPOS, VAULT_DOCS, flattenVaultFiles, type DocNode } from "./context"
@@ -455,10 +454,13 @@ function LoopHeader(props: {
             return (
               <button
                 type="button"
-                onClick={() => {
-                  setChatActive(mount.id)
-                  navigate("/chat")
-                }}
+                onClick={() =>
+                  navigate(
+                    mount.id.startsWith("dm-")
+                      ? `/chat/dm/${mount.id.slice(3)}`
+                      : `/chat/${mount.id}`,
+                  )
+                }
                 title={`${display} ingested up to msg #${mount.upTo} · click to open`}
                 class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 hover:bg-gray-200 text-[11px]"
               >
