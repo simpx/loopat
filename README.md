@@ -65,3 +65,7 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 ## Sandbox
 
 Each loop runs in a bwrap mount namespace with a virtualized fs view (`/loop/<id>`, `/context/*`, `/personal/`). See [docs/sandbox.md](docs/sandbox.md) and `$LOOPAT_HOME/context/knowledge/loopat/CLAUDE.md`.
+
+## Troubleshooting
+
+If chat doesn't start or you see "Claude code process exited with code 1", see [docs/troubleshoot.md](docs/troubleshoot.md).
