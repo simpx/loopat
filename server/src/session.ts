@@ -162,11 +162,11 @@ class LoopSession {
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        // Read user-tier settings.json from CLAUDE_CONFIG_DIR — that's where
-        // we wrote autoMemoryDirectory: /personal/memory. SDK's auto-memory
-        // recall will then scan the virtual path (which the outer bwrap maps
-        // to the real personal/<user>/memory/).
-        settingSources: ["user"],
+        // user-tier: read autoMemoryDirectory: /personal/memory from
+        // CLAUDE_CONFIG_DIR/settings.json (SDK auto-memory uses that path).
+        // project-tier: auto-load <workdir>/CLAUDE.md so per-repo conventions
+        // (e.g. the project's own CLAUDE.md) layer on top of platform doctrine.
+        settingSources: ["user", "project"],
         // Inner SDK sandbox disabled — outer bwrap (single layer) wraps the
         // CLI process itself; bash subprocesses inherit the same namespace.
         // No nested sandbox needed.
