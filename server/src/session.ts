@@ -134,7 +134,7 @@ class LoopSession {
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
-    const bwrapBase = await buildOuterBwrapArgs(loopId, {
+    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, {
       ANTHROPIC_API_KEY: provider.apiKey,
       ANTHROPIC_BASE_URL: provider.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),

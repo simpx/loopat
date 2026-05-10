@@ -15,7 +15,6 @@ import { Editor } from "../Editor"
 import { Terminal } from "../Terminal"
 
 type RightMode = "info" | "workdir" | "editor" | "terminal"
-const ME = "simpx"
 
 export function LoopPage() {
   const { id } = useParams<{ id: string }>()
@@ -93,7 +92,7 @@ function LoopsList({ currentId }: { currentId: string }) {
                 <div className="text-[13px] text-gray-900 truncate">{loop.title}</div>
                 <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
                   <span className="text-gray-400 font-mono text-[10px]">‹›</span>
-                  <span>{ME}</span>
+                  <span>{loop.createdBy}</span>
                   <span>·</span>
                   <span className="font-mono">{loop.id.slice(0, 6)}</span>
                 </div>
@@ -216,7 +215,7 @@ function LoopHeader({
         <span className="text-[15px] font-medium text-gray-900">{meta.title}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         <span className="text-xs text-gray-500">
-          driver: <span className="text-gray-900">{ME}</span>
+          driver: <span className="text-gray-900">{meta.createdBy}</span>
         </span>
         <span
           className={
@@ -350,13 +349,15 @@ function RightPanel({
 }
 
 function InfoPanel({ meta }: { meta: LoopMeta }) {
+  const ws = useWorkspace()
+  const isMine = ws.currentUser?.id === meta.createdBy
   return (
     <div className="flex-1 min-h-0 overflow-auto px-5 py-4 text-[13px] text-gray-900">
       <Section label="basics">
         <Row label="title" value={meta.title} />
         <Row label="created" value={new Date(meta.createdAt).toLocaleString()} />
         <Row label="status" value="active" />
-        <Row label="driver" value={`${ME} (you)`} />
+        <Row label="driver" value={isMine ? `${meta.createdBy} (you)` : meta.createdBy} />
       </Section>
       <Section label="workdir">
         <Row label="id" value={meta.id} mono />
@@ -366,7 +367,7 @@ function InfoPanel({ meta }: { meta: LoopMeta }) {
       <Section label="context">
         <Row label="knowledge" value="all (ro)" />
         <Row label="notes" value="all (rw)" />
-        <Row label="personal" value="simpx (rw)" />
+        <Row label="personal" value={`${meta.createdBy} (rw)`} />
       </Section>
     </div>
   )

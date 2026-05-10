@@ -1,4 +1,4 @@
-import { homedir, userInfo } from "node:os"
+import { homedir } from "node:os"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -17,9 +17,9 @@ export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
 export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
 export const WORKSPACE = basename(LOOPAT_HOME).replace(/^\.+/, "") || "loopat"
-export const ME = process.env.LOOPAT_USER ?? process.env.USER ?? userInfo().username ?? "user"
 
 export const workspaceDir = () => LOOPAT_HOME
+export const usersPath = () => join(LOOPAT_HOME, "users.json")
 export const loopsDir = () => join(LOOPAT_HOME, "loops")
 export const workspaceContextDir = () => join(LOOPAT_HOME, "context")
 export const workspaceKnowledgeDir = () => join(workspaceContextDir(), "knowledge")

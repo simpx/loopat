@@ -1,6 +1,6 @@
 import { readdir, lstat, realpath } from "node:fs/promises"
 import { join } from "node:path"
-import { personalDir, ME } from "./paths"
+import { personalDir } from "./paths"
 
 /**
  * Recursively walk personal/<user>/ for symlinks and return resolved targets.
@@ -12,8 +12,8 @@ import { personalDir, ME } from "./paths"
  *
  * See memory: project_loop_dir_is_sandbox.md
  */
-export async function resolvePersonalDeps(): Promise<string[]> {
-  const root = personalDir(ME)
+export async function resolvePersonalDeps(user: string): Promise<string[]> {
+  const root = personalDir(user)
   const out: string[] = []
 
   async function walk(dir: string): Promise<void> {
