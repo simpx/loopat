@@ -21,6 +21,24 @@ export type RepoSpec = {
 }
 
 /**
+ * Host -> sandbox bind, docker -v style. `~` and `$VAR` expand in both fields.
+ * `dst` defaults to expanded `src`. `rw` defaults to false (ro-bind). Missing
+ * source is silently skipped (uses bwrap *-bind-try).
+ */
+export type SandboxMount = {
+  src: string
+  dst?: string
+  rw?: boolean
+}
+
+export type SandboxConfig = {
+  /** Extra binds from host into sandbox. */
+  mounts?: SandboxMount[]
+  /** Dirs prepended to PATH inside sandbox (after `~`/`$VAR` expansion). */
+  path?: string[]
+}
+
+/**
  * config.json is the workspace's self-describing manifest. Hand this file
  * (with apiKey + git URLs filled in) to a clean machine and bootstrap can
  * reconstruct the workspace: clone knowledge/notes/repos from remotes,
@@ -32,6 +50,7 @@ export type WorkspaceConfig = {
   repos?: RepoSpec[]
   default: string
   providers: Record<string, ProviderConfig>
+  sandbox?: SandboxConfig
 }
 
 const TEMPLATE: WorkspaceConfig = {
