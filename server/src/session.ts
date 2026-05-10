@@ -153,10 +153,28 @@ class LoopSession {
         // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
           const fullArgs = [...bwrapBase, "--", command, ...args]
-          return nodeSpawn("bwrap", fullArgs, {
+          const tag = loopId.slice(0, 8)
+          if (process.env.LOOPAT_DEBUG_SPAWN) {
+            console.error(`[sdk:${tag}] spawn: bwrap ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`)
+          }
+          const proc = nodeSpawn("bwrap", fullArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             signal,
-          }) as any
+          })
+          // surface bwrap / claude stderr directly so spawn failures are visible
+          // in `bun run dev` output (the SDK's own `stderr` cb only catches what
+          // the SDK explicitly forwards).
+          proc.stderr?.on("data", (chunk: Buffer) => {
+            for (const line of chunk.toString("utf8").split("\n")) {
+              if (line.trim()) console.error(`[sdk:${tag}:stderr] ${line}`)
+            }
+          })
+          proc.on("exit", (code, sig) => {
+            if (code !== 0 && code !== null) {
+              console.error(`[sdk:${tag}] child exited code=${code}${sig ? ` sig=${sig}` : ""}`)
+            }
+          })
+          return proc as any
         },
         // Stream text deltas + tool progress to the UI for live visibility.
         includePartialMessages: true,
