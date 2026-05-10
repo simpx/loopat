@@ -12,8 +12,8 @@ export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
 // Workspace + user are env-overridable so a fresh machine "just works":
 //   LOOPAT_WORKSPACE=foo LOOPAT_USER=alice bun run dev
-// otherwise: WORKSPACE defaults to "1001", ME defaults to $USER (OS account).
-export const WORKSPACE = process.env.LOOPAT_WORKSPACE ?? "1001"
+// otherwise: WORKSPACE defaults to "loopat", ME defaults to $USER (OS account).
+export const WORKSPACE = process.env.LOOPAT_WORKSPACE ?? "loopat"
 export const ME = process.env.LOOPAT_USER ?? process.env.USER ?? userInfo().username ?? "user"
 
 export const workspaceDir = () => join(LOOPAT_HOME, WORKSPACE)
@@ -37,4 +37,7 @@ export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl
 
 export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
 export const teamMemoryDir = () => join(workspaceNotesDir(), "memory")
-export const workspaceDoctrinePath = () => join(workspaceDir(), "CLAUDE.md")
+// doctrine lives inside knowledge as `loopat/CLAUDE.md` — it IS knowledge,
+// versioned + cloned along with the rest of the team's distilled docs.
+export const workspaceKnowledgeLoopatDir = () => join(workspaceKnowledgeDir(), "loopat")
+export const workspaceDoctrinePath = () => join(workspaceKnowledgeLoopatDir(), "CLAUDE.md")

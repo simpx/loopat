@@ -53,7 +53,7 @@ PTY 和 Claude SDK 走**同一个** `buildOuterBwrapArgs(loopId)`，所以两者
 | host machine | 1 | 全员 |
 | loopat server 进程（Bun） | 1 | 全员 |
 | port 7787（HTTP+WS） | 1 | 全员 |
-| workspace `1001` | 1（MVP）| workspace member |
+| workspace `loopat` | 1（MVP）| workspace member |
 | LoopSession 内存对象 | N（每 loop 一个）| 同 loop 所有 ws subscriber |
 | Claude CLI 进程 | 0 或 1 / loop | 同 loop 全员 |
 | outer bwrap (Claude) | 跟 CLI 同生命周期 | 同 loop 全员 |
@@ -161,7 +161,7 @@ Claude 在 sandbox 里看到的：
 
 例：
 ```sh
-ln -s ~/.ssh ~/.loopat/1001/personal/simpx/secrets/.ssh
+ln -s ~/.ssh ~/.loopat/loopat/personal/simpx/secrets/.ssh
 ```
 之后沙箱里：
 - `/personal/secrets/.ssh` 可见（因为 `/personal` 已 bind）

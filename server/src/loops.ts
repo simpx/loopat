@@ -17,6 +17,7 @@ import {
   loopMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
+  workspaceKnowledgeLoopatDir,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
@@ -27,6 +28,7 @@ import {
   TEMPLATES_DIR,
 } from "./paths"
 import { existsSync as existsSyncBase } from "node:fs"
+import { loadConfig } from "./config"
 
 const execFileP = promisify(execFile)
 
@@ -62,13 +64,50 @@ async function gitInitIfMissing(dir: string) {
   }
 }
 
+async function isEmptyOrMissing(dir: string): Promise<boolean> {
+  if (!existsSyncBase(dir)) return true
+  try {
+    const names = await readdir(dir)
+    return names.length === 0
+  } catch {
+    return true
+  }
+}
+
+/**
+ * If the dir is empty / missing AND a clone URL is set, clone it. On any
+ * failure (network, auth, etc.) fall through to mkdir so the workspace can
+ * still come up. Returns whether the dir came from a remote clone — caller
+ * uses that to decide whether to git init locally.
+ */
+async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ cloned: boolean }> {
+  if (url && (await isEmptyOrMissing(dir))) {
+    try {
+      // remove the empty placeholder if it exists, git clone wants to create
+      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      await mkdir(join(dir, ".."), { recursive: true })
+      await execFileP("git", ["clone", "--", url, dir])
+      console.log(`[loopat] cloned ${url} → ${dir}`)
+      return { cloned: true }
+    } catch (e: any) {
+      console.warn(`[loopat] clone failed (${url}): ${e?.stderr ?? e?.message ?? e} — falling back to empty dir`)
+    }
+  }
+  await mkdir(dir, { recursive: true })
+  return { cloned: false }
+}
+
 export async function ensureWorkspaceDirs() {
   await mkdir(workspaceDir(), { recursive: true })
   await mkdir(loopsDir(), { recursive: true })
-  await mkdir(workspaceKnowledgeDir(), { recursive: true })
-  await mkdir(workspaceNotesDir(), { recursive: true })
   await mkdir(workspaceReposDir(), { recursive: true })
   await mkdir(personalDir(ME), { recursive: true })
+
+  // knowledge / notes: clone from config'd remote if present, else local mkdir
+  const cfg = await loadConfig()
+  const k = await cloneOrMkdir(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)
+  const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
+
   // memory dirs + stub indices (idempotent)
   const pm = personalMemoryDir(ME)
   const tm = teamMemoryDir()
@@ -78,17 +117,24 @@ export async function ensureWorkspaceDirs() {
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
-  // doctrine (workspace-level CLAUDE.md): copy template if missing
+
+  // doctrine lives inside knowledge as `loopat/CLAUDE.md` — copy the bundled
+  // template if not already present (a cloned knowledge repo with its own
+  // CLAUDE.md wins; otherwise we seed from server/templates/).
   const doctrine = workspaceDoctrinePath()
   if (!existsSyncBase(doctrine)) {
+    await mkdir(workspaceKnowledgeLoopatDir(), { recursive: true })
     const tpl = join(TEMPLATES_DIR, "CLAUDE.md")
     if (existsSyncBase(tpl)) await copyFile(tpl, doctrine)
     else console.warn(`[loopat] doctrine template missing at ${tpl}`)
   }
-  // local auto-commit story: notes + personal init'd as repos so vaultWrite
-  // can stamp commits. knowledge/ stays plain (read-only by Claude convention).
-  await gitInitIfMissing(workspaceNotesDir())
+
+  // git init notes + personal so vaultWrite auto-commits work locally. Skip
+  // notes if we cloned (already a repo). Knowledge stays plain unless cloned.
+  if (!n.cloned) await gitInitIfMissing(workspaceNotesDir())
   await gitInitIfMissing(personalDir(ME))
+  // suppress unused warning for k.cloned (kept for symmetry / future use)
+  void k
 }
 
 async function ensureSymlink(link: string, target: string) {
