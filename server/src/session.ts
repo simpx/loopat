@@ -182,13 +182,14 @@ class LoopSession {
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         canUseTool: async (toolName, input, { toolUseID, signal }) => {
-          // Only intercept AskUserQuestion — allow everything else immediately
+          // Only intercept AskUserQuestion — allow everything else immediately.
+          // SDK Zod schema requires `updatedInput` on allow (echo input back).
           if (toolName !== "AskUserQuestion") {
-            return { behavior: "allow" as const }
+            return { behavior: "allow" as const, updatedInput: input as Record<string, unknown> }
           }
           const questions = (input as any)?.questions
           if (!Array.isArray(questions) || questions.length === 0) {
-            return { behavior: "allow" as const }
+            return { behavior: "allow" as const, updatedInput: input as Record<string, unknown> }
           }
           // Broadcast questions to frontend and wait for answers.
           // Don't persist to history — questions are ephemeral and stale on replay.
