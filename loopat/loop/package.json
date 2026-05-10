@@ -1,0 +1,14 @@
+{
+  "name": "loopat-loop",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:server": "bun --cwd server run dev",
+    "dev:web": "bun --cwd web run dev"
+  }
+}
