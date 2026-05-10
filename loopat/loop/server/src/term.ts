@@ -1,7 +1,6 @@
 import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
-import { loopWorkdir } from "./paths"
-import { wrapForLoop } from "./sandbox"
+import { buildOuterBwrapArgs } from "./outer-sandbox"
 
 type Term = {
   proc: IPty
@@ -18,18 +17,18 @@ async function getOrSpawn(loopId: string): Promise<Term> {
   if (inflight) return inflight
 
   const p = (async () => {
-    const workdir = loopWorkdir(loopId)
+    // Outer bwrap argv (same shape as Claude CLI's outer sandbox — virtual
+    // /loop/<id>, /context/*, /personal). Wrap inner shell with `script` so
+    // it gets a fresh controlling tty (without this, the bash-in-bash chain
+    // strips tty control).
     const innerShell = process.env.SHELL ?? "/bin/bash"
-    // Wrap inner shell with `script` so it gets a fresh controlling tty.
-    // Without this, multiple `bash -c` layers from sandbox-runtime strip the
-    // tty; bash logs "cannot set terminal process group · no job control".
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
-    const wrappedCmd = await wrapForLoop(innerCmd, loopId)
-    const proc = spawn("/bin/bash", ["-c", wrappedCmd], {
+    const bwrapArgs = await buildOuterBwrapArgs(loopId, { TERM: "xterm-256color" })
+    const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
+    const proc = spawn("bwrap", fullArgs, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
-      cwd: workdir,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     })
     const t: Term = { proc, subscribers: new Set() }
