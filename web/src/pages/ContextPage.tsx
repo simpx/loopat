@@ -9,6 +9,7 @@
  *   - Save → auto-commit (server side)
  */
 import { NavLink, useParams, useNavigate } from "react-router-dom"
+import { useWorkspaceName } from "../App"
 import {
   vaultList,
   vaultFlatList,
@@ -40,6 +41,7 @@ const VALID = new Set<VaultId>(["knowledge", "notes", "personal", "repos"])
 
 export function ContextPage() {
   const { sub } = useParams<{ sub: string }>()
+  const workspaceName = useWorkspaceName()
   const active = (VALID.has(sub as VaultId) ? sub : "knowledge") as VaultId
 
   return (
@@ -48,7 +50,7 @@ export function ContextPage() {
         {SUBS.map((s) => (
           <NavLink
             key={s.id}
-            to={`/context/${s.id}`}
+            to={`/${workspaceName}/context/${s.id}`}
             className={({ isActive }) =>
               isActive
                 ? "h-7 px-2.5 rounded flex items-center gap-1.5 text-xs bg-gray-100 text-gray-900"
@@ -401,6 +403,7 @@ function DocView({
 }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
+  const workspaceName = useWorkspaceName()
   const [original, setOriginal] = useState("")
   const [draft, setDraft] = useState("")
   const [editing, setEditing] = useState(false)
@@ -456,12 +459,12 @@ function DocView({
 
   const startEditByLoop = async () => {
     const m = await ws.createLoop({ title: `edit ${vault}/${path}` })
-    navigate(`/loop/${m.id}`)
+    navigate(`/${workspaceName}/loop/${m.id}`)
   }
 
   const startDistill = async () => {
     const m = await ws.createLoop({ title: `distill ${path} → knowledge` })
-    navigate(`/loop/${m.id}`)
+    navigate(`/${workspaceName}/loop/${m.id}`)
   }
 
   // wikilink target → file path: try `<target>.md` in same dir as current path,
@@ -669,6 +672,7 @@ function NewFileDialog({
 function ReposPane() {
   const ws = useWorkspace()
   const navigate = useNavigate()
+  const workspaceName = useWorkspaceName()
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [detail, setDetail] = useState<RepoDetail | null>(null)
@@ -688,7 +692,7 @@ function ReposPane() {
   const onSpawnLoop = async () => {
     if (!selectedName) return
     const m = await ws.createLoop({ title: `${selectedName} loop`, repo: selectedName })
-    navigate(`/loop/${m.id}`)
+    navigate(`/${workspaceName}/loop/${m.id}`)
   }
 
   return (
@@ -747,6 +751,7 @@ function ReposPane() {
 
 function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => void }) {
   const navigate = useNavigate()
+  const workspaceName = useWorkspaceName()
   return (
     <>
       <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
@@ -772,7 +777,7 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
                 {repo.recentLoops.map((loop) => (
                   <li key={loop.id}>
                     <button
-                      onClick={() => navigate(`/loop/${loop.id}`)}
+                      onClick={() => navigate(`/${workspaceName}/loop/${loop.id}`)}
                       className="w-full px-3 py-2 rounded hover:bg-gray-100 flex items-center gap-3 text-[13px] text-left"
                     >
                       <span className="text-gray-500">⑂</span>
