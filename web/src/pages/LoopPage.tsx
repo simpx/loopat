@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime } from "../useLoopRuntime"
@@ -45,9 +46,30 @@ function LoopsList({ currentId }: { currentId: string }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loopat:loopsList:collapsed") === "1")
 
   // single-user MVP — "我的" / "全部" filter both show everything; RFD always 0
   const filtered = ws.loops
+
+  const setCollapsedPersist = (v: boolean) => {
+    setCollapsed(v)
+    localStorage.setItem("loopat:loopsList:collapsed", v ? "1" : "0")
+  }
+
+  if (collapsed) {
+    return (
+      <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+        <button
+          type="button"
+          onClick={() => setCollapsedPersist(false)}
+          className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+          title="expand sidebar"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      </aside>
+    )
+  }
 
   return (
     <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
@@ -71,6 +93,14 @@ function LoopsList({ currentId }: { currentId: string }) {
           </button>
         ))}
         <span className="text-[11px] text-gray-400 ml-auto pr-1">{filtered.length}</span>
+        <button
+          type="button"
+          onClick={() => setCollapsedPersist(true)}
+          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+          title="collapse sidebar"
+        >
+          <PanelLeftClose size={14} />
+        </button>
       </div>
       <div className="flex-1 min-h-0 overflow-auto py-2">
         {filtered.map((loop) => {
