@@ -14,7 +14,8 @@ import {
   loopContextNotes,
   loopContextPersonal,
 } from "./paths"
-import { loadConfig, getActiveProvider, configPath } from "./config"
+import { loadConfig } from "./config"
+import { printBootstrapBanner } from "./bootstrap"
 
 const { upgradeWebSocket, websocket } = createBunWebSocket()
 
@@ -238,16 +239,8 @@ const port = Number(process.env.PORT ?? 7787)
 await ensureWorkspaceDirs()
 const backfilled = await backfillAllMounts()
 const cfg = await loadConfig()
-const { name: activeName, provider: activeProvider } = getActiveProvider(cfg)
-console.log(`[loopat] server on http://localhost:${port}`)
-console.log(`[loopat] data root: ${LOOPAT_HOME}`)
-console.log(`[loopat] active workspace: ${WORKSPACE}`)
-console.log(`[loopat] config: ${configPath()}`)
-console.log(`[loopat] active provider: ${activeName} (model=${activeProvider.model}, baseUrl=${activeProvider.baseUrl})`)
-if (!activeProvider.apiKey) {
-  console.warn(`[loopat] WARNING: provider "${activeName}" has empty apiKey — loops will fail until you fill it in ${configPath()}`)
-}
-console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
+printBootstrapBanner(cfg)
+if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
 
 export default {
   port,

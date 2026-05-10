@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 
 type RawMsg = {
@@ -17,6 +17,70 @@ let counter = 0
 function freshId(prefix: string) {
   counter++
   return `${prefix}-${Date.now()}-${counter}`
+}
+
+/**
+ * Apply a SDKPartialAssistantMessage (`type: "stream_event"`) — text deltas
+ * and tool_use input json deltas — to the live assistant message keyed by
+ * uuid. Final SDKAssistantMessage with the same uuid replaces the partial
+ * later, so this is best-effort live preview.
+ */
+function handleStreamEvent(m: any, setRaw: React.Dispatch<React.SetStateAction<RawMsg[]>>) {
+  const uuid: string | undefined = m?.uuid
+  const ev = m?.event
+  if (!uuid || !ev) return
+
+  const upsert = (mutate: (msg: RawMsg) => RawMsg) => {
+    setRaw((prev) => {
+      const idx = prev.findIndex((x) => x.id === uuid)
+      if (idx < 0) {
+        return [...prev, mutate({ id: uuid, role: "assistant", content: [] })]
+      }
+      const out = prev.slice()
+      out[idx] = mutate(prev[idx])
+      return out
+    })
+  }
+
+  if (ev.type === "content_block_start") {
+    const idx: number = ev.index ?? 0
+    const cb = ev.content_block ?? {}
+    upsert((msg) => {
+      const content = msg.content.slice()
+      while (content.length <= idx) content.push({ type: "text", text: "" })
+      if (cb.type === "text") {
+        content[idx] = { type: "text", text: cb.text ?? "" }
+      } else if (cb.type === "tool_use") {
+        content[idx] = {
+          type: "tool_use",
+          id: cb.id,
+          name: cb.name,
+          input: cb.input ?? {},
+          _partial_json: "",
+        }
+      }
+      return { ...msg, content }
+    })
+  } else if (ev.type === "content_block_delta") {
+    const idx: number = ev.index ?? 0
+    const d = ev.delta
+    upsert((msg) => {
+      const content = msg.content.slice()
+      const cur = content[idx]
+      if (!cur) return msg
+      if (d?.type === "text_delta" && cur.type === "text") {
+        content[idx] = { ...cur, text: (cur.text ?? "") + (d.text ?? "") }
+      } else if (d?.type === "input_json_delta" && cur.type === "tool_use") {
+        const json = (cur._partial_json ?? "") + (d.partial_json ?? "")
+        let parsed = cur.input
+        try {
+          parsed = JSON.parse(json)
+        } catch {}
+        content[idx] = { ...cur, _partial_json: json, input: parsed }
+      }
+      return { ...msg, content }
+    })
+  }
 }
 
 function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
@@ -71,6 +135,12 @@ function convertMessage(raw: RawMsg) {
         args: b.input ?? {},
         result: r ? r.content : undefined,
         isError: r ? r.isError : undefined,
+        // surfaces a spinner in tool-fallback while result is missing
+        status: r
+          ? r.isError
+            ? { type: "incomplete", reason: "error" as const }
+            : { type: "complete" as const }
+          : { type: "running" as const },
       })
     }
   }
@@ -84,63 +154,107 @@ function convertMessage(raw: RawMsg) {
 export function useLoopRuntime(loopId: string | null) {
   const [raw, setRaw] = useState<RawMsg[]>([])
   const [connected, setConnected] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [running, setRunning] = useState(false)
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   const replayingRef = useRef(true)
+  const reconnectTimerRef = useRef<number | null>(null)
+  const attemptsRef = useRef(0)
+  const aliveRef = useRef(true)
 
   useEffect(() => {
     if (!loopId) return
-    setRaw([])
-    setRunning(false)
-    replayingRef.current = true
-    const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/loop/${loopId}`
-    const ws = new WebSocket(url)
-    wsRef.current = ws
+    aliveRef.current = true
 
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => {
-      setConnected(false)
+    const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/loop/${loopId}`
+
+    const connect = () => {
+      // server replays history on each connect — clear local buffer
+      setRaw([])
       setRunning(false)
-    }
-    ws.onerror = () => setConnected(false)
-    ws.onmessage = (e) => {
-      let m: any
-      try {
-        m = JSON.parse(e.data)
-      } catch {
-        return
+      replayingRef.current = true
+      const ws = new WebSocket(url)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setConnected(true)
+        setReconnecting(false)
+        attemptsRef.current = 0
       }
-      if (m?.type === "history_end") {
-        replayingRef.current = false
+      ws.onclose = () => {
+        setConnected(false)
         setRunning(false)
-        return
+        if (!aliveRef.current) return
+        const n = ++attemptsRef.current
+        // exp backoff capped at 30s: 500ms, 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
+        const delay = Math.min(30_000, 500 * 2 ** Math.min(n - 1, 6))
+        setReconnecting(true)
+        reconnectTimerRef.current = window.setTimeout(() => {
+          reconnectTimerRef.current = null
+          if (aliveRef.current) connect()
+        }, delay)
       }
-      if (m?.type === "viewers") {
-        setViewers(typeof m.count === "number" ? m.count : 0)
-        return
-      }
-      if (m?.type === "user" && m.message) {
-        setRaw((prev) => [...prev, { id: freshId("u"), role: "user", content: asContentArray(m.message.content) }])
-      } else if (m?.type === "assistant" && m.message?.content) {
-        setRaw((prev) => [...prev, { id: freshId("a"), role: "assistant", content: m.message.content }])
-      } else if (m?.type === "system" && m.subtype === "init") {
-        if (!replayingRef.current) setRunning(true)
-      } else if (m?.type === "result") {
-        if (!replayingRef.current) setRunning(false)
-      } else if (m?.type === "error") {
-        setRaw((prev) => [
-          ...prev,
-          { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
-        ])
-        if (!replayingRef.current) setRunning(false)
+      ws.onerror = () => setConnected(false)
+      ws.onmessage = (e) => {
+        let m: any
+        try {
+          m = JSON.parse(e.data)
+        } catch {
+          return
+        }
+        if (m?.type === "history_end") {
+          replayingRef.current = false
+          setRunning(false)
+          return
+        }
+        if (m?.type === "viewers") {
+          setViewers(typeof m.count === "number" ? m.count : 0)
+          return
+        }
+        if (m?.type === "user" && m.message) {
+          setRaw((prev) => [...prev, { id: freshId("u"), role: "user", content: asContentArray(m.message.content) }])
+        } else if (m?.type === "assistant" && m.message?.content) {
+          // upsert by uuid so the streaming partial gets replaced cleanly
+          const uuid: string = m.uuid ?? freshId("a")
+          setRaw((prev) => {
+            const idx = prev.findIndex((x) => x.id === uuid)
+            const full: RawMsg = { id: uuid, role: "assistant", content: m.message.content }
+            if (idx < 0) return [...prev, full]
+            const out = prev.slice()
+            out[idx] = full
+            return out
+          })
+        } else if (m?.type === "stream_event") {
+          handleStreamEvent(m, setRaw)
+        } else if (m?.type === "system" && m.subtype === "init") {
+          if (!replayingRef.current) setRunning(true)
+        } else if (m?.type === "result") {
+          if (!replayingRef.current) setRunning(false)
+        } else if (m?.type === "error") {
+          setRaw((prev) => [
+            ...prev,
+            { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
+          ])
+          if (!replayingRef.current) setRunning(false)
+        }
       }
     }
+
+    connect()
 
     return () => {
-      ws.close()
+      aliveRef.current = false
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current)
+        reconnectTimerRef.current = null
+      }
+      const ws = wsRef.current
       wsRef.current = null
+      if (ws) ws.close()
+      setReconnecting(false)
+      attemptsRef.current = 0
     }
   }, [loopId])
 
@@ -175,5 +289,5 @@ export function useLoopRuntime(loopId: string | null) {
     onCancel,
   })
 
-  return { runtime, connected, running, viewers, mounts, setMounts }
+  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts }
 }

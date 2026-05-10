@@ -157,6 +157,8 @@ class LoopSession {
             signal,
           }) as any
         },
+        // Stream text deltas + tool progress to the UI for live visibility.
+        includePartialMessages: true,
         ...(shouldContinue ? { continue: true } : {}),
       },
     })
@@ -166,8 +168,13 @@ class LoopSession {
   private async consume(q: Query) {
     try {
       for await (const msg of q) {
-        this.history.push(msg)
-        this.persist(msg)
+        // ephemeral live-feed events: don't persist or replay; just broadcast
+        // so already-attached clients see the streaming.
+        const ephemeral = msg.type === "stream_event" || msg.type === "tool_progress"
+        if (!ephemeral) {
+          this.history.push(msg)
+          this.persist(msg)
+        }
         this.broadcast(msg)
       }
     } catch (e: any) {

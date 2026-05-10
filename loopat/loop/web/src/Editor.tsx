@@ -1,12 +1,11 @@
 /**
  * Right-panel editor mode. Layout follows phase1-prototype:
- *   <body: textarea/CodeMirror/...>
+ *   <body: CodeMirror>
  *   <footer: path · unsaved · utf-8·LF>
- *
- * v5: textarea + monospace. Switch to CodeMirror later.
  */
 import { useEffect, useState } from "react"
 import { readFile, writeFile } from "./api"
+import { CodeEditor } from "./components/markdown/CodeEditor"
 
 export function Editor({ loopId, path }: { loopId: string; path: string | null }) {
   const [original, setOriginal] = useState("")
@@ -52,19 +51,22 @@ export function Editor({ loopId, path }: { loopId: string; path: string | null }
 
   return (
     <>
-      <div className="flex-1 min-h-0">
-        <textarea
-          value={loading ? "..." : draft}
-          onChange={(e) => setDraft(e.target.value)}
-          spellCheck={false}
-          className="w-full h-full p-3 text-[12px] font-mono leading-snug bg-white text-gray-900 outline-none resize-none border-0"
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-              e.preventDefault()
-              save()
-            }
-          }}
-        />
+      <div
+        className="flex-1 min-h-0"
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+            e.preventDefault()
+            save()
+          }
+        }}
+      >
+        {loading ? (
+          <div className="h-full w-full flex items-center justify-center text-[12px] text-gray-400">
+            loading…
+          </div>
+        ) : (
+          <CodeEditor path={path} value={draft} onChange={setDraft} />
+        )}
       </div>
       <div className="border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 flex items-center gap-3">
         <span className="truncate">{path}</span>

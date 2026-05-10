@@ -114,7 +114,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 // ============================================================================
 
 function LoopMain({ meta }: { meta: LoopMeta }) {
-  const { runtime, connected, running, viewers } = useLoopRuntime(meta.id)
+  const { runtime, connected, reconnecting, running, viewers } = useLoopRuntime(meta.id)
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
@@ -145,6 +145,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           meta={meta}
           mounts={mounts}
           connected={connected}
+          reconnecting={reconnecting}
           running={running}
           viewers={viewers}
           rightOpen={rightOpen}
@@ -179,6 +180,7 @@ function LoopHeader({
   meta,
   mounts,
   connected,
+  reconnecting,
   running,
   viewers,
   rightOpen,
@@ -188,6 +190,7 @@ function LoopHeader({
   meta: LoopMeta
   mounts: ContextMount[]
   connected: boolean
+  reconnecting: boolean
   running: boolean
   viewers: number
   rightOpen: boolean
@@ -217,12 +220,26 @@ function LoopHeader({
         </span>
         <span
           className={
-            "text-[11px] " + (connected ? "text-emerald-600" : "text-red-500")
+            "text-[11px] " +
+            (connected
+              ? "text-emerald-600"
+              : reconnecting
+                ? "text-amber-500"
+                : "text-red-500")
           }
-          title={connected ? "ws connected" : "disconnected"}
+          title={
+            connected
+              ? "ws connected"
+              : reconnecting
+                ? "reconnecting…"
+                : "disconnected"
+          }
         >
           ●
         </span>
+        {!connected && reconnecting && (
+          <span className="text-[11px] text-amber-600">reconnecting…</span>
+        )}
         {running && <span className="text-[11px] text-blue-600">running</span>}
         {viewers > 1 && (
           <span
