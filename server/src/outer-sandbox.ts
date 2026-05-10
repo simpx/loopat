@@ -19,6 +19,7 @@
  */
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
+import { join } from "node:path"
 import {
   loopWorkdir,
   loopClaudeDir,
@@ -90,6 +91,15 @@ export async function buildOuterBwrapArgs(
   const skillsSrc = workspaceLoopatSkillsDir()
   if (existsSync(skillsSrc)) {
     args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
+  }
+
+  // Claude Code's OAuth credentials for MCP servers (coop / yuque / aone-* …)
+  // live at `~/.claude/.credentials.json` on the host. ro-bind into the
+  // sandbox's CLAUDE_CONFIG_DIR so MCPs that use OAuth flow reuse the host
+  // driver's tokens. Refresh-on-expiry will fail (ro), needs separate flow.
+  const credsSrc = join(home, ".claude", ".credentials.json")
+  if (existsSync(credsSrc)) {
+    args.push("--ro-bind", credsSrc, join(V_LOOP_CLAUDE(loopId), ".credentials.json"))
   }
 
   // repos: re-bind at the same host absolute path so worktree `.git` files
