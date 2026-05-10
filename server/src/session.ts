@@ -1,6 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
@@ -252,6 +253,7 @@ class LoopSession {
       type: "user",
       message: { role: "user", content: text },
       parent_tool_use_id: null,
+      uuid: randomUUID(),
     }
     this.history.push(userMsg)
     this.persist(userMsg)
