@@ -50,18 +50,20 @@ export default function Composer() {
 
       {/* Scroll-to-bottom button */}
       <ThreadPrimitive.ScrollToBottom asChild>
-        <button
+        <Button
           type="button"
-          className="absolute -top-12 left-1/2 z-10 -translate-x-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm transition-all hover:bg-gray-100 disabled:invisible"
+          variant="outline"
+          size="icon-sm"
+          className="absolute -top-12 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm disabled:invisible"
         >
           <ArrowDownIcon className="h-4 w-4 text-gray-500" />
-        </button>
+        </Button>
       </ThreadPrimitive.ScrollToBottom>
 
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="composer-shell"
-          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-200"
+          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-sky-300 focus-within:ring-1 focus-within:ring-sky-200"
         >
           <ComposerAttachments />
 
@@ -105,7 +107,7 @@ export default function Composer() {
                     type="button"
                     variant="default"
                     size="icon"
-                    className="h-8 w-8 rounded-lg bg-blue-600 hover:bg-blue-700"
+                    className="h-8 w-8 rounded-lg bg-sky-600 hover:bg-sky-700"
                     disabled={!hasInput}
                     aria-label="Send message"
                   >

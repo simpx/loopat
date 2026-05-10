@@ -1,9 +1,8 @@
-import { useState, type FC } from "react";
 import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { BrainIcon, CheckIcon, CopyIcon } from "lucide-react";
+import { BrainIcon } from "lucide-react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
 import {
@@ -12,11 +11,6 @@ import {
   ReasoningContent,
   ReasoningText,
 } from "@/components/assistant-ui/reasoning";
-import {
-  ToolGroupRoot,
-  ToolGroupTrigger,
-  ToolGroupContent,
-} from "@/components/assistant-ui/tool-group";
 
 function extractTime(messageId: string | undefined): string {
   if (!messageId) return "";
@@ -25,33 +19,6 @@ function extractTime(messageId: string | undefined): string {
     return new Date(parseInt(match[1], 10)).toLocaleTimeString();
   }
   return "";
-}
-
-function CopyButton({ content }: { content: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (!content || copied) return;
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="inline-flex items-center gap-0.5 text-gray-400 transition-colors hover:text-gray-600"
-      title="Copy message"
-    >
-      {copied ? (
-        <CheckIcon className="h-3 w-3 text-emerald-500" />
-      ) : (
-        <CopyIcon className="h-3 w-3" />
-      )}
-    </button>
-  );
 }
 
 /* ─── JSON detection helper ─── */
@@ -99,20 +66,6 @@ function JsonBlock({ content }: { content: string }) {
   }
 }
 
-/* ─── Tool group display ─── */
-
-const ToolGroupDisplay: FC<{ children: React.ReactNode }> = ({ children }) => {
-  return (
-    <ToolGroupRoot>
-      <ToolGroupTrigger
-        count={1}
-        active={false}
-      />
-      <ToolGroupContent>{children}</ToolGroupContent>
-    </ToolGroupRoot>
-  );
-};
-
 /* ─── Assistant message ─── */
 
 export default function AssistantMessage() {
@@ -133,8 +86,6 @@ export default function AssistantMessage() {
       groupBy={(part) => {
         if (part.type === "reasoning")
           return ["group-chainOfThought", "group-reasoning"];
-        if (part.type === "tool-call")
-          return ["group-chainOfThought", "group-tool"];
         return null;
       }}
     >
@@ -153,16 +104,6 @@ export default function AssistantMessage() {
               </ReasoningRoot>
             );
           }
-          case "group-tool":
-            return (
-              <ToolGroupRoot>
-                <ToolGroupTrigger
-                  count={part.indices.length}
-                  active={part.status.type === "running"}
-                />
-                <ToolGroupContent>{children}</ToolGroupContent>
-              </ToolGroupRoot>
-            );
           case "text": {
             const content = textContent;
             const jsonBlock = JsonBlock({ content });
@@ -211,11 +152,12 @@ export default function AssistantMessage() {
         {children}
       </div>
 
-      {/* Footer: copy + time */}
-      <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
-        <CopyButton content={textContent} />
-        {time && <span>{time}</span>}
-      </div>
+      {/* Footer: time */}
+      {time && (
+        <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
+          <span>{time}</span>
+        </div>
+      )}
     </MessagePrimitive.Root>
   );
 }
