@@ -27,6 +27,7 @@ import {
   workspaceLoopatSkillsDir,
   workspaceNotesDir,
   workspaceReposDir,
+  workspaceTeamClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
@@ -91,6 +92,14 @@ export async function buildOuterBwrapArgs(
   const skillsSrc = workspaceLoopatSkillsDir()
   if (existsSync(skillsSrc)) {
     args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
+  }
+
+  // team CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
+  // Code natively loads it as user-tier (settingSources includes "user").
+  // The platform doctrine (L2) is still injected via systemPrompt.append.
+  const teamClaudeMd = workspaceTeamClaudePath()
+  if (existsSync(teamClaudeMd)) {
+    args.push("--ro-bind", teamClaudeMd, join(V_LOOP_CLAUDE(loopId), "CLAUDE.md"))
   }
 
   // Claude Code's OAuth credentials for MCP servers (coop / yuque / aone-* …)
