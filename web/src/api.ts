@@ -6,6 +6,18 @@ export type LoopMeta = {
   branch?: string
 }
 
+let _workspaceCache: Promise<string> | null = null
+/** Server's current workspace name, fetched once and memoized. */
+export function getServerWorkspace(): Promise<string> {
+  if (!_workspaceCache) {
+    _workspaceCache = fetch("/api/health")
+      .then((r) => r.json())
+      .then((d) => (typeof d?.workspace === "string" ? d.workspace : "loopat"))
+      .catch(() => "loopat")
+  }
+  return _workspaceCache
+}
+
 export async function listLoops(): Promise<LoopMeta[]> {
   const r = await fetch("/api/loops")
   const j = await r.json()
