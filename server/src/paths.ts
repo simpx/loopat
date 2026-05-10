@@ -40,7 +40,10 @@ export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl
 
 export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
 export const teamMemoryDir = () => join(workspaceNotesDir(), "memory")
-// doctrine lives inside knowledge as `loopat/CLAUDE.md` — it IS knowledge,
-// versioned + cloned along with the rest of the team's distilled docs.
-export const workspaceKnowledgeLoopatDir = () => join(workspaceKnowledgeDir(), "loopat")
-export const workspaceDoctrinePath = () => join(workspaceKnowledgeLoopatDir(), "CLAUDE.md")
+// `.loopat/` is a reserved namespace under knowledge — platform-managed config
+// (doctrine, skills, …). Everything else under knowledge/ is team-owned.
+// Versioned + cloned along with the rest of the team's distilled docs.
+export const workspaceLoopatReservedDir = () => join(workspaceKnowledgeDir(), ".loopat")
+export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(), "claude")
+export const workspaceDoctrinePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
+export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")

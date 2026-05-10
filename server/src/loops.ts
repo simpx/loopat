@@ -16,7 +16,7 @@ import {
   loopMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
-  workspaceKnowledgeLoopatDir,
+  workspaceLoopatClaudeDir,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
@@ -130,12 +130,12 @@ export async function ensureWorkspaceDirs() {
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
 
-  // doctrine lives inside knowledge as `loopat/CLAUDE.md` — copy the bundled
-  // template if not already present (a cloned knowledge repo with its own
-  // CLAUDE.md wins; otherwise we seed from server/templates/).
+  // doctrine lives inside knowledge as `.loopat/claude/CLAUDE.md` — copy the
+  // bundled template if not already present (a cloned knowledge repo with its
+  // own CLAUDE.md wins; otherwise we seed from server/templates/).
   const doctrine = workspaceDoctrinePath()
   if (!existsSyncBase(doctrine)) {
-    await mkdir(workspaceKnowledgeLoopatDir(), { recursive: true })
+    await mkdir(workspaceLoopatClaudeDir(), { recursive: true })
     const tpl = join(TEMPLATES_DIR, "CLAUDE.md")
     if (existsSyncBase(tpl)) await copyFile(tpl, doctrine)
     else console.warn(`[loopat] doctrine template missing at ${tpl}`)
