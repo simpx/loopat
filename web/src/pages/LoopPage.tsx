@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
+import { useWorkspaceName } from "../App"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { Thread } from "@/components/assistant-ui/thread"
 import { useWorkspace } from "../ctx"
@@ -19,9 +20,10 @@ const ME = "simpx"
 
 export function LoopPage() {
   const { id } = useParams<{ id: string }>()
+  const workspaceName = useWorkspaceName()
   const ws = useWorkspace()
 
-  if (!id) return <Navigate to="/loop" replace />
+  if (!id) return <Navigate to={`/${workspaceName}/loop`} replace />
   const meta = ws.loops.find((l) => l.id === id)
   if (!meta) {
     return (
@@ -46,6 +48,7 @@ export function LoopPage() {
 function LoopsList({ currentId }: { currentId: string }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
+  const workspaceName = useWorkspaceName()
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
 
   // single-user MVP — "我的" / "全部" filter both show everything; RFD always 0
@@ -81,7 +84,7 @@ function LoopsList({ currentId }: { currentId: string }) {
             <button
               key={loop.id}
               type="button"
-              onClick={() => navigate(`/loop/${loop.id}`)}
+              onClick={() => navigate(`/${workspaceName}/loop/${loop.id}`)}
               className={
                 sel
                   ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
