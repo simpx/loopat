@@ -5,7 +5,7 @@ import { existsSync } from "node:fs"
 import { listLoops, createLoop, getLoop, loopExists, backfillAllMounts, ensureWorkspaceDirs } from "./loops"
 import { getSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
-import { vaultList, vaultRead, vaultWrite, vaultCreateFile, listRepos, readFocusData, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, readFocusData, type VaultId } from "./workspace"
 import { attachTerm, detachTerm, writeTerm, resizeTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -93,6 +93,9 @@ app.get("/api/workspace/files", async (c) => {
   const vault = c.req.query("vault") ?? ""
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
   const path = c.req.query("path") ?? ""
+  if (c.req.query("flat") === "1") {
+    return c.json({ entries: await vaultFlatList(vault as VaultId) })
+  }
   return c.json({ entries: await vaultList(vault as VaultId, path) })
 })
 
@@ -128,8 +131,26 @@ app.post("/api/workspace/file", async (c) => {
   return c.json({ ok: true })
 })
 
+app.get("/api/workspace/backlinks", async (c) => {
+  const vault = c.req.query("vault") ?? ""
+  if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
+  const path = c.req.query("path") ?? ""
+  if (!path) return c.json({ backlinks: [] })
+  return c.json({ backlinks: await vaultBacklinks(vault as VaultId, path) })
+})
+
 app.get("/api/workspace/repos", async (c) => {
   return c.json({ repos: await listRepos() })
+})
+
+app.get("/api/workspace/repo/:name", async (c) => {
+  const name = c.req.param("name") ?? ""
+  const detail = await readRepoDetail(name)
+  if (!detail) return c.json({ error: "not found" }, 404)
+  // recent loops on this repo
+  const loops = await listLoops()
+  const recent = loops.filter((l) => (l as any).repo === name).slice(0, 8)
+  return c.json({ ...detail, recentLoops: recent })
 })
 
 app.get("/api/workspace/focus", async (c) => {
