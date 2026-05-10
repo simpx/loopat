@@ -1,3 +1,5 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
 interface TokenUsagePieProps {
   used: number;
   total: number;
@@ -18,37 +20,44 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
   };
 
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-500">
-      <svg
-        width="24"
-        height="24"
-        viewBox="0 0 24 24"
-        className="-rotate-90 transform"
-      >
-        <circle
-          cx="12"
-          cy="12"
-          r={radius}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          className="text-gray-300"
-        />
-        <circle
-          cx="12"
-          cy="12"
-          r={radius}
-          fill="none"
-          stroke={getColor()}
-          strokeWidth="2"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-        />
-      </svg>
-      <span title={`${used.toLocaleString()} / ${total.toLocaleString()} tokens`}>
-        {percentage.toFixed(1)}%
-      </span>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            className="-rotate-90 transform"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className="text-gray-300"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r={radius}
+              fill="none"
+              stroke={getColor()}
+              strokeWidth="2"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              strokeLinecap="round"
+            />
+          </svg>
+          <span>
+            {percentage.toFixed(1)}%
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        {used.toLocaleString()} / {total.toLocaleString()} tokens
+      </TooltipContent>
+    </Tooltip>
   );
 }
