@@ -10,13 +10,14 @@ import { resolveClaudeBinary } from "./claude-binary"
 import { configPath, type WorkspaceConfig } from "./config"
 import {
   WORKSPACE,
-  ME,
+  usersPath,
   workspaceDir,
   workspaceDoctrinePath,
   workspaceKnowledgeDir,
   workspaceNotesDir,
   workspaceRepoDir,
 } from "./paths"
+import { listUsers } from "./auth"
 
 type Check = { ok: boolean; label: string; hint?: string }
 
@@ -77,13 +78,28 @@ function describeRepos(cfg: WorkspaceConfig): Check {
   return { ok: allOk, label: `repos:     ${parts.join(", ")}` }
 }
 
-export function printBootstrapBanner(cfg: WorkspaceConfig) {
+async function checkUsers(): Promise<Check> {
+  const path = usersPath()
+  if (!existsSync(path)) {
+    return { ok: true, label: `users:     (none yet — register on first visit)` }
+  }
+  try {
+    const users = await listUsers()
+    const ids = users.map((u) => u.id).join(", ") || "(empty)"
+    return { ok: true, label: `users:     ${users.length} (${ids})` }
+  } catch (e: any) {
+    return { ok: false, label: `users:     <unreadable>`, hint: `${path}: ${e?.message ?? e}` }
+  }
+}
+
+export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
     { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/loopat/CLAUDE.md` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
     describeRepos(cfg),
+    await checkUsers(),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkBwrap(),
     checkClaudeBinary(),
@@ -92,7 +108,7 @@ export function printBootstrapBanner(cfg: WorkspaceConfig) {
 
   const bar = "─".repeat(60)
   console.log(`\n${bar}`)
-  console.log(`  loopat bootstrap — ${WORKSPACE} (user=${ME})`)
+  console.log(`  loopat bootstrap — ${WORKSPACE}`)
   console.log(bar)
   for (const c of checks) {
     const mark = c.ok ? "✓" : "✗"

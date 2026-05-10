@@ -11,7 +11,6 @@ import { useNavigate } from "react-router-dom"
 import { useWorkspace } from "../ctx"
 import { readFocusData, type FocusData, type LoopMeta } from "../api"
 
-const ME = "simpx"
 const INBOX_PREVIEW_LIMIT = 5
 
 type LinkedLoop = {
@@ -140,7 +139,7 @@ export function FocusPage() {
                   <span className="text-gray-400">⑂</span>
                   <span className="text-[13px] text-gray-900 truncate">{loop.title}</span>
                   <span className="text-xs text-gray-500 ml-auto">
-                    {ME} · {agoFromISO(loop.createdAt)}
+                    {loop.createdBy} · {agoFromISO(loop.createdAt)}
                   </span>
                 </button>
               ))}
