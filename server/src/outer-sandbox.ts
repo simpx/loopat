@@ -17,11 +17,13 @@
  *
  * See memory: project_loop_dir_is_sandbox.md
  */
+import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import {
   loopWorkdir,
   loopClaudeDir,
   workspaceKnowledgeDir,
+  workspaceLoopatSkillsDir,
   workspaceNotesDir,
   personalDir,
   LOOPAT_INSTALL_DIR,
@@ -38,6 +40,7 @@ function expandHostPath(p: string, home: string): string {
 
 export const V_LOOP = (id: string) => `/loop/${id}`
 export const V_LOOP_CLAUDE = (id: string) => `/loop/${id}/.claude`
+export const V_LOOP_CLAUDE_SKILLS = (id: string) => `/loop/${id}/.claude/skills`
 export const V_CONTEXT_KNOWLEDGE = "/context/knowledge"
 export const V_CONTEXT_NOTES = "/context/notes"
 export const V_CONTEXT_NOTES_MEMORY = "/context/notes/memory"
@@ -79,6 +82,16 @@ export async function buildOuterBwrapArgs(
     "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
+  )
+
+  // team skills: nested ro-bind over .claude/ so Claude Code discovers them
+  // as user-tier skills (CLAUDE_CONFIG_DIR/skills). Only mount if populated.
+  const skillsSrc = workspaceLoopatSkillsDir()
+  if (existsSync(skillsSrc)) {
+    args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
+  }
+
+  args.push(
     // proc, dev, pid namespace
     "--proc", "/proc",
     "--dev", "/dev",
