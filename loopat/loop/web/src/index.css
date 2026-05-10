@@ -1,6 +1,59 @@
 @import "tailwindcss";
 @import "tw-shimmer";
 
+/* Markdown rendering for Context tab DocView (and elsewhere). */
+.prose-loopat {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #1f2937;
+}
+.prose-loopat h1 { font-size: 1.6em; font-weight: 600; margin: 1.2em 0 0.6em; line-height: 1.2; }
+.prose-loopat h2 { font-size: 1.3em; font-weight: 600; margin: 1.1em 0 0.5em; line-height: 1.25; }
+.prose-loopat h3 { font-size: 1.1em; font-weight: 600; margin: 1em 0 0.4em; }
+.prose-loopat h4 { font-weight: 600; margin: 0.9em 0 0.3em; }
+.prose-loopat p { margin: 0.7em 0; }
+.prose-loopat ul, .prose-loopat ol { margin: 0.7em 0; padding-left: 1.3em; }
+.prose-loopat ul li { list-style: disc; margin: 0.2em 0; }
+.prose-loopat ol li { list-style: decimal; margin: 0.2em 0; }
+.prose-loopat blockquote {
+  border-left: 3px solid #d1d5db;
+  padding-left: 0.8em;
+  color: #4b5563;
+  margin: 0.8em 0;
+}
+.prose-loopat code:not(pre code) {
+  background: #f3f4f6;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.88em;
+}
+.prose-loopat pre {
+  background: #f6f8fa;
+  padding: 0.8em 1em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.prose-loopat pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+.prose-loopat table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+}
+.prose-loopat th, .prose-loopat td {
+  border: 1px solid #e5e7eb;
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.prose-loopat th { background: #f9fafb; font-weight: 600; }
+.prose-loopat hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.5em 0; }
+
 @layer base {
   * { box-sizing: border-box; }
   html, body, #root { margin: 0; padding: 0; height: 100%; }

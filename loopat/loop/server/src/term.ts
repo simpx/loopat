@@ -20,7 +20,11 @@ async function getOrSpawn(loopId: string): Promise<Term> {
   const p = (async () => {
     const workdir = loopWorkdir(loopId)
     const innerShell = process.env.SHELL ?? "/bin/bash"
-    const wrappedCmd = await wrapForLoop(`${innerShell} -i`, loopId)
+    // Wrap inner shell with `script` so it gets a fresh controlling tty.
+    // Without this, multiple `bash -c` layers from sandbox-runtime strip the
+    // tty; bash logs "cannot set terminal process group · no job control".
+    const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
+    const wrappedCmd = await wrapForLoop(innerCmd, loopId)
     const proc = spawn("/bin/bash", ["-c", wrappedCmd], {
       name: "xterm-256color",
       cols: 80,

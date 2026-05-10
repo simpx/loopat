@@ -1,26 +1,39 @@
 /**
- * Context tab. Layout/visuals ported from phase1-prototype/src/pages/context.tsx
- * — sub-nav (knowledge/notes/personal/repos; agents skipped) + vault tree +
- * markdown editor. Backed by real fs via /api/workspace/*. Saves auto-commit.
+ * Context tab. Layout/visuals + behavior ported from
+ * phase1-prototype/src/pages/context.tsx (VaultPane + DocView).
+ *   - sub-nav: Knowledge / Notes / Personal / Repos (Agents skipped)
+ *   - VaultPane: tree (left) + DocView (right)
+ *   - DocView read mode: markdown + wikilinks + Backlinks panel (right w-64)
+ *   - DocView edit mode: split source (CodeMirror) + live preview
+ *   - Header buttons: distill (notes), edit by loop (non-secret), edit (non-knowledge)
+ *   - Save → auto-commit (server side)
  */
-import { NavLink, useParams } from "react-router-dom"
+import { NavLink, useParams, useNavigate } from "react-router-dom"
 import {
   vaultList,
+  vaultFlatList,
   vaultRead,
   vaultWrite,
   vaultCreateFile,
+  vaultBacklinks,
   listRepos,
+  getRepo,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
+  type RepoDetail,
+  type Backlink,
 } from "../api"
 import { useEffect, useState, useCallback } from "react"
+import { useWorkspace } from "../ctx"
+import { CodeEditor } from "../components/markdown/CodeEditor"
+import { Markdown } from "../components/markdown/Markdown"
 
-const SUBS: { id: VaultId; label: string; hint?: string }[] = [
-  { id: "knowledge", label: "Knowledge", hint: "团队沉淀" },
-  { id: "notes", label: "Notes", hint: "团队 prose" },
-  { id: "personal", label: "Personal", hint: "私有" },
-  { id: "repos", label: "Repos", hint: "代码仓" },
+const SUBS: { id: VaultId; label: string }[] = [
+  { id: "knowledge", label: "Knowledge" },
+  { id: "notes", label: "Notes" },
+  { id: "personal", label: "Personal" },
+  { id: "repos", label: "Repos" },
 ]
 
 const VALID = new Set<VaultId>(["knowledge", "notes", "personal", "repos"])
@@ -43,7 +56,6 @@ export function ContextPage() {
             }
           >
             <span>{s.label}</span>
-            {s.hint && <span className="text-[10px] text-gray-400">{s.hint}</span>}
           </NavLink>
         ))}
       </nav>
@@ -55,20 +67,40 @@ export function ContextPage() {
 }
 
 // ============================================================================
-// VaultPane: left tree + right doc viewer/editor (knowledge / notes / personal)
+// VaultPane: left tree + right DocView
 // ============================================================================
+
+const VAULT_TAGLINE: Record<VaultId, string> = {
+  knowledge: "team's distilled materials",
+  notes: "team · public",
+  personal: "yours · private",
+  repos: "registered code repos",
+}
 
 function VaultPane({ vault }: { vault: VaultId }) {
   const [tree, setTree] = useState<VaultEntry[]>([])
+  const [flat, setFlat] = useState<VaultEntry[]>([])
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
   const [pickedPath, setPickedPath] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [showNewFile, setShowNewFile] = useState(false)
+  const [query, setQuery] = useState("")
 
   useEffect(() => {
-    vaultList(vault).then(setTree)
-    setPickedPath(null)
+    vaultList(vault).then((entries) => {
+      setTree(entries)
+      // auto-pick first .md file
+      const findFirst = (arr: VaultEntry[]): string | null => {
+        for (const e of arr) {
+          if (e.type === "file" && e.path.endsWith(".md")) return e.path
+        }
+        return null
+      }
+      setPickedPath(findFirst(entries))
+    })
+    vaultFlatList(vault).then(setFlat)
     setOpenFolders(new Set())
+    setQuery("")
   }, [vault, reloadKey])
 
   const toggleFolder = (path: string) => {
@@ -91,14 +123,26 @@ function VaultPane({ vault }: { vault: VaultId }) {
     }
   }
 
-  const footerHint = vaultFooter(vault)
+  const q = query.trim().toLowerCase()
+  const searching = q.length > 0
+  const matches = searching
+    ? flat
+        .filter((e) => e.path.toLowerCase().includes(q))
+        .slice(0, 60)
+    : []
 
   return (
     <div className="flex h-full w-full">
       <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
         <div className="px-3 h-9 flex items-center gap-1 border-b border-gray-200">
-          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">{vault}</span>
-          <div className="flex-1" />
+          <SearchIcon />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="search files…"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[12px] text-gray-700 placeholder:text-gray-400"
+          />
           <button
             onClick={() => setShowNewFile(true)}
             className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
@@ -115,31 +159,60 @@ function VaultPane({ vault }: { vault: VaultId }) {
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-auto py-2">
-          {tree.map((node) => (
-            <TreeNode
-              key={node.path}
-              vault={vault}
-              node={node}
-              depth={0}
-              openFolders={openFolders}
-              toggleFolder={toggleFolder}
-              picked={pickedPath}
-              onPick={setPickedPath}
-            />
-          ))}
-          {tree.length === 0 && (
-            <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-              empty · click + 创建第一个文件
-            </div>
+          {searching ? (
+            matches.length === 0 ? (
+              <div className="px-3 py-4 text-[12px] text-gray-400 italic">no matches</div>
+            ) : (
+              matches.map((e) => (
+                <button
+                  key={e.path}
+                  type="button"
+                  onClick={() => setPickedPath(e.path)}
+                  className={
+                    "w-full px-3 py-1.5 flex items-center gap-2 text-left " +
+                    (pickedPath === e.path ? "bg-gray-100" : "hover:bg-gray-50")
+                  }
+                  title={e.path}
+                >
+                  <span className="text-gray-500">📄</span>
+                  <span className="flex-1 min-w-0 truncate text-[13px] text-gray-900">{e.path}</span>
+                </button>
+              ))
+            )
+          ) : (
+            <>
+              {tree.map((node) => (
+                <TreeNode
+                  key={node.path}
+                  vault={vault}
+                  node={node}
+                  depth={0}
+                  openFolders={openFolders}
+                  toggleFolder={toggleFolder}
+                  picked={pickedPath}
+                  onPick={setPickedPath}
+                />
+              ))}
+              {tree.length === 0 && (
+                <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+                  empty · click + 创建第一个文件
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="px-3 h-9 border-t border-gray-200 flex items-center text-[11px] text-gray-500">
-          {footerHint}
+          {VAULT_TAGLINE[vault]}
         </div>
       </aside>
-      <main className="flex-1 min-w-0 flex flex-col bg-white">
+      <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {pickedPath ? (
-          <DocView vault={vault} path={pickedPath} onSaved={() => setReloadKey((k) => k + 1)} />
+          <DocView
+            vault={vault}
+            path={pickedPath}
+            onSelect={setPickedPath}
+            onSaved={() => setReloadKey((k) => k + 1)}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
             选一个文件，或点 + 新建
@@ -151,17 +224,25 @@ function VaultPane({ vault }: { vault: VaultId }) {
   )
 }
 
-function vaultFooter(v: VaultId): string {
-  switch (v) {
-    case "knowledge":
-      return "git: ~/.loopat/1001/context/knowledge"
-    case "notes":
-      return "git: ~/.loopat/1001/context/notes"
-    case "personal":
-      return "~/.loopat/1001/personal/simpx"
-    default:
-      return ""
-  }
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" className="text-gray-400 shrink-0">
+      <path
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        d="M11 11l3 3M7 12.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z"
+      />
+    </svg>
+  )
+}
+
+function isSecretsFolder(vault: VaultId, path: string): boolean {
+  return vault === "personal" && (path === "secrets" || path.endsWith("/secrets"))
+}
+function isSecretFile(vault: VaultId, path: string): boolean {
+  return vault === "personal" && path.startsWith("secrets/")
 }
 
 function TreeNode({
@@ -183,36 +264,77 @@ function TreeNode({
 }) {
   if (node.type === "dir") {
     const open = openFolders.has(node.path)
+    const secretsFolder = isSecretsFolder(vault, node.path)
     return (
       <>
         <button
           type="button"
           onClick={() => toggleFolder(node.path)}
-          className="w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
+          className={
+            secretsFolder
+              ? "w-full py-1.5 flex items-center gap-1.5 bg-amber-50/40 hover:bg-amber-50 text-left border-y border-amber-200/60 mt-1"
+              : "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
+          }
           style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
+          title={secretsFolder ? "secrets · convention: encrypted (placeholder, not yet implemented)" : undefined}
         >
-          <span className="text-gray-500">{open ? "▾" : "▸"}</span>
-          <span className="text-gray-500">📁</span>
-          <span className="text-[13px] text-gray-900 truncate">{node.name}</span>
+          <span className={secretsFolder ? "text-amber-700" : "text-gray-500"}>{open ? "▾" : "▸"}</span>
+          <span className="text-[12px]">{secretsFolder ? "🔐" : "📁"}</span>
+          <span
+            className={
+              secretsFolder
+                ? "text-[12px] uppercase tracking-wider font-semibold text-amber-900"
+                : "text-[13px] text-gray-900 truncate"
+            }
+          >
+            {node.name}
+          </span>
+          {secretsFolder && (
+            <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+              encrypted
+            </span>
+          )}
         </button>
-        {open && <Branch vault={vault} path={node.path} depth={depth + 1} openFolders={openFolders} toggleFolder={toggleFolder} picked={picked} onPick={onPick} />}
+        {open && (
+          <Branch
+            vault={vault}
+            path={node.path}
+            depth={depth + 1}
+            openFolders={openFolders}
+            toggleFolder={toggleFolder}
+            picked={picked}
+            onPick={onPick}
+          />
+        )}
       </>
     )
   }
   const sel = picked === node.path
+  const secret = isSecretFile(vault, node.path)
   return (
     <button
       type="button"
       onClick={() => onPick(node.path)}
       className={
         "w-full py-1 flex items-center gap-2 text-left " +
-        (sel ? "bg-gray-100" : "hover:bg-gray-50")
+        (sel ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
       }
       style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
+      title={secret ? "secret · 仅可注入" : undefined}
     >
       <span className="w-4" />
-      <span className="text-gray-500">📄</span>
-      <span className="flex-1 min-w-0 truncate text-[13px] text-gray-900">{node.name}</span>
+      {secret ? (
+        <span className="text-amber-600 text-[12px] shrink-0">🔒</span>
+      ) : (
+        <span className="text-gray-500">📄</span>
+      )}
+      <span
+        className={
+          "flex-1 min-w-0 truncate text-[13px] " + (secret ? "text-amber-900" : "text-gray-900")
+        }
+      >
+        {node.name}
+      </span>
     </button>
   )
 }
@@ -257,14 +379,33 @@ function Branch({
 }
 
 // ============================================================================
-// DocView: view + edit selected file
+// DocView: header (3 action buttons) + read mode (markdown + backlinks) +
+// edit mode (split source / preview).  Mirrors phase-1.
 // ============================================================================
 
-function DocView({ vault, path, onSaved }: { vault: VaultId; path: string; onSaved: () => void }) {
+function isSecretPath(path: string): boolean {
+  // convention: anything under a `secrets/` segment is a secret
+  return /(^|\/)secrets\//.test(path) || path === "secrets"
+}
+
+function DocView({
+  vault,
+  path,
+  onSelect,
+  onSaved,
+}: {
+  vault: VaultId
+  path: string
+  onSelect: (path: string) => void
+  onSaved: () => void
+}) {
+  const ws = useWorkspace()
+  const navigate = useNavigate()
   const [original, setOriginal] = useState("")
   const [draft, setDraft] = useState("")
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [lastCommit, setLastCommit] = useState<string | null>(null)
 
   useEffect(() => {
@@ -275,7 +416,14 @@ function DocView({ vault, path, onSaved }: { vault: VaultId; path: string; onSav
       setOriginal(c)
       setDraft(c)
     })
+    vaultBacklinks(vault, path).then(setBacklinks)
   }, [vault, path])
+
+  const isSecret = isSecretPath(path)
+  const isMd = path.endsWith(".md")
+  const allowDirectEdit = vault !== "knowledge"
+  const allowLoopEdit = !isSecret
+  const allowDistill = vault === "notes" && !isSecret
 
   const dirty = draft !== original
 
@@ -289,6 +437,8 @@ function DocView({ vault, path, onSaved }: { vault: VaultId; path: string; onSav
         setLastCommit(r.commit ?? null)
         setEditing(false)
         onSaved()
+        // refresh backlinks (links may have changed)
+        vaultBacklinks(vault, path).then(setBacklinks)
       } else {
         alert(`save failed: ${r.error}`)
       }
@@ -297,62 +447,175 @@ function DocView({ vault, path, onSaved }: { vault: VaultId; path: string; onSav
     }
   }, [vault, path, draft, dirty, saving, onSaved])
 
+  const startEdit = () => setEditing(true)
+
+  const cancelEdit = () => {
+    setDraft(original)
+    setEditing(false)
+  }
+
+  const startEditByLoop = async () => {
+    const m = await ws.createLoop({ title: `edit ${vault}/${path}` })
+    navigate(`/loop/${m.id}`)
+  }
+
+  const startDistill = async () => {
+    const m = await ws.createLoop({ title: `distill ${path} → knowledge` })
+    navigate(`/loop/${m.id}`)
+  }
+
+  // wikilink target → file path: try `<target>.md` in same dir as current path,
+  // then `<target>.md` from vault root, then `<target>` literal
+  const onWikilink = (target: string) => {
+    const candidates = [
+      path.replace(/[^/]+$/, "") + target + ".md",
+      target + ".md",
+      target,
+    ]
+    // try first candidate (we don't have a file-existence check here; just navigate
+    // and let read return null if missing — empty content for now)
+    onSelect(candidates[0].replace(/^\//, ""))
+  }
+
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <header className="h-10 shrink-0 border-b border-gray-200 px-4 flex items-center gap-3">
-        <span className="font-mono text-[12px] text-gray-500 truncate flex-1">{path}</span>
-        {lastCommit && !dirty && (
-          <span className="text-[10px] text-emerald-700 font-mono">commit {lastCommit}</span>
-        )}
-        {editing ? (
-          <>
-            <button
-              onClick={() => {
-                setDraft(original)
-                setEditing(false)
-              }}
-              className="px-2 h-6 text-xs rounded text-gray-600 hover:bg-gray-100"
-            >
-              cancel
-            </button>
-            <button
-              onClick={save}
-              disabled={!dirty || saving}
-              className="px-2 h-6 text-xs rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
-            >
-              {saving ? "saving…" : dirty ? "save" : "saved"}
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={() => setEditing(true)}
-            className="px-2 h-6 text-xs rounded text-gray-700 hover:bg-gray-100"
-          >
-            ✎ edit
-          </button>
-        )}
+    <>
+      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[13px]">
+          <span className="text-gray-500">{isSecret ? "🔒" : "📄"}</span>
+          <span className="font-mono text-[12px] text-gray-500 truncate">{path}</span>
+          {lastCommit && !dirty && !editing && (
+            <span className="text-[10px] text-emerald-700 font-mono">commit {lastCommit}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          {editing ? (
+            <>
+              <button
+                onClick={cancelEdit}
+                className="px-2.5 h-7 rounded text-xs text-gray-600 hover:bg-gray-100"
+              >
+                cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={!dirty || saving}
+                className="px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+              >
+                {saving ? "saving…" : "save"}
+              </button>
+            </>
+          ) : (
+            <>
+              {allowDistill && (
+                <button
+                  onClick={startDistill}
+                  className="px-2.5 h-7 rounded text-xs bg-amber-100 text-amber-900 hover:bg-amber-200 flex items-center gap-1"
+                  title="open a loop to distill this notes file into knowledge"
+                >
+                  <span>↑</span>
+                  <span>distill</span>
+                </button>
+              )}
+              {allowLoopEdit && (
+                <button
+                  onClick={startEditByLoop}
+                  className={
+                    allowDistill
+                      ? "px-2.5 h-7 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-900 flex items-center gap-1"
+                      : "px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 flex items-center gap-1"
+                  }
+                  title="open a new loop with AI assist for this file"
+                >
+                  <span>↻</span>
+                  <span>edit by loop</span>
+                </button>
+              )}
+              {allowDirectEdit && (
+                <button
+                  onClick={startEdit}
+                  className="px-2.5 h-7 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-900"
+                  title="direct edit (fastpath)"
+                >
+                  edit
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </header>
-      <div className="flex-1 min-h-0 overflow-auto">
-        {editing ? (
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            className="w-full h-full p-4 text-[13px] font-mono leading-relaxed bg-white text-gray-900 outline-none resize-none border-0"
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-                e.preventDefault()
-                save()
-              }
-            }}
-          />
-        ) : (
-          <pre className="p-6 m-0 text-[13px] leading-relaxed whitespace-pre-wrap text-gray-900 font-sans">
-            {original || <span className="italic text-gray-400">(empty)</span>}
-          </pre>
-        )}
-      </div>
-    </div>
+
+      {editing ? (
+        // edit mode: split source / preview
+        <div className="flex-1 min-h-0 min-w-0 flex">
+          <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
+            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
+              source · markdown
+            </div>
+            <div className="flex-1 min-h-0">
+              <CodeEditor path={path} value={draft} onChange={setDraft} />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
+              preview
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto px-6 py-4">
+              <div className="max-w-[760px]">
+                <Markdown text={draft} onWikilink={onWikilink} />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        // read mode: article + backlinks
+        <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
+          <article className="flex-1 min-h-0 overflow-auto px-8 py-6">
+            <div className="max-w-[760px]">
+              {isSecret ? (
+                <div className="font-mono text-[14px] text-gray-400 select-none">
+                  ••••••••••••••••••••••••
+                  <div className="mt-2 text-[12px] text-gray-500 font-sans">
+                    点 edit 编辑（值不显示）
+                  </div>
+                </div>
+              ) : isMd ? (
+                <Markdown text={original} onWikilink={onWikilink} />
+              ) : (
+                <pre className="font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-gray-900">
+                  {original || <span className="text-gray-400 italic">(empty)</span>}
+                </pre>
+              )}
+            </div>
+          </article>
+          {isMd && (
+            <aside className="w-64 shrink-0 border-l border-gray-200 bg-gray-50 overflow-auto">
+              <div className="px-3 h-9 flex items-center border-b border-gray-200">
+                <span className="text-[11px] text-gray-500">Backlinks</span>
+                <span className="ml-auto text-[11px] text-gray-500">{backlinks.length}</span>
+              </div>
+              {backlinks.length === 0 ? (
+                <div className="px-3 py-4 text-xs text-gray-500">No documents link here yet.</div>
+              ) : (
+                <ul className="py-2">
+                  {backlinks.map((b) => (
+                    <li key={b.path}>
+                      <button
+                        type="button"
+                        onClick={() => onSelect(b.path)}
+                        className="w-full px-3 py-2 text-left hover:bg-gray-100"
+                      >
+                        <div className="text-xs font-medium text-gray-900 truncate">{b.path}</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5 leading-snug line-clamp-2">{b.preview}</div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
+          )}
+        </div>
+      )}
+    </>
   )
 }
 
@@ -404,43 +667,147 @@ function NewFileDialog({
 // ============================================================================
 
 function ReposPane() {
+  const ws = useWorkspace()
+  const navigate = useNavigate()
   const [repos, setRepos] = useState<RepoEntry[]>([])
-  const [loaded, setLoaded] = useState(false)
+  const [selectedName, setSelectedName] = useState<string | null>(null)
+  const [detail, setDetail] = useState<RepoDetail | null>(null)
+
   useEffect(() => {
-    listRepos()
-      .then(setRepos)
-      .finally(() => setLoaded(true))
+    listRepos().then((rs) => {
+      setRepos(rs)
+      if (rs.length > 0 && !selectedName) setSelectedName(rs[0].name)
+    })
   }, [])
+
+  useEffect(() => {
+    if (!selectedName) return
+    getRepo(selectedName).then(setDetail)
+  }, [selectedName])
+
+  const onSpawnLoop = async () => {
+    if (!selectedName) return
+    const m = await ws.createLoop({ title: `${selectedName} loop`, repo: selectedName })
+    navigate(`/loop/${m.id}`)
+  }
+
   return (
-    <div className="h-full overflow-auto px-6 py-6">
-      <div className="max-w-[760px]">
-        <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-3">repos · {repos.length}</div>
-        {!loaded ? (
-          <div className="text-gray-400">…</div>
-        ) : repos.length === 0 ? (
-          <div className="text-sm text-gray-500">
-            还没有注册的代码仓。在 `~/.loopat/1001/context/repos/` 下 `git clone` 或 `ln -s` 一个进来。
-            <div className="text-[11px] text-gray-400 mt-2">
-              （5.3 会加 UI 注册按钮 + git worktree 集成）
+    <div className="flex h-full w-full">
+      <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
+        <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">repos</span>
+          <span className="text-[11px] text-gray-400">{repos.length}</span>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto py-2">
+          {repos.map((r) => {
+            const sel = selectedName === r.name
+            return (
+              <button
+                key={r.name}
+                type="button"
+                onClick={() => setSelectedName(r.name)}
+                className={
+                  sel
+                    ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
+                    : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
+                }
+              >
+                <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500" />
+                <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{r.name}</span>
+              </button>
+            )
+          })}
+          {repos.length === 0 && (
+            <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+              none · `ln -s` or `git clone` into ~/.loopat/1001/context/repos/
             </div>
-          </div>
+          )}
+        </div>
+        <button
+          disabled
+          className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-400 cursor-default flex items-center gap-2"
+          title="UI not wired yet — symlink/clone manually"
+        >
+          <span>↳</span>
+          <span>add repo</span>
+        </button>
+      </aside>
+      <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
+        {detail ? (
+          <RepoView repo={detail} onSpawnLoop={onSpawnLoop} />
         ) : (
-          <ul className="space-y-2">
-            {repos.map((r) => (
-              <li key={r.path} className="border border-gray-200 rounded p-3 bg-white">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">⌥</span>
-                  <span className="text-sm font-medium text-gray-900">{r.name}</span>
-                </div>
-                <div className="text-[12px] text-gray-500 mt-1 font-mono truncate">{r.path}</div>
-                {r.remote && (
-                  <div className="text-[12px] text-gray-500 mt-0.5 font-mono truncate">↪ {r.remote}</div>
-                )}
-              </li>
-            ))}
-          </ul>
+          <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
+            select a repo
+          </div>
         )}
-      </div>
+      </main>
     </div>
+  )
+}
+
+function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => void }) {
+  const navigate = useNavigate()
+  return (
+    <>
+      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[13px]">
+          <span
+            className={
+              repo.status === "online"
+                ? "w-2 h-2 rounded-full bg-emerald-500"
+                : "w-2 h-2 rounded-full bg-gray-300"
+            }
+          />
+          <span className="text-gray-900 font-medium">{repo.name}</span>
+          {repo.remote && <span className="text-gray-500">· {repo.remote}</span>}
+        </div>
+        <div className="text-xs text-gray-500">default branch: {repo.branch ?? "—"}</div>
+      </header>
+      <article className="flex-1 min-h-0 overflow-auto px-8 py-6">
+        <div className="max-w-[820px]">
+          <section className="mb-6">
+            <h3 className="text-[13px] font-medium text-gray-900 mb-2">Recent loops on this repo</h3>
+            {repo.recentLoops.length > 0 ? (
+              <ul className="flex flex-col gap-1">
+                {repo.recentLoops.map((loop) => (
+                  <li key={loop.id}>
+                    <button
+                      onClick={() => navigate(`/loop/${loop.id}`)}
+                      className="w-full px-3 py-2 rounded hover:bg-gray-100 flex items-center gap-3 text-[13px] text-left"
+                    >
+                      <span className="text-gray-500">⑂</span>
+                      <span className="text-gray-900">{loop.title}</span>
+                      <span className="text-gray-500 font-mono text-[11px]">{loop.branch ?? "main"}</span>
+                      <span className="text-gray-500 ml-auto text-[11px]">
+                        {new Date(loop.createdAt).toLocaleString()}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[13px] text-gray-500">No active loops yet.</p>
+            )}
+            <button
+              onClick={onSpawnLoop}
+              className="mt-3 px-3 py-1.5 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 flex items-center gap-2"
+            >
+              <span>+</span>
+              <span>spawn new loop on a branch</span>
+            </button>
+          </section>
+          <section>
+            <h3 className="text-[13px] font-medium text-gray-900 mb-2">README</h3>
+            <div className="max-w-[760px]">
+              {repo.readme ? (
+                <Markdown text={repo.readme} />
+              ) : (
+                <p className="text-[13px] text-gray-500 italic">No README found at repo root.</p>
+              )}
+            </div>
+          </section>
+        </div>
+      </article>
+    </>
   )
 }
