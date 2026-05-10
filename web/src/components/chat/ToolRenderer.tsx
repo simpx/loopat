@@ -7,6 +7,10 @@ import {
   AlertCircleIcon,
   PencilIcon,
   TerminalIcon,
+  SearchIcon,
+  FileTextIcon,
+  GlobeIcon,
+  WrenchIcon,
 } from "lucide-react";
 import {
   Collapsible,
@@ -24,92 +28,46 @@ interface ToolRendererProps {
   status?: ToolStatus;
 }
 
-/* ─── Category colors ─── */
-
-const CATEGORY_STYLES: Record<string, { border: string; bg: string; icon: string }> = {
-  edit: {
-    border: "border-amber-300",
-    bg: "bg-amber-50/50",
-    icon: "text-amber-500",
-  },
-  bash: {
-    border: "border-gray-500",
-    bg: "bg-gray-900",
-    icon: "text-gray-400",
-  },
-  search: {
-    border: "border-blue-300",
-    bg: "bg-blue-50/50",
-    icon: "text-blue-500",
-  },
-  default: {
-    border: "border-gray-300",
-    bg: "bg-gray-50/50",
-    icon: "text-gray-500",
-  },
-};
+/* ─── Status badge config ─── */
 
 const STATUS_CONFIG: Record<ToolStatus, { label: string; className: string }> = {
-  running: {
-    label: "Running",
-    className: "bg-blue-100 text-blue-700",
-  },
-  complete: {
-    label: "Done",
-    className: "bg-emerald-100 text-emerald-700",
-  },
-  incomplete: {
-    label: "Error",
-    className: "bg-red-100 text-red-700",
-  },
-  "requires-action": {
-    label: "Action needed",
-    className: "bg-amber-100 text-amber-700",
-  },
+  running: { label: "Running", className: "bg-sky-100 text-sky-700" },
+  complete: { label: "Done", className: "bg-emerald-100 text-emerald-700" },
+  incomplete: { label: "Error", className: "bg-red-100 text-red-700" },
+  "requires-action": { label: "Action needed", className: "bg-amber-100 text-amber-700" },
 };
 
-function getCategory(toolName: string): string {
+/* ─── Tool icon & category ─── */
+
+interface ToolMeta {
+  category: string;
+  icon: React.ElementType;
+  borderClass: string;
+}
+
+function getToolMeta(toolName: string): ToolMeta {
   const name = toolName || "";
-  if (["Edit", "Write", "ApplyPatch"].includes(name)) return "edit";
-  if (["Grep", "Glob", "WebSearch", "WebFetch"].includes(name)) return "search";
-  if (name === "Bash") return "bash";
-  return "default";
-}
-
-/* ─── Status badge ─── */
-
-function StatusBadge({ status }: { status: ToolStatus }) {
-  const cfg = STATUS_CONFIG[status];
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-px text-[10px] font-medium",
-        cfg.className,
-      )}
-    >
-      {cfg.label}
-    </span>
-  );
-}
-
-/* ─── Status icon ─── */
-
-function StatusIcon({ status }: { status: ToolStatus }) {
-  switch (status) {
-    case "running":
-      return <LoaderIcon className="h-3.5 w-3.5 animate-spin text-blue-500" />;
-    case "complete":
-      return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
-    case "incomplete":
-      return <XCircleIcon className="h-3.5 w-3.5 text-red-500" />;
-    case "requires-action":
-      return <AlertCircleIcon className="h-3.5 w-3.5 text-amber-500" />;
+  if (["Edit", "Write", "ApplyPatch"].includes(name)) {
+    return { category: "edit", icon: PencilIcon, borderClass: "border-l-amber-400" };
   }
+  if (name === "Bash") {
+    return { category: "bash", icon: TerminalIcon, borderClass: "border-l-gray-400" };
+  }
+  if (["Grep", "Glob"].includes(name)) {
+    return { category: "search", icon: SearchIcon, borderClass: "border-l-blue-400" };
+  }
+  if (name === "Read") {
+    return { category: "read", icon: FileTextIcon, borderClass: "border-l-emerald-400" };
+  }
+  if (["WebSearch", "WebFetch"].includes(name)) {
+    return { category: "web", icon: GlobeIcon, borderClass: "border-l-purple-400" };
+  }
+  return { category: "default", icon: WrenchIcon, borderClass: "border-l-gray-300" };
 }
 
-/* ─── Extract display value from args ─── */
+/* ─── Extract summary from args ─── */
 
-function getDisplayValue(toolName: string, args: Record<string, unknown>): string {
+function getSummary(toolName: string, args: Record<string, unknown>): string {
   switch (toolName) {
     case "Bash":
       return (args.command as string) || (args.description as string) || "";
@@ -122,9 +80,114 @@ function getDisplayValue(toolName: string, args: Record<string, unknown>): strin
       return (args.pattern as string) || "";
     case "Read":
       return (args.file_path as string) || (args.filePath as string) || "";
+    case "WebSearch":
+    case "WebFetch":
+      return (args.query as string) || (args.url as string) || "";
     default:
       return "";
   }
+}
+
+/* ─── Status icon ─── */
+
+function StatusIcon({ status }: { status: ToolStatus }) {
+  switch (status) {
+    case "running":
+      return <LoaderIcon className="h-3.5 w-3.5 animate-spin text-sky-500" />;
+    case "complete":
+      return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
+    case "incomplete":
+      return <XCircleIcon className="h-3.5 w-3.5 text-red-500" />;
+    case "requires-action":
+      return <AlertCircleIcon className="h-3.5 w-3.5 text-amber-500" />;
+  }
+}
+
+/* ─── Diff renderer ─── */
+
+interface DiffLine {
+  type: "add" | "del" | "hdr" | "ctx";
+  text: string;
+}
+
+function parseDiff(text: string): DiffLine[] | null {
+  const lines = text.split("\n");
+  let hasDiffMarkers = false;
+  const parsed: DiffLine[] = [];
+
+  for (const line of lines) {
+    if (/^@@\s/.test(line)) {
+      hasDiffMarkers = true;
+      parsed.push({ type: "hdr", text: line });
+    } else if (/^\+/.test(line)) {
+      hasDiffMarkers = true;
+      parsed.push({ type: "add", text: line });
+    } else if (/^-/.test(line)) {
+      hasDiffMarkers = true;
+      parsed.push({ type: "del", text: line });
+    } else if (/^(---|\+\+\+)/.test(line)) {
+      hasDiffMarkers = true;
+      parsed.push({ type: "hdr", text: line });
+    } else {
+      parsed.push({ type: "ctx", text: line });
+    }
+  }
+
+  return hasDiffMarkers ? parsed : null;
+}
+
+function DiffView({ text }: { text: string }) {
+  const diff = parseDiff(text);
+  if (!diff) return null;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 font-mono text-xs leading-relaxed">
+      {diff.map((line, i) => (
+        <div
+          key={i}
+          className={cn(
+            "px-3 py-px whitespace-pre-wrap break-all",
+            line.type === "add" && "bg-emerald-50 text-emerald-800",
+            line.type === "del" && "bg-red-50 text-red-800",
+            line.type === "hdr" && "bg-blue-50 text-blue-700 font-medium",
+            line.type === "ctx" && "text-gray-500",
+          )}
+        >
+          {line.text}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ─── Code block ─── */
+
+function CodeBlock({ text }: { text: string }) {
+  return (
+    <pre className="overflow-x-auto rounded-md border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-700 whitespace-pre-wrap break-all font-mono">
+      {text}
+    </pre>
+  );
+}
+
+/* ─── Terminal block ─── */
+
+function TerminalBlock({ command, output }: { command: string; output?: string }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-gray-700 bg-gray-900 text-xs">
+      {command && (
+        <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-2 text-green-400 font-mono">
+          <span className="select-none text-gray-500">$</span>
+          <span className="whitespace-pre-wrap break-all">{command}</span>
+        </div>
+      )}
+      {output !== undefined && (
+        <pre className="max-h-64 overflow-auto px-3 py-2 text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
+          {output}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 /* ─── Main renderer ─── */
@@ -135,119 +198,99 @@ export default function ToolRenderer({
   result,
   status = "complete",
 }: ToolRendererProps) {
-  const category = getCategory(toolName);
-  const style = CATEGORY_STYLES[category] || CATEGORY_STYLES.default;
-  const [open, setOpen] = useState(category === "bash" ? false : true);
+  const meta = getToolMeta(toolName);
+  const Icon = meta.icon;
+  const summary = getSummary(toolName, args);
+  const [open, setOpen] = useState(status === "running");
+  const isDone = status === "complete";
+  const isRunning = status === "running";
+  const statusCfg = STATUS_CONFIG[status];
 
-  const displayValue = getDisplayValue(toolName, args);
-  const formattedArgs = JSON.stringify(args, null, 2);
+  const hasDiff = isDone && result ? parseDiff(result) !== null : false;
+  const isBash = toolName === "Bash";
 
   return (
     <Collapsible
       open={open}
       onOpenChange={setOpen}
       className={cn(
-        "group/tool my-2 overflow-hidden rounded-lg border",
-        style.border,
-        category === "bash" ? style.bg : style.bg,
+        "group/tool my-1.5 overflow-hidden rounded-lg border border-gray-200 bg-white border-l-[3px]",
+        meta.borderClass,
+        isRunning && "animate-pulse",
       )}
     >
       <CollapsibleTrigger
-        className={cn(
-          "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors",
-          category === "bash"
-            ? "text-gray-200 hover:bg-gray-800"
-            : "text-gray-700 hover:bg-gray-50",
-        )}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-gray-50"
       >
         <StatusIcon status={status} />
+        <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+        <span className="font-medium text-gray-700 text-xs">{toolName}</span>
 
-        <span className="font-medium">{toolName}</span>
-
-        {displayValue && (
+        {summary && (
           <>
-            <span className="text-gray-400">·</span>
-            <span
-              className={cn(
-                "truncate font-mono text-xs",
-                category === "bash" ? "text-green-400" : "text-gray-500",
-              )}
-            >
-              {displayValue}
+            <span className="text-gray-300">·</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500">
+              {summary}
             </span>
           </>
         )}
 
-        <div className="ml-auto flex items-center gap-2">
-          <StatusBadge status={status} />
-          <ChevronDownIcon
-            className={cn(
-              "h-4 w-4 shrink-0 transition-transform",
-              open ? "rotate-180" : "rotate-0",
-              category === "bash" ? "text-gray-500" : "text-gray-400",
-            )}
-          />
-        </div>
+        <span
+          className={cn(
+            "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+            statusCfg.className,
+          )}
+        >
+          {statusCfg.label}
+        </span>
+
+        <ChevronDownIcon
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform",
+            open && "rotate-180",
+          )}
+        />
       </CollapsibleTrigger>
 
       <CollapsibleContent
         className={cn(
-          "overflow-hidden text-sm",
+          "overflow-hidden",
           "data-[state=open]:animate-collapsible-down",
           "data-[state=closed]:animate-collapsible-up",
         )}
       >
-        <div
-          className={cn(
-            "border-t px-3 py-2",
-            category === "bash"
-              ? "border-gray-700 bg-gray-900"
-              : "border-gray-200 bg-white",
-          )}
-        >
-          {/* Args */}
-          <div className="mb-2">
-            <h4
-              className={cn(
-                "mb-1 text-xs font-medium",
-                category === "bash" ? "text-gray-400" : "text-gray-500",
-              )}
-            >
-              Input
-            </h4>
-            <pre
-              className={cn(
-                "overflow-x-auto rounded p-2 text-xs leading-relaxed whitespace-pre-wrap",
-                category === "bash"
-                  ? "bg-gray-800 text-gray-300"
-                  : "bg-gray-100 text-gray-700",
-              )}
-            >
-              {formattedArgs}
-            </pre>
-          </div>
+        <div className="border-t border-gray-100 px-3 py-2">
+          {/* Edit / Write / Patch — show diff if available */}
+          {(toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch") && isDone && hasDiff && result ? (
+            <DiffView text={result} />
+          ) : null}
 
-          {/* Result */}
-          {result !== undefined && (
-            <div>
-              <h4
-                className={cn(
-                  "mb-1 text-xs font-medium",
-                  category === "bash" ? "text-gray-400" : "text-gray-500",
-                )}
-              >
-                Result
-              </h4>
-              <pre
-                className={cn(
-                  "max-h-64 overflow-auto rounded p-2 text-xs leading-relaxed whitespace-pre-wrap",
-                  category === "bash"
-                    ? "bg-gray-800 text-gray-300"
-                    : "bg-gray-100 text-gray-700",
-                )}
-              >
-                {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-              </pre>
+          {/* Bash — show terminal-style output */}
+          {isBash && (
+            <TerminalBlock
+              command={summary}
+              output={result}
+            />
+          )}
+
+          {/* Fallback: show result as code, suppress JSON args */}
+          {!isBash && !(hasDiff && (toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch")) && result !== undefined && (
+            <CodeBlock text={typeof result === "string" ? result : JSON.stringify(result, null, 2)} />
+          )}
+
+          {/* Running state — show a subtle loading hint */}
+          {isRunning && !result && (
+            <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
+              <LoaderIcon className="h-3 w-3 animate-spin" />
+              Working...
+            </div>
+          )}
+
+          {/* Error state */}
+          {status === "incomplete" && (
+            <div className="flex items-center gap-2 text-xs text-red-500">
+              <XCircleIcon className="h-3.5 w-3.5" />
+              Tool call failed
             </div>
           )}
         </div>
