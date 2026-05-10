@@ -65,7 +65,7 @@ export function NewLoopDialog({
             </select>
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
-                还没注册的 repo。在 ~/.loopat/loopat/context/repos/ 下 git clone 一个进来。
+                还没注册的 repo。在 ~/.loopat/context/repos/ 下 git clone 一个进来。
               </div>
             )}
           </DialogField>

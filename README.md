@@ -25,7 +25,7 @@ bun install                          # also pulls the platform-specific claude b
 bun run dev
 ```
 
-On the very first run the server creates `~/.loopat/<workspace>/` (default workspace name: `loopat`) with:
+On the very first run the server populates `LOOPAT_HOME` (default `~/.loopat`) with:
 
 - `config.json`            — self-describing manifest (apiKey + optional remote git URLs for `knowledge` / `notes`)
 - `context/knowledge/`     — cloned from `config.knowledge.git` if set, else empty dir
@@ -38,7 +38,7 @@ It prints a checklist banner. The only thing you have to do manually:
 
 ```
 ✗  apiKey (bailian)
-   → edit /home/<user>/.loopat/loopat/config.json  →  set providers.bailian.apiKey
+   → edit ~/.loopat/config.json  →  set providers.bailian.apiKey
 ```
 
 Open `config.json`, fill in your key, optionally set `knowledge.git` / `notes.git` to your team's remote, then `bun run dev` again. Hand this `config.json` to a clean machine and bootstrap reconstructs the same workspace.
@@ -51,8 +51,7 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 
 | var | default | use |
 |---|---|---|
-| `LOOPAT_HOME` | `~/.loopat` | data root (per-machine) |
-| `LOOPAT_WORKSPACE` | auto | workspace name. If unset: pick the lone subdir of `LOOPAT_HOME` if there's exactly one; otherwise default to `loopat`. |
+| `LOOPAT_HOME` | `~/.loopat` | the workspace directory itself. Single workspace per loopat instance — to run a second workspace, start another loopat with a different `LOOPAT_HOME`. URL/display name = basename minus leading dots (`~/.loopat` → `loopat`). |
 | `LOOPAT_USER` | `$USER` | active driver name; also where `personal/` lives |
 | `PORT` | `7787` | server port |
 
@@ -61,8 +60,8 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 - **server/** — Hono + ws + Claude Agent SDK. Single port (REST + ws).
 - **web/** — Vite + React + assistant-ui. In dev, served from the same port via Vite middleware.
 - **server/templates/** — files copied into a fresh workspace on first run.
-- **`~/.loopat/<workspace>/`** — runtime data root. Per-machine.
+- **`$LOOPAT_HOME`** (default `~/.loopat`) — the workspace itself, per-machine.
 
 ## Sandbox
 
-Each loop runs in a bwrap mount namespace with a virtualized fs view (`/loop/<id>`, `/context/*`, `/personal/`). See [docs/sandbox.md](docs/sandbox.md) and `~/.loopat/<workspace>/CLAUDE.md`.
+Each loop runs in a bwrap mount namespace with a virtualized fs view (`/loop/<id>`, `/context/*`, `/personal/`). See [docs/sandbox.md](docs/sandbox.md) and `$LOOPAT_HOME/context/knowledge/loopat/CLAUDE.md`.

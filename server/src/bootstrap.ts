@@ -9,7 +9,6 @@ import { join } from "node:path"
 import { resolveClaudeBinary } from "./claude-binary"
 import { configPath, type WorkspaceConfig } from "./config"
 import {
-  LOOPAT_HOME,
   WORKSPACE,
   ME,
   workspaceDir,
@@ -68,7 +67,7 @@ function describeRemote(dir: string, url: string | undefined): string {
 
 export function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
-    { ok: true, label: `workspace dir: ${workspaceDir()}` },
+    { ok: true, label: `workspace: ${workspaceDir()}` },
     { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/loopat/CLAUDE.md` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
@@ -80,8 +79,7 @@ export function printBootstrapBanner(cfg: WorkspaceConfig) {
 
   const bar = "─".repeat(60)
   console.log(`\n${bar}`)
-  console.log(`  loopat bootstrap`)
-  console.log(`  workspace=${WORKSPACE}  user=${ME}  home=${LOOPAT_HOME}`)
+  console.log(`  loopat bootstrap — ${WORKSPACE} (user=${ME})`)
   console.log(bar)
   for (const c of checks) {
     const mark = c.ok ? "✓" : "✗"
