@@ -266,8 +266,11 @@ app.get(
         attachedTerm = ws
         await attachTerm(id, ws)
       },
-      onMessage(event, _ws) {
-        if (!canWrite) return
+      onMessage(event, ws) {
+        if (!canWrite) {
+          try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
+          return
+        }
         try {
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
           const msg = JSON.parse(data)
