@@ -1,8 +1,9 @@
-import { mkdir, readdir, readFile, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
+import { mkdir, readdir, readFile, writeFile, stat, symlink, lstat, rm, copyFile } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { existsSync } from "node:fs"
+import { join } from "node:path"
 import {
   ME,
   loopsDir,
@@ -14,6 +15,7 @@ import {
   loopContextNotes,
   loopContextPersonal,
   loopMetaPath,
+  workspaceDir,
   workspaceKnowledgeDir,
   workspaceNotesDir,
   workspaceReposDir,
@@ -21,6 +23,8 @@ import {
   personalDir,
   personalMemoryDir,
   teamMemoryDir,
+  workspaceDoctrinePath,
+  TEMPLATES_DIR,
 } from "./paths"
 import { existsSync as existsSyncBase } from "node:fs"
 
@@ -49,7 +53,17 @@ operational fact, a non-obvious gotcha). Routine observations belong in
 
 `
 
+async function gitInitIfMissing(dir: string) {
+  if (existsSyncBase(join(dir, ".git"))) return
+  try {
+    await execFileP("git", ["-C", dir, "init", "-q", "-b", "main"])
+  } catch (e: any) {
+    console.warn(`[loopat] git init failed for ${dir}: ${e?.message ?? e}`)
+  }
+}
+
 export async function ensureWorkspaceDirs() {
+  await mkdir(workspaceDir(), { recursive: true })
   await mkdir(loopsDir(), { recursive: true })
   await mkdir(workspaceKnowledgeDir(), { recursive: true })
   await mkdir(workspaceNotesDir(), { recursive: true })
@@ -64,6 +78,17 @@ export async function ensureWorkspaceDirs() {
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
+  // doctrine (workspace-level CLAUDE.md): copy template if missing
+  const doctrine = workspaceDoctrinePath()
+  if (!existsSyncBase(doctrine)) {
+    const tpl = join(TEMPLATES_DIR, "CLAUDE.md")
+    if (existsSyncBase(tpl)) await copyFile(tpl, doctrine)
+    else console.warn(`[loopat] doctrine template missing at ${tpl}`)
+  }
+  // local auto-commit story: notes + personal init'd as repos so vaultWrite
+  // can stamp commits. knowledge/ stays plain (read-only by Claude convention).
+  await gitInitIfMissing(workspaceNotesDir())
+  await gitInitIfMissing(personalDir(ME))
 }
 
 async function ensureSymlink(link: string, target: string) {

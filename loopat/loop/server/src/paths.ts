@@ -1,4 +1,4 @@
-import { homedir } from "node:os"
+import { homedir, userInfo } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -8,10 +8,13 @@ export const LOOPAT_HOME = process.env.LOOPAT_HOME ?? join(homedir(), ".loopat")
 // Computed from this file's path: server/src/paths.ts → loop/
 const __DIRNAME = dirname(fileURLToPath(import.meta.url))
 export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
+export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
-// Hardcoded for now; future = subdomain-routed multi-workspace.
-export const WORKSPACE = "1001"
-export const ME = "simpx"
+// Workspace + user are env-overridable so a fresh machine "just works":
+//   LOOPAT_WORKSPACE=foo LOOPAT_USER=alice bun run dev
+// otherwise: WORKSPACE defaults to "1001", ME defaults to $USER (OS account).
+export const WORKSPACE = process.env.LOOPAT_WORKSPACE ?? "1001"
+export const ME = process.env.LOOPAT_USER ?? process.env.USER ?? userInfo().username ?? "user"
 
 export const workspaceDir = () => join(LOOPAT_HOME, WORKSPACE)
 export const loopsDir = () => join(workspaceDir(), "loops")
