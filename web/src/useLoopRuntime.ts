@@ -214,7 +214,12 @@ export function useLoopRuntime(loopId: string | null) {
           return
         }
         if (m?.type === "user" && m.message) {
-          setRaw((prev) => [...prev, { id: freshId("u"), role: "user", content: asContentArray(m.message.content) }])
+          // upsert by uuid: dedup against history-replay + StrictMode double-mount
+          const uuid: string = m.uuid || freshId("u")
+          setRaw((prev) => {
+            if (prev.some((x) => x.id === uuid)) return prev
+            return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content) }]
+          })
         } else if (m?.type === "assistant" && m.message?.content) {
           // upsert by uuid so the streaming partial gets replaced cleanly
           const uuid: string = m.uuid ?? freshId("a")
