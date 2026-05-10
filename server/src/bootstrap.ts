@@ -5,6 +5,7 @@
  */
 import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
+import { join } from "node:path"
 import { resolveClaudeBinary } from "./claude-binary"
 import { configPath, type WorkspaceConfig } from "./config"
 import {
@@ -59,7 +60,9 @@ function checkApiKey(cfg: WorkspaceConfig): Check {
 
 function describeRemote(dir: string, url: string | undefined): string {
   if (!existsSync(dir)) return "missing"
-  if (url) return `${url}`
+  const isRepo = existsSync(join(dir, ".git"))
+  if (url && isRepo) return url
+  if (url && !isRepo) return `${url}  (clone failed → local-only)`
   return "local-only (no remote)"
 }
 
