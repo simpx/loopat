@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { BrainIcon } from "lucide-react";
+import { BrainIcon, SquareIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 const ACTION_WORDS = [
   "Thinking",
@@ -84,22 +85,19 @@ export default function ClaudeStatus({
                 {formatElapsedTime(elapsedTime)}
               </div>
 
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="xs"
                 onClick={onAbort}
-                className="group flex items-center gap-1.5 rounded-full bg-red-100 px-2.5 py-1 text-[10px] font-bold text-red-600 transition-all hover:bg-red-500 hover:text-white"
+                className="group rounded-full text-[10px] font-bold"
               >
-                <svg
-                  className="h-3 w-3 fill-current"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M6 6h12v12H6z" />
-                </svg>
+                <SquareIcon className="h-3 w-3 fill-current" />
                 <span className="hidden sm:inline">STOP</span>
                 <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-white/20 sm:block">
                   ESC
                 </kbd>
-              </button>
+              </Button>
             </>
           )}
         </div>
