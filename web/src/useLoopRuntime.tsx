@@ -261,7 +261,9 @@ export function useLoopRuntime(loopId: string | null) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
-  const [loadingHistory, setLoadingHistory] = useState(true)
+  // Ref (not state) so ws.onmessage closure sees fresh value without
+  // re-attaching the handler. Only the gating logic inside onmessage reads it.
+  const loadingHistoryRef = useRef(true)
   const reconnectTimerRef = useRef<number | null>(null)
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
@@ -322,7 +324,7 @@ export function useLoopRuntime(loopId: string | null) {
       // server replays history on each connect — clear local buffer
       setRaw([])
       setRunning(false)
-      setLoadingHistory(true)
+      loadingHistoryRef.current = true
       // Clear tool progress & task state & questions on reconnect
       toolProgressRef.current = new Map()
       setToolProgressVersion((v) => v + 1)
@@ -368,7 +370,7 @@ export function useLoopRuntime(loopId: string | null) {
           return
         }
         if (m?.type === "history_end") {
-          setLoadingHistory(false)
+          loadingHistoryRef.current = false
           setRunning(false)
           return
         }
@@ -457,14 +459,14 @@ export function useLoopRuntime(loopId: string | null) {
           }
           // system/init — start running
           if (subtype === "init") {
-            if (!loadingHistory) setRunning(true)
+            if (!loadingHistoryRef.current) setRunning(true)
             return
           }
           return
         }
 
         if (m?.type === "result") {
-          if (!loadingHistory) setRunning(false)
+          if (!loadingHistoryRef.current) setRunning(false)
           return
         }
 
@@ -497,7 +499,7 @@ export function useLoopRuntime(loopId: string | null) {
             ...prev,
             { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
           ])
-          if (!loadingHistory) setRunning(false)
+          if (!loadingHistoryRef.current) setRunning(false)
         }
       }
     }
