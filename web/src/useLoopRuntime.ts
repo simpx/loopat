@@ -115,6 +115,14 @@ function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
         }
         return b
       })
+      // skip assistant entries that render to nothing (e.g. a freshly-allocated
+      // partial message with no text yet) — otherwise they show as empty bubbles
+      const visible = enriched.some(
+        (b: any) =>
+          (b?.type === "text" && (b.text ?? "").length > 0) ||
+          b?.type === "tool_use",
+      )
+      if (!visible) continue
       out.push({ ...m, content: enriched })
     }
   }
