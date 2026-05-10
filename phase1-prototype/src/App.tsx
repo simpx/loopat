@@ -129,7 +129,7 @@ function Layout(props: { children?: any }) {
                 type="button"
                 onClick={() => {
                   setWorkspaceMenuOpen(false)
-                  navigate("/chat")
+                  navigate("/chat/all")
                 }}
                 class="w-full px-3 py-2 text-left flex items-center gap-2 text-gray-700 hover:bg-gray-50"
               >
@@ -221,7 +221,9 @@ function App() {
       <Route path="/context" component={() => <Navigate href="/context/knowledge" />} />
       <Route path="/context/:sub" component={ContextPage} />
       <Route path="/context/:sub/*path" component={ContextPage} />
-      <Route path="/chat" component={ChatPage} />
+      <Route path="/chat" component={() => <Navigate href="/chat/all" />} />
+      <Route path="/chat/dm/:name" component={ChatPage} />
+      <Route path="/chat/:id" component={ChatPage} />
     </Router>
   )
 }

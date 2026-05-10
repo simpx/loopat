@@ -1117,10 +1117,6 @@ export const [focusFile, setFocusFile] = createSignal<FocusFile>({
   listed: ["初版上线"],
 })
 
-// Currently selected chat conversation. Module-level so the Loop tab's
-// chat chips can drive Chat tab's selection on click.
-export const [chatActive, setChatActive] = createSignal<string>("all")
-
 // ============================================================================
 // notes/inbox.md — team scratch prose.
 // ============================================================================

@@ -5,9 +5,9 @@
  * which loops have ingested this channel (loop.context.chats[]).
  */
 import { createMemo, createSignal, For, Show } from "solid-js"
-import { useNavigate } from "@solidjs/router"
+import { useNavigate, useParams } from "@solidjs/router"
 import { Icon } from "../components/icon"
-import { loops, chatActive, setChatActive } from "../state"
+import { loops } from "../state"
 import { AGENTS } from "./context"
 
 type ChannelId = string
@@ -353,7 +353,9 @@ const DMS: Conversation[] = [
 
 function agentToConversation(a: typeof AGENTS[number]): Conversation {
   return {
-    id: `agent-${a.id}`,
+    // agents 跟 humans 共享 dm- 命名空间，name 是 workspace 唯一标识符
+    // (跟 mvp doc §1.4 "agent 跟人完全平起" 一致 —— @mention 不分人 / agent)
+    id: `dm-${a.id}`,
     kind: "dm",
     name: a.name,
     topic: a.charter,
@@ -408,10 +410,17 @@ function buildDmList(): DmEntry[] {
 }
 
 export function ChatPage() {
-  const active = chatActive
-  const setActive = setChatActive
-  const [refExpanded, setRefExpanded] = createSignal(false)
+  // URL 模式：
+  //   channel: /chat/:id      → params.id 直接用
+  //   dm:      /chat/dm/:name → 内部 id 是 dm-<name>
+  const params = useParams<{ id?: string; name?: string }>()
   const navigate = useNavigate()
+  const active = () => (params.name ? `dm-${params.name}` : params.id ?? "all")
+  const setActive = (id: string) => {
+    if (id.startsWith("dm-")) navigate(`/chat/dm/${id.slice(3)}`)
+    else navigate(`/chat/${id}`)
+  }
+  const [refExpanded, setRefExpanded] = createSignal(false)
   const dmList = buildDmList()
   const activeDms = () => dmList.filter((e) => e.hasActivity)
   const allConvos = () => [...CHANNELS, ...dmList.map((e) => e.conv)]
@@ -424,8 +433,9 @@ export function ChatPage() {
   }
   const memberKind = (name: string): "human" | "agent" =>
     AGENTS.some((a) => a.name === name) ? "agent" : "human"
-  const memberDmId = (name: string) =>
-    name === "coo" ? "dm-coo" : memberKind(name) === "agent" ? `agent-${name}` : `dm-${name}`
+  // 命名空间统一：humans + agents 都是 `dm-<name>`
+  // (workspace 内 name 唯一即可，agent 跟人不区分)
+  const memberDmId = (name: string) => `dm-${name}`
 
   // Loops that have this conversation in their context.chats[].
   const referencedBy = createMemo(() =>
