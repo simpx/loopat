@@ -19,7 +19,10 @@ import {
   workspaceReposDir,
   workspaceRepoDir,
   personalDir,
+  personalMemoryDir,
+  teamMemoryDir,
 } from "./paths"
+import { existsSync as existsSyncBase } from "node:fs"
 
 const execFileP = promisify(execFile)
 
@@ -31,12 +34,36 @@ export type LoopMeta = {
   branch?: string
 }
 
+const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index
+
+Each line points at a memory file in this directory. Maintained by Claude.
+
+`
+
+const TEAM_MEMORY_INDEX_STUB = `# Team memory index
+
+Cross-loop, cross-user memory shared via the notes git repo. One line per entry.
+Promote here only when the insight is workspace-wide (a convention, an
+operational fact, a non-obvious gotcha). Routine observations belong in
+\`/personal/memory/\` instead.
+
+`
+
 export async function ensureWorkspaceDirs() {
   await mkdir(loopsDir(), { recursive: true })
   await mkdir(workspaceKnowledgeDir(), { recursive: true })
   await mkdir(workspaceNotesDir(), { recursive: true })
   await mkdir(workspaceReposDir(), { recursive: true })
   await mkdir(personalDir(ME), { recursive: true })
+  // memory dirs + stub indices (idempotent)
+  const pm = personalMemoryDir(ME)
+  const tm = teamMemoryDir()
+  await mkdir(pm, { recursive: true })
+  await mkdir(tm, { recursive: true })
+  const pmIdx = `${pm}/MEMORY.md`
+  const tmIdx = `${tm}/MEMORY.md`
+  if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
+  if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
 }
 
 async function ensureSymlink(link: string, target: string) {
@@ -93,6 +120,13 @@ export async function createLoop(opts: { title: string; repo?: string }): Promis
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
+  // Write per-loop settings.json so SDK auto-memory points at the virtual
+  // /personal/memory/ path (which exists inside outer sandbox).
+  const settings = {
+    autoMemoryEnabled: true,
+    autoMemoryDirectory: "/personal/memory",
+  }
+  await writeFile(`${loopClaudeDir(id)}/settings.json`, JSON.stringify(settings, null, 2))
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {
