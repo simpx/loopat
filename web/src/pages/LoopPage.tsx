@@ -253,7 +253,7 @@ function LoopHeader({
 
       {/* workdir + branch + mode toggles */}
       <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
-        <span className="font-mono">~/.loopat/1001/loops/{meta.id.slice(0, 8)}/workdir</span>
+        <span className="font-mono">~/.loopat/loopat/loops/{meta.id.slice(0, 8)}/workdir</span>
         <span>·</span>
         <span>main</span>
         {viewers > 0 && (
@@ -360,7 +360,7 @@ function InfoPanel({ meta }: { meta: LoopMeta }) {
       </Section>
       <Section label="workdir">
         <Row label="id" value={meta.id} mono />
-        <Row label="path" value={`~/.loopat/1001/loops/${meta.id.slice(0, 8)}/workdir`} mono />
+        <Row label="path" value={`~/.loopat/loopat/loops/${meta.id.slice(0, 8)}/workdir`} mono />
         <Row label="branch" value="main" mono />
       </Section>
       <Section label="context">
