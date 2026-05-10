@@ -1,18 +1,14 @@
-# Nested repos with their own histories (top-level only)
-/claw-code/
-/loop/
-/opencode/
-/loopat-ts/
-
-# loopat code lock files
+node_modules/
+dist/
+.vite/
+.env
+.env.local
+*.log
+.DS_Store
 bun.lock
+*.tsbuildinfo
 
 # Editor swap / temp files
 .*.swp
 .*.swo
 *~
-
-# JS build artifacts
-node_modules/
-dist/
-.vite/

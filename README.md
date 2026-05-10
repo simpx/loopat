@@ -1,4 +1,4 @@
-# loopat / loop
+# loopat
 
 Single-binary collaborative AI coding workspace. Loop = context + AI + workdir, sandboxed per-loop with bwrap, served as a web app on `localhost:7787`.
 
@@ -14,8 +14,8 @@ curl -fsSL https://bun.sh/install | bash
 ### 2. clone + install
 
 ```sh
-git clone <this-repo>
-cd loopat/loop
+git clone git@github.com:simpx/loopat.git
+cd loopat
 bun install                          # also pulls the platform-specific claude binary
 ```
 
