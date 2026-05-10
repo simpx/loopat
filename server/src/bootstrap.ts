@@ -15,6 +15,7 @@ import {
   workspaceDoctrinePath,
   workspaceKnowledgeDir,
   workspaceNotesDir,
+  workspaceRepoDir,
 } from "./paths"
 
 type Check = { ok: boolean; label: string; hint?: string }
@@ -65,12 +66,24 @@ function describeRemote(dir: string, url: string | undefined): string {
   return "local-only (no remote)"
 }
 
+function describeRepos(cfg: WorkspaceConfig): Check {
+  const specs = cfg.repos ?? []
+  if (specs.length === 0) return { ok: true, label: `repos:     (none configured)` }
+  const parts = specs.map((r) => {
+    const present = existsSync(workspaceRepoDir(r.name))
+    return `${present ? "" : "✗"}${r.name}`
+  })
+  const allOk = specs.every((r) => existsSync(workspaceRepoDir(r.name)))
+  return { ok: allOk, label: `repos:     ${parts.join(", ")}` }
+}
+
 export function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
     { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/loopat/CLAUDE.md` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
+    describeRepos(cfg),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkBwrap(),
     checkClaudeBinary(),
