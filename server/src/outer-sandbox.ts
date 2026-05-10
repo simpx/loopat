@@ -25,6 +25,7 @@ import {
   workspaceKnowledgeDir,
   workspaceLoopatSkillsDir,
   workspaceNotesDir,
+  workspaceReposDir,
   personalDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
@@ -89,6 +90,15 @@ export async function buildOuterBwrapArgs(
   const skillsSrc = workspaceLoopatSkillsDir()
   if (existsSync(skillsSrc)) {
     args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
+  }
+
+  // repos: re-bind at the same host absolute path so worktree `.git` files
+  // (which store absolute gitdir paths) resolve inside the sandbox. The main
+  // repo holds the per-worktree refs/index that git needs to follow from the
+  // workdir's .git pointer. Rw because git writes HEAD/index/logs there.
+  const reposDir = workspaceReposDir()
+  if (existsSync(reposDir)) {
+    args.push("--bind", reposDir, reposDir)
   }
 
   args.push(
