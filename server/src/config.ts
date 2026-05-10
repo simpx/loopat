@@ -7,6 +7,15 @@ export type ProviderConfig = {
   model: string
   baseUrl: string
   apiKey: string
+  /**
+   * Override cli's context-window detection for this model. cli has a
+   * hardcoded list (DP / XV8 / coral_reef_sonnet predicates) of claude
+   * models that get 1M; everything else falls back to DR1=200000. For
+   * gateway-routed / non-claude models with larger windows, set this so
+   * auto-compact (92% × window) fires at the right point. Activated via
+   * env vars DISABLE_COMPACT=1 + CLAUDE_CODE_MAX_CONTEXT_TOKENS=<value>.
+   */
+  maxContextTokens?: number
 }
 
 export type RemoteSpec = {
