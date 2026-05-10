@@ -31,3 +31,7 @@ export const loopContextNotes = (id: string) => join(loopContextDir(id), "notes"
 export const loopContextPersonal = (id: string) => join(loopContextDir(id), "personal")
 export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
+
+export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
+export const teamMemoryDir = () => join(workspaceNotesDir(), "memory")
+export const workspaceDoctrinePath = () => join(workspaceDir(), "CLAUDE.md")

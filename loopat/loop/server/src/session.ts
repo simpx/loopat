@@ -2,25 +2,13 @@ import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthro
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
-import { homedir } from "node:os"
-import {
-  ME,
-  loopWorkdir,
-  loopClaudeDir,
-  loopContextDir,
-  loopContextKnowledge,
-  loopContextNotes,
-  loopContextPersonal,
-  loopHistoryPath,
-  workspaceKnowledgeDir,
-  workspaceNotesDir,
-  personalDir,
-  LOOPAT_INSTALL_DIR,
-} from "./paths"
-import { existsSync } from "node:fs"
+import { loopClaudeDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, getActiveProvider } from "./config"
-import { resolvePersonalDeps } from "./personal-deps"
+import { buildLoopatAppend } from "./system-prompt"
+import { getLoop } from "./loops"
+import { spawn as nodeSpawn } from "node:child_process"
+import { buildOuterBwrapArgs, V_LOOP, V_LOOP_CLAUDE } from "./outer-sandbox"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 
@@ -121,53 +109,53 @@ class LoopSession {
       throw new Error(`config.json: provider "${providerName}" has empty apiKey — fill it in and restart`)
     }
 
-    const workdir = loopWorkdir(this.id)
-    const claudeDir = loopClaudeDir(this.id)
-    const additionalDirectories: string[] = []
-    for (const p of [loopContextKnowledge(this.id), loopContextNotes(this.id), loopContextPersonal(this.id)]) {
-      if (existsSync(p)) additionalDirectories.push(p)
+    const meta = await getLoop(this.id)
+    if (!meta) {
+      throw new Error(`loop ${this.id} meta missing`)
     }
-    const personalDeps = await resolvePersonalDeps()
-    const home = homedir()
+    const loopatAppend = await buildLoopatAppend(meta)
+    const loopId = this.id
+
+    // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
+    // spawnClaudeCodeProcess callback can run synchronously.
+    const bwrapBase = await buildOuterBwrapArgs(loopId, {
+      ANTHROPIC_API_KEY: provider.apiKey,
+      ANTHROPIC_BASE_URL: provider.baseUrl,
+      CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
+    })
 
     this.q = query({
       prompt: this.input.iter,
       options: {
-        cwd: workdir,
+        cwd: V_LOOP(loopId),
         env: {
           ...process.env,
-          CLAUDE_CONFIG_DIR: claudeDir,
+          CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
           ANTHROPIC_API_KEY: provider.apiKey,
           ANTHROPIC_BASE_URL: provider.baseUrl,
         },
         model: provider.model,
-        stderr: (s) => console.error(`[sdk:${this.id.slice(0, 8)}] ${s.trimEnd()}`),
+        systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
+        stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
-        settingSources: [],
-        additionalDirectories,
-        sandbox: {
-          enabled: true,
-          failIfUnavailable: true,
-          autoAllowBashIfSandboxed: true,
-          allowUnsandboxedCommands: false,
-          filesystem: {
-            denyRead: [home],
-            allowRead: [
-              LOOPAT_INSTALL_DIR,                 // sandbox helpers (apply-seccomp, claude binary)
-              loopContextDir(this.id),            // context/ for symlink visibility (don't include loopDir — it'd ro-clobber workdir)
-              workspaceKnowledgeDir(),            // knowledge symlink target — read-only
-              ...personalDeps,
-            ],
-            allowWrite: [
-              workdir,
-              claudeDir,
-              workspaceNotesDir(),                // notes symlink target — rw
-              personalDir(ME),                    // personal symlink target — rw
-              ...personalDeps,
-            ],
-          },
+        // Read user-tier settings.json from CLAUDE_CONFIG_DIR — that's where
+        // we wrote autoMemoryDirectory: /personal/memory. SDK's auto-memory
+        // recall will then scan the virtual path (which the outer bwrap maps
+        // to the real personal/<user>/memory/).
+        settingSources: ["user"],
+        // Inner SDK sandbox disabled — outer bwrap (single layer) wraps the
+        // CLI process itself; bash subprocesses inherit the same namespace.
+        // No nested sandbox needed.
+        sandbox: { enabled: false },
+        // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
+        spawnClaudeCodeProcess: ({ command, args, signal }) => {
+          const fullArgs = [...bwrapBase, "--", command, ...args]
+          return nodeSpawn("bwrap", fullArgs, {
+            stdio: ["pipe", "pipe", "pipe"],
+            signal,
+          }) as any
         },
         ...(shouldContinue ? { continue: true } : {}),
       },
