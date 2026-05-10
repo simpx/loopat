@@ -38,7 +38,7 @@ function checkClaudeBinary(): Check {
     return {
       ok: false,
       label: "claude binary",
-      hint: "run `bun install` in loopat/loop/ — SDK ships the binary as a platform-specific package",
+      hint: "run `bun install` in the loopat repo root — SDK ships the binary as a platform-specific package",
     }
   }
 }

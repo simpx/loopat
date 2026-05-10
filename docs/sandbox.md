@@ -220,7 +220,7 @@ L4（per-loop user nudge，loop dir 根的 CLAUDE.md）+ L5（repo 自带 CLAUDE
 rsync -a ~/.loopat/ b:.loopat/
 
 # b 机
-cd ~/workspace/1001/loopat/loop && bun install
+cd ~/workspace/loopat && bun install
 bun run --hot src/index.ts
 ```
 
@@ -245,7 +245,7 @@ bun run --hot src/index.ts
 UX 上**不"完美 docker"的地方**：
 - `$HOME=/home/simpx`（不是 `/personal`）—— 因为 ssh 等工具固定读 `$HOME/.ssh`
 - `/usr/local` 之类系统路径仍可见（RO）—— sandbox 里的 Claude 不应该感到"在外星系"，常用工具应该都在
-- `LOOPAT_INSTALL_DIR`（如 `/home/simpx/workspace/1001/loopat/loop`）有泄漏 —— 因为 claude binary 必须能跑，只能 bind same-to-same
+- `LOOPAT_INSTALL_DIR`（如 `/home/simpx/workspace/loopat`）有泄漏 —— 因为 claude binary 必须能跑，只能 bind same-to-same
 
 这些都是**实用主义妥协**。彻底纯化（每层路径都虚拟、$HOME 也虚拟）需要更多 bind 重写 + 可能破坏工具，得不偿失。
 
