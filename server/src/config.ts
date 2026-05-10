@@ -35,8 +35,8 @@ export type WorkspaceConfig = {
 }
 
 const TEMPLATE: WorkspaceConfig = {
-  knowledge: { git: "" },
-  notes: { git: "" },
+  knowledge: { git: "https://github.com/simpx/loopat-knowledge.git" },
+  notes: { git: "https://github.com/simpx/loopat-notes.git" },
   repos: [
     { name: "loopat", git: "https://github.com/simpx/loopat.git" },
   ],
