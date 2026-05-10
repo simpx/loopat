@@ -8,6 +8,7 @@ import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, getActiveProvider } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
+import { loadPersonalSecrets, substituteVars } from "./personal-secrets"
 import { getLoop } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildOuterBwrapArgs, V_LOOP, V_LOOP_CLAUDE } from "./outer-sandbox"
@@ -131,6 +132,10 @@ class LoopSession {
     }
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
+    // Resolve ${VAR} refs in mcpServers from personal/<user>/secrets/. Server
+    // does the substitution on the host; secret files never enter the sandbox.
+    const secrets = await loadPersonalSecrets(meta.createdBy)
+    const mcpServers = cfg.mcpServers ? substituteVars(cfg.mcpServers, secrets) : undefined
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
@@ -158,7 +163,7 @@ class LoopSession {
         },
         model: provider.model,
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
-        mcpServers: cfg.mcpServers,
+        mcpServers,
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         permissionMode: "bypassPermissions",
