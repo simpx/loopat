@@ -1,8 +1,11 @@
-# Nested repos with their own histories
-claw-code/
-loop/
-opencode/
-loopat-ts/
+# Nested repos with their own histories (top-level only)
+/claw-code/
+/loop/
+/opencode/
+/loopat-ts/
+
+# loopat code lock files
+bun.lock
 
 # Editor swap / temp files
 .*.swp
