@@ -25,21 +25,23 @@ bun install                          # also pulls the platform-specific claude b
 bun run dev
 ```
 
-On the very first run the server creates `~/.loopat/<workspace>/` with:
+On the very first run the server creates `~/.loopat/<workspace>/` (default workspace name: `loopat`) with:
 
-- `CLAUDE.md`         — sandbox doctrine (copied from `server/templates/CLAUDE.md`)
-- `config.json`       — provider template (apiKey is empty)
-- `context/{knowledge,notes,repos}/`, `personal/<user>/` — empty skeletons
-- `notes/` and `personal/<user>/` get `git init`'d so writes auto-commit locally
+- `config.json`            — self-describing manifest (apiKey + optional remote git URLs for `knowledge` / `notes`)
+- `context/knowledge/`     — cloned from `config.knowledge.git` if set, else empty dir
+- `context/knowledge/loopat/CLAUDE.md` — sandbox doctrine, seeded from `server/templates/` if absent
+- `context/notes/`         — cloned from `config.notes.git` if set, else `git init`'d locally for auto-commit
+- `context/repos/`, `personal/<user>/` — empty skeletons
+- `personal/<user>/` gets `git init`'d so vault writes auto-commit
 
-It prints a checklist banner. The only thing you need to do manually:
+It prints a checklist banner. The only thing you have to do manually:
 
 ```
 ✗  apiKey (bailian)
-   → edit /home/<user>/.loopat/1001/config.json  →  set providers.bailian.apiKey
+   → edit /home/<user>/.loopat/loopat/config.json  →  set providers.bailian.apiKey
 ```
 
-Open `config.json`, fill in your key (or pick a different provider as `default`), then `bun run dev` again.
+Open `config.json`, fill in your key, optionally set `knowledge.git` / `notes.git` to your team's remote, then `bun run dev` again. Hand this `config.json` to a clean machine and bootstrap reconstructs the same workspace.
 
 ### 4. it should now work
 
@@ -50,7 +52,7 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 | var | default | use |
 |---|---|---|
 | `LOOPAT_HOME` | `~/.loopat` | data root (per-machine) |
-| `LOOPAT_WORKSPACE` | `1001` | workspace name (subdir of `LOOPAT_HOME`) |
+| `LOOPAT_WORKSPACE` | `loopat` | workspace name (subdir of `LOOPAT_HOME`) |
 | `LOOPAT_USER` | `$USER` | active driver name; also where `personal/` lives |
 | `PORT` | `7787` | server port |
 

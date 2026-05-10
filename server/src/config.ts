@@ -9,12 +9,27 @@ export type ProviderConfig = {
   apiKey: string
 }
 
+export type RemoteSpec = {
+  /** clone URL; empty string or omitted = local-only, don't clone */
+  git?: string
+}
+
+/**
+ * config.json is the workspace's self-describing manifest. Hand this file
+ * (with apiKey + git URLs filled in) to a clean machine and bootstrap can
+ * reconstruct the workspace: clone knowledge/notes from their remotes,
+ * seed doctrine, set up personal/.
+ */
 export type WorkspaceConfig = {
+  knowledge?: RemoteSpec
+  notes?: RemoteSpec
   default: string
   providers: Record<string, ProviderConfig>
 }
 
 const TEMPLATE: WorkspaceConfig = {
+  knowledge: { git: "" },
+  notes: { git: "" },
   default: "bailian",
   providers: {
     bailian: {

@@ -13,6 +13,8 @@ import {
   ME,
   workspaceDir,
   workspaceDoctrinePath,
+  workspaceKnowledgeDir,
+  workspaceNotesDir,
 } from "./paths"
 
 type Check = { ok: boolean; label: string; hint?: string }
@@ -55,10 +57,18 @@ function checkApiKey(cfg: WorkspaceConfig): Check {
   }
 }
 
+function describeRemote(dir: string, url: string | undefined): string {
+  if (!existsSync(dir)) return "missing"
+  if (url) return `${url}`
+  return "local-only (no remote)"
+}
+
 export function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
     { ok: true, label: `workspace dir: ${workspaceDir()}` },
-    { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: ${workspaceDoctrinePath()}` },
+    { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/loopat/CLAUDE.md` },
+    { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
+    { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkBwrap(),
     checkClaudeBinary(),

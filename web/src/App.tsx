@@ -14,7 +14,6 @@ import { FocusPage } from "./pages/FocusPage"
 import { ContextPage } from "./pages/ContextPage"
 
 const WORKSPACE_NAME = "loopat"
-const WORKSPACE_ID = "1001"
 const ME = "simpx"
 
 const TABS = [
@@ -70,8 +69,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           >
             <span className="text-lg leading-none">🧶</span>
             <span className="text-sm text-gray-900 font-medium">{WORKSPACE_NAME}</span>
-            <span className="text-gray-300">·</span>
-            <span className="font-mono text-sm text-gray-600">{WORKSPACE_ID}</span>
             <span className="text-gray-400 text-xs">{workspaceMenuOpen ? "▴" : "▾"}</span>
           </button>
           {workspaceMenuOpen && (
@@ -80,9 +77,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                 <div className="flex items-center gap-2">
                   <span className="text-base">🧶</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-gray-900 font-medium">
-                      {WORKSPACE_NAME} · {WORKSPACE_ID}
-                    </div>
+                    <div className="text-gray-900 font-medium">{WORKSPACE_NAME}</div>
                     <div className="text-[11px] text-gray-500">single-user</div>
                   </div>
                 </div>
