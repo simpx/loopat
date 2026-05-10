@@ -10,7 +10,7 @@
  */
 import { readFile } from "node:fs/promises"
 import type { LoopMeta } from "./loops"
-import { workspaceDoctrinePath, ME } from "./paths"
+import { workspaceDoctrinePath } from "./paths"
 
 let cachedDoctrine: string | null = null
 
@@ -34,7 +34,7 @@ function buildRuntimeBlock(loop: LoopMeta): string {
 
 - title: ${loop.title}
 - id: ${loop.id}
-- driver: ${ME}
+- driver: ${loop.createdBy}
 - workdir: /loop/${loop.id}
 - repo: ${repoLine}
 - created: ${loop.createdAt}

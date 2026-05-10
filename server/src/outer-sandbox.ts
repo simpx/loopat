@@ -19,7 +19,6 @@
  */
 import { homedir } from "node:os"
 import {
-  ME,
   loopWorkdir,
   loopClaudeDir,
   workspaceKnowledgeDir,
@@ -44,10 +43,11 @@ export type SandboxExtraEnv = Record<string, string>
  */
 export async function buildOuterBwrapArgs(
   loopId: string,
+  createdBy: string,
   extraSetenv: SandboxExtraEnv = {},
 ): Promise<string[]> {
   const home = homedir()
-  const personalDeps = await resolvePersonalDeps()
+  const personalDeps = await resolvePersonalDeps(createdBy)
 
   // Per-component ro-binds (NOT `--ro-bind / /`) — RO root prevents bwrap from
   // mkdir'ing virtual paths like /loop. With selective binds, the sandbox
@@ -64,7 +64,7 @@ export async function buildOuterBwrapArgs(
     // host home: tmpfs; personal-dep targets bound back below
     "--tmpfs", home,
     // virtual mount points: bind directly. bwrap auto-creates parents.
-    "--bind", personalDir(ME), V_PERSONAL,
+    "--bind", personalDir(createdBy), V_PERSONAL,
     "--bind", loopWorkdir(loopId), V_LOOP(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
     "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,

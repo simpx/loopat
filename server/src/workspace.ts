@@ -14,7 +14,6 @@ import {
   workspaceNotesDir,
   workspaceReposDir,
   personalDir,
-  ME,
 } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -28,14 +27,14 @@ export type VaultEntry = {
   size?: number
 }
 
-export function vaultRoot(vault: VaultId): string {
+export function vaultRoot(vault: VaultId, user: string): string {
   switch (vault) {
     case "knowledge":
       return workspaceKnowledgeDir()
     case "notes":
       return workspaceNotesDir()
     case "personal":
-      return personalDir(ME)
+      return personalDir(user)
     case "repos":
       return workspaceReposDir()
   }
@@ -50,8 +49,8 @@ function safeJoin(rootAbs: string, rel: string): string | null {
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".bun"])
 
-export async function vaultList(vault: VaultId, relPath: string): Promise<VaultEntry[]> {
-  const root = vaultRoot(vault)
+export async function vaultList(vault: VaultId, relPath: string, user: string): Promise<VaultEntry[]> {
+  const root = vaultRoot(vault, user)
   const abs = safeJoin(root, relPath)
   if (!abs) return []
   let names: string[] = []
@@ -89,8 +88,8 @@ export async function vaultList(vault: VaultId, relPath: string): Promise<VaultE
 /**
  * Recursive flat list of files in a vault. Used for sidebar search.
  */
-export async function vaultFlatList(vault: VaultId): Promise<VaultEntry[]> {
-  const root = vaultRoot(vault)
+export async function vaultFlatList(vault: VaultId, user: string): Promise<VaultEntry[]> {
+  const root = vaultRoot(vault, user)
   const out: VaultEntry[] = []
   const walk = async (abs: string, rel: string): Promise<void> => {
     let names: string[] = []
@@ -122,8 +121,8 @@ export async function vaultFlatList(vault: VaultId): Promise<VaultEntry[]> {
 
 const MAX_BYTES = 1024 * 1024
 
-export async function vaultRead(vault: VaultId, relPath: string): Promise<{ content: string; size: number; truncated: boolean } | null> {
-  const root = vaultRoot(vault)
+export async function vaultRead(vault: VaultId, relPath: string, user: string): Promise<{ content: string; size: number; truncated: boolean } | null> {
+  const root = vaultRoot(vault, user)
   const abs = safeJoin(root, relPath)
   if (!abs) return null
   try {
@@ -142,8 +141,9 @@ export async function vaultWrite(
   vault: VaultId,
   relPath: string,
   content: string,
+  user: string,
 ): Promise<{ ok: boolean; commit?: string; error?: string }> {
-  const root = vaultRoot(vault)
+  const root = vaultRoot(vault, user)
   const abs = safeJoin(root, relPath)
   if (!abs) return { ok: false, error: "path escapes root" }
   try {
@@ -173,8 +173,8 @@ export async function vaultWrite(
   return { ok: true }
 }
 
-export async function vaultCreateFile(vault: VaultId, relPath: string): Promise<{ ok: boolean; error?: string }> {
-  const root = vaultRoot(vault)
+export async function vaultCreateFile(vault: VaultId, relPath: string, user: string): Promise<{ ok: boolean; error?: string }> {
+  const root = vaultRoot(vault, user)
   const abs = safeJoin(root, relPath)
   if (!abs) return { ok: false, error: "path escapes root" }
   if (existsSync(abs)) return { ok: false, error: "exists" }
@@ -202,8 +202,8 @@ export type Backlink = {
  * Scan all .md files in the vault for `[[<basename of path>]]` references
  * and return matching files with a short preview.
  */
-export async function vaultBacklinks(vault: VaultId, targetPath: string): Promise<Backlink[]> {
-  const root = vaultRoot(vault)
+export async function vaultBacklinks(vault: VaultId, targetPath: string, user: string): Promise<Backlink[]> {
+  const root = vaultRoot(vault, user)
   // basename without .md extension is the wikilink target
   const baseName = targetPath.split("/").pop()?.replace(/\.md$/, "") ?? targetPath
   const aliases = new Set<string>([baseName, targetPath, targetPath.replace(/\.md$/, "")])

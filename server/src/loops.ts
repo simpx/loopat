@@ -5,7 +5,6 @@ import { promisify } from "node:util"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import {
-  ME,
   loopsDir,
   loopDir,
   loopWorkdir,
@@ -37,6 +36,7 @@ export type LoopMeta = {
   id: string
   title: string
   createdAt: string
+  createdBy: string
   repo?: string
   branch?: string
 }
@@ -117,7 +117,6 @@ export async function ensureWorkspaceDirs() {
   await mkdir(workspaceDir(), { recursive: true })
   await mkdir(loopsDir(), { recursive: true })
   await mkdir(workspaceReposDir(), { recursive: true })
-  await mkdir(personalDir(ME), { recursive: true })
 
   // knowledge / notes / repos: clone from config'd remote if present
   const cfg = await loadConfig()
@@ -125,14 +124,10 @@ export async function ensureWorkspaceDirs() {
   const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
   if (cfg.repos?.length) await ensureRepos(cfg.repos)
 
-  // memory dirs + stub indices (idempotent)
-  const pm = personalMemoryDir(ME)
+  // team memory dir + stub
   const tm = teamMemoryDir()
-  await mkdir(pm, { recursive: true })
   await mkdir(tm, { recursive: true })
-  const pmIdx = `${pm}/MEMORY.md`
   const tmIdx = `${tm}/MEMORY.md`
-  if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
 
   // doctrine lives inside knowledge as `loopat/CLAUDE.md` — copy the bundled
@@ -146,12 +141,28 @@ export async function ensureWorkspaceDirs() {
     else console.warn(`[loopat] doctrine template missing at ${tpl}`)
   }
 
-  // git init notes + personal so vaultWrite auto-commits work locally. Skip
-  // notes if we cloned (already a repo). Knowledge stays plain unless cloned.
+  // git init notes so vaultWrite auto-commits work locally. Skip if cloned
+  // (already a repo). Knowledge stays plain unless cloned.
   if (!n.cloned) await gitInitIfMissing(workspaceNotesDir())
-  await gitInitIfMissing(personalDir(ME))
   // suppress unused warning for k.cloned (kept for symmetry / future use)
   void k
+}
+
+/**
+ * Provision a freshly-registered user's personal/ tree. Tries to clone
+ * personalRepo if provided; on failure (network, auth, bad URL) falls back
+ * to an empty git-init'd dir so vaultWrite auto-commits still work.
+ */
+export async function provisionUserPersonal(userId: string, personalRepo?: string): Promise<void> {
+  const dir = personalDir(userId)
+  const r = await cloneOrMkdir(dir, personalRepo)
+
+  const pm = personalMemoryDir(userId)
+  await mkdir(pm, { recursive: true })
+  const pmIdx = `${pm}/MEMORY.md`
+  if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
+
+  if (!r.cloned) await gitInitIfMissing(dir)
 }
 
 async function ensureSymlink(link: string, target: string) {
@@ -162,11 +173,11 @@ async function ensureSymlink(link: string, target: string) {
   }
 }
 
-export async function ensureContextMounts(id: string) {
+export async function ensureContextMounts(id: string, createdBy: string) {
   await mkdir(loopContextDir(id), { recursive: true })
   await ensureSymlink(loopContextKnowledge(id), workspaceKnowledgeDir())
   await ensureSymlink(loopContextNotes(id), workspaceNotesDir())
-  await ensureSymlink(loopContextPersonal(id), personalDir(ME))
+  await ensureSymlink(loopContextPersonal(id), personalDir(createdBy))
 }
 
 export async function listLoops(): Promise<LoopMeta[]> {
@@ -198,13 +209,14 @@ async function shortBranchSlug(title: string): Promise<string> {
   return base || "loop"
 }
 
-export async function createLoop(opts: { title: string; repo?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; createdBy: string }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
   const meta: LoopMeta = {
     id,
     title: opts.title.trim() || "untitled",
     createdAt: new Date().toISOString(),
+    createdBy: opts.createdBy,
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
@@ -237,7 +249,7 @@ export async function createLoop(opts: { title: string; repo?: string }): Promis
     await mkdir(loopWorkdir(id), { recursive: true })
   }
 
-  await ensureContextMounts(id)
+  await ensureContextMounts(id, meta.createdBy)
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta
 }
@@ -266,7 +278,12 @@ export async function backfillAllMounts(): Promise<number> {
     const ids = await readdir(loopsDir())
     for (const id of ids) {
       try {
-        await ensureContextMounts(id)
+        const meta = await getLoop(id)
+        if (!meta?.createdBy) {
+          console.warn(`[loopat] loop ${id}: meta missing createdBy — skipping mount backfill`)
+          continue
+        }
+        await ensureContextMounts(id, meta.createdBy)
         count++
       } catch {}
     }
