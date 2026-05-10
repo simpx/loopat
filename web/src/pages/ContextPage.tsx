@@ -723,7 +723,7 @@ function ReposPane() {
           })}
           {repos.length === 0 && (
             <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-              none · `ln -s` or `git clone` into ~/.loopat/loopat/context/repos/
+              none · `ln -s` or `git clone` into ~/.loopat/context/repos/
             </div>
           )}
         </div>

@@ -12,7 +12,7 @@ status: draft (review before promoting to knowledge/)
 
 1. **loop 目录就是 sandbox 的完整描述** —— 沙箱权限不藏在配置文件里，而是从 `loops/<id>/` 目录的物理结构 + symlink 链派生。`ls -laR loops/<id>` 就能看见全部访问范围。
 2. **filesystem-first，不引入 DB** —— sandbox 配置、memory、context、状态全是文件，user / Claude / git 都能操作。
-3. **机器无关、可移植** —— 把 `~/.loopat/<workspace>/` rsync 到别的机器，sandbox 视图不变。
+3. **机器无关、可移植** —— 把 `$LOOPAT_HOME` 整个 rsync 到别的机器，sandbox 视图不变。
 4. **单层** —— 用一个 bwrap 包 Claude CLI driver；它 spawn 的 bash 子进程**继承同一 mount/pid namespace**，不需要嵌套 sandbox。
 
 ## 完整架构
@@ -161,7 +161,7 @@ Claude 在 sandbox 里看到的：
 
 例：
 ```sh
-ln -s ~/.ssh ~/.loopat/loopat/personal/simpx/secrets/.ssh
+ln -s ~/.ssh ~/.loopat/personal/simpx/secrets/.ssh
 ```
 之后沙箱里：
 - `/personal/secrets/.ssh` 可见（因为 `/personal` 已 bind）
