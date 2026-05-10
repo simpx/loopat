@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { workspaceDir } from "./paths"
+import { workspaceDir, workspaceTeamClaudeJsonPath } from "./paths"
 
 export type ProviderConfig = {
   model: string
@@ -61,7 +61,10 @@ export type WorkspaceConfig = {
   default: string
   providers: Record<string, ProviderConfig>
   sandbox?: SandboxConfig
-  /** name -> server config; passed through to SDK `query({ mcpServers })`. */
+}
+
+/** Shape of knowledge/.loopat/claude/claude.json — team-shared Claude config. */
+export type TeamClaudeJson = {
   mcpServers?: Record<string, McpServerConfig>
 }
 
@@ -114,4 +117,16 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
 
 export function getActiveProvider(cfg: WorkspaceConfig): { name: string; provider: ProviderConfig } {
   return { name: cfg.default, provider: cfg.providers[cfg.default] }
+}
+
+/** Read knowledge/.loopat/claude/claude.json if present. Missing/malformed -> {}. */
+export async function loadTeamClaudeJson(): Promise<TeamClaudeJson> {
+  const p = workspaceTeamClaudeJsonPath()
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(await readFile(p, "utf8")) as TeamClaudeJson
+  } catch (e: any) {
+    console.warn(`[loopat] team claude.json malformed at ${p}: ${e?.message ?? e}`)
+    return {}
+  }
 }
