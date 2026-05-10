@@ -35,10 +35,10 @@ export type WorkspaceConfig = {
 }
 
 const TEMPLATE: WorkspaceConfig = {
-  knowledge: { git: "https://github.com/simpx/loopat-knowledge.git" },
-  notes: { git: "https://github.com/simpx/loopat-notes.git" },
+  knowledge: { git: "git@github.com:simpx/loopat-knowledge.git" },
+  notes: { git: "git@github.com:simpx/loopat-notes.git" },
   repos: [
-    { name: "loopat", git: "https://github.com/simpx/loopat.git" },
+    { name: "loopat", git: "git@github.com:simpx/loopat.git" },
   ],
   default: "bailian",
   providers: {
