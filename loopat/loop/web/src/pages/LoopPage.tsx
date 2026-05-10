@@ -324,7 +324,7 @@ function RightPanel({
       {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
 
       {mode === "terminal" && (
-        <div className="flex-1 min-h-0 bg-[#0e0e10]">
+        <div className="flex-1 min-h-0 bg-[#1a1c20]">
           <Terminal loopId={loopId} />
         </div>
       )}

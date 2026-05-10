@@ -76,10 +76,47 @@ export async function vaultList(vault: VaultId, relPath: string): Promise<VaultE
     }
     out.push({ name, path: childRel, type: isDir ? "dir" : "file", size })
   }
+  const isSecretsRoot = (e: VaultEntry) => vault === "personal" && e.type === "dir" && e.name === "secrets" && relPath === ""
   out.sort((a, b) => {
+    // secrets/ pinned to the very bottom in personal vault root
+    if (isSecretsRoot(a) !== isSecretsRoot(b)) return isSecretsRoot(a) ? 1 : -1
     if (a.type !== b.type) return a.type === "dir" ? -1 : 1
     return a.name.localeCompare(b.name)
   })
+  return out
+}
+
+/**
+ * Recursive flat list of files in a vault. Used for sidebar search.
+ */
+export async function vaultFlatList(vault: VaultId): Promise<VaultEntry[]> {
+  const root = vaultRoot(vault)
+  const out: VaultEntry[] = []
+  const walk = async (abs: string, rel: string): Promise<void> => {
+    let names: string[] = []
+    try {
+      names = await readdir(abs)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (SKIP_DIRS.has(name) || name === ".git" || name === ".DS_Store") continue
+      const childAbs = join(abs, name)
+      const childRel = rel ? `${rel}/${name}` : name
+      let s
+      try {
+        s = await stat(childAbs)
+      } catch {
+        continue
+      }
+      if (s.isDirectory()) {
+        await walk(childAbs, childRel)
+      } else {
+        out.push({ name, path: childRel, type: "file", size: s.size })
+      }
+    }
+  }
+  await walk(root, "")
   return out
 }
 
@@ -156,6 +193,70 @@ export type RepoEntry = {
   remote?: string
 }
 
+export type Backlink = {
+  path: string  // file path that links to the target
+  preview: string  // first line of context around the link
+}
+
+/**
+ * Scan all .md files in the vault for `[[<basename of path>]]` references
+ * and return matching files with a short preview.
+ */
+export async function vaultBacklinks(vault: VaultId, targetPath: string): Promise<Backlink[]> {
+  const root = vaultRoot(vault)
+  // basename without .md extension is the wikilink target
+  const baseName = targetPath.split("/").pop()?.replace(/\.md$/, "") ?? targetPath
+  const aliases = new Set<string>([baseName, targetPath, targetPath.replace(/\.md$/, "")])
+  const out: Backlink[] = []
+  const walk = async (dir: string): Promise<void> => {
+    let names: string[] = []
+    try {
+      names = await readdir(dir)
+    } catch {
+      return
+    }
+    for (const name of names) {
+      if (SKIP_DIRS.has(name) || name === ".git") continue
+      const p = join(dir, name)
+      let s
+      try {
+        s = await stat(p)
+      } catch {
+        continue
+      }
+      if (s.isDirectory()) {
+        await walk(p)
+        continue
+      }
+      if (!name.endsWith(".md")) continue
+      const rel = relative(root, p)
+      if (rel === targetPath) continue
+      let body = ""
+      try {
+        body = await readFile(p, "utf8")
+      } catch {
+        continue
+      }
+      // find any [[X]] where X matches one of aliases
+      const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(body)) !== null) {
+        const target = m[1].trim()
+        if (aliases.has(target)) {
+          // grab the line
+          const lineStart = body.lastIndexOf("\n", m.index) + 1
+          const lineEnd = body.indexOf("\n", m.index)
+          const line = body.slice(lineStart, lineEnd === -1 ? undefined : lineEnd).trim()
+          out.push({ path: rel, preview: line.slice(0, 200) })
+          break
+        }
+      }
+    }
+  }
+  await walk(root)
+  return out
+}
+
 export type FocusData = {
   pinned: string[]
   listed: string[]
@@ -203,6 +304,44 @@ export async function readFocusData(): Promise<FocusData> {
   const { pinned, listed } = parseSections(focusBody)
   const inbox = parseList(inboxBody)
   return { pinned, listed, inbox }
+}
+
+export type RepoDetail = RepoEntry & {
+  branch?: string
+  status: "online" | "offline"
+  readme?: string
+}
+
+export async function readRepoDetail(name: string): Promise<RepoDetail | null> {
+  const path = join(workspaceReposDir(), name)
+  try {
+    const s = await stat(path)
+    if (!s.isDirectory()) return null
+  } catch {
+    return null
+  }
+  let remote: string | undefined
+  let branch: string | undefined
+  let online: "online" | "offline" = "online"
+  try {
+    const { stdout } = await execFileP("git", ["-C", path, "remote", "get-url", "origin"])
+    remote = stdout.trim()
+  } catch {
+    online = "offline"
+  }
+  try {
+    const { stdout } = await execFileP("git", ["-C", path, "symbolic-ref", "--short", "HEAD"])
+    branch = stdout.trim()
+  } catch {}
+  let readme: string | undefined
+  for (const candidate of ["README.md", "readme.md", "README", "Readme.md"]) {
+    try {
+      const buf = await readFile(join(path, candidate), "utf8")
+      readme = buf
+      break
+    } catch {}
+  }
+  return { name, path, remote, branch, status: online, readme }
 }
 
 export async function listRepos(): Promise<RepoEntry[]> {

@@ -67,6 +67,13 @@ export async function vaultList(vault: VaultId, path = ""): Promise<VaultEntry[]
   return (j.entries ?? []) as VaultEntry[]
 }
 
+export async function vaultFlatList(vault: VaultId): Promise<VaultEntry[]> {
+  const r = await fetch(`/api/workspace/files?vault=${vault}&flat=1`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.entries ?? []) as VaultEntry[]
+}
+
 export async function vaultRead(vault: VaultId, path: string): Promise<{ content: string; size: number; truncated: boolean } | null> {
   const r = await fetch(`/api/workspace/file?vault=${vault}&path=${encodeURIComponent(path)}`)
   if (!r.ok) return null
@@ -91,12 +98,33 @@ export async function vaultCreateFile(vault: VaultId, path: string): Promise<{ o
   return (await r.json()) as { ok: boolean; error?: string }
 }
 
+export type Backlink = { path: string; preview: string }
+export async function vaultBacklinks(vault: VaultId, path: string): Promise<Backlink[]> {
+  const r = await fetch(`/api/workspace/backlinks?vault=${vault}&path=${encodeURIComponent(path)}`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.backlinks ?? []) as Backlink[]
+}
+
 export type RepoEntry = { name: string; path: string; remote?: string }
 export async function listRepos(): Promise<RepoEntry[]> {
   const r = await fetch(`/api/workspace/repos`)
   if (!r.ok) return []
   const j = await r.json()
   return (j.repos ?? []) as RepoEntry[]
+}
+
+export type RepoDetail = RepoEntry & {
+  branch?: string
+  status: "online" | "offline"
+  readme?: string
+  recentLoops: LoopMeta[]
+}
+
+export async function getRepo(name: string): Promise<RepoDetail | null> {
+  const r = await fetch(`/api/workspace/repo/${encodeURIComponent(name)}`)
+  if (!r.ok) return null
+  return (await r.json()) as RepoDetail
 }
 
 export type FocusData = { pinned: string[]; listed: string[]; inbox: string[] }
