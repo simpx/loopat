@@ -27,6 +27,7 @@ import {
   workspaceDoctrinePath,
   TEMPLATES_DIR,
 } from "./paths"
+import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 
@@ -97,16 +98,32 @@ async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ clo
   return { cloned: false }
 }
 
+async function ensureRepos(specs: RepoSpec[]) {
+  for (const r of specs) {
+    if (!r?.name || !r?.git) continue
+    const dir = workspaceRepoDir(r.name)
+    if (existsSyncBase(dir)) continue
+    try {
+      await mkdir(workspaceReposDir(), { recursive: true })
+      await execFileP("git", ["clone", "--", r.git, dir])
+      console.log(`[loopat] cloned ${r.git} → ${dir}`)
+    } catch (e: any) {
+      console.warn(`[loopat] repo clone failed (${r.git}): ${e?.stderr ?? e?.message ?? e}`)
+    }
+  }
+}
+
 export async function ensureWorkspaceDirs() {
   await mkdir(workspaceDir(), { recursive: true })
   await mkdir(loopsDir(), { recursive: true })
   await mkdir(workspaceReposDir(), { recursive: true })
   await mkdir(personalDir(ME), { recursive: true })
 
-  // knowledge / notes: clone from config'd remote if present, else local mkdir
+  // knowledge / notes / repos: clone from config'd remote if present
   const cfg = await loadConfig()
   const k = await cloneOrMkdir(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)
   const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
+  if (cfg.repos?.length) await ensureRepos(cfg.repos)
 
   // memory dirs + stub indices (idempotent)
   const pm = personalMemoryDir(ME)

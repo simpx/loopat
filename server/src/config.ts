@@ -14,15 +14,22 @@ export type RemoteSpec = {
   git?: string
 }
 
+/** A repo registered for spawn-loop use, cloned to context/repos/<name>/. */
+export type RepoSpec = {
+  name: string
+  git: string
+}
+
 /**
  * config.json is the workspace's self-describing manifest. Hand this file
  * (with apiKey + git URLs filled in) to a clean machine and bootstrap can
- * reconstruct the workspace: clone knowledge/notes from their remotes,
+ * reconstruct the workspace: clone knowledge/notes/repos from remotes,
  * seed doctrine, set up personal/.
  */
 export type WorkspaceConfig = {
   knowledge?: RemoteSpec
   notes?: RemoteSpec
+  repos?: RepoSpec[]
   default: string
   providers: Record<string, ProviderConfig>
 }
@@ -30,6 +37,9 @@ export type WorkspaceConfig = {
 const TEMPLATE: WorkspaceConfig = {
   knowledge: { git: "" },
   notes: { git: "" },
+  repos: [
+    { name: "loopat", git: "https://github.com/simpx/loopat.git" },
+  ],
   default: "bailian",
   providers: {
     bailian: {
