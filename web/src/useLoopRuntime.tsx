@@ -58,6 +58,10 @@ function handleStreamEvent(m: any, setRaw: React.Dispatch<React.SetStateAction<R
           input: cb.input ?? {},
           _partial_json: "",
         }
+      } else if (cb.type === "thinking") {
+        content[idx] = { type: "thinking", thinking: cb.thinking ?? "", signature: cb.signature ?? "" }
+      } else if (cb.type === "redacted_thinking") {
+        content[idx] = { type: "thinking", thinking: "[Redacted]", signature: "" }
       }
       return { ...msg, content }
     })
@@ -70,6 +74,10 @@ function handleStreamEvent(m: any, setRaw: React.Dispatch<React.SetStateAction<R
       if (!cur) return msg
       if (d?.type === "text_delta" && cur.type === "text") {
         content[idx] = { ...cur, text: (cur.text ?? "") + (d.text ?? "") }
+      } else if (d?.type === "thinking_delta" && cur.type === "thinking") {
+        content[idx] = { ...cur, thinking: (cur.thinking ?? "") + (d.thinking ?? "") }
+      } else if (d?.type === "signature_delta" && cur.type === "thinking") {
+        content[idx] = { ...cur, signature: (cur.signature ?? "") + (d.signature ?? "") }
       } else if (d?.type === "input_json_delta" && cur.type === "tool_use") {
         const json = (cur._partial_json ?? "") + (d.partial_json ?? "")
         let parsed = cur.input
@@ -120,7 +128,8 @@ function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
       const visible = enriched.some(
         (b: any) =>
           (b?.type === "text" && (b.text ?? "").length > 0) ||
-          b?.type === "tool_use",
+          b?.type === "tool_use" ||
+          b?.type === "thinking",
       )
       if (!visible) continue
       out.push({ ...m, content: enriched })
@@ -134,6 +143,12 @@ function convertMessage(raw: RawMsg) {
   for (const b of raw.content) {
     if (b?.type === "text") {
       parts.push({ type: "text", text: b.text ?? "" })
+    } else if (b?.type === "thinking") {
+      parts.push({
+        type: "reasoning",
+        text: b.thinking ?? "",
+        signature: b.signature,
+      })
     } else if (b?.type === "tool_use") {
       const r = b._result
       parts.push({
@@ -206,6 +221,8 @@ export interface LoopRuntimeExtra {
   taskMap: ReadonlyMap<string, TaskState>
   questions: ReadonlyMap<string, QuestionDef[]>
   sendAnswers: (toolUseId: string, answers: Record<string, string>) => void
+  thinkingOpen: boolean
+  setThinkingOpen: (open: boolean) => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -213,6 +230,8 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   taskMap: new Map(),
   questions: new Map(),
   sendAnswers: () => {},
+  thinkingOpen: false,
+  setThinkingOpen: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -255,6 +274,8 @@ export function useLoopRuntime(loopId: string | null) {
 
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
+  const [thinkingOpen, setThinkingOpen] = useState(false)
+
   const sendAnswers = useMemo(() => {
     const fn = (toolUseId: string, answers: Record<string, string>) => {
       const ws = wsRef.current
@@ -286,8 +307,8 @@ export function useLoopRuntime(loopId: string | null) {
   }, [questionsObj])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen],
   )
 
   useEffect(() => {
@@ -307,6 +328,7 @@ export function useLoopRuntime(loopId: string | null) {
       taskRef.current = new Map()
       setTaskVersion((v) => v + 1)
       setQuestionsObj({})
+      setThinkingOpen(false)
       const ws = new WebSocket(url)
       wsRef.current = ws
 

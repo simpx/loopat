@@ -2,16 +2,16 @@ import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { BrainIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
 import {
-  ReasoningRoot,
-  ReasoningTrigger,
-  ReasoningContent,
-  ReasoningText,
-} from "@/components/assistant-ui/reasoning";
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { cn } from "@/lib/utils";
 import ErrorBoundary from "./ErrorBoundary";
 
 function extractTime(messageId: string | undefined): string {
@@ -73,7 +73,9 @@ function JsonBlock({ content }: { content: string }) {
 export default function AssistantMessage() {
   const messageId = useAuiState((s) => s.message.id);
   const time = extractTime(messageId);
-  const { toolProgressMap, taskMap } = useLoopRuntimeExtra();
+  const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen } = useLoopRuntimeExtra();
+
+  const messageParts = useAuiState((s) => s.message.content);
 
   const textContent = useAuiState((s) => {
     const parts = s.message.content;
@@ -98,13 +100,46 @@ export default function AssistantMessage() {
             return <div data-slot="chain-of-thought">{children}</div>;
           case "group-reasoning": {
             const running = part.status.type === "running";
+            const charCount = (part as any).indices?.reduce((sum: number, i: number) => {
+              return sum + ((messageParts[i] as any)?.text?.length ?? 0);
+            }, 0) ?? 0;
+            const label = charCount > 0
+              ? `Thinking · ${charCount.toLocaleString()} chars`
+              : "Thinking";
             return (
-              <ReasoningRoot defaultOpen={running}>
-                <ReasoningTrigger active={running} />
-                <ReasoningContent aria-busy={running}>
-                  <ReasoningText>{children}</ReasoningText>
-                </ReasoningContent>
-              </ReasoningRoot>
+              <Collapsible
+                open={running ? true : thinkingOpen}
+                onOpenChange={setThinkingOpen}
+                className="group/think my-1.5 overflow-hidden rounded-lg border border-gray-200 bg-white border-l-[3px] border-l-gray-300"
+              >
+                <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-gray-50">
+                  <span className="font-medium text-gray-500 text-xs">{label}</span>
+                  {running && (
+                    <span className="shrink-0 rounded px-1.5 py-px text-[10px] font-medium bg-sky-100 text-sky-700">
+                      thinking
+                    </span>
+                  )}
+                  <ChevronDownIcon
+                    className={cn(
+                      "ml-auto h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform",
+                      (running || thinkingOpen) && "rotate-180",
+                    )}
+                  />
+                </CollapsibleTrigger>
+                <CollapsibleContent
+                  className={cn(
+                    "overflow-hidden",
+                    "data-[state=open]:animate-collapsible-down",
+                    "data-[state=closed]:animate-collapsible-up",
+                  )}
+                >
+                  <div className="border-t border-gray-100 px-3 py-2">
+                    <div className="max-h-64 overflow-y-auto text-[12px] text-gray-600 leading-relaxed">
+                      {children}
+                    </div>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             );
           }
           case "text": {
@@ -116,7 +151,9 @@ export default function AssistantMessage() {
             return <MarkdownBlock />;
           }
           case "reasoning":
-            return null; // handled by group-reasoning
+            // Render inside group-reasoning's ReasoningText — MarkdownBlock reads
+            // the current part's text from assistant-ui runtime context (like thread.tsx)
+            return <MarkdownBlock />;
           case "tool-call": {
             const args = (part as any).args ?? {};
             const result = (part as any).result;
