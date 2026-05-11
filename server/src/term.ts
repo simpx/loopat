@@ -6,7 +6,16 @@ import { getLoop } from "./loops"
 type Term = {
   proc: IPty
   subscribers: Set<WSContext>
+  /**
+   * Rolling buffer of recent PTY output. Replayed to each new subscriber
+   * so the initial prompt (emitted before the first ws joined) and history
+   * since term spawn are visible on attach. Capped by SCROLLBACK_MAX_BYTES.
+   */
+  scrollback: string[]
+  scrollbackBytes: number
 }
+
+const SCROLLBACK_MAX_BYTES = 64 * 1024
 
 const terms = new Map<string, Term>()
 const pending = new Map<string, Promise<Term>>()
@@ -34,10 +43,16 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       rows: 24,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     })
-    const t: Term = { proc, subscribers: new Set() }
+    const t: Term = { proc, subscribers: new Set(), scrollback: [], scrollbackBytes: 0 }
     terms.set(loopId, t)
 
     proc.onData((chunk) => {
+      t.scrollback.push(chunk)
+      t.scrollbackBytes += chunk.length
+      while (t.scrollbackBytes > SCROLLBACK_MAX_BYTES && t.scrollback.length > 1) {
+        const dropped = t.scrollback.shift()!
+        t.scrollbackBytes -= dropped.length
+      }
       for (const ws of t.subscribers) {
         try {
           ws.send(JSON.stringify({ type: "data", data: chunk }))
@@ -67,6 +82,13 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
 export async function attachTerm(loopId: string, ws: WSContext) {
   const t = await getOrSpawn(loopId)
+  // Replay scrollback BEFORE adding to subscribers so the new viewer sees the
+  // initial prompt + prior output exactly once (live chunks come after).
+  for (const chunk of t.scrollback) {
+    try {
+      ws.send(JSON.stringify({ type: "data", data: chunk }))
+    } catch {}
+  }
   t.subscribers.add(ws)
 }
 
