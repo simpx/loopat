@@ -328,6 +328,12 @@ class LoopSession {
       this.history.push(err as any)
       this.persist(err)
       this.broadcast(err)
+    } finally {
+      // Always emit a result marker so the frontend knows the run is done,
+      // even if the generator ended without one (e.g. after interrupt).
+      const result = { type: "result" as const }
+      this.history.push(result as any)
+      this.broadcast(result)
     }
   }
 
