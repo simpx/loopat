@@ -154,11 +154,19 @@ class LoopSession {
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
-    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, {
+    const extraEnv: Record<string, string> = {
       ANTHROPIC_API_KEY: provider.apiKey,
       ANTHROPIC_BASE_URL: provider.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
-    })
+    }
+    // Override cli's hardcoded model→context-window map for gateway-routed
+    // models. Both env vars are required (cli checks DISABLE_COMPACT first
+    // to enable the override path, then reads CLAUDE_CODE_MAX_CONTEXT_TOKENS).
+    if (provider.maxContextTokens && provider.maxContextTokens > 0) {
+      extraEnv.DISABLE_COMPACT = "1"
+      extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
+    }
+    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, extraEnv)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
