@@ -8,7 +8,7 @@ import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
-import { useLoopRuntime } from "../useLoopRuntime"
+import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
 import { FileTree } from "../FileTree"
 import { Editor } from "../Editor"
@@ -142,7 +142,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 // ============================================================================
 
 function LoopMain({ meta }: { meta: LoopMeta }) {
-  const { runtime, connected, reconnecting, running, viewers } = useLoopRuntime(meta.id)
+  const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id)
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
@@ -181,9 +181,11 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           toggleMode={toggleMode}
         />
         <div className="flex-1 min-h-0">
-          <AssistantRuntimeProvider runtime={runtime}>
-            <ChatInterface />
-          </AssistantRuntimeProvider>
+          <LoopRuntimeProvider extra={extra}>
+            <AssistantRuntimeProvider runtime={runtime}>
+              <ChatInterface />
+            </AssistantRuntimeProvider>
+          </LoopRuntimeProvider>
         </div>
       </main>
       {rightOpen && (
