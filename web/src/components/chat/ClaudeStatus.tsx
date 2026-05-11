@@ -79,26 +79,24 @@ export default function ClaudeStatus({
         </div>
 
         <div className="flex items-center gap-2">
-          {onAbort && (
-            <>
-              <div className="hidden items-center rounded-md bg-gray-200/50 px-2 py-0.5 text-[10px] font-medium tabular-nums text-gray-500 sm:flex">
-                {formatElapsedTime(elapsedTime)}
-              </div>
+          <div className="flex items-center rounded-md bg-gray-200/50 px-2 py-0.5 text-[10px] font-medium tabular-nums text-gray-500">
+            {formatElapsedTime(elapsedTime)}
+          </div>
 
-              <Button
-                type="button"
-                variant="destructive"
-                size="xs"
-                onClick={onAbort}
-                className="group rounded-full text-[10px] font-bold"
-              >
-                <SquareIcon className="h-3 w-3 fill-current" />
-                <span className="hidden sm:inline">STOP</span>
-                <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-white/20 sm:block">
-                  ESC
-                </kbd>
-              </Button>
-            </>
+          {onAbort && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="xs"
+              onClick={onAbort}
+              className="group rounded-full text-[10px] font-bold"
+            >
+              <SquareIcon className="h-3 w-3 fill-current" />
+              <span className="hidden sm:inline">STOP</span>
+              <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-white/20 sm:block">
+                ESC
+              </kbd>
+            </Button>
           )}
         </div>
       </div>

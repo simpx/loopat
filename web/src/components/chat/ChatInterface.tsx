@@ -1,11 +1,14 @@
+import type { FC } from "react";
 import {
   ThreadPrimitive,
   AuiIf,
 } from "@assistant-ui/react";
-import type { FC } from "react";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import Composer from "./Composer";
+import AskUserQuestionRenderer from "./AskUserQuestionRenderer";
+import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import ErrorBoundary from "./ErrorBoundary";
 
 /* ─── Welcome screen ─── */
 
@@ -29,6 +32,13 @@ const ThreadWelcome: FC = () => {
 /* ─── Chat Interface ─── */
 
 export default function ChatInterface() {
+  const { questions, sendAnswers } = useLoopRuntimeExtra();
+
+  // Convert ReadonlyMap entries to array (safe for iteration)
+  const questionEntries = questions.size > 0
+    ? Array.from(questions.entries())
+    : [];
+
   return (
     <ThreadPrimitive.Root
       className="flex h-full flex-col bg-white"
@@ -61,8 +71,29 @@ export default function ChatInterface() {
             </ThreadPrimitive.Messages>
           </div>
 
-          {/* Sticky footer with composer */}
+          {/* Sticky footer with questions + composer */}
           <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-4 pb-4 md:pb-6">
+            {/* Pending questions (AskUserQuestion tool) — fixed above input */}
+            {questionEntries.length > 0 && (
+              <ErrorBoundary name="QuestionsPanel">
+                <div className="mb-3 space-y-3">
+                  {questionEntries.map(([toolUseId, qs]) =>
+                    Array.isArray(qs) && qs.length > 0 ? (
+                      <div
+                        key={toolUseId}
+                        className="rounded-lg border border-violet-200 bg-white p-4 shadow-md"
+                      >
+                        <AskUserQuestionRenderer
+                          questions={qs}
+                          toolUseId={toolUseId}
+                          onAnswers={sendAnswers}
+                        />
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              </ErrorBoundary>
+            )}
             <Composer />
           </ThreadPrimitive.ViewportFooter>
         </div>

@@ -12,6 +12,7 @@ import {
   ReasoningText,
 } from "@/components/assistant-ui/reasoning";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import ErrorBoundary from "./ErrorBoundary";
 
 function extractTime(messageId: string | undefined): string {
   if (!messageId) return "";
@@ -121,20 +122,23 @@ export default function AssistantMessage() {
             const result = (part as any).result;
             const status = (part as any).status?.type ?? "complete";
             const toolCallId = (part as any).toolCallId as string | undefined;
+            const toolName = (part as any).toolName ?? "Unknown";
             const toolProgress = toolCallId ? toolProgressMap.get(toolCallId) : undefined;
             // Look up task by tool_use_id (agent tasks link to parent tool)
             const taskFromToolUseId = toolCallId
               ? Array.from(taskMap.values()).find((t) => t.tool_use_id === toolCallId)
               : undefined;
             return (
-              <ToolRenderer
-                toolName={(part as any).toolName ?? "Unknown"}
-                args={args}
-                result={result}
-                status={status}
-                elapsedSeconds={toolProgress?.elapsed_time_seconds}
-                taskState={taskFromToolUseId}
-              />
+              <ErrorBoundary name={"ToolRenderer:" + toolName}>
+                <ToolRenderer
+                  toolName={toolName}
+                  args={args}
+                  result={result}
+                  status={status}
+                  elapsedSeconds={toolProgress?.elapsed_time_seconds}
+                  taskState={taskFromToolUseId}
+                />
+              </ErrorBoundary>
             );
           }
           default:
