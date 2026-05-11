@@ -89,11 +89,22 @@ function getDotType(parts: any[]): DotType {
 /* ─── Assistant message ─── */
 
 export default function AssistantMessage() {
+  // IMPORTANT: call ALL hooks before any conditional early return so React's
+  // hook-order invariant holds across renders (content shape changes during
+  // streaming / clear-boundary insertion).
   const messageId = useAuiState((s) => s.message.id);
-  const time = extractTime(messageId);
   const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen } = useLoopRuntimeExtra();
-
   const messageParts = useAuiState((s) => s.message.content);
+  const textContent = useAuiState((s) => {
+    const parts = s.message.content;
+    if (!Array.isArray(parts)) return "";
+    return parts
+      .filter((p: { type: string }) => p.type === "text")
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("");
+  });
+
+  const time = extractTime(messageId);
 
   const hasContent = Array.isArray(messageParts) && messageParts.some(
     (p: any) =>
@@ -112,15 +123,6 @@ export default function AssistantMessage() {
     ? messageParts.find((p: any) => p?.type === "text" || p?.type === "tool-call")
     : null;
   const dotTopClass = firstVisiblePart?.type === "text" ? "top-[6px]" : "top-[17px]";
-
-  const textContent = useAuiState((s) => {
-    const parts = s.message.content;
-    if (!Array.isArray(parts)) return "";
-    return parts
-      .filter((p: { type: string }) => p.type === "text")
-      .map((p: { text?: string }) => p.text ?? "")
-      .join("");
-  });
 
   const children = (
     <MessagePrimitive.GroupedParts
