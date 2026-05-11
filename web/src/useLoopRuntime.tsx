@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 
 type RawMsg = {
@@ -159,6 +159,64 @@ function convertMessage(raw: RawMsg) {
   } as const
 }
 
+/* ─── Tool progress & task tracking ─── */
+
+export interface ToolProgress {
+  tool_use_id: string
+  tool_name: string
+  elapsed_time_seconds: number
+  parent_tool_use_id: string | null
+  task_id?: string
+}
+
+export interface TaskState {
+  task_id: string
+  tool_use_id?: string
+  status: "pending" | "running" | "completed" | "failed" | "killed" | "stopped"
+  description: string
+  task_type?: string
+  workflow_name?: string
+  prompt?: string
+  usage?: {
+    total_tokens: number
+    tool_uses: number
+    duration_ms: number
+  }
+  summary?: string
+  last_tool_name?: string
+  output_file?: string
+  end_time?: number
+  error?: string
+}
+
+export interface LoopRuntimeExtra {
+  toolProgressMap: ReadonlyMap<string, ToolProgress>
+  taskMap: ReadonlyMap<string, TaskState>
+}
+
+const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
+  toolProgressMap: new Map(),
+  taskMap: new Map(),
+})
+
+export function useLoopRuntimeExtra(): LoopRuntimeExtra {
+  return useContext(LoopRuntimeCtx)
+}
+
+export function LoopRuntimeProvider({
+  extra,
+  children,
+}: {
+  extra: LoopRuntimeExtra
+  children: React.ReactNode
+}) {
+  return (
+    <LoopRuntimeCtx.Provider value={extra}>
+      {children}
+    </LoopRuntimeCtx.Provider>
+  )
+}
+
 export function useLoopRuntime(loopId: string | null) {
   const [raw, setRaw] = useState<RawMsg[]>([])
   const [connected, setConnected] = useState(false)
@@ -172,6 +230,29 @@ export function useLoopRuntime(loopId: string | null) {
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
 
+  // Tool progress (tool_progress messages) keyed by tool_use_id
+  const toolProgressRef = useRef<Map<string, ToolProgress>>(new Map())
+  const [toolProgressVersion, setToolProgressVersion] = useState(0)
+  // Task state (task_started / task_updated / task_progress / task_notification) keyed by task_id
+  const taskRef = useRef<Map<string, TaskState>>(new Map())
+  const [taskVersion, setTaskVersion] = useState(0)
+
+  // Expose as stable read-only Maps that re-render when version bumps
+  const toolProgressMap = useMemo(() => {
+    void toolProgressVersion // pin for re-computation
+    return toolProgressRef.current as ReadonlyMap<string, ToolProgress>
+  }, [toolProgressVersion])
+
+  const taskMap = useMemo(() => {
+    void taskVersion
+    return taskRef.current as ReadonlyMap<string, TaskState>
+  }, [taskVersion])
+
+  const extra = useMemo<LoopRuntimeExtra>(
+    () => ({ toolProgressMap, taskMap }),
+    [toolProgressMap, taskMap],
+  )
+
   useEffect(() => {
     if (!loopId) return
     aliveRef.current = true
@@ -183,6 +264,11 @@ export function useLoopRuntime(loopId: string | null) {
       setRaw([])
       setRunning(false)
       replayingRef.current = true
+      // Clear tool progress & task state on reconnect
+      toolProgressRef.current = new Map()
+      setToolProgressVersion((v) => v + 1)
+      taskRef.current = new Map()
+      setTaskVersion((v) => v + 1)
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -221,6 +307,92 @@ export function useLoopRuntime(loopId: string | null) {
           setViewers(typeof m.count === "number" ? m.count : 0)
           return
         }
+
+        // ── tool_progress ──
+        if (m?.type === "tool_progress") {
+          const tp: ToolProgress = {
+            tool_use_id: m.tool_use_id,
+            tool_name: m.tool_name,
+            elapsed_time_seconds: m.elapsed_time_seconds,
+            parent_tool_use_id: m.parent_tool_use_id ?? null,
+            task_id: m.task_id,
+          }
+          toolProgressRef.current.set(m.tool_use_id, tp)
+          setToolProgressVersion((v) => v + 1)
+          return
+        }
+
+        // ── task messages ──
+        if (m?.type === "system") {
+          const subtype = m.subtype
+          if (subtype === "task_started") {
+            const existing = taskRef.current.get(m.task_id)
+            taskRef.current.set(m.task_id, {
+              task_id: m.task_id,
+              tool_use_id: m.tool_use_id,
+              status: "running",
+              description: m.description,
+              task_type: m.task_type,
+              workflow_name: m.workflow_name,
+              prompt: m.prompt,
+              ...(existing?.usage ? { usage: existing.usage } : {}),
+            })
+            setTaskVersion((v) => v + 1)
+            return
+          }
+          if (subtype === "task_updated") {
+            const prev = taskRef.current.get(m.task_id)
+            taskRef.current.set(m.task_id, {
+              ...(prev ?? { task_id: m.task_id, status: "pending" as const, description: "" }),
+              ...(m.patch?.status ? { status: m.patch.status } : {}),
+              ...(m.patch?.description ? { description: m.patch.description } : {}),
+              ...(m.patch?.end_time ? { end_time: m.patch.end_time } : {}),
+              ...(m.patch?.error ? { error: m.patch.error } : {}),
+            } as TaskState)
+            setTaskVersion((v) => v + 1)
+            return
+          }
+          if (subtype === "task_progress") {
+            const prev = taskRef.current.get(m.task_id)
+            taskRef.current.set(m.task_id, {
+              ...(prev ?? { task_id: m.task_id, status: "running" as const, description: "" }),
+              description: m.description ?? prev?.description ?? "",
+              usage: m.usage,
+              ...(m.last_tool_name ? { last_tool_name: m.last_tool_name } : {}),
+              ...(m.summary ? { summary: m.summary } : {}),
+              tool_use_id: m.tool_use_id ?? prev?.tool_use_id,
+            } as TaskState)
+            setTaskVersion((v) => v + 1)
+            return
+          }
+          if (subtype === "task_notification") {
+            const prev = taskRef.current.get(m.task_id)
+            taskRef.current.set(m.task_id, {
+              ...(prev ?? { task_id: m.task_id, status: "pending" as const, description: "" }),
+              status: m.status === "completed" ? "completed"
+                : m.status === "failed" ? "failed"
+                : "stopped",
+              tool_use_id: m.tool_use_id ?? prev?.tool_use_id,
+              output_file: m.output_file,
+              summary: m.summary,
+              usage: m.usage,
+            } as TaskState)
+            setTaskVersion((v) => v + 1)
+            return
+          }
+          // system/init — start running
+          if (subtype === "init") {
+            if (!replayingRef.current) setRunning(true)
+            return
+          }
+          return
+        }
+
+        if (m?.type === "result") {
+          if (!replayingRef.current) setRunning(false)
+          return
+        }
+
         if (m?.type === "user" && m.message) {
           // upsert by uuid: dedup against history-replay + StrictMode double-mount
           const uuid: string = m.uuid || freshId("u")
@@ -241,10 +413,6 @@ export function useLoopRuntime(loopId: string | null) {
           })
         } else if (m?.type === "stream_event") {
           handleStreamEvent(m, setRaw)
-        } else if (m?.type === "system" && m.subtype === "init") {
-          if (!replayingRef.current) setRunning(true)
-        } else if (m?.type === "result") {
-          if (!replayingRef.current) setRunning(false)
         } else if (m?.type === "error") {
           setRaw((prev) => [
             ...prev,
@@ -302,5 +470,5 @@ export function useLoopRuntime(loopId: string | null) {
     onCancel,
   })
 
-  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts }
+  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts, extra }
 }
