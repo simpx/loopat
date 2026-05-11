@@ -35,6 +35,7 @@ export const loopContextDir = (id: string) => join(loopDir(id), "context")
 export const loopContextKnowledge = (id: string) => join(loopContextDir(id), "knowledge")
 export const loopContextNotes = (id: string) => join(loopContextDir(id), "notes")
 export const loopContextPersonal = (id: string) => join(loopContextDir(id), "personal")
+export const loopContextRepos = (id: string) => join(loopContextDir(id), "repos")
 export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
 
