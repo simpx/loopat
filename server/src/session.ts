@@ -1,6 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
-import { appendFile, readFile, readdir } from "node:fs/promises"
+import { appendFile, readFile, readdir, writeFile } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
@@ -488,6 +488,51 @@ class LoopSession {
 
   async interrupt() {
     if (this.q) await this.q.interrupt().catch(() => {})
+  }
+
+  /**
+   * Equivalent to CC TUI's `/clear`: ends the in-flight SDK conversation
+   * and makes the next message start with zero AI context — while keeping
+   * old session jsonls intact (still resumable via `claude --resume`).
+   *
+   * Mechanism: touch a fresh empty `<new-uuid>.jsonl` in the same
+   * `projects/<encoded-cwd>/` dir(s) the SDK uses. `claude --continue`
+   * picks "the most recent" jsonl by mtime, so on the next query it finds
+   * this empty file and resumes with 0 prior turns. Older jsonls stay in
+   * place — `claude --resume` still lists them, matching CC behavior. No
+   * persistent session-id state is needed.
+   *
+   * messages.jsonl (our chat record) is NOT modified beyond appending a
+   * `clear-boundary` marker. Marker broadcasts to clients (UI divider),
+   * persists to disk (segments the log into per-session ranges), and is
+   * visible to future readers (humans + AI) so they can tell which
+   * messages belong to which SDK session window.
+   */
+  async clear(by: string) {
+    // 1. Stop in-flight generation if any.
+    if (this.q) {
+      try { await this.q.interrupt() } catch {}
+      this.q = null
+    }
+    // 2. Drop SDK context without deleting history. Touch an empty new
+    //    jsonl in each existing encoded-cwd subdir so --continue picks it.
+    //    If no subdir exists yet (no SDK has spawned in this loop), the
+    //    first post-clear message creates one naturally and starts fresh.
+    const projectsDir = join(loopClaudeDir(this.id), "projects")
+    try {
+      const subdirs = await readdir(projectsDir)
+      for (const sub of subdirs) {
+        const newPath = join(projectsDir, sub, randomUUID() + ".jsonl")
+        try { await writeFile(newPath, "") } catch {}
+      }
+    } catch {
+      // projects/ doesn't exist yet — nothing to do; SDK state is already empty
+    }
+    // 3. Append boundary marker (in-memory + jsonl + broadcast).
+    const marker = { type: "clear-boundary" as const, ts: new Date().toISOString(), by }
+    this.history.push(marker as any)
+    this.persist(marker)
+    this.broadcast(marker)
   }
 }
 
