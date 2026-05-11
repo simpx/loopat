@@ -142,7 +142,8 @@ function convertMessage(raw: RawMsg) {
   const parts: any[] = []
   for (const b of raw.content) {
     if (b?.type === "text") {
-      parts.push({ type: "text", text: b.text ?? "" })
+      const txt = (b.text ?? "").trim()
+      if (txt) parts.push({ type: "text", text: txt })
     } else if (b?.type === "thinking") {
       parts.push({
         type: "reasoning",
@@ -170,7 +171,7 @@ function convertMessage(raw: RawMsg) {
   return {
     id: raw.id,
     role: raw.role,
-    content: parts.length > 0 ? parts : [{ type: "text", text: "" }],
+    content: parts,
   } as const
 }
 
@@ -545,6 +546,7 @@ export function useLoopRuntime(loopId: string | null) {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: "interrupt" }))
+    setRunning(false)
   }, [])
 
   const safeConvert = useCallback((raw: RawMsg) => {

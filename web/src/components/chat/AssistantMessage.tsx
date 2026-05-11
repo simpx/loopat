@@ -77,6 +77,17 @@ export default function AssistantMessage() {
 
   const messageParts = useAuiState((s) => s.message.content);
 
+  // Skip rendering if there's no meaningful content (prevents blank bubbles)
+  const hasContent = Array.isArray(messageParts) && messageParts.some(
+    (p: any) =>
+      (p?.type === "text" && (p.text ?? "").length > 0) ||
+      p?.type === "tool-call" ||
+      p?.type === "reasoning" ||
+      p?.type === "image" ||
+      p?.type === "file",
+  );
+  if (!hasContent) return null;
+
   const textContent = useAuiState((s) => {
     const parts = s.message.content;
     if (!Array.isArray(parts)) return "";
