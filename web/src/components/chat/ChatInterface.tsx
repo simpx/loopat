@@ -35,7 +35,7 @@ export default function ChatInterface() {
   const { questions, sendAnswers } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on initial load (instant), then only when near bottom (smooth).
+  // Auto-scroll to bottom: instant on first load, throttled during streaming.
   const bottomRef = useRef<HTMLDivElement>(null);
   const didInitialScroll = useRef(false);
   useEffect(() => {
@@ -43,24 +43,28 @@ export default function ChatInterface() {
     const vp = inner?.parentElement as HTMLElement | null;
     if (!inner || !vp) return;
     const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const scroll = () => {
       if (didInitialScroll.current && !nearBottom()) return;
       if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
-        // First load — instant scroll (suppress scroll-smooth on the viewport)
         const prev = vp.style.scrollBehavior;
         vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
         vp.style.scrollBehavior = prev;
         didInitialScroll.current = true;
       } else if (didInitialScroll.current) {
-        // Subsequent — smooth scroll
-        bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+        // Instant during streaming — smooth scroll animations block the UI
+        vp.scrollTop = vp.scrollHeight;
       }
     };
     scroll();
-    const ro = new ResizeObserver(() => scroll());
+    const ro = new ResizeObserver(() => {
+      // Throttle to at most once per 80ms to avoid blocking the main thread
+      if (timer) return;
+      timer = setTimeout(() => { timer = null; scroll(); }, 80);
+    });
     ro.observe(inner);
-    return () => ro.disconnect();
+    return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
   }, []);
 
   const questionEntries = questions.size > 0
