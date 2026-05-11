@@ -2,7 +2,7 @@ import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon } from "lucide-react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
 import {
@@ -68,6 +68,24 @@ function JsonBlock({ content }: { content: string }) {
   }
 }
 
+/* ─── Dot type for message-level indicator ─── */
+
+type DotType = "gray" | "green" | "blink-green";
+
+function getDotType(parts: any[]): DotType {
+  let hasRunning = false;
+  let hasTool = false;
+  for (const p of parts) {
+    if (p?.type === "tool-call") {
+      hasTool = true;
+      if (p?.status?.type === "running") hasRunning = true;
+    }
+  }
+  if (hasRunning) return "blink-green";
+  if (hasTool) return "green";
+  return "gray";
+}
+
 /* ─── Assistant message ─── */
 
 export default function AssistantMessage() {
@@ -77,7 +95,6 @@ export default function AssistantMessage() {
 
   const messageParts = useAuiState((s) => s.message.content);
 
-  // Skip rendering if there's no meaningful content (prevents blank bubbles)
   const hasContent = Array.isArray(messageParts) && messageParts.some(
     (p: any) =>
       (p?.type === "text" && (p.text ?? "").length > 0) ||
@@ -87,6 +104,14 @@ export default function AssistantMessage() {
       p?.type === "file",
   );
   if (!hasContent) return null;
+
+  const dotType = Array.isArray(messageParts) ? getDotType(messageParts) : "gray";
+
+  // Position dot at first-line-of-text height for text, or centered on tool bar for tool-call
+  const firstVisiblePart = Array.isArray(messageParts)
+    ? messageParts.find((p: any) => p?.type === "text" || p?.type === "tool-call")
+    : null;
+  const dotTopClass = firstVisiblePart?.type === "text" ? "top-[6px]" : "top-[17px]";
 
   const textContent = useAuiState((s) => {
     const parts = s.message.content;
@@ -162,8 +187,6 @@ export default function AssistantMessage() {
             return <MarkdownBlock />;
           }
           case "reasoning":
-            // Render inside group-reasoning's ReasoningText — MarkdownBlock reads
-            // the current part's text from assistant-ui runtime context (like thread.tsx)
             return <MarkdownBlock />;
           case "tool-call": {
             const args = (part as any).args ?? {};
@@ -172,7 +195,6 @@ export default function AssistantMessage() {
             const toolCallId = (part as any).toolCallId as string | undefined;
             const toolName = (part as any).toolName ?? "Unknown";
             const toolProgress = toolCallId ? toolProgressMap.get(toolCallId) : undefined;
-            // Look up task by tool_use_id (agent tasks link to parent tool)
             const taskFromToolUseId = toolCallId
               ? Array.from(taskMap.values()).find((t) => t.tool_use_id === toolCallId)
               : undefined;
@@ -199,15 +221,21 @@ export default function AssistantMessage() {
   return (
     <MessagePrimitive.Root
       data-role="assistant"
-      className="px-3 sm:px-0"
+      className="relative pl-8"
     >
-      {/* Avatar + name header */}
-      <div className="mb-2 flex items-center gap-3">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-orange-100">
-          <BrainIcon className="h-4 w-4 text-orange-600" />
-        </div>
-        <span className="text-sm font-medium text-gray-900">Claude</span>
-      </div>
+      {/* Vertical line gutter — dot sits on the line. Extends past bounds to bridge gap-2 between messages */}
+      <div className="absolute left-[5px] -top-1 -bottom-1 w-[2px] bg-gray-200" />
+
+      {/* Dot indicator — positioned per first-content-type */}
+      <div
+        className={cn(
+          "absolute left-[3px] z-10 h-[6px] w-[6px] rounded-full",
+          dotTopClass,
+          dotType === "gray" && "bg-gray-300",
+          dotType === "green" && "bg-green-500",
+          dotType === "blink-green" && "animate-[blink-green_2s_ease-in-out_infinite]",
+        )}
+      />
 
       {/* Content */}
       <div className="w-full text-sm text-gray-700">

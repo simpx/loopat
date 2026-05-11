@@ -4,7 +4,6 @@ import {
   ChevronDownIcon,
   LoaderIcon,
   XCircleIcon,
-  AlertCircleIcon,
   PencilIcon,
   TerminalIcon,
   SearchIcon,
@@ -139,21 +138,6 @@ function getSummary(toolName: string, args: Record<string, unknown>): string {
       return (args.description as string) || (args.subagent_type as string) || "";
     default:
       return "";
-  }
-}
-
-/* ─── Status icon ─── */
-
-function StatusIcon({ status }: { status: ToolStatus }) {
-  switch (status) {
-    case "running":
-      return <LoaderIcon className="h-3.5 w-3.5 animate-spin text-sky-500" />;
-    case "complete":
-      return <CheckIcon className="h-3.5 w-3.5 text-emerald-500" />;
-    case "incomplete":
-      return <XCircleIcon className="h-3.5 w-3.5 text-red-500" />;
-    case "requires-action":
-      return <AlertCircleIcon className="h-3.5 w-3.5 text-amber-500" />;
   }
 }
 
@@ -373,7 +357,6 @@ export default function ToolRenderer({
       >
         {/* Title line */}
         <div className="flex w-full items-center gap-2 px-3 py-1.5">
-          <StatusIcon status={status} />
           <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
           <span className="font-medium text-gray-700 text-xs">{toolName}</span>
 
