@@ -356,7 +356,7 @@ export default function ToolRenderer({
         className="flex w-full flex-col text-left text-sm transition-colors hover:bg-gray-50"
       >
         {/* Title line */}
-        <div className="flex w-full items-center gap-2 px-3 py-1.5">
+        <div className="flex w-full items-center gap-1.5 md:gap-2 px-2 md:px-3 py-1.5">
           <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
           <span className="font-medium text-gray-700 text-xs">{toolName}</span>
 
@@ -397,7 +397,7 @@ export default function ToolRenderer({
 
         {/* Collapsed preview: brief content/diff when not expanded */}
         {collapsedPreview && (
-          <div className="border-t border-gray-100 px-3 py-1.5">
+          <div className="border-t border-gray-100 px-2 md:px-3 py-1.5">
             {typeof collapsedPreview === "string" ? (
               <pre className="font-mono text-[10px] leading-relaxed text-gray-500 whitespace-pre-wrap break-all line-clamp-3">
                 {collapsedPreview}
@@ -437,7 +437,7 @@ export default function ToolRenderer({
           "data-[state=closed]:animate-collapsible-up",
         )}
       >
-        <div className="border-t border-gray-100 px-3 py-2">
+        <div className="border-t border-gray-100 px-2 md:px-3 py-2">
           {/* Write — show full content with file header */}
           {isWrite && isDone && writeContent && (
             <WriteContentBlock filePath={summary} content={writeContent} />

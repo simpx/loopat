@@ -26,8 +26,10 @@ import {
 } from "../api"
 import { useEffect, useState, useCallback } from "react"
 import { useWorkspace } from "../ctx"
+import { useIsMobile } from "../lib/useIsMobile"
 import { CodeEditor } from "../components/markdown/CodeEditor"
 import { Markdown } from "../components/markdown/Markdown"
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 const SUBS: { id: VaultId; label: string }[] = [
   { id: "knowledge", label: "Knowledge" },
@@ -85,6 +87,8 @@ function VaultPane({ vault }: { vault: VaultId }) {
   const [reloadKey, setReloadKey] = useState(0)
   const [showNewFile, setShowNewFile] = useState(false)
   const [query, setQuery] = useState("")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     vaultList(vault).then((entries) => {
@@ -131,80 +135,123 @@ function VaultPane({ vault }: { vault: VaultId }) {
         .slice(0, 60)
     : []
 
+  const sidebar = (
+    <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
+      <div className="px-3 h-9 flex items-center gap-1 border-b border-gray-200">
+        {isMobile && (
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100 mr-1"
+            title="close sidebar"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        )}
+        <SearchIcon />
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="search files…"
+          className="flex-1 min-w-0 bg-transparent outline-none text-[12px] text-gray-700 placeholder:text-gray-400"
+        />
+        <button
+          onClick={() => setShowNewFile(true)}
+          className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
+          title="new file"
+        >
+          +
+        </button>
+        <button
+          onClick={() => setReloadKey((k) => k + 1)}
+          className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
+          title="refresh"
+        >
+          ↻
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto py-2">
+        {searching ? (
+          matches.length === 0 ? (
+            <div className="px-3 py-4 text-[12px] text-gray-400 italic">no matches</div>
+          ) : (
+            matches.map((e) => (
+              <button
+                key={e.path}
+                type="button"
+                onClick={() => {
+                  setPickedPath(e.path)
+                  if (isMobile) setSidebarOpen(false)
+                }}
+                className={
+                  "w-full px-3 py-1.5 flex items-center gap-2 text-left " +
+                  (pickedPath === e.path ? "bg-gray-100" : "hover:bg-gray-50")
+                }
+                title={e.path}
+              >
+                <span className="text-gray-500">📄</span>
+                <span className="flex-1 min-w-0 truncate text-[13px] text-gray-900">{e.path}</span>
+              </button>
+            ))
+          )
+        ) : (
+          <>
+            {tree.map((node) => (
+              <TreeNode
+                key={node.path}
+                vault={vault}
+                node={node}
+                depth={0}
+                openFolders={openFolders}
+                toggleFolder={toggleFolder}
+                picked={pickedPath}
+                onPick={(p) => {
+                  setPickedPath(p)
+                  if (isMobile) setSidebarOpen(false)
+                }}
+              />
+            ))}
+            {tree.length === 0 && (
+              <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+                empty · click + 创建第一个文件
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="px-3 h-9 border-t border-gray-200 flex items-center text-[11px] text-gray-500">
+        {VAULT_TAGLINE[vault]}
+      </div>
+    </aside>
+  )
+
   return (
     <div className="flex h-full w-full">
-      <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-        <div className="px-3 h-9 flex items-center gap-1 border-b border-gray-200">
-          <SearchIcon />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="search files…"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[12px] text-gray-700 placeholder:text-gray-400"
-          />
-          <button
-            onClick={() => setShowNewFile(true)}
-            className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
-            title="new file"
-          >
-            +
-          </button>
-          <button
-            onClick={() => setReloadKey((k) => k + 1)}
-            className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
-            title="refresh"
-          >
-            ↻
-          </button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-auto py-2">
-          {searching ? (
-            matches.length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-gray-400 italic">no matches</div>
-            ) : (
-              matches.map((e) => (
-                <button
-                  key={e.path}
-                  type="button"
-                  onClick={() => setPickedPath(e.path)}
-                  className={
-                    "w-full px-3 py-1.5 flex items-center gap-2 text-left " +
-                    (pickedPath === e.path ? "bg-gray-100" : "hover:bg-gray-50")
-                  }
-                  title={e.path}
-                >
-                  <span className="text-gray-500">📄</span>
-                  <span className="flex-1 min-w-0 truncate text-[13px] text-gray-900">{e.path}</span>
-                </button>
-              ))
-            )
+      {isMobile ? (
+        <>
+          {sidebarOpen ? (
+            <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+                {sidebar}
+              </div>
+            </div>
           ) : (
-            <>
-              {tree.map((node) => (
-                <TreeNode
-                  key={node.path}
-                  vault={vault}
-                  node={node}
-                  depth={0}
-                  openFolders={openFolders}
-                  toggleFolder={toggleFolder}
-                  picked={pickedPath}
-                  onPick={setPickedPath}
-                />
-              ))}
-              {tree.length === 0 && (
-                <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-                  empty · click + 创建第一个文件
-                </div>
-              )}
-            </>
+            <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+                title="open file tree"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </aside>
           )}
-        </div>
-        <div className="px-3 h-9 border-t border-gray-200 flex items-center text-[11px] text-gray-500">
-          {VAULT_TAGLINE[vault]}
-        </div>
-      </aside>
+        </>
+      ) : (
+        sidebar
+      )}
       <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {pickedPath ? (
           <DocView
@@ -407,6 +454,8 @@ function DocView({
   const [saving, setSaving] = useState(false)
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [lastCommit, setLastCommit] = useState<string | null>(null)
+  const [showBacklinks, setShowBacklinks] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     setEditing(false)
@@ -479,15 +528,15 @@ function DocView({
 
   return (
     <>
-      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-[13px]">
-          <span className="text-gray-500">{isSecret ? "🔒" : "📄"}</span>
+      <header className="px-3 md:px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[13px] min-w-0">
+          <span className="text-gray-500 shrink-0">{isSecret ? "🔒" : "📄"}</span>
           <span className="font-mono text-[12px] text-gray-500 truncate">{path}</span>
           {lastCommit && !dirty && !editing && (
-            <span className="text-[10px] text-emerald-700 font-mono">commit {lastCommit}</span>
+            <span className="hidden md:inline text-[10px] text-emerald-700 font-mono">commit {lastCommit}</span>
           )}
         </div>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-1 md:gap-2 text-xs text-gray-500">
           {editing ? (
             <>
               <button
@@ -539,6 +588,15 @@ function DocView({
                   edit
                 </button>
               )}
+              {isMobile && isMd && (
+                <button
+                  onClick={() => setShowBacklinks((v) => !v)}
+                  className={`px-2.5 h-7 rounded text-xs border ${showBacklinks ? "bg-gray-900 text-white" : "border-gray-200 hover:bg-gray-100 text-gray-900"}`}
+                  title="toggle backlinks"
+                >
+                  ⇄ {backlinks.length}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -546,7 +604,7 @@ function DocView({
 
       {editing ? (
         // edit mode: split source / preview
-        <div className="flex-1 min-h-0 min-w-0 flex">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
           <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
             <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
               source · markdown
@@ -569,7 +627,7 @@ function DocView({
       ) : (
         // read mode: article + backlinks
         <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-          <article className="flex-1 min-h-0 overflow-auto px-8 py-6">
+          <article className="flex-1 min-h-0 overflow-auto px-4 md:px-8 py-4 md:py-6">
             <div className="max-w-[760px]">
               {isSecret ? (
                 <div className="font-mono text-[14px] text-gray-400 select-none">
@@ -587,7 +645,7 @@ function DocView({
               )}
             </div>
           </article>
-          {isMd && (
+          {isMd && !isMobile && (
             <aside className="w-64 shrink-0 border-l border-gray-200 bg-gray-50 overflow-auto">
               <div className="px-3 h-9 flex items-center border-b border-gray-200">
                 <span className="text-[11px] text-gray-500">Backlinks</span>
@@ -613,6 +671,45 @@ function DocView({
               )}
             </aside>
           )}
+          {isMobile && isMd && showBacklinks && (
+            <div className="fixed inset-0 z-30" onClick={() => setShowBacklinks(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="absolute right-0 top-0 bottom-0 w-64 max-w-[80vw] bg-gray-50 border-l border-gray-200 shadow-xl overflow-auto" onClick={(e) => e.stopPropagation()}>
+                <div className="px-3 h-9 flex items-center border-b border-gray-200">
+                  <span className="text-[11px] text-gray-500">Backlinks</span>
+                  <span className="ml-auto text-[11px] text-gray-500">{backlinks.length}</span>
+                  <button
+                    onClick={() => setShowBacklinks(false)}
+                    className="ml-2 text-gray-400 hover:text-gray-700 px-1"
+                    title="close backlinks"
+                  >
+                    ✕
+                  </button>
+                </div>
+                {backlinks.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-gray-500">No documents link here yet.</div>
+                ) : (
+                  <ul className="py-2">
+                    {backlinks.map((b) => (
+                      <li key={b.path}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelect(b.path)
+                            setShowBacklinks(false)
+                          }}
+                          className="w-full px-3 py-2 text-left hover:bg-gray-100"
+                        >
+                          <div className="text-xs font-medium text-gray-900 truncate">{b.path}</div>
+                          <div className="text-[11px] text-gray-500 mt-0.5 leading-snug line-clamp-2">{b.preview}</div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>
@@ -632,7 +729,7 @@ function NewFileDialog({
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center" onClick={onClose}>
       <div
-        className="w-[420px] bg-white rounded-md shadow-xl border border-gray-200 p-5"
+        className="w-full max-w-[420px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-base font-semibold text-gray-900 mb-3">new file in {vault}/</div>
@@ -672,6 +769,8 @@ function ReposPane() {
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [detail, setDetail] = useState<RepoDetail | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     listRepos().then((rs) => {
@@ -691,47 +790,88 @@ function ReposPane() {
     navigate(`/loop/${m.id}`)
   }
 
+  const repoList = (
+    <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
+      <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
+        {isMobile ? (
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
+            title="close repos"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        ) : (
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">repos</span>
+        )}
+        <span className="text-[11px] text-gray-400 ml-auto">{repos.length}</span>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto py-2">
+        {repos.map((r) => {
+          const sel = selectedName === r.name
+          return (
+            <button
+              key={r.name}
+              type="button"
+              onClick={() => {
+                setSelectedName(r.name)
+                if (isMobile) setSidebarOpen(false)
+              }}
+              className={
+                sel
+                  ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
+                  : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
+              }
+            >
+              <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500" />
+              <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{r.name}</span>
+            </button>
+          )
+        })}
+        {repos.length === 0 && (
+          <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+            none · `ln -s` or `git clone` into ~/.loopat/context/repos/
+          </div>
+        )}
+      </div>
+      <button
+        disabled
+        className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-400 cursor-default flex items-center gap-2"
+        title="UI not wired yet — symlink/clone manually"
+      >
+        <span>↳</span>
+        <span>add repo</span>
+      </button>
+    </aside>
+  )
+
   return (
     <div className="flex h-full w-full">
-      <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col">
-        <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
-          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">repos</span>
-          <span className="text-[11px] text-gray-400">{repos.length}</span>
-        </div>
-        <div className="flex-1 min-h-0 overflow-auto py-2">
-          {repos.map((r) => {
-            const sel = selectedName === r.name
-            return (
-              <button
-                key={r.name}
-                type="button"
-                onClick={() => setSelectedName(r.name)}
-                className={
-                  sel
-                    ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
-                    : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
-                }
-              >
-                <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500" />
-                <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{r.name}</span>
-              </button>
-            )
-          })}
-          {repos.length === 0 && (
-            <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-              none · `ln -s` or `git clone` into ~/.loopat/context/repos/
+      {isMobile ? (
+        <>
+          {sidebarOpen ? (
+            <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+                {repoList}
+              </div>
             </div>
+          ) : (
+            <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+                title="open repos list"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </aside>
           )}
-        </div>
-        <button
-          disabled
-          className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-400 cursor-default flex items-center gap-2"
-          title="UI not wired yet — symlink/clone manually"
-        >
-          <span>↳</span>
-          <span>add repo</span>
-        </button>
-      </aside>
+        </>
+      ) : (
+        repoList
+      )}
       <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {detail ? (
           <RepoView repo={detail} onSpawnLoop={onSpawnLoop} />
@@ -763,7 +903,7 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
         </div>
         <div className="text-xs text-gray-500">default branch: {repo.branch ?? "—"}</div>
       </header>
-      <article className="flex-1 min-h-0 overflow-auto px-8 py-6">
+      <article className="flex-1 min-h-0 overflow-auto px-4 md:px-8 py-4 md:py-6">
         <div className="max-w-[820px]">
           <section className="mb-6">
             <h3 className="text-[13px] font-medium text-gray-900 mb-2">Recent loops on this repo</h3>

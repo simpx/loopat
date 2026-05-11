@@ -17,10 +17,10 @@ const ThreadWelcome: FC = () => {
     <div className="my-auto flex grow flex-col">
       <div className="flex w-full grow flex-col items-center justify-center">
         <div className="flex size-full flex-col justify-center px-4">
-          <h1 className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both font-semibold text-2xl text-gray-900 duration-200">
+          <h1 className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both font-semibold text-xl md:text-2xl text-gray-900 duration-200">
             Hello there!
           </h1>
-          <p className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-gray-500 text-xl delay-75 duration-200">
+          <p className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-gray-500 text-lg md:text-xl delay-75 duration-200">
             How can I help you today?
           </p>
         </div>
@@ -102,7 +102,7 @@ export default function ChatInterface() {
         turnAnchor="top"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
-        <div ref={containerRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-3 pt-4">
+        <div ref={containerRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-2 md:px-3 pt-3 md:pt-4">
           {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
           <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
@@ -123,7 +123,7 @@ export default function ChatInterface() {
           </div>
 
           {/* Sticky footer with questions + composer */}
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-4 pb-4 md:pb-6">
+          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-3 md:pt-4 pb-3 md:pb-6">
             {/* Pending questions (AskUserQuestion tool) — fixed above input */}
             {questionEntries.length > 0 && (
               <ErrorBoundary name="QuestionsPanel">

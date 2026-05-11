@@ -62,24 +62,24 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 
   return (
     <div className="h-full w-full flex flex-col bg-gray-50 text-gray-900">
-      <header className="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-4 gap-4">
-        <div className="flex items-center gap-2 px-2 h-8 shrink-0" title={`workspace: ${workspaceName}`}>
+      <header className="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-2 md:px-4 gap-2 md:gap-4">
+        <div className="flex items-center gap-2 px-1 md:px-2 h-8 shrink-0" title={`workspace: ${workspaceName}`}>
           <span className="text-lg leading-none">🧶</span>
-          <span className="text-sm text-gray-900 font-medium">{workspaceName}</span>
+          <span className="hidden md:inline text-sm text-gray-900 font-medium">{workspaceName}</span>
         </div>
-        <nav className="flex items-center gap-1">
+        <nav className="flex items-center gap-0.5 md:gap-1">
           {TABS.map((t) => (
             <NavLink
               key={t.id}
               to={`/${t.id}`}
               className={({ isActive }) =>
                 isActive
-                  ? "px-3 h-8 rounded text-sm bg-gray-900 text-white flex items-center gap-1.5"
-                  : "px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 flex items-center gap-1.5"
+                  ? "px-2 md:px-3 h-8 rounded text-sm bg-gray-900 text-white flex items-center gap-1.5"
+                  : "px-2 md:px-3 h-8 rounded text-sm text-gray-600 hover:bg-gray-100 flex items-center gap-1.5"
               }
             >
               <span className="opacity-70">{t.icon}</span>
-              <span>{t.label}</span>
+              <span className="hidden md:inline">{t.label}</span>
             </NavLink>
           ))}
         </nav>
@@ -88,11 +88,11 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           <button
             type="button"
             onClick={() => ws.setNewLoopDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
+            className="flex items-center gap-1 md:gap-1.5 px-2 md:px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
             title="create new loop"
           >
             <span className="text-base leading-none">+</span>
-            <span>New Loop</span>
+            <span className="hidden md:inline">New Loop</span>
           </button>
         )}
         {loggedIn ? (
@@ -100,13 +100,13 @@ function Shell({ ws }: { ws: WorkspaceState }) {
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              className="flex items-center gap-2 px-2 h-8 rounded hover:bg-gray-100"
+              className="flex items-center gap-1 md:gap-2 px-1 md:px-2 h-8 rounded hover:bg-gray-100"
               title="account"
             >
               <span className="w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center">
                 {me[0]?.toUpperCase() ?? "?"}
               </span>
-              <span className="text-sm text-gray-700">{me}</span>
+              <span className="hidden md:inline text-sm text-gray-700">{me}</span>
               <span className="text-gray-400 text-xs">▾</span>
             </button>
             {menuOpen && (
@@ -132,7 +132,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           <button
             type="button"
             onClick={() => setAuthOpen(true)}
-            className="px-3 h-8 rounded text-sm border border-gray-300 text-gray-700 hover:bg-gray-100"
+            className="px-2 md:px-3 h-8 rounded text-xs md:text-sm border border-gray-300 text-gray-700 hover:bg-gray-100"
             title="login or register"
           >
             Login
