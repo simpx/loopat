@@ -320,6 +320,7 @@ export default function ToolRenderer({
   const isAgent = toolName === "Agent" || toolName === "Task";
   const isWrite = toolName === "Write";
   const isEdit = toolName === "Edit" || toolName === "ApplyPatch";
+  const hasArgs = Object.keys(args).length > 0;
 
   const writeContent = (args.content as string) ?? "";
   const editOld = (args.old_string as string) ?? "";
@@ -451,8 +452,8 @@ export default function ToolRenderer({
             <EditChangeBlock oldStr={editOld} newStr={editNew} />
           )}
 
-          {/* Bash — show terminal-style output */}
-          {isBash && (
+          {/* Bash — show terminal-style output (only when there's content) */}
+          {isBash && (summary || result !== undefined) && (
             <TerminalBlock
               command={summary}
               output={result}
@@ -460,7 +461,7 @@ export default function ToolRenderer({
           )}
 
           {/* TodoWrite — checklist */}
-          {isTodo && todos && (
+          {isTodo && todos && todos.length > 0 && (
             <TodoRenderer todos={todos} />
           )}
 
@@ -480,8 +481,8 @@ export default function ToolRenderer({
             <CodeBlock text={typeof result === "string" ? result : JSON.stringify(result, null, 2)} />
           )}
 
-          {/* Running state — show a subtle loading hint (non-special tools) */}
-          {isRunning && !result && !isTodo && !isAgent && (
+          {/* Running state — show loader when no meaningful content yet */}
+          {isRunning && !result && !hasArgs && !isAgent && !(isTodo && todos && todos.length > 0) && (
             <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
               <LoaderIcon className="h-3 w-3 animate-spin" />
               Working...
