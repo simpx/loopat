@@ -39,6 +39,16 @@ export type SandboxConfig = {
 }
 
 /**
+ * MCP server config — shape matches Claude Agent SDK `McpServerConfig`.
+ * - stdio: spawn a command (binary must be reachable in sandbox PATH)
+ * - http/sse: connect to URL (network is shared with host, no extra bind needed)
+ */
+export type McpServerConfig =
+  | { type?: "stdio"; command: string; args?: string[]; env?: Record<string, string> }
+  | { type: "http"; url: string; headers?: Record<string, string> }
+  | { type: "sse"; url: string; headers?: Record<string, string> }
+
+/**
  * config.json is the workspace's self-describing manifest. Hand this file
  * (with apiKey + git URLs filled in) to a clean machine and bootstrap can
  * reconstruct the workspace: clone knowledge/notes/repos from remotes,
@@ -51,6 +61,8 @@ export type WorkspaceConfig = {
   default: string
   providers: Record<string, ProviderConfig>
   sandbox?: SandboxConfig
+  /** name -> server config; passed through to SDK `query({ mcpServers })`. */
+  mcpServers?: Record<string, McpServerConfig>
 }
 
 const TEMPLATE: WorkspaceConfig = {
