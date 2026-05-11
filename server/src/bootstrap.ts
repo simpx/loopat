@@ -47,17 +47,6 @@ function checkClaudeBinary(): Check {
   }
 }
 
-function checkApiKey(cfg: WorkspaceConfig): Check {
-  const active = cfg.providers[cfg.default]
-  if (active?.apiKey) {
-    return { ok: true, label: `apiKey (${cfg.default})` }
-  }
-  return {
-    ok: false,
-    label: `apiKey (${cfg.default})`,
-    hint: `edit ${configPath()}  →  set providers.${cfg.default}.apiKey`,
-  }
-}
 
 function describeRemote(dir: string, url: string | undefined): string {
   if (!existsSync(dir)) return "missing"
@@ -103,7 +92,6 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkBwrap(),
     checkClaudeBinary(),
-    checkApiKey(cfg),
   ]
 
   const bar = "─".repeat(60)
