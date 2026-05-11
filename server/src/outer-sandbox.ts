@@ -10,7 +10,7 @@
  *       /loopat/loop/<id>/.claude/    ← SDK CLAUDE_CONFIG_DIR (rw)
  *       /loopat/context/knowledge/    ← team docs (ro)
  *       /loopat/context/notes/        ← team prose (rw)
- *       /loopat/context/personal/     ← driver private (rw, memory/ + secrets/)
+ *       /loopat/context/personal/     ← driver private (rw, memory/ + .loopat/{config.json,secrets/})
  *       /loopat/context/repos/<name>/ ← workspace repos (rw; commits go via workdir worktree)
  *   - $HOME (/home/$USER) is tmpfs; personal-dep symlink targets are re-bound
  *     to their real paths under $HOME so tools like ssh find $HOME/.ssh

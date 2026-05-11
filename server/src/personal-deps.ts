@@ -7,8 +7,8 @@ import { personalDir } from "./paths"
  * These targets are added to sandbox allowRead/allowWrite — i.e., the
  * mechanism that lets a loop see external files (ssh keys, tool configs).
  *
- * Walks recursively so symlinks under e.g. personal/<user>/secrets/.ssh are
- * also picked up.
+ * Walks recursively so symlinks under e.g. personal/<user>/.loopat/secrets/.ssh
+ * are also picked up.
  *
  * See memory: project_loop_dir_is_sandbox.md
  */

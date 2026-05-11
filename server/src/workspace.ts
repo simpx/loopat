@@ -75,10 +75,10 @@ export async function vaultList(vault: VaultId, relPath: string, user: string): 
     }
     out.push({ name, path: childRel, type: isDir ? "dir" : "file", size })
   }
-  const isSecretsRoot = (e: VaultEntry) => vault === "personal" && e.type === "dir" && e.name === "secrets" && relPath === ""
+  const isLoopatRoot = (e: VaultEntry) => vault === "personal" && e.type === "dir" && e.name === ".loopat" && relPath === ""
   out.sort((a, b) => {
-    // secrets/ pinned to the very bottom in personal vault root
-    if (isSecretsRoot(a) !== isSecretsRoot(b)) return isSecretsRoot(a) ? 1 : -1
+    // .loopat/ pinned to the very bottom in personal vault root (platform-managed namespace)
+    if (isLoopatRoot(a) !== isLoopatRoot(b)) return isLoopatRoot(a) ? 1 : -1
     if (a.type !== b.type) return a.type === "dir" ? -1 : 1
     return a.name.localeCompare(b.name)
   })
