@@ -17,6 +17,7 @@ import {
 } from "@/components/assistant-ui/attachment";
 import ClaudeStatus from "./ClaudeStatus";
 import ThinkingModeSelector from "./ThinkingModeSelector";
+import PlanModeToggle from "./PlanModeToggle";
 import TokenUsagePie from "./TokenUsagePie";
 import { cn } from "@/lib/utils";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
@@ -43,7 +44,7 @@ export default function Composer() {
 
   const messagesArray = useAuiState((s) => s.thread.messages);
   const usedTokens = estimateTokens(messagesArray);
-  const { provider } = useLoopRuntimeExtra();
+  const { provider, planMode, setPlanMode } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   return (
@@ -106,6 +107,11 @@ export default function Composer() {
             </div>
 
             <div className="flex items-center gap-2">
+              <PlanModeToggle
+                active={planMode}
+                onChange={setPlanMode}
+              />
+
               <div
                 className={cn(
                   "hidden text-xs text-gray-300 transition-opacity lg:block",
