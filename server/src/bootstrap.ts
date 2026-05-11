@@ -95,7 +95,7 @@ async function checkUsers(): Promise<Check> {
 export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
-    { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/loopat/CLAUDE.md` },
+    { ok: existsSync(workspaceDoctrinePath()), label: `doctrine: knowledge/.loopat/claude/CLAUDE.md` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
     describeRepos(cfg),
