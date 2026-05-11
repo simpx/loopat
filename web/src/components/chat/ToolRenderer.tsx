@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -18,6 +18,9 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import TodoRenderer from "./TodoRenderer";
+import AgentRenderer from "./AgentRenderer";
+import type { TaskState } from "@/useLoopRuntime";
 
 type ToolStatus = "running" | "complete" | "incomplete" | "requires-action";
 
@@ -26,6 +29,35 @@ interface ToolRendererProps {
   args: Record<string, unknown>;
   result?: string;
   status?: ToolStatus;
+  elapsedSeconds?: number;
+  taskState?: TaskState;
+}
+
+/* ─── Elapsed timer helpers ─── */
+
+function formatElapsed(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return mins < 1 ? `${secs}s` : `${mins}m ${secs}s`;
+}
+
+function useElapsedTimer(isRunning: boolean, sdkSeconds?: number) {
+  const [local, setLocal] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning) {
+      setLocal(0);
+      return;
+    }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setLocal(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRunning]);
+
+  if (sdkSeconds !== undefined && sdkSeconds > 0) return sdkSeconds;
+  return local;
 }
 
 /* ─── Status badge config ─── */
@@ -62,6 +94,12 @@ function getToolMeta(toolName: string): ToolMeta {
   if (["WebSearch", "WebFetch"].includes(name)) {
     return { category: "web", icon: GlobeIcon, borderClass: "border-l-purple-400" };
   }
+  if (name === "TodoWrite") {
+    return { category: "todo", icon: CheckIcon, borderClass: "border-l-violet-400" };
+  }
+  if (["Agent", "Task"].includes(name)) {
+    return { category: "agent", icon: PencilIcon, borderClass: "border-l-purple-400" };
+  }
   return { category: "default", icon: WrenchIcon, borderClass: "border-l-gray-300" };
 }
 
@@ -83,6 +121,11 @@ function getSummary(toolName: string, args: Record<string, unknown>): string {
     case "WebSearch":
     case "WebFetch":
       return (args.query as string) || (args.url as string) || "";
+    case "TodoWrite":
+      return (args.description as string) || "";
+    case "Agent":
+    case "Task":
+      return (args.description as string) || (args.subagent_type as string) || "";
     default:
       return "";
   }
@@ -197,6 +240,8 @@ export default function ToolRenderer({
   args,
   result,
   status = "complete",
+  elapsedSeconds,
+  taskState,
 }: ToolRendererProps) {
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
@@ -206,8 +251,20 @@ export default function ToolRenderer({
   const isRunning = status === "running";
   const statusCfg = STATUS_CONFIG[status];
 
+  // Per-tool elapsed timer (SDK or local fallback)
+  const elapsed = useElapsedTimer(isRunning, elapsedSeconds);
+
   const hasDiff = isDone && result ? parseDiff(result) !== null : false;
   const isBash = toolName === "Bash";
+  const isTodo = toolName === "TodoWrite";
+  const isAgent = toolName === "Agent" || toolName === "Task";
+
+  // Parse todos from args
+  const todos = isTodo
+    ? (Array.isArray(args.todos)
+        ? (args.todos as any[])
+        : [])
+    : null;
 
   return (
     <Collapsible
@@ -235,14 +292,23 @@ export default function ToolRenderer({
           </>
         )}
 
-        <span
-          className={cn(
-            "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
-            statusCfg.className,
-          )}
-        >
-          {statusCfg.label}
-        </span>
+        {/* Elapsed time badge when running */}
+        {isRunning && (
+          <span className="ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium tabular-nums bg-sky-100 text-sky-700">
+            {formatElapsed(elapsed)}
+          </span>
+        )}
+
+        {!isRunning && (
+          <span
+            className={cn(
+              "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+              statusCfg.className,
+            )}
+          >
+            {statusCfg.label}
+          </span>
+        )}
 
         <ChevronDownIcon
           className={cn(
@@ -273,13 +339,29 @@ export default function ToolRenderer({
             />
           )}
 
+          {/* TodoWrite — checklist */}
+          {isTodo && todos && (
+            <TodoRenderer todos={todos} />
+          )}
+
+          {/* Agent / Task — sub-agent display */}
+          {isAgent && (
+            <AgentRenderer
+              args={args}
+              result={result}
+              status={status}
+              taskState={taskState}
+              elapsedSeconds={elapsed}
+            />
+          )}
+
           {/* Fallback: show result as code, suppress JSON args */}
-          {!isBash && !(hasDiff && (toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch")) && result !== undefined && (
+          {!isBash && !isTodo && !isAgent && !(hasDiff && (toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch")) && result !== undefined && (
             <CodeBlock text={typeof result === "string" ? result : JSON.stringify(result, null, 2)} />
           )}
 
-          {/* Running state — show a subtle loading hint */}
-          {isRunning && !result && (
+          {/* Running state — show a subtle loading hint (non-special tools) */}
+          {isRunning && !result && !isTodo && !isAgent && (
             <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
               <LoaderIcon className="h-3 w-3 animate-spin" />
               Working...
