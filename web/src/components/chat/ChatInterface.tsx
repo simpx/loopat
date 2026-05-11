@@ -87,6 +87,7 @@ export default function ChatInterface() {
                           questions={qs}
                           toolUseId={toolUseId}
                           onAnswers={sendAnswers}
+                          onDismiss={(id) => sendAnswers(id, {})}
                         />
                       </div>
                     ) : null,
