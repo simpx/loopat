@@ -54,6 +54,23 @@
 .prose-loopat th { background: #f9fafb; font-weight: 600; }
 .prose-loopat hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.5em 0; }
 
+/* ─── Chat dot animations ─── */
+@keyframes blink-green {
+  0%, 100% { background-color: #22c55e; }
+  50% { background-color: #bbf7d0; }
+}
+
+/* ─── User message gradient fade (collapsed state) ─── */
+.user-msg-fade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2rem;
+  background: linear-gradient(to top, #fff 0%, transparent 100%);
+  pointer-events: none;
+}
+
 @layer base {
   * { box-sizing: border-box; }
   html, body, #root { margin: 0; padding: 0; height: 100%; }

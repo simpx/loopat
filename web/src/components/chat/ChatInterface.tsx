@@ -109,7 +109,7 @@ export default function ChatInterface() {
           </AuiIf>
 
           {/* Message list */}
-          <div className="mb-10 flex flex-col gap-4">
+          <div className="mb-10 flex flex-col gap-2">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === "user" ? (
