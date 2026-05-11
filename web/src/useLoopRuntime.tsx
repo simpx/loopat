@@ -189,14 +189,30 @@ export interface TaskState {
   error?: string
 }
 
+export interface QuestionOption {
+  label: string
+  description: string
+}
+
+export interface QuestionDef {
+  question: string
+  header: string
+  options: QuestionOption[]
+  multiSelect: boolean
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
+  questions: ReadonlyMap<string, QuestionDef[]>
+  sendAnswers: (toolUseId: string, answers: Record<string, string>) => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   toolProgressMap: new Map(),
   taskMap: new Map(),
+  questions: new Map(),
+  sendAnswers: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -237,6 +253,23 @@ export function useLoopRuntime(loopId: string | null) {
   const taskRef = useRef<Map<string, TaskState>>(new Map())
   const [taskVersion, setTaskVersion] = useState(0)
 
+  // Questions (AskUserQuestion tool) — plain object for immutable updates
+  const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
+  const sendAnswers = useMemo(() => {
+    const fn = (toolUseId: string, answers: Record<string, string>) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify({ type: "answers", tool_use_id: toolUseId, answers }))
+      setQuestionsObj((prev) => {
+        if (!(toolUseId in prev)) return prev
+        const next = { ...prev }
+        delete next[toolUseId]
+        return next
+      })
+    }
+    return fn
+  }, [])
+
   // Expose as stable read-only Maps that re-render when version bumps
   const toolProgressMap = useMemo(() => {
     void toolProgressVersion // pin for re-computation
@@ -248,9 +281,13 @@ export function useLoopRuntime(loopId: string | null) {
     return taskRef.current as ReadonlyMap<string, TaskState>
   }, [taskVersion])
 
+  const questionsReadonlyMap = useMemo<ReadonlyMap<string, QuestionDef[]>>(() => {
+    return new Map(Object.entries(questionsObj))
+  }, [questionsObj])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap }),
-    [toolProgressMap, taskMap],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers],
   )
 
   useEffect(() => {
@@ -264,11 +301,12 @@ export function useLoopRuntime(loopId: string | null) {
       setRaw([])
       setRunning(false)
       replayingRef.current = true
-      // Clear tool progress & task state on reconnect
+      // Clear tool progress & task state & questions on reconnect
       toolProgressRef.current = new Map()
       setToolProgressVersion((v) => v + 1)
       taskRef.current = new Map()
       setTaskVersion((v) => v + 1)
+      setQuestionsObj({})
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -319,6 +357,12 @@ export function useLoopRuntime(loopId: string | null) {
           }
           toolProgressRef.current.set(m.tool_use_id, tp)
           setToolProgressVersion((v) => v + 1)
+          return
+        }
+
+        // ── question (AskUserQuestion) ──
+        if (m?.type === "question" && Array.isArray(m.questions)) {
+          setQuestionsObj((prev) => ({ ...prev, [m.tool_use_id]: m.questions }))
           return
         }
 
@@ -396,23 +440,27 @@ export function useLoopRuntime(loopId: string | null) {
         if (m?.type === "user" && m.message) {
           // upsert by uuid: dedup against history-replay + StrictMode double-mount
           const uuid: string = m.uuid || freshId("u")
-          setRaw((prev) => {
-            if (prev.some((x) => x.id === uuid)) return prev
-            return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content) }]
-          })
+          try {
+            setRaw((prev) => {
+              if (prev.some((x) => x.id === uuid)) return prev
+              return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content) }]
+            })
+          } catch {}
         } else if (m?.type === "assistant" && m.message?.content) {
           // upsert by uuid so the streaming partial gets replaced cleanly
           const uuid: string = m.uuid ?? freshId("a")
-          setRaw((prev) => {
-            const idx = prev.findIndex((x) => x.id === uuid)
-            const full: RawMsg = { id: uuid, role: "assistant", content: m.message.content }
-            if (idx < 0) return [...prev, full]
-            const out = prev.slice()
-            out[idx] = full
-            return out
-          })
+          try {
+            setRaw((prev) => {
+              const idx = prev.findIndex((x) => x.id === uuid)
+              const full: RawMsg = { id: uuid, role: "assistant", content: m.message.content }
+              if (idx < 0) return [...prev, full]
+              const out = prev.slice()
+              out[idx] = full
+              return out
+            })
+          } catch {}
         } else if (m?.type === "stream_event") {
-          handleStreamEvent(m, setRaw)
+          try { handleStreamEvent(m, setRaw) } catch {}
         } else if (m?.type === "error") {
           setRaw((prev) => [
             ...prev,
@@ -439,7 +487,14 @@ export function useLoopRuntime(loopId: string | null) {
     }
   }, [loopId])
 
-  const aggregated = useMemo(() => aggregateToolResults(raw), [raw])
+  const aggregated = useMemo(() => {
+    try {
+      return aggregateToolResults(raw)
+    } catch (e) {
+      console.error("[fe:aggregateToolResults]", e)
+      return []
+    }
+  }, [raw])
 
   const onNew = async (message: AppendMessage) => {
     let text = ""
@@ -464,7 +519,14 @@ export function useLoopRuntime(loopId: string | null) {
 
   const runtime = useExternalStoreRuntime({
     messages: aggregated,
-    convertMessage,
+    convertMessage: (raw) => {
+      try {
+        return convertMessage(raw)
+      } catch (e) {
+        console.error("[fe:convertMessage]", e)
+        return { id: raw.id, role: raw.role, content: [{ type: "text", text: "" }] } as any
+      }
+    },
     isRunning: running,
     onNew,
     onCancel,

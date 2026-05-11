@@ -324,6 +324,8 @@ app.get(
             session.sendUserText(msg.text)
           } else if (msg?.type === "interrupt") {
             session.interrupt()
+          } else if (msg?.type === "answers") {
+            session.answerQuestions(msg.tool_use_id, msg.answers)
           }
         } catch (e) {
           console.error("ws message parse error", e)
