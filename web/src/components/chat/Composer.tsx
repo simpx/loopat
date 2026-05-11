@@ -1,0 +1,138 @@
+import { useState } from "react";
+import {
+  ComposerPrimitive,
+  ThreadPrimitive,
+  AuiIf,
+  useAuiState,
+} from "@assistant-ui/react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  SquareIcon,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  ComposerAttachments,
+  ComposerAddAttachment,
+} from "@/components/assistant-ui/attachment";
+import ClaudeStatus from "./ClaudeStatus";
+import ThinkingModeSelector from "./ThinkingModeSelector";
+import TokenUsagePie from "./TokenUsagePie";
+import { cn } from "@/lib/utils";
+
+const CONTEXT_WINDOW = 200_000;
+
+function estimateTokens(messages: readonly unknown[]): number {
+  let chars = 0;
+  for (const m of messages) {
+    if (typeof m === "object" && m !== null) {
+      chars += JSON.stringify(m).length;
+    }
+  }
+  return Math.round(chars / 3.5);
+}
+
+export default function Composer() {
+  const [thinkingMode, setThinkingMode] = useState("none");
+
+  const isRunning = useAuiState((s) => s.thread.isRunning);
+  const hasInput = useAuiState(
+    (s) => typeof s.composer.text === "string" && s.composer.text.trim().length > 0,
+  );
+
+  const messagesArray = useAuiState((s) => s.thread.messages);
+  const usedTokens = estimateTokens(messagesArray);
+
+  return (
+    <ComposerPrimitive.Root className="relative flex w-full flex-col">
+      {/* Claude Status bar */}
+      <ClaudeStatus isLoading={isRunning} />
+
+      {/* Scroll-to-bottom button */}
+      <ThreadPrimitive.ScrollToBottom asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-sm"
+          className="absolute -top-12 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm disabled:invisible"
+        >
+          <ArrowDownIcon className="h-4 w-4 text-gray-500" />
+        </Button>
+      </ThreadPrimitive.ScrollToBottom>
+
+      <ComposerPrimitive.AttachmentDropzone asChild>
+        <div
+          data-slot="composer-shell"
+          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-sky-300 focus-within:ring-1 focus-within:ring-sky-200"
+        >
+          <ComposerAttachments />
+
+          <ComposerPrimitive.Input
+            placeholder="Send a message..."
+            className="max-h-32 min-h-10 w-full resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+            rows={1}
+            autoFocus
+            aria-label="Message input"
+          />
+
+          {/* Toolbar */}
+          <div className="flex items-center justify-between gap-1 border-t border-gray-100 pt-2">
+            <div className="flex items-center gap-1">
+              <ComposerAddAttachment />
+
+              <ThinkingModeSelector
+                selectedMode={thinkingMode}
+                onModeChange={setThinkingMode}
+              />
+
+              <TokenUsagePie
+                used={Math.min(usedTokens, CONTEXT_WINDOW)}
+                total={CONTEXT_WINDOW}
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "hidden text-xs text-gray-300 transition-opacity lg:block",
+                  hasInput ? "opacity-0" : "opacity-100",
+                )}
+              >
+                Enter to send
+              </div>
+
+              <AuiIf condition={(s) => !s.thread.isRunning}>
+                <ComposerPrimitive.Send asChild>
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg bg-sky-600 hover:bg-sky-700"
+                    disabled={!hasInput}
+                    aria-label="Send message"
+                  >
+                    <ArrowUpIcon className="h-4 w-4" />
+                  </Button>
+                </ComposerPrimitive.Send>
+              </AuiIf>
+
+              <AuiIf condition={(s) => s.thread.isRunning}>
+                <ComposerPrimitive.Cancel asChild>
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg bg-red-500 hover:bg-red-600"
+                    aria-label="Stop generating"
+                  >
+                    <SquareIcon className="h-3 w-3 fill-current" />
+                  </Button>
+                </ComposerPrimitive.Cancel>
+              </AuiIf>
+            </div>
+          </div>
+        </div>
+      </ComposerPrimitive.AttachmentDropzone>
+    </ComposerPrimitive.Root>
+  );
+}
