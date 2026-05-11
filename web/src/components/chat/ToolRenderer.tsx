@@ -106,18 +106,29 @@ function getToolMeta(toolName: string): ToolMeta {
 /* ─── Extract summary from args ─── */
 
 function getSummary(toolName: string, args: Record<string, unknown>): string {
+  const filePath = (args.file_path as string) || (args.filePath as string) || "";
   switch (toolName) {
     case "Bash":
       return (args.command as string) || (args.description as string) || "";
-    case "Edit":
-    case "Write":
+    case "Edit": {
+      const base = filePath || "";
+      const oldLines = ((args.old_string as string) ?? "").split("\n").length;
+      const newLines = ((args.new_string as string) ?? "").split("\n").length;
+      const delta = newLines - oldLines;
+      const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : `±${oldLines}`;
+      return base ? `${base} (${deltaStr} lines)` : "";
+    }
+    case "Write": {
+      const content = (args.content as string) ?? "";
+      return filePath ? `${filePath} (${content.length.toLocaleString()} chars)` : "";
+    }
     case "ApplyPatch":
-      return (args.file_path as string) || (args.filePath as string) || "";
+      return filePath || "";
     case "Grep":
     case "Glob":
       return (args.pattern as string) || "";
     case "Read":
-      return (args.file_path as string) || (args.filePath as string) || "";
+      return filePath;
     case "WebSearch":
     case "WebFetch":
       return (args.query as string) || (args.url as string) || "";
@@ -179,13 +190,16 @@ function parseDiff(text: string): DiffLine[] | null {
   return hasDiffMarkers ? parsed : null;
 }
 
-function DiffView({ text }: { text: string }) {
+function DiffView({ text, maxLines }: { text: string; maxLines?: number }) {
   const diff = parseDiff(text);
   if (!diff) return null;
 
+  const lines = maxLines ? diff.slice(0, maxLines) : diff;
+  const truncated = maxLines && diff.length > maxLines;
+
   return (
     <div className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 font-mono text-xs leading-relaxed">
-      {diff.map((line, i) => (
+      {lines.map((line, i) => (
         <div
           key={i}
           className={cn(
@@ -199,6 +213,67 @@ function DiffView({ text }: { text: string }) {
           {line.text}
         </div>
       ))}
+      {truncated && (
+        <div className="px-3 py-1 text-gray-400 italic">
+          ... {diff.length - (maxLines ?? 0)} more lines
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Write content block ─── */
+
+function WriteContentBlock({ filePath, content, maxChars }: { filePath: string; content: string; maxChars?: number }) {
+  const truncated = maxChars && content.length > maxChars;
+  const display = truncated ? content.slice(0, maxChars) : content;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 font-mono text-xs leading-relaxed">
+      <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 bg-gray-100">
+        <FileTextIcon className="h-3 w-3 text-gray-400" />
+        <span className="text-[10px] text-gray-500 truncate">{filePath}</span>
+        <span className="ml-auto text-[10px] text-gray-400">
+          {content.length.toLocaleString()} chars
+        </span>
+      </div>
+      <pre className="overflow-x-auto px-3 py-2 text-gray-700 whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
+        {display}
+        {truncated && (
+          <span className="text-gray-400 italic">
+            {"\n"}... {content.length - (maxChars ?? 0)} more chars
+          </span>
+        )}
+      </pre>
+    </div>
+  );
+}
+
+function briefContent(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen) + "…";
+}
+
+/* ─── Old→New string change block (for Edit without diff result) ─── */
+
+function EditChangeBlock({ oldStr, newStr, maxLen }: { oldStr: string; newStr: string; maxLen?: number }) {
+  const truncOld = maxLen && oldStr.length > maxLen;
+  const truncNew = maxLen && newStr.length > maxLen;
+  const displayOld = truncOld ? oldStr.slice(0, maxLen) : oldStr;
+  const displayNew = truncNew ? newStr.slice(0, maxLen) : newStr;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-relaxed">
+      <div className="px-3 py-px bg-red-50 text-red-800 whitespace-pre-wrap break-all">
+        <span className="select-none text-red-400">- </span>
+        {displayOld}
+        {truncOld && <span className="text-red-400 italic">…</span>}
+      </div>
+      <div className="px-3 py-px bg-emerald-50 text-emerald-800 whitespace-pre-wrap break-all">
+        <span className="select-none text-emerald-400">+ </span>
+        {displayNew}
+        {truncNew && <span className="text-emerald-400 italic">…</span>}
+      </div>
     </div>
   );
 }
@@ -254,16 +329,33 @@ export default function ToolRenderer({
   // Per-tool elapsed timer (SDK or local fallback)
   const elapsed = useElapsedTimer(isRunning, elapsedSeconds);
 
-  const hasDiff = isDone && result ? parseDiff(result) !== null : false;
+  const diff = isDone && result ? parseDiff(result) : null;
+  const hasDiff = diff !== null;
   const isBash = toolName === "Bash";
   const isTodo = toolName === "TodoWrite";
   const isAgent = toolName === "Agent" || toolName === "Task";
+  const isWrite = toolName === "Write";
+  const isEdit = toolName === "Edit" || toolName === "ApplyPatch";
+
+  const writeContent = (args.content as string) ?? "";
+  const editOld = (args.old_string as string) ?? "";
+  const editNew = (args.new_string as string) ?? "";
+  const editHasChange = isEdit && editOld && editNew;
 
   // Parse todos from args
   const todos = isTodo
     ? (Array.isArray(args.todos)
         ? (args.todos as any[])
         : [])
+    : null;
+
+  // Collapsed preview content for Write/Edit
+  const collapsedPreview = !open
+    ? isWrite && writeContent
+      ? briefContent(writeContent, 200)
+      : isEdit && (hasDiff || editHasChange)
+        ? { type: "edit" as const, oldStr: editOld, newStr: editNew, diff }
+        : null
     : null;
 
   return (
@@ -277,45 +369,82 @@ export default function ToolRenderer({
       )}
     >
       <CollapsibleTrigger
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-gray-50"
+        className="flex w-full flex-col text-left text-sm transition-colors hover:bg-gray-50"
       >
-        <StatusIcon status={status} />
-        <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
-        <span className="font-medium text-gray-700 text-xs">{toolName}</span>
+        {/* Title line */}
+        <div className="flex w-full items-center gap-2 px-3 py-1.5">
+          <StatusIcon status={status} />
+          <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+          <span className="font-medium text-gray-700 text-xs">{toolName}</span>
 
-        {summary && (
-          <>
-            <span className="text-gray-300">·</span>
-            <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500">
-              {summary}
-            </span>
-          </>
-        )}
-
-        {/* Elapsed time badge when running */}
-        {isRunning && (
-          <span className="ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium tabular-nums bg-sky-100 text-sky-700">
-            {formatElapsed(elapsed)}
-          </span>
-        )}
-
-        {!isRunning && (
-          <span
-            className={cn(
-              "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
-              statusCfg.className,
-            )}
-          >
-            {statusCfg.label}
-          </span>
-        )}
-
-        <ChevronDownIcon
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform",
-            open && "rotate-180",
+          {summary && (
+            <>
+              <span className="text-gray-300">·</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500">
+                {summary}
+              </span>
+            </>
           )}
-        />
+
+          {/* Elapsed time badge when running */}
+          {isRunning && (
+            <span className="ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium tabular-nums bg-sky-100 text-sky-700">
+              {formatElapsed(elapsed)}
+            </span>
+          )}
+
+          {!isRunning && (
+            <span
+              className={cn(
+                "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
+                statusCfg.className,
+              )}
+            >
+              {statusCfg.label}
+            </span>
+          )}
+
+          <ChevronDownIcon
+            className={cn(
+              "h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </div>
+
+        {/* Collapsed preview: brief content/diff when not expanded */}
+        {collapsedPreview && (
+          <div className="border-t border-gray-100 px-3 py-1.5">
+            {typeof collapsedPreview === "string" ? (
+              <pre className="font-mono text-[10px] leading-relaxed text-gray-500 whitespace-pre-wrap break-all line-clamp-3">
+                {collapsedPreview}
+              </pre>
+            ) : collapsedPreview.type === "edit" ? (
+              collapsedPreview.diff ? (
+                <div className="overflow-hidden rounded border border-gray-200 font-mono text-[10px] leading-relaxed opacity-70">
+                  {collapsedPreview.diff.slice(0, 8).map((line, i) => (
+                    <div
+                      key={i}
+                      className={cn(
+                        "px-2 py-px whitespace-pre-wrap break-all",
+                        line.type === "add" && "bg-emerald-50 text-emerald-800",
+                        line.type === "del" && "bg-red-50 text-red-800",
+                        line.type === "hdr" && "bg-blue-50 text-blue-700",
+                        line.type === "ctx" && "text-gray-400",
+                      )}
+                    >
+                      {line.text}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="opacity-70">
+                  <EditChangeBlock oldStr={collapsedPreview.oldStr} newStr={collapsedPreview.newStr} maxLen={200} />
+                </div>
+              )
+            ) : null}
+          </div>
+        )}
       </CollapsibleTrigger>
 
       <CollapsibleContent
@@ -326,10 +455,18 @@ export default function ToolRenderer({
         )}
       >
         <div className="border-t border-gray-100 px-3 py-2">
-          {/* Edit / Write / Patch — show diff if available */}
-          {(toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch") && isDone && hasDiff && result ? (
+          {/* Write — show full content with file header */}
+          {isWrite && isDone && writeContent && (
+            <WriteContentBlock filePath={summary} content={writeContent} />
+          )}
+
+          {/* Edit / ApplyPatch — show diff (if result has one) or old→new change */}
+          {isEdit && isDone && hasDiff && result && (
             <DiffView text={result} />
-          ) : null}
+          )}
+          {isEdit && isDone && !hasDiff && editHasChange && (
+            <EditChangeBlock oldStr={editOld} newStr={editNew} />
+          )}
 
           {/* Bash — show terminal-style output */}
           {isBash && (
@@ -356,7 +493,7 @@ export default function ToolRenderer({
           )}
 
           {/* Fallback: show result as code, suppress JSON args */}
-          {!isBash && !isTodo && !isAgent && !(hasDiff && (toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch")) && result !== undefined && (
+          {!isWrite && !isBash && !isTodo && !isAgent && !(isEdit && (hasDiff || editHasChange)) && result !== undefined && (
             <CodeBlock text={typeof result === "string" ? result : JSON.stringify(result, null, 2)} />
           )}
 
