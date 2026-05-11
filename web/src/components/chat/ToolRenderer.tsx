@@ -321,7 +321,7 @@ export default function ToolRenderer({
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
   const summary = getSummary(toolName, args);
-  const [open, setOpen] = useState(status === "running");
+  const [open, setOpen] = useState(false);
   const isDone = status === "complete";
   const isRunning = status === "running";
   const statusCfg = STATUS_CONFIG[status];
