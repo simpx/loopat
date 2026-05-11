@@ -13,6 +13,7 @@ import {
   loopContextKnowledge,
   loopContextNotes,
   loopContextPersonal,
+  loopContextRepos,
 } from "./paths"
 import { loadConfig } from "./config"
 import { printBootstrapBanner } from "./bootstrap"
@@ -129,6 +130,7 @@ app.get("/api/loops/:id/context", async (c) => {
   if (existsSync(loopContextKnowledge(id))) mounts.push({ name: "knowledge", path: "context/knowledge" })
   if (existsSync(loopContextNotes(id))) mounts.push({ name: "notes", path: "context/notes" })
   if (existsSync(loopContextPersonal(id))) mounts.push({ name: "personal", path: "context/personal" })
+  if (existsSync(loopContextRepos(id))) mounts.push({ name: "repos", path: "context/repos" })
   return c.json({ mounts })
 })
 

@@ -11,7 +11,7 @@ import { buildLoopatAppend } from "./system-prompt"
 import { loadPersonalSecrets, substituteVars } from "./personal-secrets"
 import { getLoop } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { buildOuterBwrapArgs, V_LOOP, V_LOOP_CLAUDE } from "./outer-sandbox"
+import { buildOuterBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./outer-sandbox"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
@@ -181,14 +181,14 @@ class LoopSession {
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
-      console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
+      console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
       console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${CLAUDE_BINARY}`)
     }
 
     this.q = query({
       prompt: this.input.iter,
       options: {
-        cwd: V_LOOP(loopId),
+        cwd: V_LOOP_WORKDIR(loopId),
         env: {
           ...process.env,
           CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
@@ -242,8 +242,8 @@ class LoopSession {
             }, { once: true })
           })
         },
-        // user-tier: read autoMemoryDirectory: /personal/memory from
-        // CLAUDE_CONFIG_DIR/settings.json (SDK auto-memory uses that path).
+        // user-tier: read autoMemoryDirectory (/loopat/context/personal/memory)
+        // from CLAUDE_CONFIG_DIR/settings.json (SDK auto-memory uses that path).
         // project-tier: auto-load <workdir>/CLAUDE.md so per-repo conventions
         // (e.g. the project's own CLAUDE.md) layer on top of platform doctrine.
         settingSources: ["user", "project"],

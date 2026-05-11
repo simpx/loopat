@@ -5,14 +5,18 @@
  * Key decisions:
  *   - Single layer (this is the only sandbox; SDK's internal sandbox-runtime
  *     is disabled for CLI; PTY also goes through here)
- *   - Virtual paths Claude / user sees:
- *       /loop/<id>/                 ← workdir (rw)
- *       /loop/<id>/.claude/         ← SDK CLAUDE_CONFIG_DIR (rw)
- *       /context/knowledge/         ← team docs (ro)
- *       /context/notes/             ← team prose (rw)
- *       /personal/                  ← user private (rw, contains memory/ secrets/)
+ *   - Virtual paths Claude / user sees (all under /loopat/):
+ *       /loopat/loop/<id>/workdir/    ← workdir (rw)
+ *       /loopat/loop/<id>/.claude/    ← SDK CLAUDE_CONFIG_DIR (rw)
+ *       /loopat/context/knowledge/    ← team docs (ro)
+ *       /loopat/context/notes/        ← team prose (rw)
+ *       /loopat/context/personal/     ← driver private (rw, memory/ + secrets/)
+ *       /loopat/context/repos/<name>/ ← workspace repos (rw; commits go via workdir worktree)
  *   - $HOME (/home/$USER) is tmpfs; personal-dep symlink targets are re-bound
  *     to their real paths under $HOME so tools like ssh find $HOME/.ssh
+ *   - Workspace repos are ALSO re-bound at their host absolute path because
+ *     git worktrees store absolute gitdir paths. The virtual path is what the
+ *     AI / user references; git internals follow the host path.
  *   - Network is not unshared (host network shared); API calls work directly
  *
  * See memory: project_loop_dir_is_sandbox.md
@@ -41,14 +45,16 @@ function expandHostPath(p: string, home: string): string {
   return s.replace(/\$([A-Z_][A-Z0-9_]*)/gi, (_, name) => process.env[name] ?? "")
 }
 
-export const V_LOOP = (id: string) => `/loop/${id}`
-export const V_LOOP_CLAUDE = (id: string) => `/loop/${id}/.claude`
-export const V_LOOP_CLAUDE_SKILLS = (id: string) => `/loop/${id}/.claude/skills`
-export const V_CONTEXT_KNOWLEDGE = "/context/knowledge"
-export const V_CONTEXT_NOTES = "/context/notes"
-export const V_CONTEXT_NOTES_MEMORY = "/context/notes/memory"
-export const V_PERSONAL = "/personal"
-export const V_PERSONAL_MEMORY = "/personal/memory"
+export const V_LOOP = (id: string) => `/loopat/loop/${id}`
+export const V_LOOP_WORKDIR = (id: string) => `/loopat/loop/${id}/workdir`
+export const V_LOOP_CLAUDE = (id: string) => `/loopat/loop/${id}/.claude`
+export const V_LOOP_CLAUDE_SKILLS = (id: string) => `/loopat/loop/${id}/.claude/skills`
+export const V_CONTEXT_KNOWLEDGE = "/loopat/context/knowledge"
+export const V_CONTEXT_NOTES = "/loopat/context/notes"
+export const V_CONTEXT_NOTES_MEMORY = "/loopat/context/notes/memory"
+export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
+export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
+export const V_CONTEXT_REPOS = "/loopat/context/repos"
 
 export type SandboxExtraEnv = Record<string, string>
 
@@ -78,11 +84,11 @@ export async function buildOuterBwrapArgs(
     // host home: tmpfs; personal-dep targets bound back below
     "--tmpfs", home,
     // virtual mount points: bind directly. bwrap auto-creates parents.
-    "--bind", personalDir(createdBy), V_PERSONAL,
-    "--bind", loopWorkdir(loopId), V_LOOP(loopId),
+    "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
     "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
     "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
+    "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
@@ -111,12 +117,13 @@ export async function buildOuterBwrapArgs(
     args.push("--ro-bind", credsSrc, join(V_LOOP_CLAUDE(loopId), ".credentials.json"))
   }
 
-  // repos: re-bind at the same host absolute path so worktree `.git` files
-  // (which store absolute gitdir paths) resolve inside the sandbox. The main
-  // repo holds the per-worktree refs/index that git needs to follow from the
-  // workdir's .git pointer. Rw because git writes HEAD/index/logs there.
+  // repos: bind at the virtual path (for AI / user) AND re-bind at the host
+  // absolute path (for git internals — worktree `.git` files store absolute
+  // gitdir paths). Same source, two paths. Rw because git writes
+  // HEAD/index/logs in the main repo for each worktree.
   const reposDir = workspaceReposDir()
   if (existsSync(reposDir)) {
+    args.push("--bind", reposDir, V_CONTEXT_REPOS)
     args.push("--bind", reposDir, reposDir)
   }
 
@@ -125,9 +132,9 @@ export async function buildOuterBwrapArgs(
     "--proc", "/proc",
     "--dev", "/dev",
     "--unshare-pid",
-    // cwd
-    "--chdir", V_LOOP(loopId),
-    "--setenv", "PWD", V_LOOP(loopId),
+    // cwd = workdir (the worktree); sibling .claude/ holds SDK state
+    "--chdir", V_LOOP_WORKDIR(loopId),
+    "--setenv", "PWD", V_LOOP_WORKDIR(loopId),
   )
 
   // re-bind personal-dep targets so e.g. /home/<user>/.ssh works for ssh client
