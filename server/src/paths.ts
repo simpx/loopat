@@ -48,5 +48,8 @@ export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(),
 // Optional. If present, appended after the bundled platform doctrine.
 export const workspaceTeamClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
 export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
+// Optional team-shared Claude Code config (mcpServers, future: hooks, ...).
+// Shape mirrors `.claude.json`. Workspace-versioned in knowledge repo.
+export const workspaceTeamClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
