@@ -68,10 +68,10 @@ prints the full `bwrap …` argv on every spawn. Copy it, run by hand to reprodu
    path-from-banner --version
    ```
 
-4. **Broken `personal-deps` symlinks.** `personal/<user>/secrets/*` symlinks get re-bound into the sandbox at their `$HOME` target. If a target doesn't exist, bwrap aborts.
+4. **Broken `personal-deps` symlinks.** Symlinks anywhere under `personal/<user>/` get re-bound into the sandbox at their `$HOME` target. If a target doesn't exist, bwrap aborts.
 
    ```sh
-   find ~/.loopat/personal/*/secrets -xtype l
+   find ~/.loopat/personal -xtype l
    # any output = broken symlink → delete it
    ```
 

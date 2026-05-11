@@ -12,9 +12,9 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 - `/loopat/loop/<id>/.claude/`      — internal SDK session state (rw). Don't poke unless debugging.
 - `/loopat/context/knowledge/`      — workspace's distilled docs (**ro**). Tree of markdown.
 - `/loopat/context/notes/`          — workspace prose layer (rw). `inbox.md`, `focus.md`, plus `memory/` (team memory).
-- `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory) and `secrets/`.
+- `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory) and `.loopat/` (platform-managed: per-user config + secrets).
 - `/loopat/context/repos/<name>/`   — workspace repos (rw). All repos registered in this workspace. The current loop's workdir is typically a worktree of one of them.
-- `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/personal/secrets/` (e.g. `.ssh`) appear at expected $HOME paths.
+- `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/personal/.loopat/secrets/` (e.g. `.ssh`) appear at expected $HOME paths.
 
 Network is open (host network is shared). Use it for API calls, git fetch, package installs, etc.
 
@@ -27,7 +27,7 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
   - Reading is fine and encouraged.
 - `/loopat/context/notes/inbox.md` — workspace scratch prose. Format: one bullet per line, `- xxx`. Append freely.
 - `/loopat/context/notes/focus.md` — `## pinned` and `## listed` sections name the workspace's current foci. Edit when user asks.
-- `/loopat/context/personal/secrets/` — user's tokens, keys, ssh, etc. **Never echo file contents to chat** (even one line counts as exfiltration). Reference by filename / env var.
+- `/loopat/context/personal/.loopat/secrets/` — user's tokens, keys, ssh, etc. **Never echo file contents to chat** (even one line counts as exfiltration). Reference by filename / env var.
 - `/loopat/context/repos/<name>/` — rw, but **don't commit directly** into a main repo. Commits go through the workdir worktree (which sits on a `loop/<slug>-<id6>` branch). Reading other repos is encouraged for cross-repo work.
 - Cross-doc references use wikilink `[[basename]]` (no `.md`), Obsidian-style. The Context tab UI renders these clickable + builds backlinks.
 
