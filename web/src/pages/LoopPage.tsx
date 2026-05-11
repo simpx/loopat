@@ -10,6 +10,7 @@ import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
+import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
 import { Editor } from "../Editor"
 import { Terminal } from "../Terminal"
@@ -47,6 +48,7 @@ function LoopsList({ currentId }: { currentId: string }) {
   const navigate = useNavigate()
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loopat:loopsList:collapsed") === "1")
+  const isMobile = useIsMobile()
 
   // single-user MVP — "我的" / "全部" filter both show everything; RFD always 0
   const filtered = ws.loops
@@ -56,23 +58,8 @@ function LoopsList({ currentId }: { currentId: string }) {
     localStorage.setItem("loopat:loopsList:collapsed", v ? "1" : "0")
   }
 
-  if (collapsed) {
-    return (
-      <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
-        <button
-          type="button"
-          onClick={() => setCollapsedPersist(false)}
-          className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
-          title="expand sidebar"
-        >
-          <PanelLeftOpen size={16} />
-        </button>
-      </aside>
-    )
-  }
-
-  return (
-    <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
+  const sidebarContent = (
+    <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
       <div className="px-2 h-10 flex items-center gap-1 border-b border-gray-200">
         {(["mine", "all", "rfd"] as const).map((s) => (
           <button
@@ -109,7 +96,10 @@ function LoopsList({ currentId }: { currentId: string }) {
             <button
               key={loop.id}
               type="button"
-              onClick={() => navigate(`/loop/${loop.id}`)}
+              onClick={() => {
+                navigate(`/loop/${loop.id}`)
+                if (isMobile) setCollapsedPersist(true)
+              }}
               className={
                 sel
                   ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
@@ -135,6 +125,47 @@ function LoopsList({ currentId }: { currentId: string }) {
       </div>
     </aside>
   )
+
+  if (collapsed) {
+    return (
+      <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+        <button
+          type="button"
+          onClick={() => setCollapsedPersist(false)}
+          className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+          title="expand sidebar"
+        >
+          <PanelLeftOpen size={16} />
+        </button>
+      </aside>
+    )
+  }
+
+  // On mobile, render expanded sidebar as a fixed overlay
+  if (isMobile) {
+    return (
+      <>
+        <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+          <button
+            type="button"
+            onClick={() => setCollapsedPersist(true)}
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+            title="collapse sidebar"
+          >
+            <PanelLeftClose size={16} />
+          </button>
+        </aside>
+        <div className="fixed inset-0 z-40" onClick={() => setCollapsedPersist(true)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+            {sidebarContent}
+          </div>
+        </div>
+      </>
+    )
+  }
+
+  return sidebarContent
 }
 
 // ============================================================================
@@ -241,9 +272,9 @@ function LoopHeader({
     </button>
   )
   return (
-    <header className="px-5 pt-3 pb-2 shrink-0 border-b border-gray-200">
+    <header className="px-3 md:px-5 pt-3 pb-2 shrink-0 border-b border-gray-200">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[15px] font-medium text-gray-900">{meta.title}</span>
+        <span className="text-[14px] md:text-[15px] font-medium text-gray-900">{meta.title}</span>
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         <span className="text-xs text-gray-500">
           driver: <span className="text-gray-900">{meta.createdBy}</span>
@@ -340,8 +371,10 @@ function RightPanel({
   pickedFile: string | null
   onPickFile: (path: string) => void
 }) {
-  return (
-    <aside className="flex-1 min-w-0 border-l border-gray-200 bg-white flex flex-col">
+  const isMobile = useIsMobile()
+
+  const panel = (
+    <aside className={`${isMobile ? "h-full w-full" : "flex-1"} min-w-0 border-l border-gray-200 bg-white flex flex-col`}>
       <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
         <span className="capitalize">{mode}</span>
         {mode === "editor" && (
@@ -377,6 +410,16 @@ function RightPanel({
       )}
     </aside>
   )
+
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-40">
+        {panel}
+      </div>
+    )
+  }
+
+  return panel
 }
 
 function InfoPanel({ meta }: { meta: LoopMeta }) {
