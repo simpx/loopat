@@ -152,18 +152,23 @@ function convertMessage(raw: RawMsg) {
       })
     } else if (b?.type === "tool_use") {
       const r = b._result
+      const args = b.input ?? {}
+      // Don't mark as complete until input JSON has actually arrived —
+      // content_block_start fires with input={} before input_json_deltas.
+      const hasArgs = Object.keys(args).length > 0
       parts.push({
         type: "tool-call",
         toolCallId: b.id,
         toolName: b.name,
-        args: b.input ?? {},
+        args,
         result: r ? r.content : undefined,
         isError: r ? r.isError : undefined,
-        // surfaces a spinner in tool-fallback while result is missing
         status: r
           ? r.isError
             ? { type: "incomplete", reason: "error" as const }
-            : { type: "complete" as const }
+            : hasArgs
+              ? { type: "complete" as const }
+              : { type: "running" as const }
           : { type: "running" as const },
       })
     }
@@ -504,16 +509,38 @@ export function useLoopRuntime(loopId: string | null) {
             })
           } catch {}
         } else if (m?.type === "assistant" && m.message?.content) {
-          // upsert by uuid so the streaming partial gets replaced cleanly
+          // upsert by uuid so the streaming partial gets replaced cleanly.
+          // Fallback: if the full message uuid doesn't match the stream_event
+          // uuid, hunt down any streaming partial whose tool_use ids overlap
+          // and replace it — otherwise both appear side-by-side.
           const uuid: string = m.uuid ?? freshId("a")
+          const content = m.message.content
           try {
             setRaw((prev) => {
+              const full: RawMsg = { id: uuid, role: "assistant", content }
               const idx = prev.findIndex((x) => x.id === uuid)
-              const full: RawMsg = { id: uuid, role: "assistant", content: m.message.content }
-              if (idx < 0) return [...prev, full]
-              const out = prev.slice()
-              out[idx] = full
-              return out
+              if (idx >= 0) {
+                const out = prev.slice()
+                out[idx] = full
+                return out
+              }
+              // No uuid match — try to find a streaming partial that shares
+              // at least one tool_use id with the full message.
+              const fullToolIds = new Set(
+                (content as any[]).filter((b: any) => b?.type === "tool_use").map((b: any) => b.id)
+              )
+              if (fullToolIds.size > 0) {
+                const dupIdx = prev.findIndex((x) =>
+                  x.role === "assistant" &&
+                  x.content.some((b: any) => b?.type === "tool_use" && fullToolIds.has(b.id)),
+                )
+                if (dupIdx >= 0) {
+                  const out = prev.slice()
+                  out[dupIdx] = full
+                  return out
+                }
+              }
+              return [...prev, full]
             })
           } catch {}
         } else if (m?.type === "stream_event") {
