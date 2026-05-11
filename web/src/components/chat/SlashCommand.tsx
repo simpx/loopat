@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useComposerRuntime } from "@assistant-ui/react";
-import { Brain, Zap, Sparkles, Route } from "lucide-react";
+import { Brain, Zap, Sparkles, Route, Eraser } from "lucide-react";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 
 interface SlashCommand {
@@ -9,9 +9,11 @@ interface SlashCommand {
   name: string;
   description: string;
   icon: React.ElementType;
-  action: "insert" | "toggle";
+  action: "insert" | "toggle" | "command";
   prefix: string;
   toggleKey?: "planMode";
+  /** Required when action === "command"; identifies which runtime action to fire. */
+  commandKey?: "clearContext";
 }
 
 const COMMANDS: SlashCommand[] = [
@@ -48,12 +50,21 @@ const COMMANDS: SlashCommand[] = [
     prefix: "",
     toggleKey: "planMode",
   },
+  {
+    id: "clear",
+    name: "Clear Context",
+    description: "Reset AI conversation (history kept)",
+    icon: Eraser,
+    action: "command",
+    prefix: "",
+    commandKey: "clearContext",
+  },
 ];
 
 export default function SlashCommand() {
   const text = useAuiState((s) => s.composer.text);
   const composerRuntime = useComposerRuntime();
-  const { planMode, setPlanMode } = useLoopRuntimeExtra();
+  const { planMode, setPlanMode, clearContext } = useLoopRuntimeExtra();
   const [open, setOpen] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [filter, setFilter] = useState("");
@@ -88,10 +99,13 @@ export default function SlashCommand() {
         composerRuntime.setText("");
       } else if (cmd.action === "insert") {
         composerRuntime.setText(cmd.prefix);
+      } else if (cmd.action === "command" && cmd.commandKey === "clearContext") {
+        clearContext();
+        composerRuntime.setText("");
       }
       setOpen(false);
     },
-    [composerRuntime, planMode, setPlanMode],
+    [composerRuntime, planMode, setPlanMode, clearContext],
   );
 
   // Keyboard navigation — uses capture phase to intercept before composer

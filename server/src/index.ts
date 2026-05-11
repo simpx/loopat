@@ -327,7 +327,8 @@ app.get(
   "/ws/loop/:id",
   upgradeWebSocket(async (c) => {
     const id = c.req.param("id") ?? ""
-    const canWrite = !!getRequestUserId(c)
+    const userId = getRequestUserId(c)
+    const canWrite = !!userId
     const exists = await loopExists(id)
     if (!exists) {
       return {
@@ -354,6 +355,8 @@ app.get(
           const msg = JSON.parse(data)
           if (msg?.type === "user" && typeof msg.text === "string") {
             session.sendUserText(msg.text)
+          } else if (msg?.type === "clear") {
+            session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
             session.interrupt()
           } else if (msg?.type === "answers") {
@@ -395,10 +398,10 @@ import { join } from "node:path"
 const webDist = join(import.meta.dir, "..", "..", "web", "dist")
 const indexHtml = join(webDist, "index.html")
 
-app.get("*", async (c) => {
+app.get("*", async (c, next) => {
   const path = c.req.path
   // Don't interfere with API / WS routes
-  if (path.startsWith("/api/") || path.startsWith("/ws/")) return c.next()
+  if (path.startsWith("/api/") || path.startsWith("/ws/")) return next()
   // Try to serve the exact file
   const file = Bun.file(join(webDist, path === "/" ? "index.html" : path))
   if (await file.exists()) {
