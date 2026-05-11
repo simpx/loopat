@@ -1,6 +1,5 @@
 import { useState } from "react"
-import { HelpCircleIcon, SendIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { HelpCircleIcon, SendIcon, XIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface QuestionOption {
@@ -19,6 +18,7 @@ interface AskUserQuestionRendererProps {
   questions: QuestionDef[]
   toolUseId?: string
   onAnswers?: (toolUseId: string, answers: Record<string, string>) => void
+  onDismiss?: (toolUseId: string) => void
   disabled?: boolean
 }
 
@@ -26,9 +26,11 @@ export default function AskUserQuestionRenderer({
   questions: rawQuestions,
   toolUseId,
   onAnswers,
+  onDismiss,
   disabled = false,
 }: AskUserQuestionRendererProps) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  const [customInputs, setCustomInputs] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState(false)
 
   // Normalize questions — filter out any that are missing required fields
@@ -46,11 +48,24 @@ export default function AskUserQuestionRenderer({
 
   const handleSelect = (questionText: string, label: string) => {
     if (disabled || submitted) return
+    // clear custom input when picking an option
+    setCustomInputs((prev) => {
+      if (!prev[questionText]) return prev
+      const next = { ...prev }
+      delete next[questionText]
+      return next
+    })
     setAnswers((prev) => ({ ...prev, [questionText]: label }))
   }
 
   const handleMultiSelect = (questionText: string, label: string) => {
     if (disabled || submitted) return
+    setCustomInputs((prev) => {
+      if (!prev[questionText]) return prev
+      const next = { ...prev }
+      delete next[questionText]
+      return next
+    })
     setAnswers((prev) => {
       const current = (prev[questionText] ?? "").split(",").filter(Boolean)
       const idx = current.indexOf(label)
@@ -63,27 +78,66 @@ export default function AskUserQuestionRenderer({
     })
   }
 
+  const handleCustomInput = (questionText: string, value: string) => {
+    if (disabled || submitted) return
+    setCustomInputs((prev) => ({ ...prev, [questionText]: value }))
+    // clear option selection when typing custom
+    setAnswers((prev) => {
+      if (!prev[questionText]) return prev
+      const next = { ...prev }
+      delete next[questionText]
+      return next
+    })
+  }
+
+  const effectiveAnswer = (q: QuestionDef): string =>
+    customInputs[q.question]?.trim() || answers[q.question] || ""
+
   const allAnswered = questions.every((q) => {
-    const ans = answers[q.question]
+    const ans = effectiveAnswer(q)
     return ans !== undefined && ans !== ""
   })
 
   const handleSubmit = () => {
     if (!allAnswered || !toolUseId || !onAnswers || submitted) return
-    onAnswers(toolUseId, answers)
+    setSubmitted(true)
+    // merge custom inputs into answers for submission
+    const merged: Record<string, string> = {}
+    for (const q of questions) {
+      merged[q.question] = effectiveAnswer(q)
+    }
+    onAnswers(toolUseId, merged)
+  }
+
+  const handleDismiss = () => {
+    if (disabled || submitted) return
+    setSubmitted(true)
+    onDismiss?.(toolUseId || "")
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-[11px] text-violet-600 font-medium">
-        <HelpCircleIcon className="h-3.5 w-3.5" />
-        <span>Questions</span>
+      {/* Header with dismiss */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-[11px] text-violet-600 font-medium">
+          <HelpCircleIcon className="h-3.5 w-3.5" />
+          <span>Questions</span>
+        </div>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          disabled={disabled || submitted}
+          className="flex items-center justify-center h-5 w-5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+        >
+          <XIcon className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {questions.map((q, qi) => {
         const selected = answers[q.question] ?? ""
         const selectedSet = new Set(selected.split(",").filter(Boolean))
         const options = Array.isArray(q.options) ? q.options : []
+        const customValue = customInputs[q.question] ?? ""
 
         return (
           <div key={qi} className="space-y-1.5">
@@ -93,6 +147,8 @@ export default function AskUserQuestionRenderer({
               </div>
             )}
             <p className="text-[12px] text-gray-800 font-medium">{q.question}</p>
+
+            {/* Option buttons */}
             <div className="space-y-1">
               {options.map((opt, oi) => {
                 const label = typeof opt?.label === "string" ? opt.label : ""
@@ -125,9 +181,7 @@ export default function AskUserQuestionRenderer({
                         <span
                           className={cn(
                             "h-3.5 w-3.5 rounded border flex-shrink-0 flex items-center justify-center",
-                            isSelected
-                              ? "border-violet-500 bg-violet-500"
-                              : "border-gray-300",
+                            isSelected ? "border-violet-500 bg-violet-500" : "border-gray-300",
                           )}
                         >
                           {isSelected && (
@@ -140,9 +194,7 @@ export default function AskUserQuestionRenderer({
                         <span
                           className={cn(
                             "h-3.5 w-3.5 rounded-full border flex-shrink-0",
-                            isSelected
-                              ? "border-violet-500 bg-violet-500"
-                              : "border-gray-300",
+                            isSelected ? "border-violet-500 bg-violet-500" : "border-gray-300",
                           )}
                         >
                           {isSelected && (
@@ -159,25 +211,48 @@ export default function AskUserQuestionRenderer({
                 )
               })}
             </div>
+
+            {/* Custom text input for free-form answers */}
+            <input
+              type="text"
+              value={customValue}
+              onChange={(e) => handleCustomInput(q.question, e.target.value)}
+              placeholder="Or type your own answer..."
+              disabled={disabled || submitted}
+              className={cn(
+                "w-full px-3 py-1.5 rounded-md border text-[12px] outline-none transition-colors",
+                customValue
+                  ? "border-violet-300 bg-violet-50/50 text-violet-900 placeholder:text-violet-300"
+                  : "border-gray-200 bg-white text-gray-700 placeholder:text-gray-300 hover:border-gray-300 focus:border-violet-300",
+                (disabled || submitted) && "cursor-default opacity-70",
+              )}
+            />
           </div>
         )
       })}
 
+      {/* Submit button — fixed to bottom-right */}
       {!submitted && (
-        <Button
-          type="button"
-          size="sm"
-          disabled={!allAnswered || disabled}
-          onClick={handleSubmit}
-          className="w-full gap-2"
-        >
-          <SendIcon className="h-3 w-3" />
-          Submit Answers
-        </Button>
+        <div className="flex justify-end pt-1">
+          <button
+            type="button"
+            disabled={!allAnswered || disabled}
+            onClick={handleSubmit}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
+              allAnswered
+                ? "bg-gray-900 text-white hover:bg-gray-800"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed",
+            )}
+          >
+            <SendIcon className="h-3 w-3" />
+            Submit
+          </button>
+        </div>
       )}
 
       {submitted && (
-        <p className="text-[11px] text-emerald-600 font-medium">Answers submitted</p>
+        <p className="text-[11px] text-emerald-600 font-medium text-right">Submitted</p>
       )}
     </div>
   )
