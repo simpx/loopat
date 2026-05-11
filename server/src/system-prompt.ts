@@ -1,11 +1,16 @@
 /**
- * System prompt composition. Layers stack as `systemPrompt.append`:
+ * System prompt composition. Layers stack:
  *   L1 (preset)     Claude Code preset — built-in
  *   L2 (doctrine)   bundled platform doctrine (server/templates/CLAUDE.md):
  *                   sandbox layout, virtual paths, memory model. Always loaded.
+ *                   Injected via `systemPrompt.append`.
  *   L2+ (team)      optional team supplement at knowledge/.loopat/claude/CLAUDE.md
  *                   workspace-specific conventions on top of the platform.
- *   L3 (runtime)    per-loop dynamic info (title/id/branch/repo)
+ *                   Injected via `systemPrompt.append`.
+ *   L2++ (project)  optional <workdir>/CLAUDE.md auto-loaded by Claude Code
+ *                   itself (enabled via `settingSources: [..., "project"]`).
+ *   L3 (runtime)    per-loop dynamic info (title/id/branch/repo).
+ *                   Injected via `systemPrompt.append`.
  *
  * Doctrine uses **virtual paths** (/loop/<id>/, /context/*, /personal/*) since
  * the loop runs inside the outer bwrap sandbox and that's what Claude sees.
