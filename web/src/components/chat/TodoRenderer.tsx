@@ -21,7 +21,7 @@ function TodoStatusIcon({ status }: { status: string }) {
 export default function TodoRenderer({ todos }: { todos: TodoItem[] }) {
   if (!Array.isArray(todos) || todos.length === 0) return null
 
-  const doneCount = todos.filter((t) => t.status === "completed").length
+  const doneCount = todos.filter((t) => t?.status === "completed").length
 
   return (
     <div className="space-y-1.5">
@@ -31,7 +31,7 @@ export default function TodoRenderer({ todos }: { todos: TodoItem[] }) {
         </span>
       </div>
       <ul className="space-y-0.5">
-        {todos.map((todo, i) => {
+        {todos.filter((t) => t && typeof t === "object" && typeof t.status === "string").map((todo, i) => {
           const isCompleted = todo.status === "completed"
           const isRunning = todo.status === "in_progress"
           return (

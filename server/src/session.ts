@@ -92,6 +92,18 @@ async function hasPriorSdkSession(loopId: string): Promise<boolean> {
 
 type SubscriberState = { pending: any[] | null }
 
+interface AskQuestionPending {
+  toolUseID: string
+  questions: Array<{
+    question: string
+    header: string
+    options: Array<{ label: string; description: string }>
+    multiSelect: boolean
+  }>
+  resolve: (result: { behavior: 'allow'; updatedInput: Record<string, unknown> }) => void
+  reject: (err: Error) => void
+}
+
 class LoopSession {
   id: string
   private q: Query | null = null
@@ -99,6 +111,7 @@ class LoopSession {
   private subscribers = new Map<WSContext, SubscriberState>()
   private history: SDKMessage[] = []
   private historyLoaded: Promise<void>
+  private pendingQuestions = new Map<string, AskQuestionPending>()
 
   constructor(id: string) {
     this.id = id
@@ -166,8 +179,47 @@ class LoopSession {
         mcpServers,
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
+        canUseTool: async (toolName, input, { toolUseID, signal }) => {
+          // Only intercept AskUserQuestion — allow everything else immediately
+          if (toolName !== "AskUserQuestion") {
+            return { behavior: "allow" as const }
+          }
+          const questions = (input as any)?.questions
+          if (!Array.isArray(questions) || questions.length === 0) {
+            return { behavior: "allow" as const }
+          }
+          // Broadcast questions to frontend and wait for answers.
+          // Don't persist to history — questions are ephemeral and stale on replay.
+          const questionMsg = {
+            type: "question",
+            tool_use_id: toolUseID,
+            questions,
+          }
+          this.broadcast(questionMsg)
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              this.pendingQuestions.delete(toolUseID)
+              reject(new Error("question timed out"))
+            }, 300_000) // 5 min timeout
+            this.pendingQuestions.set(toolUseID, {
+              toolUseID,
+              questions,
+              resolve: (result) => {
+                clearTimeout(timeout)
+                resolve(result)
+              },
+              reject: (err) => {
+                clearTimeout(timeout)
+                reject(err)
+              },
+            })
+            signal.addEventListener("abort", () => {
+              clearTimeout(timeout)
+              this.pendingQuestions.delete(toolUseID)
+              reject(new Error("question cancelled"))
+            }, { once: true })
+          })
+        },
         // user-tier: read autoMemoryDirectory: /personal/memory from
         // CLAUDE_CONFIG_DIR/settings.json (SDK auto-memory uses that path).
         // project-tier: auto-load <workdir>/CLAUDE.md so per-repo conventions
@@ -352,6 +404,14 @@ class LoopSession {
     this.persist(userMsg)
     this.broadcast(userMsg)
     this.input.push(userMsg)
+  }
+
+  async answerQuestions(toolUseID: string, answers: Record<string, string>) {
+    const pending = this.pendingQuestions.get(toolUseID)
+    if (!pending) return
+    this.pendingQuestions.delete(toolUseID)
+    // Include original questions alongside answers so the CLI tool receives both
+    pending.resolve({ behavior: "allow", updatedInput: { questions: pending.questions, answers } })
   }
 
   async interrupt() {
