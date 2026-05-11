@@ -13,7 +13,7 @@
  *   L3 (runtime)    per-loop dynamic info (title/id/branch/repo).
  *                   Injected via `systemPrompt.append`.
  *
- * Doctrine uses **virtual paths** (/loop/<id>/, /context/*, /personal/*) since
+ * Doctrine uses **virtual paths** (/loopat/loop/<id>/, /loopat/context/*) since
  * the loop runs inside the outer bwrap sandbox and that's what Claude sees.
  */
 import { readFile } from "node:fs/promises"
@@ -39,7 +39,7 @@ function buildRuntimeBlock(loop: LoopMeta): string {
 - title: ${loop.title}
 - id: ${loop.id}
 - driver: ${loop.createdBy}
-- workdir: /loop/${loop.id}
+- workdir: /loopat/loop/${loop.id}/workdir
 - repo: ${repoLine}
 - created: ${loop.createdAt}
 `.trim()

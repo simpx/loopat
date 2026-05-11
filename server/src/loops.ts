@@ -13,6 +13,7 @@ import {
   loopContextKnowledge,
   loopContextNotes,
   loopContextPersonal,
+  loopContextRepos,
   loopMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
@@ -49,7 +50,7 @@ const TEAM_MEMORY_INDEX_STUB = `# Team memory index
 Cross-loop, cross-user memory shared via the notes git repo. One line per entry.
 Promote here only when the insight is workspace-wide (a convention, an
 operational fact, a non-obvious gotcha). Routine observations belong in
-\`/personal/memory/\` instead.
+\`/loopat/context/personal/memory/\` instead.
 
 `
 
@@ -164,6 +165,7 @@ export async function ensureContextMounts(id: string, createdBy: string) {
   await ensureSymlink(loopContextKnowledge(id), workspaceKnowledgeDir())
   await ensureSymlink(loopContextNotes(id), workspaceNotesDir())
   await ensureSymlink(loopContextPersonal(id), personalDir(createdBy))
+  await ensureSymlink(loopContextRepos(id), workspaceReposDir())
 }
 
 export async function listLoops(): Promise<LoopMeta[]> {
@@ -207,10 +209,10 @@ export async function createLoop(opts: { title: string; repo?: string; createdBy
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
   // Write per-loop settings.json so SDK auto-memory points at the virtual
-  // /personal/memory/ path (which exists inside outer sandbox).
+  // /loopat/context/personal/memory/ path (which exists inside outer sandbox).
   const settings = {
     autoMemoryEnabled: true,
-    autoMemoryDirectory: "/personal/memory",
+    autoMemoryDirectory: "/loopat/context/personal/memory",
   }
   await writeFile(`${loopClaudeDir(id)}/settings.json`, JSON.stringify(settings, null, 2))
 

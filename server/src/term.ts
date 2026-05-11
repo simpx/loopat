@@ -19,9 +19,9 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
   const p = (async () => {
     // Outer bwrap argv (same shape as Claude CLI's outer sandbox — virtual
-    // /loop/<id>, /context/*, /personal). Wrap inner shell with `script` so
-    // it gets a fresh controlling tty (without this, the bash-in-bash chain
-    // strips tty control).
+    // /loopat/loop/<id>/, /loopat/context/*). Wrap inner shell with `script`
+    // so it gets a fresh controlling tty (without this, the bash-in-bash
+    // chain strips tty control).
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const innerShell = process.env.SHELL ?? "/bin/bash"
