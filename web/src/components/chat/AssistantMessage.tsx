@@ -221,7 +221,7 @@ export default function AssistantMessage() {
   return (
     <MessagePrimitive.Root
       data-role="assistant"
-      className="relative pl-8"
+      className="relative pl-6 md:pl-8"
     >
       {/* Vertical line gutter — dot sits on the line. Extends past bounds to bridge gap-2 between messages */}
       <div className="absolute left-[5px] -top-1 -bottom-1 w-[2px] bg-gray-200" />
@@ -238,7 +238,7 @@ export default function AssistantMessage() {
       />
 
       {/* Content */}
-      <div className="w-full text-sm text-gray-700">
+      <div className="w-full text-[13px] md:text-sm text-gray-700">
         {children}
       </div>
 

@@ -44,7 +44,7 @@ export function NewLoopDialog({
       onClick={onClose}
     >
       <div
-        className="w-[480px] bg-white rounded-md shadow-xl border border-gray-200 p-5"
+        className="w-full max-w-[480px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-base font-semibold text-gray-900 mb-4">New loop</div>

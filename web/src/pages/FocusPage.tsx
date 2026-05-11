@@ -110,7 +110,7 @@ export function FocusPage() {
       </header>
 
       <main className="flex-1 min-w-0 flex flex-col overflow-auto">
-        <div className="px-8 py-8 mx-auto w-full max-w-[760px] flex flex-col gap-7">
+        <div className="px-4 md:px-8 py-4 md:py-8 mx-auto w-full max-w-[760px] flex flex-col gap-5 md:gap-7">
           {pinned.length > 0 && (
             <Section label="📌 Pinned" sub="永不归档" tone="pin">
               {pinned.map((item) => (
@@ -220,7 +220,7 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <section className={`rounded-lg border px-4 py-3 ${TONE_BOX[tone]}`}>
+    <section className={`rounded-lg border px-3 md:px-4 py-3 ${TONE_BOX[tone]}`}>
       <header className="flex items-baseline gap-2 mb-2">
         <span className={`w-1.5 h-1.5 rounded-full self-center ${TONE_DOT[tone]}`} />
         <h3 className="text-[14px] font-medium text-gray-900">{label}</h3>

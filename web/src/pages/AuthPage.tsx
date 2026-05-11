@@ -43,7 +43,7 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
       onClick={onClose ? () => onClose() : undefined}
     >
       <div
-        className="w-[380px] bg-white rounded-md shadow-xl border border-gray-200 p-6"
+        className="w-full max-w-[380px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 mb-5">

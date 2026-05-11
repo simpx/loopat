@@ -55,7 +55,7 @@ export default function ClaudeStatus({
 
   return (
     <div className="mb-3 w-full">
-      <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 overflow-hidden rounded-full border border-gray-200 bg-gray-100 px-3 py-1.5 shadow-sm">
+      <div className="mx-auto flex max-w-full md:max-w-4xl items-center justify-between gap-2 md:gap-3 overflow-hidden rounded-full border border-gray-200 bg-gray-100 px-2 md:px-3 py-1.5 shadow-sm">
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 ring-1 ring-blue-200">
             <BrainIcon className="h-3.5 w-3.5 text-blue-600" />

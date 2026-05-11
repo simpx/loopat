@@ -95,7 +95,7 @@ export default function Composer() {
 
               {provider && (
                 <div
-                  className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-500"
+                  className="hidden md:flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-500"
                   title={`provider: ${provider.name}\nmodel: ${provider.model}\ncontext window: ${provider.contextWindow.toLocaleString()}`}
                 >
                   <span className="font-medium text-gray-700">{provider.name}</span>
