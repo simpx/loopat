@@ -102,7 +102,7 @@ export default function ChatInterface() {
         turnAnchor="top"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
-        <div ref={containerRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-2 md:px-3 pt-3 md:pt-4">
+        <div ref={containerRef} className="mx-auto flex w-full flex-1 flex-col px-2 md:px-3 pt-3 md:pt-4">
           {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
           <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
@@ -123,7 +123,7 @@ export default function ChatInterface() {
           </div>
 
           {/* Sticky footer with questions + composer */}
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-3 md:pt-4 pb-3 md:pb-6">
+          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-3 md:pt-4 pb-3 md:pb-6">
             {/* Pending questions (AskUserQuestion tool) — fixed above input */}
             {questionEntries.length > 0 && (
               <ErrorBoundary name="QuestionsPanel">
