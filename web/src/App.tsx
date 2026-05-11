@@ -39,6 +39,11 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const me = ws.currentUser?.id ?? ""
   const loggedIn = !!ws.currentUser
 
+  // auto-close auth dialog when login succeeds
+  useEffect(() => {
+    if (loggedIn && authOpen) setAuthOpen(false)
+  }, [loggedIn])
+
   useEffect(() => {
     getServerWorkspace().then((name) => {
       if (name) {
