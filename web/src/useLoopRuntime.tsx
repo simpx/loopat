@@ -217,6 +217,12 @@ export interface QuestionDef {
   multiSelect: boolean
 }
 
+export interface ProviderInfo {
+  name: string
+  model: string
+  contextWindow: number
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
@@ -224,6 +230,7 @@ export interface LoopRuntimeExtra {
   sendAnswers: (toolUseId: string, answers: Record<string, string>) => void
   thinkingOpen: boolean
   setThinkingOpen: (open: boolean) => void
+  provider: ProviderInfo | null
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -233,6 +240,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   sendAnswers: () => {},
   thinkingOpen: false,
   setThinkingOpen: () => {},
+  provider: null,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -260,6 +268,7 @@ export function useLoopRuntime(loopId: string | null) {
   const [running, setRunning] = useState(false)
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
+  const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -310,8 +319,8 @@ export function useLoopRuntime(loopId: string | null) {
   }, [questionsObj])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, provider }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, provider],
   )
 
   useEffect(() => {
@@ -376,6 +385,14 @@ export function useLoopRuntime(loopId: string | null) {
         }
         if (m?.type === "viewers") {
           setViewers(typeof m.count === "number" ? m.count : 0)
+          return
+        }
+        if (m?.type === "provider") {
+          setProvider({
+            name: String(m.name ?? "?"),
+            model: String(m.model ?? "?"),
+            contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : 200_000,
+          })
           return
         }
 
@@ -568,5 +585,5 @@ export function useLoopRuntime(loopId: string | null) {
     onCancel,
   })
 
-  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts, extra }
+  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts, provider, extra }
 }

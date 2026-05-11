@@ -19,8 +19,9 @@ import ClaudeStatus from "./ClaudeStatus";
 import ThinkingModeSelector from "./ThinkingModeSelector";
 import TokenUsagePie from "./TokenUsagePie";
 import { cn } from "@/lib/utils";
+import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 
-const CONTEXT_WINDOW = 200_000;
+const FALLBACK_CONTEXT_WINDOW = 200_000;
 
 function estimateTokens(messages: readonly unknown[]): number {
   let chars = 0;
@@ -42,6 +43,8 @@ export default function Composer() {
 
   const messagesArray = useAuiState((s) => s.thread.messages);
   const usedTokens = estimateTokens(messagesArray);
+  const { provider } = useLoopRuntimeExtra();
+  const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   return (
     <ComposerPrimitive.Root className="relative flex w-full flex-col">
@@ -86,9 +89,20 @@ export default function Composer() {
               />
 
               <TokenUsagePie
-                used={Math.min(usedTokens, CONTEXT_WINDOW)}
-                total={CONTEXT_WINDOW}
+                used={Math.min(usedTokens, contextWindow)}
+                total={contextWindow}
               />
+
+              {provider && (
+                <div
+                  className="flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-500"
+                  title={`provider: ${provider.name}\nmodel: ${provider.model}\ncontext window: ${provider.contextWindow.toLocaleString()}`}
+                >
+                  <span className="font-medium text-gray-700">{provider.name}</span>
+                  <span className="text-gray-400">·</span>
+                  <span className="font-mono">{provider.model}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

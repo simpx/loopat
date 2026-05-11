@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadTeamClaudeJson, getActiveProvider } from "./config"
+import { loadConfig, loadTeamClaudeJson, getActiveProvider, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { loadPersonalSecrets, substituteVars } from "./personal-secrets"
 import { getLoop } from "./loops"
@@ -15,6 +15,17 @@ import { buildOuterBwrapArgs, V_LOOP, V_LOOP_CLAUDE } from "./outer-sandbox"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
+
+/**
+ * Mirror cli's ff(): explicit override wins; otherwise [1m] tag → 1M;
+ * any claude opus-4-7/4-6/sonnet-4/sonnet-4-6 → still defaults to 200K
+ * unless tagged [1m] (1M is opt-in via beta on those). Fallback 200K.
+ */
+function resolveContextWindow(p: ProviderConfig): number {
+  if (p.maxContextTokens && p.maxContextTokens > 0) return p.maxContextTokens
+  if (/\[1m\]/i.test(p.model)) return 1_000_000
+  return 200_000
+}
 
 function maskEnv(env: Record<string, string | undefined>): Record<string, string> {
   const out: Record<string, string> = {}
@@ -382,6 +393,17 @@ class LoopSession {
     await this.historyLoaded
     const state: SubscriberState = { pending: [] }
     this.subscribers.set(ws, state)
+    // Send active provider info up-front so UI can render badge + true context window.
+    try {
+      const cfg = await loadConfig()
+      const { name, provider } = getActiveProvider(cfg)
+      ws.send(JSON.stringify({
+        type: "provider",
+        name,
+        model: provider.model,
+        contextWindow: resolveContextWindow(provider),
+      }))
+    } catch {}
     const snapshot = this.history.slice()
     for (const m of snapshot) {
       try {
