@@ -27,6 +27,14 @@ import {
   LOOPAT_INSTALL_DIR,
 } from "./paths"
 import { resolvePersonalDeps } from "./personal-deps"
+import { loadConfig } from "./config"
+
+function expandHostPath(p: string, home: string): string {
+  let s = p
+  if (s === "~") s = home
+  else if (s.startsWith("~/")) s = home + s.slice(1)
+  return s.replace(/\$([A-Z_][A-Z0-9_]*)/gi, (_, name) => process.env[name] ?? "")
+}
 
 export const V_LOOP = (id: string) => `/loop/${id}`
 export const V_LOOP_CLAUDE = (id: string) => `/loop/${id}/.claude`
@@ -83,6 +91,24 @@ export async function buildOuterBwrapArgs(
   // re-bind personal-dep targets so e.g. /home/<user>/.ssh works for ssh client
   for (const target of personalDeps) {
     args.push("--bind", target, target)
+  }
+
+  // user-declared host -> sandbox mounts (config.json sandbox.mounts)
+  const cfg = await loadConfig()
+  const sandboxCfg = cfg.sandbox ?? {}
+  for (const m of sandboxCfg.mounts ?? []) {
+    const src = expandHostPath(m.src, home)
+    const dst = expandHostPath(m.dst ?? m.src, home)
+    args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
+  }
+
+  // PATH prepend (sandbox.path) — server's PATH is inherited by default; this
+  // adds dirs to the front so binaries in e.g. ~/.local/bin are found without
+  // sourcing a shell rc.
+  if (sandboxCfg.path?.length) {
+    const dirs = sandboxCfg.path.map((p) => expandHostPath(p, home)).join(":")
+    const cur = process.env.PATH ?? ""
+    args.push("--setenv", "PATH", cur ? `${dirs}:${cur}` : dirs)
   }
 
   for (const [k, v] of Object.entries(extraSetenv)) {
