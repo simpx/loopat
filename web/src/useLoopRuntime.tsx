@@ -230,6 +230,8 @@ export interface LoopRuntimeExtra {
   sendAnswers: (toolUseId: string, answers: Record<string, string>) => void
   thinkingOpen: boolean
   setThinkingOpen: (open: boolean) => void
+  planMode: boolean
+  setPlanMode: (active: boolean) => void
   provider: ProviderInfo | null
 }
 
@@ -240,6 +242,8 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   sendAnswers: () => {},
   thinkingOpen: false,
   setThinkingOpen: () => {},
+  planMode: false,
+  setPlanMode: () => {},
   provider: null,
 })
 
@@ -287,6 +291,9 @@ export function useLoopRuntime(loopId: string | null) {
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
   const [thinkingOpen, setThinkingOpen] = useState(false)
+  const [planMode, setPlanMode] = useState(false)
+  const planModeRef = useRef(false)
+  planModeRef.current = planMode
 
   const sendAnswers = useMemo(() => {
     const fn = (toolUseId: string, answers: Record<string, string>) => {
@@ -319,8 +326,8 @@ export function useLoopRuntime(loopId: string | null) {
   }, [questionsObj])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, provider }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, provider],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider],
   )
 
   useEffect(() => {
@@ -555,6 +562,9 @@ export function useLoopRuntime(loopId: string | null) {
     }
     text = text.trim()
     if (!text) return
+    if (planModeRef.current) {
+      text = "Plan first: " + text
+    }
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     setRunning(true)
