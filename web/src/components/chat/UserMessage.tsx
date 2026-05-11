@@ -1,8 +1,11 @@
+import { useState } from "react";
 import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
 import { MarkdownBlock } from "./MarkdownBlock";
+import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 function extractTime(messageId: string | undefined): string {
   if (!messageId) return "";
@@ -16,37 +19,74 @@ function extractTime(messageId: string | undefined): string {
 export default function UserMessage() {
   const messageId = useAuiState((s) => s.message.id);
   const time = extractTime(messageId);
+  const [expanded, setExpanded] = useState(false);
+  const [needsTruncation, setNeedsTruncation] = useState(false);
+
+  // Inline ref callback fires on every render, re-measuring as content streams
+  const measureRef = (el: HTMLDivElement | null) => {
+    if (!el) return;
+    setNeedsTruncation(el.scrollHeight > 72);
+  };
 
   return (
     <MessagePrimitive.Root
       data-role="user"
-      className="flex justify-end px-3 sm:px-0"
+      className="group relative"
     >
-      <div className="group flex w-full items-end gap-2 sm:w-auto sm:max-w-[85%] md:max-w-md lg:max-w-lg xl:max-w-xl">
-        {/* Blue bubble */}
-        <div className="flex-1 rounded-2xl rounded-br-md bg-sky-600 px-3 py-2 text-white shadow-sm sm:flex-initial sm:px-4">
-          <div className="whitespace-pre-wrap break-words text-sm">
-            <MessagePrimitive.Parts
-              components={{
-                // Use MarkdownBlock for text parts, fallback for others
-                Text: () => <MarkdownBlock />,
-              }}
-            />
-          </div>
-
-          {/* Footer: time */}
-          {time && (
-            <div className="mt-1 flex items-center justify-end gap-1 text-xs text-sky-200">
-              <span>{time}</span>
-            </div>
-          )}
+      {/* Gray-bordered box */}
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm shadow-sm transition-all",
+          !expanded && needsTruncation && "max-h-[4.5rem]",
+        )}
+      >
+        <div
+          ref={measureRef}
+          className="whitespace-pre-wrap break-words text-gray-800"
+        >
+          <MessagePrimitive.Parts
+            components={{
+              Text: () => <MarkdownBlock />,
+            }}
+          />
         </div>
 
-        {/* "U" avatar */}
-        <div className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-600 text-sm text-white sm:flex">
-          U
-        </div>
+        {/* Gradient fade at bottom when collapsed and overflowing */}
+        {!expanded && needsTruncation && (
+          <div className="user-msg-fade rounded-b-xl" />
+        )}
       </div>
+
+      {/* Show more / Show less button — appears on hover */}
+      {needsTruncation && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className={cn(
+            "absolute -bottom-0 right-2 z-10 flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[10px] text-gray-500 shadow-sm transition-all hover:bg-gray-50 hover:text-gray-700",
+            "opacity-0 group-hover:opacity-100",
+            expanded && "opacity-100",
+          )}
+        >
+          {expanded ? (
+            <>
+              <ChevronUpIcon className="h-3 w-3" />
+              Show less
+            </>
+          ) : (
+            <>
+              <ChevronDownIcon className="h-3 w-3" />
+              Show more
+            </>
+          )}
+        </button>
+      )}
+
+      {/* Footer: time */}
+      {time && (
+        <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-gray-400">
+          <span>{time}</span>
+        </div>
+      )}
     </MessagePrimitive.Root>
   );
 }
