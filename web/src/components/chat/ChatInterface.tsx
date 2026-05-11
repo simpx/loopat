@@ -36,6 +36,8 @@ export default function ChatInterface() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom: instant on first load, throttled during streaming.
+  // Tracks whether the user has scrolled away via scroll events, so we know
+  // their intent before content changes push them out of the near-bottom zone.
   const bottomRef = useRef<HTMLDivElement>(null);
   const didInitialScroll = useRef(false);
   useEffect(() => {
@@ -43,28 +45,44 @@ export default function ChatInterface() {
     const vp = inner?.parentElement as HTMLElement | null;
     if (!inner || !vp) return;
     const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
+
+    // Track user intent: if the user manually scrolls up, we stop following.
+    // Reset when they scroll back to the bottom (or we programmatically put them there).
+    let userScrolledUp = false;
+    const onScroll = () => {
+      if (nearBottom()) {
+        userScrolledUp = false;
+      } else {
+        userScrolledUp = true;
+      }
+    };
+    vp.addEventListener("scroll", onScroll, { passive: true });
+
     let timer: ReturnType<typeof setTimeout> | null = null;
     const scroll = () => {
-      if (didInitialScroll.current && !nearBottom()) return;
+      if (didInitialScroll.current && userScrolledUp) return;
       if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
         const prev = vp.style.scrollBehavior;
         vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
         vp.style.scrollBehavior = prev;
         didInitialScroll.current = true;
+        userScrolledUp = false;
       } else if (didInitialScroll.current) {
-        // Instant during streaming — smooth scroll animations block the UI
         vp.scrollTop = vp.scrollHeight;
       }
     };
     scroll();
     const ro = new ResizeObserver(() => {
-      // Throttle to at most once per 80ms to avoid blocking the main thread
       if (timer) return;
       timer = setTimeout(() => { timer = null; scroll(); }, 80);
     });
     ro.observe(inner);
-    return () => { ro.disconnect(); if (timer) clearTimeout(timer); };
+    return () => {
+      ro.disconnect();
+      if (timer) clearTimeout(timer);
+      vp.removeEventListener("scroll", onScroll);
+    };
   }, []);
 
   const questionEntries = questions.size > 0
