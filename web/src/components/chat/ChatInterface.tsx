@@ -1,4 +1,4 @@
-import type { FC } from "react";
+import { useEffect, useRef, type FC } from "react";
 import {
   ThreadPrimitive,
   AuiIf,
@@ -33,8 +33,36 @@ const ThreadWelcome: FC = () => {
 
 export default function ChatInterface() {
   const { questions, sendAnswers } = useLoopRuntimeExtra();
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Convert ReadonlyMap entries to array (safe for iteration)
+  // Auto-scroll to bottom on initial load (instant), then only when near bottom (smooth).
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const didInitialScroll = useRef(false);
+  useEffect(() => {
+    const inner = containerRef.current;
+    const vp = inner?.parentElement as HTMLElement | null;
+    if (!inner || !vp) return;
+    const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
+    const scroll = () => {
+      if (didInitialScroll.current && !nearBottom()) return;
+      if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
+        // First load — instant scroll (suppress scroll-smooth on the viewport)
+        const prev = vp.style.scrollBehavior;
+        vp.style.scrollBehavior = "auto";
+        vp.scrollTop = vp.scrollHeight;
+        vp.style.scrollBehavior = prev;
+        didInitialScroll.current = true;
+      } else if (didInitialScroll.current) {
+        // Subsequent — smooth scroll
+        bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+      }
+    };
+    scroll();
+    const ro = new ResizeObserver(() => scroll());
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, []);
+
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
     : [];
@@ -52,9 +80,9 @@ export default function ChatInterface() {
         turnAnchor="top"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
-        <div className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-3 pt-4">
-          {/* Empty state */}
-          <AuiIf condition={(s) => s.thread.isEmpty}>
+        <div ref={containerRef} className="mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-3 pt-4">
+          {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
+          <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
           </AuiIf>
 
@@ -69,6 +97,7 @@ export default function ChatInterface() {
                 )
               }
             </ThreadPrimitive.Messages>
+            <div ref={bottomRef} />
           </div>
 
           {/* Sticky footer with questions + composer */}

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 
 type RawMsg = {
@@ -260,7 +260,7 @@ export function useLoopRuntime(loopId: string | null) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const wsRef = useRef<WebSocket | null>(null)
-  const replayingRef = useRef(true)
+  const [loadingHistory, setLoadingHistory] = useState(true)
   const reconnectTimerRef = useRef<number | null>(null)
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
@@ -321,7 +321,7 @@ export function useLoopRuntime(loopId: string | null) {
       // server replays history on each connect — clear local buffer
       setRaw([])
       setRunning(false)
-      replayingRef.current = true
+      setLoadingHistory(true)
       // Clear tool progress & task state & questions on reconnect
       toolProgressRef.current = new Map()
       setToolProgressVersion((v) => v + 1)
@@ -336,6 +336,11 @@ export function useLoopRuntime(loopId: string | null) {
         setConnected(true)
         setReconnecting(false)
         attemptsRef.current = 0
+        // Clear any pending retry from a previous connection's onclose
+        if (reconnectTimerRef.current !== null) {
+          clearTimeout(reconnectTimerRef.current)
+          reconnectTimerRef.current = null
+        }
       }
       ws.onclose = () => {
         setConnected(false)
@@ -347,7 +352,10 @@ export function useLoopRuntime(loopId: string | null) {
         setReconnecting(true)
         reconnectTimerRef.current = window.setTimeout(() => {
           reconnectTimerRef.current = null
-          if (aliveRef.current) connect()
+          // Don't reconnect if a new WS already opened (e.g. StrictMode double-mount)
+          if (!aliveRef.current) return
+          if (wsRef.current?.readyState === WebSocket.OPEN) return
+          connect()
         }, delay)
       }
       ws.onerror = () => setConnected(false)
@@ -359,7 +367,7 @@ export function useLoopRuntime(loopId: string | null) {
           return
         }
         if (m?.type === "history_end") {
-          replayingRef.current = false
+          setLoadingHistory(false)
           setRunning(false)
           return
         }
@@ -448,14 +456,14 @@ export function useLoopRuntime(loopId: string | null) {
           }
           // system/init — start running
           if (subtype === "init") {
-            if (!replayingRef.current) setRunning(true)
+            if (!loadingHistory) setRunning(true)
             return
           }
           return
         }
 
         if (m?.type === "result") {
-          if (!replayingRef.current) setRunning(false)
+          if (!loadingHistory) setRunning(false)
           return
         }
 
@@ -488,7 +496,7 @@ export function useLoopRuntime(loopId: string | null) {
             ...prev,
             { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
           ])
-          if (!replayingRef.current) setRunning(false)
+          if (!loadingHistory) setRunning(false)
         }
       }
     }
@@ -518,7 +526,7 @@ export function useLoopRuntime(loopId: string | null) {
     }
   }, [raw])
 
-  const onNew = async (message: AppendMessage) => {
+  const onNew = useCallback(async (message: AppendMessage) => {
     let text = ""
     if (Array.isArray(message.content)) {
       for (const part of message.content) {
@@ -531,24 +539,26 @@ export function useLoopRuntime(loopId: string | null) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     setRunning(true)
     ws.send(JSON.stringify({ type: "user", text }))
-  }
+  }, [])
 
-  const onCancel = async () => {
+  const onCancel = useCallback(async () => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: "interrupt" }))
-  }
+  }, [])
+
+  const safeConvert = useCallback((raw: RawMsg) => {
+    try {
+      return convertMessage(raw)
+    } catch (e) {
+      console.error("[fe:convertMessage]", e)
+      return { id: raw.id, role: raw.role, content: [{ type: "text", text: "" }] } as any
+    }
+  }, [])
 
   const runtime = useExternalStoreRuntime({
     messages: aggregated,
-    convertMessage: (raw) => {
-      try {
-        return convertMessage(raw)
-      } catch (e) {
-        console.error("[fe:convertMessage]", e)
-        return { id: raw.id, role: raw.role, content: [{ type: "text", text: "" }] } as any
-      }
-    },
+    convertMessage: safeConvert,
     isRunning: running,
     onNew,
     onCancel,
