@@ -1,31 +1,41 @@
 /**
- * System prompt composition. Three layers stack as `systemPrompt.append`:
- *   L1 (preset)    Claude Code preset — built-in
- *   L2 (doctrine)  workspace-shared, file at workspaceDoctrinePath()
- *                  describes loopat sandbox, conventions, memory model
- *   L3 (runtime)   per-loop dynamic info (title/id/branch/repo)
+ * System prompt composition. Layers stack as `systemPrompt.append`:
+ *   L1 (preset)     Claude Code preset — built-in
+ *   L2 (doctrine)   bundled platform doctrine (server/templates/CLAUDE.md):
+ *                   sandbox layout, virtual paths, memory model. Always loaded.
+ *   L2+ (team)      optional team supplement at knowledge/.loopat/claude/CLAUDE.md
+ *                   workspace-specific conventions on top of the platform.
+ *   L3 (runtime)    per-loop dynamic info (title/id/branch/repo)
  *
  * Doctrine uses **virtual paths** (/loop/<id>/, /context/*, /personal/*) since
  * the loop runs inside the outer bwrap sandbox and that's what Claude sees.
  */
 import { readFile } from "node:fs/promises"
 import type { LoopMeta } from "./loops"
-import { workspaceDoctrinePath } from "./paths"
+import { bundledDoctrinePath, workspaceTeamClaudePath } from "./paths"
 
-let cachedDoctrine: string | null = null
+let cachedBundled: string | null = null
+let cachedTeam: string | null = null
 
-async function loadDoctrine(): Promise<string> {
-  if (cachedDoctrine !== null) return cachedDoctrine
+async function loadBundled(): Promise<string> {
+  if (cachedBundled !== null) return cachedBundled
+  cachedBundled = await readFile(bundledDoctrinePath(), "utf8")
+  return cachedBundled
+}
+
+async function loadTeam(): Promise<string> {
+  if (cachedTeam !== null) return cachedTeam
   try {
-    cachedDoctrine = await readFile(workspaceDoctrinePath(), "utf8")
+    cachedTeam = await readFile(workspaceTeamClaudePath(), "utf8")
   } catch {
-    cachedDoctrine = ""
+    cachedTeam = ""
   }
-  return cachedDoctrine
+  return cachedTeam
 }
 
 export function invalidateDoctrineCache(): void {
-  cachedDoctrine = null
+  cachedBundled = null
+  cachedTeam = null
 }
 
 function buildRuntimeBlock(loop: LoopMeta): string {
@@ -42,7 +52,9 @@ function buildRuntimeBlock(loop: LoopMeta): string {
 }
 
 export async function buildLoopatAppend(loop: LoopMeta): Promise<string> {
-  const doctrine = await loadDoctrine()
+  const bundled = await loadBundled()
+  const team = await loadTeam()
   const runtime = buildRuntimeBlock(loop)
-  return `${doctrine}\n\n${runtime}\n`.trim()
+  const parts = [bundled, team, runtime].filter((s) => s.trim().length > 0)
+  return parts.join("\n\n").trim()
 }

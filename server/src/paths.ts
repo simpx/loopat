@@ -40,10 +40,13 @@ export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl
 
 export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
 export const teamMemoryDir = () => join(workspaceNotesDir(), "memory")
-// `.loopat/` is a reserved namespace under knowledge — platform-managed config
-// (doctrine, skills, …). Everything else under knowledge/ is team-owned.
-// Versioned + cloned along with the rest of the team's distilled docs.
+// `.loopat/` is a reserved namespace under knowledge — slots for team Claude
+// config that supplements the platform doctrine (skills, optional team CLAUDE.md).
+// Everything else under knowledge/ is plain team-owned docs.
 export const workspaceLoopatReservedDir = () => join(workspaceKnowledgeDir(), ".loopat")
 export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(), "claude")
-export const workspaceDoctrinePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
+// Optional. If present, appended after the bundled platform doctrine.
+export const workspaceTeamClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
 export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
+// Bundled platform doctrine — ships with loopat code, always present.
+export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")

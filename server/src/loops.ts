@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile, stat, symlink, lstat, rm, copyFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
@@ -16,15 +16,12 @@ import {
   loopMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
-  workspaceLoopatClaudeDir,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
   personalDir,
   personalMemoryDir,
   teamMemoryDir,
-  workspaceDoctrinePath,
-  TEMPLATES_DIR,
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
@@ -129,17 +126,6 @@ export async function ensureWorkspaceDirs() {
   await mkdir(tm, { recursive: true })
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
-
-  // doctrine lives inside knowledge as `.loopat/claude/CLAUDE.md` — copy the
-  // bundled template if not already present (a cloned knowledge repo with its
-  // own CLAUDE.md wins; otherwise we seed from server/templates/).
-  const doctrine = workspaceDoctrinePath()
-  if (!existsSyncBase(doctrine)) {
-    await mkdir(workspaceLoopatClaudeDir(), { recursive: true })
-    const tpl = join(TEMPLATES_DIR, "CLAUDE.md")
-    if (existsSyncBase(tpl)) await copyFile(tpl, doctrine)
-    else console.warn(`[loopat] doctrine template missing at ${tpl}`)
-  }
 
   // git init notes so vaultWrite auto-commits work locally. Skip if cloned
   // (already a repo). Knowledge stays plain unless cloned.
