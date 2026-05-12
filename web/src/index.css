@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "tw-shimmer";
 
+html, body {
+  touch-action: pan-x pan-y;
+}
+
 /* Markdown rendering for Context tab DocView (and elsewhere). */
 .prose-loopat {
   font-size: 14px;
