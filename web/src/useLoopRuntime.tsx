@@ -287,7 +287,7 @@ export function LoopRuntimeProvider({
   )
 }
 
-export function useLoopRuntime(loopId: string | null) {
+export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [raw, setRaw] = useState<RawMsg[]>([])
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
@@ -625,7 +625,7 @@ export function useLoopRuntime(loopId: string | null) {
       setReconnecting(false)
       attemptsRef.current = 0
     }
-  }, [loopId])
+  }, [loopId, currentUserId])
 
   const aggregated = useMemo(() => {
     try {
