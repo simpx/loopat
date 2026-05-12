@@ -6,9 +6,8 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadTeamClaudeJson, getActiveProvider, type ProviderConfig } from "./config"
+import { loadPersonalConfig, loadTeamClaudeJson, getActiveProvider, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
-import { loadPersonalSecrets, substituteVars } from "./personal-secrets"
 import { getLoop } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildOuterBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./outer-sandbox"
@@ -144,24 +143,24 @@ class LoopSession {
   private async ensureStarted() {
     if (this.q) return
     const shouldContinue = await hasPriorSdkSession(this.id)
-    const cfg = await loadConfig()
-    const { name: providerName, provider } = getActiveProvider(cfg)
-    if (!provider.apiKey) {
-      throw new Error(`config.json: provider "${providerName}" has empty apiKey — fill it in and restart`)
-    }
-
     const meta = await getLoop(this.id)
     if (!meta) {
       throw new Error(`loop ${this.id} meta missing`)
     }
+    const cfg = await loadPersonalConfig(meta.createdBy)
+    const { name: providerName, provider } = getActiveProvider(cfg)
+    if (!provider.apiKey) {
+      throw new Error(`personal config: provider "${providerName}" has empty apiKey — write it to personal/${meta.createdBy}/.loopat/secrets/provider-keys/${providerName}`)
+    }
+
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
     // Team Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
-    // Resolve ${VAR} refs against personal/<user>/secrets/ on the host; secret
-    // files themselves never enter the sandbox — only the substituted strings.
+    // Passed through to SDK as-is — secret substitution removed; static-auth
+    // servers should keep their token in `env`/`headers` directly (only ever
+    // commit OAuth-flow servers like `coop` to the team repo).
     const team = await loadTeamClaudeJson()
-    const secrets = await loadPersonalSecrets(meta.createdBy)
-    const mcpServers = team.mcpServers ? substituteVars(team.mcpServers, secrets) : undefined
+    const mcpServers = team.mcpServers
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
@@ -395,14 +394,17 @@ class LoopSession {
     this.subscribers.set(ws, state)
     // Send active provider info up-front so UI can render badge + true context window.
     try {
-      const cfg = await loadConfig()
-      const { name, provider } = getActiveProvider(cfg)
-      ws.send(JSON.stringify({
-        type: "provider",
-        name,
-        model: provider.model,
-        contextWindow: resolveContextWindow(provider),
-      }))
+      const meta = await getLoop(this.id)
+      if (meta) {
+        const cfg = await loadPersonalConfig(meta.createdBy)
+        const { name, provider } = getActiveProvider(cfg)
+        ws.send(JSON.stringify({
+          type: "provider",
+          name,
+          model: provider.model,
+          contextWindow: resolveContextWindow(provider),
+        }))
+      }
     } catch {}
     const snapshot = this.history.slice()
     for (const m of snapshot) {

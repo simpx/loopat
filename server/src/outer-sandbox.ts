@@ -36,7 +36,7 @@ import {
   LOOPAT_INSTALL_DIR,
 } from "./paths"
 import { resolvePersonalDeps } from "./personal-deps"
-import { loadConfig } from "./config"
+import { loadPersonalConfig } from "./config"
 
 function expandHostPath(p: string, home: string): string {
   let s = p
@@ -142,9 +142,9 @@ export async function buildOuterBwrapArgs(
     args.push("--bind", target, target)
   }
 
-  // user-declared host -> sandbox mounts (config.json sandbox.mounts)
-  const cfg = await loadConfig()
-  const sandboxCfg = cfg.sandbox ?? {}
+  // user-declared host -> sandbox mounts (personal/<user>/.loopat/config.json sandbox.mounts)
+  const personalCfg = await loadPersonalConfig(createdBy)
+  const sandboxCfg = personalCfg.sandbox ?? {}
   for (const m of sandboxCfg.mounts ?? []) {
     const src = expandHostPath(m.src, home)
     const dst = expandHostPath(m.dst ?? m.src, home)
