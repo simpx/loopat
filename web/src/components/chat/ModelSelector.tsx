@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Cpu, ChevronDown, User, Globe } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { getProviders, type ProvidersResponse } from "@/api";
+import { getProviders, stripThinkingBlocks, type ProvidersResponse } from "@/api";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 
 export default function ModelSelector() {
-  const { provider, selectProvider } = useLoopRuntimeExtra();
+  const { provider, selectProvider, thinkingBlockCount, loopId } = useLoopRuntimeExtra();
   const [providers, setProviders] = useState<ProvidersResponse | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -16,6 +16,29 @@ export default function ModelSelector() {
   const currentName = provider?.name || "default";
   const currentModel = provider?.model || "";
   const entries = providers ? Object.entries(providers.providers) : [];
+
+  // Thinking blocks are cryptographically signed by the provider that
+  // generated them. Switching to a provider with a different baseUrl
+  // (gateway / account) makes those signatures invalid → API 400 on
+  // the next turn. We pre-empt that by offering to strip them.
+  const onPickProvider = async (name: string, source?: "personal" | "workspace") => {
+    setOpen(false);
+    if (name === currentName) return;
+    const currentBase = providers?.providers?.[currentName]?.baseUrl;
+    const newBase = providers?.providers?.[name]?.baseUrl;
+    const crossProvider = currentBase && newBase && currentBase !== newBase;
+    if (crossProvider && thinkingBlockCount > 0 && loopId) {
+      const msg =
+        `Switching to "${name}" uses a different API endpoint, so the ${thinkingBlockCount} ` +
+        `existing thinking block${thinkingBlockCount === 1 ? "" : "s"} in this conversation ` +
+        `won't pass signature validation.\n\n` +
+        `Click OK to remove them from the AI's context (chat history stays). ` +
+        `Cancel to keep the current provider.`;
+      if (!window.confirm(msg)) return;
+      await stripThinkingBlocks(loopId);
+    }
+    selectProvider(name, source);
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -54,10 +77,7 @@ export default function ModelSelector() {
               <button
                 key={name}
                 type="button"
-                onClick={() => {
-                  selectProvider(name, info.source);
-                  setOpen(false);
-                }}
+                onClick={() => onPickProvider(name, info.source)}
                 className={`w-full px-4 py-2.5 text-left transition-colors hover:bg-gray-50 ${
                   isActive ? "bg-blue-50" : ""
                 }`}

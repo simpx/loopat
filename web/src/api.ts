@@ -95,6 +95,14 @@ export async function setLoopArchived(id: string, archived: boolean): Promise<Lo
   return (await r.json()) as LoopMeta
 }
 
+/** Strip thinking/redacted_thinking blocks from SDK history. Used before
+ *  swapping to a provider that can't validate existing thinking signatures. */
+export async function stripThinkingBlocks(id: string): Promise<{ stripped: number; sessionsTouched: number }> {
+  const r = await apiFetch(`/api/loops/${id}/strip-thinking`, { method: "POST" })
+  if (!r.ok) return { stripped: 0, sessionsTouched: 0 }
+  return (await r.json()) as { stripped: number; sessionsTouched: number }
+}
+
 export type FileEntry = {
   name: string
   path: string
