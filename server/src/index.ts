@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
-import { listLoops, createLoop, getLoop, loopExists, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal } from "./loops"
 import { getSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, readFocusData, type VaultId } from "./workspace"
@@ -15,7 +15,7 @@ import {
   loopContextPersonal,
   loopContextRepos,
 } from "./paths"
-import { loadConfig, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, getActiveProvider, type ProviderConfig } from "./config"
 import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
@@ -43,14 +43,33 @@ app.use("/api/*", cors({ origin: (o) => o ?? "*", credentials: true }))
 app.get("/api/health", (c) => c.json({ ok: true, loopatHome: LOOPAT_HOME, workspace: WORKSPACE }))
 
 // ── providers (public) ──
+// Merges personal + workspace configs. Personal providers take precedence
+// (they carry per-user apiKeys via secrets/). Source field indicates origin.
 app.get("/api/providers", async (c) => {
-  const cfg = await loadConfig()
-  const { name: activeName } = getActiveProvider(cfg)
-  const providers: Record<string, { model: string; baseUrl: string }> = {}
-  for (const [name, p] of Object.entries(cfg.providers)) {
-    providers[name] = { model: p.model, baseUrl: p.baseUrl }
+  const wCfg = await loadConfig()
+  const providers: Record<string, { model: string; baseUrl: string; source: "personal" | "workspace" }> = {}
+  // Start with workspace providers (workspace config historically carries
+  // providers on disk even though the TS type was split)
+  const wp = (wCfg as any).providers as Record<string, { model: string; baseUrl: string }> | undefined
+  if (wp) {
+    for (const [name, p] of Object.entries(wp)) {
+      providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "workspace" }
+    }
   }
-  return c.json({ providers, default: activeName })
+  // Overlay personal providers (they take precedence)
+  const wDefault = (wCfg as any).default as string | undefined
+  let active = wDefault ?? ""
+  const userId = getRequestUserId(c)
+  if (userId) {
+    try {
+      const pCfg = await loadPersonalConfig(userId)
+      for (const [name, p] of Object.entries(pCfg.providers)) {
+        providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "personal" }
+      }
+      active = pCfg.default || active
+    } catch {}
+  }
+  return c.json({ providers, default: active })
 })
 
 // ── auth (public) ──
@@ -342,9 +361,13 @@ app.get(
           } else if (msg?.type === "provider_select" && typeof msg.provider === "string") {
             const ok = session.setProvider(msg.provider)
             if (ok) {
+              const source = msg.source === "personal" || msg.source === "workspace" ? msg.source : undefined
+              // Persist to loop meta so it survives reloads
+              patchLoopMeta(id, { config: { default_model: msg.provider, default_model_source: source } }).catch(() => {})
               try {
-                const cfg = await loadConfig()
-                const p = cfg.providers[msg.provider]
+                // Resolve provider info from workspace config (primary source for provider list)
+                const wCfg = await loadConfig() as any
+                const p = wCfg?.providers?.[msg.provider]
                 if (p) {
                   ws.send(JSON.stringify({
                     type: "provider",
