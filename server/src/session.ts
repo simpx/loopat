@@ -1,6 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
-import { appendFile, readFile, readdir, writeFile } from "node:fs/promises"
+import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
@@ -547,6 +547,75 @@ class LoopSession {
    * visible to future readers (humans + AI) so they can tell which
    * messages belong to which SDK session window.
    */
+  /**
+   * Strip all `thinking` / `redacted_thinking` content blocks from every
+   * SDK jsonl in this loop. Used before swapping to a provider that won't
+   * recognize the existing thinking signatures (different baseUrl / account
+   * / gateway). The plain user/assistant text stays — the AI's context is
+   * preserved minus the cryptographically-signed reasoning chains, which
+   * are useless to the new provider anyway.
+   *
+   * Originals backed up to `.claude/projects-archive/<ts>/<sub>/<file>`.
+   * Returns the number of blocks stripped across all sessions.
+   *
+   * Side effects: interrupts current query and resets the pushIterable so
+   * the next sendUserText spawns fresh against the rewritten jsonl.
+   */
+  async stripThinkingBlocks(): Promise<{ stripped: number; sessionsTouched: number }> {
+    if (this.q) {
+      try { await this.q.interrupt() } catch {}
+      this.q = null
+      this.input = pushIterable<SDKUserMessage>()
+    }
+    const projectsDir = join(loopClaudeDir(this.id), "projects")
+    let stripped = 0
+    let sessionsTouched = 0
+    const ts = new Date().toISOString().replace(/[:.]/g, "-")
+    const archiveDir = join(loopClaudeDir(this.id), "projects-archive", ts)
+    try {
+      const subdirs = await readdir(projectsDir)
+      for (const sub of subdirs) {
+        const subPath = join(projectsDir, sub)
+        const files = await readdir(subPath).catch(() => [])
+        for (const f of files) {
+          if (!f.endsWith(".jsonl")) continue
+          const filePath = join(subPath, f)
+          const raw = await readFile(filePath, "utf8")
+          const lines = raw.split("\n")
+          const out: string[] = []
+          let changed = false
+          for (const line of lines) {
+            if (!line) { out.push(line); continue }
+            try {
+              const obj = JSON.parse(line)
+              const content = obj?.message?.content
+              if (Array.isArray(content)) {
+                const filtered = content.filter((c: any) => c?.type !== "thinking" && c?.type !== "redacted_thinking")
+                if (filtered.length !== content.length) {
+                  stripped += content.length - filtered.length
+                  obj.message.content = filtered
+                  changed = true
+                  out.push(JSON.stringify(obj))
+                  continue
+                }
+              }
+              out.push(line)
+            } catch {
+              out.push(line)
+            }
+          }
+          if (changed) {
+            sessionsTouched++
+            await mkdir(join(archiveDir, sub), { recursive: true })
+            await writeFile(join(archiveDir, sub, f), raw)
+            await writeFile(filePath, out.join("\n"))
+          }
+        }
+      }
+    } catch {}
+    return { stripped, sessionsTouched }
+  }
+
   async clear(by: string) {
     // 1. Stop in-flight generation if any.
     if (this.q) {
