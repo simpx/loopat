@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadPersonalConfig, loadTeamClaudeJson, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadTeamClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { getLoop } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
@@ -154,15 +154,20 @@ class LoopSession {
     if (!meta) {
       throw new Error(`loop ${this.id} meta missing`)
     }
-    const cfg = await loadPersonalConfig(meta.createdBy)
-    const selectedName = this.providerOverride ?? cfg.default
-    const provider = cfg.providers[selectedName]
+    const pCfg = await loadPersonalConfig(meta.createdBy)
+    // Prefer: providerOverride (runtime WS select) > meta.config.default_model > cfg.default
+    const selectedName = this.providerOverride ?? meta.config?.default_model ?? pCfg.default
+    let provider: ProviderConfig | undefined = pCfg.providers[selectedName]
     if (!provider) {
-      throw new Error(`personal config: provider "${selectedName}" not found`)
+      const wCfg = await loadConfig()
+      provider = (wCfg as any).providers?.[selectedName] as ProviderConfig | undefined
+    }
+    if (!provider) {
+      throw new Error(`provider "${selectedName}" not found in personal or workspace config`)
     }
     const providerName = selectedName
     if (!provider.apiKey) {
-      throw new Error(`personal config: provider "${providerName}" has empty apiKey — write it to personal/${meta.createdBy}/.loopat/secrets/provider-keys/${providerName}`)
+      throw new Error(`provider "${providerName}" has empty apiKey — write it to personal/${meta.createdBy}/.loopat/secrets/provider-keys/${providerName}`)
     }
 
     const loopatAppend = await buildLoopatAppend(meta)
@@ -408,16 +413,30 @@ class LoopSession {
     try {
       const meta = await getLoop(this.id)
       if (meta) {
-        const cfg = await loadPersonalConfig(meta.createdBy)
-        const { name, provider } = getActiveProvider(cfg)
-        ws.send(JSON.stringify({
-          type: "provider",
-          name,
-          model: provider.model,
-          contextWindow: resolveContextWindow(provider),
-        }))
+        const pCfg = await loadPersonalConfig(meta.createdBy)
+        const selectedName = this.providerOverride ?? meta.config?.default_model ?? pCfg.default
+        // Try personal config first; fall back to workspace config
+        // (workspace config still carries providers on disk even though the TS
+        //  type was split into WorkspaceConfig + PersonalConfig)
+        let provider: ProviderConfig | undefined = pCfg.providers[selectedName]
+        if (!provider) {
+          const wCfg = await loadConfig()
+          provider = (wCfg as any).providers?.[selectedName] as ProviderConfig | undefined
+        }
+        if (provider) {
+          ws.send(JSON.stringify({
+            type: "provider",
+            name: selectedName,
+            model: provider.model,
+            contextWindow: resolveContextWindow(provider),
+          }))
+        } else {
+          console.warn(`[loop:${this.id.slice(0, 8)}] provider "${selectedName}" not found in personal or workspace config`)
+        }
       }
-    } catch {}
+    } catch (e: any) {
+      console.error(`[loop:${this.id.slice(0, 8)}] attach provider error:`, e?.message ?? e)
+    }
     const snapshot = this.history.slice()
     for (const m of snapshot) {
       try {

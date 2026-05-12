@@ -238,7 +238,7 @@ export interface LoopRuntimeExtra {
   planMode: boolean
   setPlanMode: (active: boolean) => void
   provider: ProviderInfo | null
-  selectProvider: (name: string) => void
+  selectProvider: (name: string, source?: "personal" | "workspace") => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -332,10 +332,10 @@ export function useLoopRuntime(loopId: string | null) {
     return new Map(Object.entries(questionsObj))
   }, [questionsObj])
 
-  const selectProvider = useCallback((name: string) => {
+  const selectProvider = useCallback((name: string, source?: "personal" | "workspace") => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "provider_select", provider: name }))
+    ws.send(JSON.stringify({ type: "provider_select", provider: name, source }))
   }, [])
 
   const extra = useMemo<LoopRuntimeExtra>(

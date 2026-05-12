@@ -37,6 +37,10 @@ export type LoopMeta = {
   createdBy: string
   repo?: string
   branch?: string
+  config?: {
+    default_model?: string
+    default_model_source?: "personal" | "workspace"
+  }
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index
@@ -249,6 +253,14 @@ export async function getLoop(id: string): Promise<LoopMeta | null> {
   } catch {
     return null
   }
+}
+
+export async function patchLoopMeta(id: string, patch: Partial<LoopMeta>): Promise<LoopMeta | null> {
+  const meta = await getLoop(id)
+  if (!meta) return null
+  const updated = { ...meta, ...patch }
+  await writeFile(loopMetaPath(id), JSON.stringify(updated, null, 2))
+  return updated
 }
 
 export async function loopExists(id: string): Promise<boolean> {
