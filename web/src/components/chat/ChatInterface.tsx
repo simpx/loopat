@@ -113,16 +113,16 @@ export default function ChatInterface() {
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
-        className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
+        className="relative flex-1 overflow-x-auto overflow-y-scroll scroll-smooth"
       >
-        <div ref={containerRef} className="mx-auto flex w-full flex-1 flex-col px-2 md:px-3 pt-3 md:pt-4">
+        <div ref={containerRef} className="mx-auto flex w-full min-h-full flex-col px-2 md:px-3 pt-3 md:pt-4">
           {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
           <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
           </AuiIf>
 
           {/* Message list */}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 pb-3">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === "user" ? (
@@ -134,35 +134,35 @@ export default function ChatInterface() {
             </ThreadPrimitive.Messages>
             <div ref={bottomRef} />
           </div>
-
-          {/* Sticky footer with questions + composer */}
-          <ThreadPrimitive.ViewportFooter className="sticky bottom-0 z-10 mt-auto bg-gradient-to-t from-white via-white to-transparent pt-3 md:pt-4 pb-3 md:pb-6">
-            {/* Pending questions (AskUserQuestion tool) — fixed above input */}
-            {questionEntries.length > 0 && (
-              <ErrorBoundary name="QuestionsPanel">
-                <div className="mb-3 space-y-3">
-                  {questionEntries.map(([toolUseId, qs]) =>
-                    Array.isArray(qs) && qs.length > 0 ? (
-                      <div
-                        key={toolUseId}
-                        className="rounded-lg border border-violet-200 bg-white p-4 shadow-md"
-                      >
-                        <AskUserQuestionRenderer
-                          questions={qs}
-                          toolUseId={toolUseId}
-                          onAnswers={sendAnswers}
-                          onDismiss={(id) => sendAnswers(id, {})}
-                        />
-                      </div>
-                    ) : null,
-                  )}
-                </div>
-              </ErrorBoundary>
-            )}
-            <Composer />
-          </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
+
+      {/* Footer — outside viewport so it stays fixed, never scrolls */}
+      <div className="shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-3 md:pt-4 pb-3 md:pb-6">
+        {/* Pending questions (AskUserQuestion tool) — fixed above input */}
+        {questionEntries.length > 0 && (
+          <ErrorBoundary name="QuestionsPanel">
+            <div className="mb-3 space-y-3 max-w-[44rem] mx-auto w-full">
+              {questionEntries.map(([toolUseId, qs]) =>
+                Array.isArray(qs) && qs.length > 0 ? (
+                  <div
+                    key={toolUseId}
+                    className="rounded-lg border border-violet-200 bg-white p-4 shadow-md"
+                  >
+                    <AskUserQuestionRenderer
+                      questions={qs}
+                      toolUseId={toolUseId}
+                      onAnswers={sendAnswers}
+                      onDismiss={(id) => sendAnswers(id, {})}
+                    />
+                  </div>
+                ) : null,
+              )}
+            </div>
+          </ErrorBoundary>
+        )}
+        <Composer />
+      </div>
 
       {/* Scroll-to-bottom button — bottom-right, outside viewport so it isn't clipped */}
       {showScrollToBottom && (
