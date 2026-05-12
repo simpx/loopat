@@ -1,8 +1,9 @@
-import { useEffect, useRef, type FC } from "react";
+import { useEffect, useRef, useState, useCallback, type FC } from "react";
 import {
   ThreadPrimitive,
   AuiIf,
 } from "@assistant-ui/react";
+import { ArrowDownIcon } from "lucide-react";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import Composer from "./Composer";
@@ -34,6 +35,15 @@ const ThreadWelcome: FC = () => {
 export default function ChatInterface() {
   const { questions, sendAnswers } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
+  const vpRef = useRef<HTMLElement | null>(null);
+
+  // Custom scroll-to-bottom button — only shows when scrolled > 200px from bottom
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const scrollToBottom = useCallback(() => {
+    const vp = vpRef.current;
+    if (!vp) return;
+    vp.scrollTo({ top: vp.scrollHeight, behavior: "smooth" });
+  }, []);
 
   // Auto-scroll to bottom: instant on first load, throttled during streaming.
   // Tracks whether the user has scrolled away via scroll events, so we know
@@ -44,6 +54,7 @@ export default function ChatInterface() {
     const inner = containerRef.current;
     const vp = inner?.parentElement as HTMLElement | null;
     if (!inner || !vp) return;
+    vpRef.current = vp;
     const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
 
     // Track user intent: if the user manually scrolls up, we stop following.
@@ -55,6 +66,8 @@ export default function ChatInterface() {
       } else {
         userScrolledUp = true;
       }
+      // Show button when > 200px from bottom
+      setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
 
@@ -91,7 +104,7 @@ export default function ChatInterface() {
 
   return (
     <ThreadPrimitive.Root
-      className="flex h-full flex-col bg-white"
+      className="flex h-full flex-col bg-white relative"
       style={
         {
           "--thread-max-width": "44rem",
@@ -109,7 +122,7 @@ export default function ChatInterface() {
           </AuiIf>
 
           {/* Message list */}
-          <div className="mb-10 flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <ThreadPrimitive.Messages>
               {({ message }) =>
                 message.role === "user" ? (
@@ -150,6 +163,18 @@ export default function ChatInterface() {
           </ThreadPrimitive.ViewportFooter>
         </div>
       </ThreadPrimitive.Viewport>
+
+      {/* Scroll-to-bottom button — bottom-right, outside viewport so it isn't clipped */}
+      {showScrollToBottom && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-40 right-4 z-20 flex h-7 w-7 items-center justify-center rounded-full bg-white border border-gray-200 shadow-sm text-gray-400 hover:text-gray-600 hover:border-gray-300 transition-all"
+          aria-label="Scroll to bottom"
+        >
+          <ArrowDownIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
     </ThreadPrimitive.Root>
   );
 }
