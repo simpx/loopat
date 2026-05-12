@@ -18,6 +18,8 @@ import {
 import ClaudeStatus from "./ClaudeStatus";
 import ThinkingModeSelector from "./ThinkingModeSelector";
 import PlanModeToggle from "./PlanModeToggle";
+import ModelSelector from "./ModelSelector";
+import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
 import { cn } from "@/lib/utils";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
@@ -69,6 +71,8 @@ export default function Composer() {
           data-slot="composer-shell"
           className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-sky-300 focus-within:ring-1 focus-within:ring-sky-200"
         >
+          <SlashCommand />
+
           <ComposerAttachments />
 
           <ComposerPrimitive.Input
@@ -94,16 +98,7 @@ export default function Composer() {
                 total={contextWindow}
               />
 
-              {provider && (
-                <div
-                  className="hidden md:flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-1.5 py-0.5 text-[10px] text-gray-500"
-                  title={`provider: ${provider.name}\nmodel: ${provider.model}\ncontext window: ${provider.contextWindow.toLocaleString()}`}
-                >
-                  <span className="font-medium text-gray-700">{provider.name}</span>
-                  <span className="text-gray-400">·</span>
-                  <span className="font-mono">{provider.model}</span>
-                </div>
-              )}
+              <ModelSelector />
             </div>
 
             <div className="flex items-center gap-2">

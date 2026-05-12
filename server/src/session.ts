@@ -122,10 +122,17 @@ class LoopSession {
   private history: SDKMessage[] = []
   private historyLoaded: Promise<void>
   private pendingQuestions = new Map<string, AskQuestionPending>()
+  private providerOverride: string | null = null
 
   constructor(id: string) {
     this.id = id
     this.historyLoaded = this.loadHistoryFromDisk()
+  }
+
+  setProvider(name: string | null) {
+    if (this.q) return false // session already started, can't change
+    this.providerOverride = name
+    return true
   }
 
   private async loadHistoryFromDisk() {
@@ -148,7 +155,12 @@ class LoopSession {
       throw new Error(`loop ${this.id} meta missing`)
     }
     const cfg = await loadPersonalConfig(meta.createdBy)
-    const { name: providerName, provider } = getActiveProvider(cfg)
+    const selectedName = this.providerOverride ?? cfg.default
+    const provider = cfg.providers[selectedName]
+    if (!provider) {
+      throw new Error(`personal config: provider "${selectedName}" not found`)
+    }
+    const providerName = selectedName
     if (!provider.apiKey) {
       throw new Error(`personal config: provider "${providerName}" has empty apiKey — write it to personal/${meta.createdBy}/.loopat/secrets/provider-keys/${providerName}`)
     }
