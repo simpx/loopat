@@ -367,6 +367,28 @@ app.get(
   })
 )
 
+// ── static assets (production) ──
+import { join } from "node:path"
+const webDist = join(import.meta.dir, "..", "..", "web", "dist")
+const indexHtml = join(webDist, "index.html")
+
+app.get("*", async (c) => {
+  const path = c.req.path
+  // Don't interfere with API / WS routes
+  if (path.startsWith("/api/") || path.startsWith("/ws/")) return c.next()
+  // Try to serve the exact file
+  const file = Bun.file(join(webDist, path === "/" ? "index.html" : path))
+  if (await file.exists()) {
+    return new Response(file, {
+      headers: { "content-type": file.type },
+    })
+  }
+  // SPA fallback
+  return new Response(Bun.file(indexHtml), {
+    headers: { "content-type": "text/html" },
+  })
+})
+
 const port = Number(process.env.PORT ?? 7787)
 await ensureWorkspaceDirs()
 const backfilled = await backfillAllMounts()
