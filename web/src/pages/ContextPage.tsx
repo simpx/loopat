@@ -27,8 +27,9 @@ import {
 import { useEffect, useState, useCallback } from "react"
 import { useWorkspace } from "../ctx"
 import { useIsMobile } from "../lib/useIsMobile"
-import { CodeEditor } from "../components/markdown/CodeEditor"
-import { Markdown } from "../components/markdown/Markdown"
+import { lazy, Suspense } from "react"
+const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
+const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 const SUBS: { id: VaultId; label: string }[] = [
@@ -610,7 +611,7 @@ function DocView({
               source · markdown
             </div>
             <div className="flex-1 min-h-0">
-              <CodeEditor path={path} value={draft} onChange={setDraft} />
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
             </div>
           </div>
           <div className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -619,7 +620,7 @@ function DocView({
             </div>
             <div className="flex-1 min-h-0 overflow-auto px-6 py-4">
               <div className="max-w-[760px]">
-                <Markdown text={draft} onWikilink={onWikilink} />
+                <Suspense fallback={<div className="text-gray-400 text-sm">Loading preview...</div>}><Markdown text={draft} onWikilink={onWikilink} /></Suspense>
               </div>
             </div>
           </div>
@@ -637,7 +638,7 @@ function DocView({
                   </div>
                 </div>
               ) : isMd ? (
-                <Markdown text={original} onWikilink={onWikilink} />
+                <Suspense fallback={<div className="text-gray-400 text-sm">Loading...</div>}><Markdown text={original} onWikilink={onWikilink} /></Suspense>
               ) : (
                 <pre className="font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-gray-900">
                   {original || <span className="text-gray-400 italic">(empty)</span>}
@@ -940,7 +941,7 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
             <h3 className="text-[13px] font-medium text-gray-900 mb-2">README</h3>
             <div className="max-w-[760px]">
               {repo.readme ? (
-                <Markdown text={repo.readme} />
+                <Suspense fallback={<div className="text-gray-400 text-sm">Loading...</div>}><Markdown text={repo.readme} /></Suspense>
               ) : (
                 <p className="text-[13px] text-gray-500 italic">No README found at repo root.</p>
               )}

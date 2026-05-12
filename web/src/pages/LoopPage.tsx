@@ -12,8 +12,9 @@ import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
 import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
-import { Editor } from "../Editor"
-import { Terminal } from "../Terminal"
+import { lazy, Suspense } from "react"
+const Editor = lazy(() => import("../Editor").then(m => ({ default: m.Editor })))
+const Terminal = lazy(() => import("../Terminal").then(m => ({ default: m.Terminal })))
 
 type RightMode = "info" | "workdir" | "editor" | "terminal"
 
@@ -401,13 +402,14 @@ function RightPanel({
         </>
       )}
 
-      {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
-
-      {mode === "terminal" && (
-        <div className="flex-1 min-h-0 bg-[#1a1c20]">
-          <Terminal loopId={loopId} />
-        </div>
-      )}
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading...</div>}>
+        {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
+        {mode === "terminal" && (
+          <div className="flex-1 min-h-0 bg-[#1a1c20]">
+            <Terminal loopId={loopId} />
+          </div>
+        )}
+      </Suspense>
     </aside>
   )
 

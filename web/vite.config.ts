@@ -10,6 +10,14 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: true,
+        chunkFileNames: "assets/[name]-[hash].js",
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,
