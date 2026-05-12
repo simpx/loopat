@@ -4,6 +4,7 @@ cd "$(dirname "$0")"
 
 echo "==> Building web frontend..."
 cd web && bun run build && cd ..
+chmod -R o+rX web/dist
 
 echo "==> Starting server..."
 exec bun run server/src/index.ts
