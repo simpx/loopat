@@ -1,5 +1,7 @@
 import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
+import { mkdir, chmod } from "node:fs/promises"
+import { join } from "node:path"
 import { buildOuterBwrapArgs } from "./outer-sandbox"
 import { getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
@@ -37,7 +39,26 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     const personalCfg = await loadPersonalConfig(meta.createdBy)
     const innerShell = personalCfg.sandbox?.shell ?? "/usr/bin/fish"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
-    const bwrapArgs = await buildOuterBwrapArgs(loopId, meta.createdBy, { TERM: "xterm-256color" })
+
+    // Fish (and other interactive shells) want to write to XDG_DATA_HOME
+    // (history) and XDG_RUNTIME_DIR (notifier pipe). Both default to paths
+    // (~/.local/share, /run/user/$UID) that are ro-bound in our sandbox.
+    // Point them at /tmp/loopat-fish-<id>/ — /tmp is bind-rw and shared with
+    // the host, so the dir we mkdir here is visible to the sandbox at the
+    // same path. Per-loop dir avoids cross-loop history mixing and keeps
+    // XDG_RUNTIME_DIR's mode-0700 requirement easy to satisfy.
+    const fishHome = `/tmp/loopat-fish-${loopId}`
+    const fishData = join(fishHome, "data")
+    const fishRuntime = join(fishHome, "runtime")
+    await mkdir(fishData, { recursive: true })
+    await mkdir(fishRuntime, { recursive: true })
+    await chmod(fishRuntime, 0o700).catch(() => {})
+
+    const bwrapArgs = await buildOuterBwrapArgs(loopId, meta.createdBy, {
+      TERM: "xterm-256color",
+      XDG_DATA_HOME: fishData,
+      XDG_RUNTIME_DIR: fishRuntime,
+    })
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
     const proc = spawn("bwrap", fullArgs, {
       name: "xterm-256color",
