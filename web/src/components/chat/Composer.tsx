@@ -70,14 +70,16 @@ export default function Composer() {
           />
 
           {/* Toolbar */}
-          <div className="flex items-center justify-between gap-1 border-t border-gray-100 pt-2 overflow-hidden">
-            <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
+          <div className="flex items-center justify-between gap-0.5 border-t border-gray-100 pt-2 overflow-hidden">
+            <div className="flex items-center gap-0.5 min-w-0">
               <ComposerAddAttachment />
 
-              <ThinkingModeSelector
-                selectedMode={thinkingMode}
-                onModeChange={setThinkingMode}
-              />
+              <div className="hidden md:block">
+                <ThinkingModeSelector
+                  selectedMode={thinkingMode}
+                  onModeChange={setThinkingMode}
+                />
+              </div>
 
               <div className="hidden sm:block">
                 <TokenUsagePie
@@ -89,7 +91,7 @@ export default function Composer() {
               <ModelSelector />
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               <PlanModeToggle
                 active={planMode}
                 onChange={setPlanMode}
