@@ -1,12 +1,10 @@
 import { useState } from "react";
 import {
   ComposerPrimitive,
-  ThreadPrimitive,
   AuiIf,
   useAuiState,
 } from "@assistant-ui/react";
 import {
-  ArrowDownIcon,
   ArrowUpIcon,
   SquareIcon,
 } from "lucide-react";
@@ -53,18 +51,6 @@ export default function Composer() {
     <ComposerPrimitive.Root className="relative flex w-full flex-col">
       {/* Claude Status bar */}
       <ClaudeStatus isLoading={isRunning} />
-
-      {/* Scroll-to-bottom button */}
-      <ThreadPrimitive.ScrollToBottom asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-sm"
-          className="absolute -top-12 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm disabled:invisible"
-        >
-          <ArrowDownIcon className="h-4 w-4 text-gray-500" />
-        </Button>
-      </ThreadPrimitive.ScrollToBottom>
 
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
