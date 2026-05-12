@@ -47,6 +47,20 @@ Open `config.json`, fill in your key, optionally set `knowledge.git` / `notes.gi
 
 Open <http://localhost:7787> → the banner ends with `ready.` → create a loop, chat with it.
 
+## Production
+
+```sh
+# 1. Build the frontend
+cd web && bun run build         # → web/dist/
+
+# 2. Start (single process — Hono serves API + static assets)
+PORT=7787 bun run server/src/index.ts
+```
+
+Open `http://localhost:7787`. The server serves static files from `web/dist/`. `/api/*` and `/ws/*` go to the API; everything else falls back to `index.html` for SPA routing.
+
+To put a reverse proxy in front, point `/` to `web/dist/` (or `localhost:7787`) and proxy `/api` + `/ws` to the server.
+
 ## Env knobs
 
 | var | default | use |
