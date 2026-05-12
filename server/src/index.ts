@@ -413,6 +413,7 @@ app.get("*", async (c) => {
 })
 
 const port = Number(process.env.PORT ?? 7787)
+const hostname = process.env.HOST ?? "127.0.0.1"
 await ensureWorkspaceDirs()
 const backfilled = await backfillAllMounts()
 const cfg = await loadConfig()
@@ -421,6 +422,7 @@ if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfil
 
 export default {
   port,
+  hostname,
   fetch: app.fetch,
   websocket,
 }
