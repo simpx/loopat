@@ -193,3 +193,11 @@ export async function readFocusData(): Promise<FocusData> {
   if (!r.ok) return { pinned: [], listed: [], inbox: [] }
   return (await r.json()) as FocusData
 }
+
+export type ProviderInfo = { model: string; baseUrl: string }
+export type ProvidersResponse = { providers: Record<string, ProviderInfo>; default: string }
+export async function getProviders(): Promise<ProvidersResponse> {
+  const r = await apiFetch("/api/providers")
+  if (!r.ok) return { providers: {}, default: "" }
+  return (await r.json()) as ProvidersResponse
+}

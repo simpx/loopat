@@ -15,7 +15,7 @@ import {
   loopContextPersonal,
   loopContextRepos,
 } from "./paths"
-import { loadConfig } from "./config"
+import { loadConfig, getActiveProvider, type ProviderConfig } from "./config"
 import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
@@ -41,6 +41,17 @@ app.use("/api/*", cors({ origin: (o) => o ?? "*", credentials: true }))
 
 // public routes
 app.get("/api/health", (c) => c.json({ ok: true, loopatHome: LOOPAT_HOME, workspace: WORKSPACE }))
+
+// ── providers (public) ──
+app.get("/api/providers", async (c) => {
+  const cfg = await loadConfig()
+  const { name: activeName } = getActiveProvider(cfg)
+  const providers: Record<string, { model: string; baseUrl: string }> = {}
+  for (const [name, p] of Object.entries(cfg.providers)) {
+    providers[name] = { model: p.model, baseUrl: p.baseUrl }
+  }
+  return c.json({ providers, default: activeName })
+})
 
 // ── auth (public) ──
 app.post("/api/auth/register", async (c) => {
@@ -314,7 +325,7 @@ app.get(
         attached = ws
         await session.attach(ws)
       },
-      onMessage(event, ws) {
+      async onMessage(event, ws) {
         if (!canWrite) {
           try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
           return
@@ -328,6 +339,22 @@ app.get(
             session.interrupt()
           } else if (msg?.type === "answers") {
             session.answerQuestions(msg.tool_use_id, msg.answers)
+          } else if (msg?.type === "provider_select" && typeof msg.provider === "string") {
+            const ok = session.setProvider(msg.provider)
+            if (ok) {
+              try {
+                const cfg = await loadConfig()
+                const p = cfg.providers[msg.provider]
+                if (p) {
+                  ws.send(JSON.stringify({
+                    type: "provider",
+                    name: msg.provider,
+                    model: p.model,
+                    contextWindow: p.maxContextTokens && p.maxContextTokens > 0 ? p.maxContextTokens : 200_000,
+                  }))
+                }
+              } catch {}
+            }
           }
         } catch (e) {
           console.error("ws message parse error", e)
