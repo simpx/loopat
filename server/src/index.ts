@@ -408,9 +408,18 @@ app.get(
               // Persist to loop meta so it survives reloads
               patchLoopMeta(id, { config: { default_model: msg.provider, default_model_source: source } }).catch(() => {})
               try {
-                // Resolve provider info from workspace config (primary source for provider list)
-                const wCfg = await loadConfig() as any
-                const p = wCfg?.providers?.[msg.provider]
+                // Resolve provider info: personal first, then workspace fallback.
+                let p: { model: string; maxContextTokens?: number } | undefined
+                if (userId) {
+                  try {
+                    const pCfg = await loadPersonalConfig(userId)
+                    p = pCfg.providers[msg.provider]
+                  } catch {}
+                }
+                if (!p) {
+                  const wCfg = await loadConfig() as any
+                  p = wCfg?.providers?.[msg.provider]
+                }
                 if (p) {
                   ws.send(JSON.stringify({
                     type: "provider",

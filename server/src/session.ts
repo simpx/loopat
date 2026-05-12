@@ -131,12 +131,20 @@ class LoopSession {
 
   /** Walk personal + workspace configs, preferring candidateNames order, and
    *  return the first matching provider. If requireKey is true, skip providers
-   *  with an empty apiKey and keep searching. Returns null if nothing matches. */
+   *  with an empty apiKey and keep searching. Returns null if nothing matches.
+   *
+   *  Selection order:
+   *    1. explicit candidates (caller-supplied: WS override, loop.meta.config)
+   *    2. personal config's `default` field
+   *    3. workspace config's `default` field
+   *    4. enumeration of all providers (personal first, then workspace) */
   private async resolveProvider(meta: { createdBy: string }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
     const pCfg = await loadPersonalConfig(meta.createdBy)
     const wCfg = await loadConfig()
     const names = [
       ...candidateNames,
+      pCfg.default,
+      (wCfg as any).default,
       ...Object.keys(pCfg.providers),
       ...Object.keys((wCfg as any).providers ?? {}),
     ].filter(Boolean) as string[]
@@ -150,9 +158,31 @@ class LoopSession {
     return null
   }
 
+  /**
+   * Set the active provider. Takes effect on the next user message — the
+   * current claude-binary child (if any) is interrupted and torn down so
+   * `ensureStarted` re-spawns it with the new provider's env (baseUrl /
+   * apiKey / model). Conversation history is preserved via `--continue`,
+   * which reads the existing SDK jsonl on disk, so the swap is transparent
+   * to the user beyond the brief pause.
+   *
+   * Always returns true — provider switching is unconditional. The setter
+   * is fire-and-forget; the interrupt runs in the background, and the next
+   * sendUserText awaits the freshly-null `q` and re-enters ensureStarted.
+   *
+   * The pushIterable is also reset: the old `Query` is still holding the
+   * old iter, so a fresh push would race the dying-but-not-dead loop. The
+   * new query takes a brand-new iter; the orphaned iter is GC'd when the
+   * old Query's internal loop unwinds.
+   */
   setProvider(name: string | null) {
-    if (this.q) return false // session already started, can't change
     this.providerOverride = name
+    if (this.q) {
+      const dying = this.q
+      this.q = null
+      this.input = pushIterable<SDKUserMessage>()
+      dying.interrupt().catch(() => {})
+    }
     return true
   }
 
