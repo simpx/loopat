@@ -129,6 +129,27 @@ class LoopSession {
     this.historyLoaded = this.loadHistoryFromDisk()
   }
 
+  /** Walk personal + workspace configs, preferring candidateNames order, and
+   *  return the first matching provider. If requireKey is true, skip providers
+   *  with an empty apiKey and keep searching. Returns null if nothing matches. */
+  private async resolveProvider(meta: { createdBy: string }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
+    const pCfg = await loadPersonalConfig(meta.createdBy)
+    const wCfg = await loadConfig()
+    const names = [
+      ...candidateNames,
+      ...Object.keys(pCfg.providers),
+      ...Object.keys((wCfg as any).providers ?? {}),
+    ].filter(Boolean) as string[]
+    const seen = new Set<string>()
+    for (const name of names) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      const p = pCfg.providers[name] ?? (wCfg as any).providers?.[name] as ProviderConfig | undefined
+      if (p && (!requireKey || p.apiKey)) return { name, provider: p }
+    }
+    return null
+  }
+
   setProvider(name: string | null) {
     if (this.q) return false // session already started, can't change
     this.providerOverride = name
@@ -154,21 +175,15 @@ class LoopSession {
     if (!meta) {
       throw new Error(`loop ${this.id} meta missing`)
     }
-    const pCfg = await loadPersonalConfig(meta.createdBy)
-    // Prefer: providerOverride (runtime WS select) > meta.config.default_model > cfg.default
-    const selectedName = this.providerOverride ?? meta.config?.default_model ?? pCfg.default
-    let provider: ProviderConfig | undefined = pCfg.providers[selectedName]
-    if (!provider) {
-      const wCfg = await loadConfig()
-      provider = (wCfg as any).providers?.[selectedName] as ProviderConfig | undefined
+    const resolved = await this.resolveProvider(meta, [
+      this.providerOverride,
+      meta.config?.default_model,
+    ], true)
+    if (!resolved) {
+      throw new Error(`no provider with a valid apiKey — set one in personal/${meta.createdBy}/.loopat/secrets/provider-keys/`)
     }
-    if (!provider) {
-      throw new Error(`provider "${selectedName}" not found in personal or workspace config`)
-    }
-    const providerName = selectedName
-    if (!provider.apiKey) {
-      throw new Error(`provider "${providerName}" has empty apiKey — write it to personal/${meta.createdBy}/.loopat/secrets/provider-keys/${providerName}`)
-    }
+    const providerName = resolved.name
+    const provider = resolved.provider
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
@@ -413,25 +428,19 @@ class LoopSession {
     try {
       const meta = await getLoop(this.id)
       if (meta) {
-        const pCfg = await loadPersonalConfig(meta.createdBy)
-        const selectedName = this.providerOverride ?? meta.config?.default_model ?? pCfg.default
-        // Try personal config first; fall back to workspace config
-        // (workspace config still carries providers on disk even though the TS
-        //  type was split into WorkspaceConfig + PersonalConfig)
-        let provider: ProviderConfig | undefined = pCfg.providers[selectedName]
-        if (!provider) {
-          const wCfg = await loadConfig()
-          provider = (wCfg as any).providers?.[selectedName] as ProviderConfig | undefined
-        }
-        if (provider) {
+        const resolved = await this.resolveProvider(meta, [
+          this.providerOverride,
+          meta.config?.default_model,
+        ], false)
+        if (resolved) {
           ws.send(JSON.stringify({
             type: "provider",
-            name: selectedName,
-            model: provider.model,
-            contextWindow: resolveContextWindow(provider),
+            name: resolved.name,
+            model: resolved.provider.model,
+            contextWindow: resolveContextWindow(resolved.provider),
           }))
         } else {
-          console.warn(`[loop:${this.id.slice(0, 8)}] provider "${selectedName}" not found in personal or workspace config`)
+          console.warn(`[loop:${this.id.slice(0, 8)}] no provider found in personal or workspace config`)
         }
       }
     } catch (e: any) {
