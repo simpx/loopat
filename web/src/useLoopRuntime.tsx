@@ -144,6 +144,10 @@ function convertMessage(raw: RawMsg) {
     if (b?.type === "text") {
       const txt = (b.text ?? "").trim()
       if (txt) parts.push({ type: "text", text: txt })
+    } else if (b?.type === "clear-divider") {
+      // Pass through as-is; AssistantMessage recognizes this part type
+      // and renders a custom banner.
+      parts.push(b)
     } else if (b?.type === "thinking") {
       parts.push({
         type: "reasoning",
@@ -239,6 +243,8 @@ export interface LoopRuntimeExtra {
   setPlanMode: (active: boolean) => void
   provider: ProviderInfo | null
   selectProvider: (name: string, source?: "personal" | "workspace") => void
+  /** Drop SDK context (like CC's /clear); next message starts with 0 history. */
+  clearContext: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -252,6 +258,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   setPlanMode: () => {},
   provider: null,
   selectProvider: () => {},
+  clearContext: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -338,9 +345,15 @@ export function useLoopRuntime(loopId: string | null) {
     ws.send(JSON.stringify({ type: "provider_select", provider: name, source }))
   }, [])
 
+  const clearContext = useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "clear" }))
+  }, [])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext],
   )
 
   useEffect(() => {
@@ -559,6 +572,20 @@ export function useLoopRuntime(loopId: string | null) {
             { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
           ])
           if (!loadingHistoryRef.current) setRunning(false)
+        } else if (m?.type === "clear-boundary") {
+          // Server signals: SDK context dropped at this point. We push a
+          // synthetic assistant message whose only content part is a custom
+          // `clear-divider`; AssistantMessage detects that part type and
+          // renders a striking full-width banner (bypassing the normal
+          // assistant chrome).
+          setRaw((prev) => [
+            ...prev,
+            {
+              id: freshId("clear"),
+              role: "assistant",
+              content: [{ type: "clear-divider", ts: m.ts ?? "", by: m.by ?? "" } as any],
+            },
+          ])
         }
       }
     }
@@ -581,7 +608,21 @@ export function useLoopRuntime(loopId: string | null) {
 
   const aggregated = useMemo(() => {
     try {
-      return aggregateToolResults(raw)
+      // CC-style: after a /clear, hide everything from prior sessions in
+      // the UI. The clear-boundary marker itself is dropped too — a fresh
+      // empty thread is the visual cue, matching CC's terminal-clearing
+      // behavior. The raw history (and messages.jsonl) is intact, just
+      // not displayed.
+      let from = 0
+      for (let i = raw.length - 1; i >= 0; i--) {
+        const m: any = raw[i]
+        const firstPart = Array.isArray(m?.content) ? m.content[0] : null
+        if (firstPart?.type === "clear-divider") {
+          from = i + 1
+          break
+        }
+      }
+      return aggregateToolResults(from === 0 ? raw : raw.slice(from))
     } catch (e) {
       console.error("[fe:aggregateToolResults]", e)
       return []
