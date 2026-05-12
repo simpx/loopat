@@ -5,7 +5,7 @@ import { existsSync } from "node:fs"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal } from "./loops"
 import { getSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, readFocusData, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
 import { attachTerm, detachTerm, writeTerm, resizeTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -315,8 +315,34 @@ app.get("/api/workspace/repo/:name", async (c) => {
   return c.json({ ...detail, recentLoops: recent })
 })
 
-app.get("/api/workspace/focus", async (c) => {
-  return c.json(await readFocusData())
+// ── focus + topics ──
+app.get("/api/focus", async (c) => {
+  const focuses = await listFocuses()
+  return c.json({ focuses })
+})
+
+app.get("/api/focus/:name", async (c) => {
+  const name = c.req.param("name") ?? ""
+  const r = await readFocus(decodeURIComponent(name))
+  if (!r) return c.json({ error: "not found" }, 404)
+  return c.json({ name, body: r.body, mtimeMs: r.mtimeMs })
+})
+
+app.put("/api/focus/:name", requireAuth, async (c) => {
+  const name = decodeURIComponent(c.req.param("name") ?? "")
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.body !== "string") return c.json({ error: "body required" }, 400)
+  const ok = await writeFocus(name, body.body)
+  if (!ok) return c.json({ error: "write failed" }, 500)
+  return c.json({ ok: true })
+})
+
+app.get("/api/topics", async (c) => {
+  const loops = await listLoops()
+  const titles = loops
+    .filter((l) => !l.archived)
+    .map((l) => ({ id: l.id, title: l.title }))
+  return c.json({ topics: await listTopics(titles) })
 })
 
 app.get(
