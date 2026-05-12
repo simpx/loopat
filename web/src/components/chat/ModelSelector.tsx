@@ -27,11 +27,11 @@ export default function ModelSelector() {
           aria-label="Select model"
         >
           <Cpu className="h-3 w-3" />
-          <span className="font-medium text-gray-700 truncate max-w-20 sm:max-w-none">{currentName}</span>
+          <span className="font-medium text-gray-700 truncate max-w-16 md:max-w-24">{currentName}</span>
           {currentModel && (
             <>
-              <span className="hidden sm:inline text-gray-400">·</span>
-              <span className="hidden sm:inline font-mono">{currentModel}</span>
+              <span className="hidden md:inline text-gray-400">·</span>
+              <span className="hidden md:inline font-mono truncate max-w-20">{currentModel}</span>
             </>
           )}
           <ChevronDown className="h-2.5 w-2.5 text-gray-400" />
