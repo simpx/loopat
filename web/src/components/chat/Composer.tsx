@@ -55,7 +55,7 @@ export default function Composer() {
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
           data-slot="composer-shell"
-          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm transition-shadow focus-within:border-sky-300 focus-within:ring-1 focus-within:ring-sky-200"
+          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
         >
           <SlashCommand />
 
@@ -70,8 +70,8 @@ export default function Composer() {
           />
 
           {/* Toolbar */}
-          <div className="flex items-center justify-between gap-1 border-t border-gray-100 pt-2">
-            <div className="flex items-center gap-1">
+          <div className="flex items-center justify-between gap-1 border-t border-gray-100 pt-2 overflow-hidden">
+            <div className="flex items-center gap-0.5 sm:gap-1 min-w-0">
               <ComposerAddAttachment />
 
               <ThinkingModeSelector
@@ -79,10 +79,12 @@ export default function Composer() {
                 onModeChange={setThinkingMode}
               />
 
-              <TokenUsagePie
-                used={Math.min(usedTokens, contextWindow)}
-                total={contextWindow}
-              />
+              <div className="hidden sm:block">
+                <TokenUsagePie
+                  used={Math.min(usedTokens, contextWindow)}
+                  total={contextWindow}
+                />
+              </div>
 
               <ModelSelector />
             </div>
@@ -108,7 +110,7 @@ export default function Composer() {
                     type="button"
                     variant="default"
                     size="icon"
-                    className="h-8 w-8 rounded-lg bg-sky-600 hover:bg-sky-700"
+                    className="h-8 w-8 rounded-lg bg-gray-800 hover:bg-gray-900 text-white"
                     disabled={!hasInput}
                     aria-label="Send message"
                   >
