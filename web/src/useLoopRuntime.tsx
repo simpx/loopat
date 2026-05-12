@@ -238,6 +238,7 @@ export interface LoopRuntimeExtra {
   planMode: boolean
   setPlanMode: (active: boolean) => void
   provider: ProviderInfo | null
+  selectProvider: (name: string) => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -250,6 +251,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   planMode: false,
   setPlanMode: () => {},
   provider: null,
+  selectProvider: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -330,9 +332,15 @@ export function useLoopRuntime(loopId: string | null) {
     return new Map(Object.entries(questionsObj))
   }, [questionsObj])
 
+  const selectProvider = useCallback((name: string) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "provider_select", provider: name }))
+  }, [])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider],
   )
 
   useEffect(() => {
