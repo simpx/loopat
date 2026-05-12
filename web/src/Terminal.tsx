@@ -28,7 +28,7 @@ const THEME = {
   brightWhite: "#ffffff",
 }
 
-export function Terminal({ loopId }: { loopId: string }) {
+export function Terminal({ loopId, currentUserId }: { loopId: string; currentUserId: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -108,7 +108,7 @@ export function Terminal({ loopId }: { loopId: string }) {
       fitRef.current = null
       wsRef.current = null
     }
-  }, [loopId])
+  }, [loopId, currentUserId])
 
   return (
     <div

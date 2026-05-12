@@ -207,7 +207,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 
 function LoopMain({ meta }: { meta: LoopMeta }) {
   const ws = useWorkspace()
-  const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id)
+  const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
@@ -264,6 +264,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           onClose={() => setRightOpen(false)}
           pickedFile={pickedFile}
           onPickFile={openFile}
+          currentUserId={ws.currentUser?.id ?? ""}
         />
       )}
     </div>
@@ -400,6 +401,7 @@ function RightPanel({
   onClose,
   pickedFile,
   onPickFile,
+  currentUserId,
 }: {
   loopId: string
   meta: LoopMeta
@@ -407,6 +409,7 @@ function RightPanel({
   onClose: () => void
   pickedFile: string | null
   onPickFile: (path: string) => void
+  currentUserId: string
 }) {
   const isMobile = useIsMobile()
 
@@ -442,7 +445,7 @@ function RightPanel({
         {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
         {mode === "terminal" && (
           <div className="flex-1 min-h-0 bg-[#1a1c20]">
-            <Terminal loopId={loopId} />
+            <Terminal loopId={loopId} currentUserId={currentUserId} />
           </div>
         )}
       </Suspense>
