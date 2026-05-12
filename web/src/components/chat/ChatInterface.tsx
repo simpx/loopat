@@ -32,7 +32,7 @@ const ThreadWelcome: FC = () => {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface() {
+export default function ChatInterface({ archived = false, onUnarchive }: { archived?: boolean; onUnarchive?: () => void } = {}) {
   const { questions, sendAnswers } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
@@ -161,7 +161,23 @@ export default function ChatInterface() {
             </div>
           </ErrorBoundary>
         )}
-        <Composer />
+        {archived ? (
+          <div className="mx-3 md:mx-5 mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[12px] text-amber-800">
+            <span>📦</span>
+            <span className="flex-1">This loop is archived (read-only).</span>
+            {onUnarchive && (
+              <button
+                type="button"
+                onClick={onUnarchive}
+                className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
+              >
+                Unarchive
+              </button>
+            )}
+          </div>
+        ) : (
+          <Composer />
+        )}
       </div>
 
       {/* Scroll-to-bottom button — bottom-right, outside viewport so it isn't clipped */}

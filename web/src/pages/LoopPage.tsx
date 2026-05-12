@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore } from "lucide-react"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
@@ -83,6 +83,18 @@ function LoopsList({ currentId }: { currentId: string }) {
         <span className="text-[11px] text-gray-400 ml-auto pr-1">{filtered.length}</span>
         <button
           type="button"
+          onClick={() => ws.setShowArchived(!ws.showArchived)}
+          className={
+            ws.showArchived
+              ? "w-6 h-6 flex items-center justify-center text-gray-700 bg-gray-100 rounded"
+              : "w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+          }
+          title={ws.showArchived ? "hide archived" : "show archived"}
+        >
+          <Archive size={13} />
+        </button>
+        <button
+          type="button"
           onClick={() => setCollapsedPersist(true)}
           className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
           title="collapse sidebar"
@@ -93,31 +105,52 @@ function LoopsList({ currentId }: { currentId: string }) {
       <div className="flex-1 min-h-0 overflow-auto py-2">
         {filtered.map((loop) => {
           const sel = currentId === loop.id
+          const archived = loop.archived === true
           return (
-            <button
+            <div
               key={loop.id}
-              type="button"
-              onClick={() => {
-                navigate(`/loop/${loop.id}`)
-                if (isMobile) setCollapsedPersist(true)
-              }}
               className={
-                sel
-                  ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
-                  : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
+                "group/row relative flex items-stretch " +
+                (sel ? "bg-gray-100" : "hover:bg-gray-50")
               }
             >
-              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-emerald-500" />
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] text-gray-900 truncate">{loop.title}</div>
-                <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
-                  <span className="text-gray-400 font-mono text-[10px]">‹›</span>
-                  <span>{loop.createdBy}</span>
-                  <span>·</span>
-                  <span className="font-mono">{loop.id.slice(0, 6)}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  navigate(`/loop/${loop.id}`)
+                  if (isMobile) setCollapsedPersist(true)
+                }}
+                className={
+                  "flex-1 min-w-0 px-3 py-2 flex items-center gap-2 text-left " +
+                  (archived ? "opacity-60" : "")
+                }
+              >
+                <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + (archived ? "bg-gray-400" : "bg-emerald-500")} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] text-gray-900 truncate flex items-center gap-1">
+                    {archived && <Archive size={10} className="text-gray-400 shrink-0" />}
+                    <span className="truncate">{loop.title}</span>
+                  </div>
+                  <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
+                    <span className="text-gray-400 font-mono text-[10px]">‹›</span>
+                    <span>{loop.createdBy}</span>
+                    <span>·</span>
+                    <span className="font-mono">{loop.id.slice(0, 6)}</span>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  ws.setLoopArchived(loop.id, !archived)
+                }}
+                className="opacity-0 group-hover/row:opacity-100 transition-opacity w-7 flex items-center justify-center text-gray-400 hover:text-gray-700"
+                title={archived ? "unarchive" : "archive (hide + read-only)"}
+              >
+                {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+              </button>
+            </div>
           )
         })}
         {filtered.length === 0 && (
@@ -174,6 +207,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 // ============================================================================
 
 function LoopMain({ meta }: { meta: LoopMeta }) {
+  const ws = useWorkspace()
   const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id)
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
@@ -215,7 +249,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         <div className="flex-1 min-h-0">
           <LoopRuntimeProvider extra={extra}>
             <AssistantRuntimeProvider runtime={runtime}>
-              <ChatInterface />
+              <ChatInterface
+                archived={meta.archived === true}
+                onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+              />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
         </div>
