@@ -12,6 +12,8 @@ import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
+import { FocusDetail } from "./pages/FocusDetail"
+import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { AuthPage } from "./pages/AuthPage"
 import { getServerWorkspace } from "./api"
@@ -186,6 +188,8 @@ export function App() {
             <Route path="/loop" element={<LoopRedirect />} />
             <Route path="/loop/:id" element={<LoopPage />} />
             <Route path="/focus" element={<FocusPage />} />
+            <Route path="/focus/:name" element={<FocusDetail />} />
+            <Route path="/topic/:name" element={<TopicView />} />
             <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
             <Route path="/context/:sub" element={<ContextPage />} />
           </Route>
