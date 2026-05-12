@@ -130,7 +130,14 @@ function isPersonalLoopPath(path: string): boolean {
 }
 
 app.get("/api/loops", async (c) => {
-  return c.json({ loops: await listLoops() })
+  // ?archived=true → only archived; ?archived=all → both; default → hide archived
+  const filter = c.req.query("archived") ?? ""
+  const all = await listLoops()
+  let loops = all
+  if (filter === "true") loops = all.filter((m) => m.archived === true)
+  else if (filter === "all") loops = all
+  else loops = all.filter((m) => m.archived !== true)
+  return c.json({ loops })
 })
 
 app.post("/api/loops", requireAuth, async (c) => {
@@ -151,6 +158,24 @@ app.get("/api/loops/:id", async (c) => {
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   return c.json(meta)
+})
+
+// Archive / unarchive. Only the loop owner (createdBy) may flip the flag.
+app.patch("/api/loops/:id", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
+  const body = await c.req.json().catch(() => ({}))
+  const patch: Partial<typeof meta> = {}
+  if (typeof body.archived === "boolean") {
+    patch.archived = body.archived
+    patch.archivedAt = body.archived ? new Date().toISOString() : undefined
+  }
+  if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
+  const updated = await patchLoopMeta(id, patch)
+  return c.json(updated)
 })
 
 app.get("/api/loops/:id/context", async (c) => {
@@ -189,7 +214,9 @@ app.get("/api/loops/:id/file", async (c) => {
 
 app.put("/api/loops/:id/file", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
-  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
   const body = await c.req.json().catch(() => ({}))
@@ -298,7 +325,7 @@ app.get(
         attachedTerm = ws
         await attachTerm(id, ws)
       },
-      onMessage(event, ws) {
+      async onMessage(event, ws) {
         try {
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
           const msg = JSON.parse(data)
@@ -309,6 +336,12 @@ app.get(
           }
           if (!canWrite) {
             try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
+            return
+          }
+          // Block writes on archived loops (re-read each msg to honor unarchive).
+          const meta = await getLoop(id)
+          if (meta?.archived) {
+            try { ws.send(JSON.stringify({ type: "error", message: "loop is archived (read-only)" })) } catch {}
             return
           }
           if (msg?.type === "data" && typeof msg.data === "string") writeTerm(id, msg.data)
@@ -348,6 +381,13 @@ app.get(
       async onMessage(event, ws) {
         if (!canWrite) {
           try { ws.send(JSON.stringify({ type: "error", message: "login required to send" })) } catch {}
+          return
+        }
+        // Block all writes on archived loops. Re-read meta per message so
+        // unarchive takes effect without reconnect.
+        const meta = await getLoop(id)
+        if (meta?.archived) {
+          try { ws.send(JSON.stringify({ type: "error", message: "loop is archived (read-only)" })) } catch {}
           return
         }
         try {

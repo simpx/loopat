@@ -5,6 +5,8 @@ export type LoopMeta = {
   createdBy: string
   repo?: string
   branch?: string
+  archived?: boolean
+  archivedAt?: string
 }
 
 export type User = { id: string }
@@ -65,8 +67,10 @@ export async function logout(): Promise<void> {
 
 // ── loops ──
 
-export async function listLoops(): Promise<LoopMeta[]> {
-  const r = await apiFetch("/api/loops")
+/** filter: "active" (default, archived hidden), "all", "archived" */
+export async function listLoops(filter: "active" | "all" | "archived" = "active"): Promise<LoopMeta[]> {
+  const q = filter === "all" ? "?archived=all" : filter === "archived" ? "?archived=true" : ""
+  const r = await apiFetch("/api/loops" + q)
   if (!r.ok) return []
   const j = await r.json()
   return j.loops as LoopMeta[]
@@ -78,6 +82,16 @@ export async function createLoop(opts: { title: string; repo?: string }): Promis
     headers: { "content-type": "application/json" },
     body: JSON.stringify(opts),
   })
+  return (await r.json()) as LoopMeta
+}
+
+export async function setLoopArchived(id: string, archived: boolean): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ archived }),
+  })
+  if (!r.ok) return null
   return (await r.json()) as LoopMeta
 }
 

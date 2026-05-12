@@ -41,6 +41,14 @@ export type LoopMeta = {
     default_model?: string
     default_model_source?: "personal" | "workspace"
   }
+  /**
+   * Archive = "hide + read-only". Hidden from default list, all writes
+   * (sendUserText / clear / setProvider / writeTerm / answerQuestions /
+   * vault writes) reject. Reads stay open (attach, history, files, term
+   * view). Lossless — `unarchive` flips back. See docs/design notes.
+   */
+  archived?: boolean
+  archivedAt?: string
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index
