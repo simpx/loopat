@@ -25,11 +25,10 @@ export function LoopPage() {
   if (!id) return <Navigate to={`/loop`} replace />
   const meta = ws.loops.find((l) => l.id === id)
   if (!meta) {
-    return (
-      <div className="h-full flex items-center justify-center text-gray-500">
-        loop {id.slice(0, 8)} not found
-      </div>
-    )
+    // Loop not in current filtered list. Most common cause: user just archived
+    // it (and showArchived is off). Fall back to LoopRedirect, which jumps to
+    // the first available loop or shows the empty state.
+    return <Navigate to="/loop" replace />
   }
 
   return (
