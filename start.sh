@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
 cd "$(dirname "$0")"
 
-echo "==> Building web frontend..."
-cd web && bun run build && cd ..
-chmod -R o+rX web/dist
-
-echo "==> Starting server..."
-exec bun run server/src/index.ts
+while true; do
+  echo "==> Starting server... ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+  bun run server/src/index.ts || true
+  echo "==> Server exited. Restarting in 3s..."
+  sleep 3
+done
