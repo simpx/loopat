@@ -178,6 +178,20 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   return c.json(updated)
 })
 
+// Strip thinking blocks from the SDK jsonl history (used before switching
+// to a provider that can't validate the existing thinking signatures).
+app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const session = getSession(id)
+  const r = await session.stripThinkingBlocks()
+  return c.json(r)
+})
+
 app.get("/api/loops/:id/context", async (c) => {
   const id = c.req.param("id") ?? ""
   if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)

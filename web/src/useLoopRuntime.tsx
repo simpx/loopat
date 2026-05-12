@@ -245,6 +245,12 @@ export interface LoopRuntimeExtra {
   selectProvider: (name: string, source?: "personal" | "workspace") => void
   /** Drop SDK context (like CC's /clear); next message starts with 0 history. */
   clearContext: () => void
+  /** Count of thinking/redacted_thinking content blocks currently in raw
+   *  assistant history. Used by ModelSelector to decide whether a cross-
+   *  provider switch needs a strip-thinking confirmation. */
+  thinkingBlockCount: number
+  /** This loop's id — needed by ModelSelector to call /strip-thinking. */
+  loopId: string
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -259,6 +265,8 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   provider: null,
   selectProvider: () => {},
   clearContext: () => {},
+  thinkingBlockCount: 0,
+  loopId: "",
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -351,9 +359,22 @@ export function useLoopRuntime(loopId: string | null) {
     ws.send(JSON.stringify({ type: "clear" }))
   }, [])
 
+  // Count thinking blocks in raw history. Cheap walk; raw is bounded by
+  // session length and rerenders only on raw change.
+  const thinkingBlockCount = useMemo(() => {
+    let n = 0
+    for (const m of raw) {
+      if (m.role !== "assistant" || !Array.isArray(m.content)) continue
+      for (const b of m.content) {
+        if (b?.type === "thinking" || b?.type === "redacted_thinking") n++
+      }
+    }
+    return n
+  }, [raw])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "" }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId],
   )
 
   useEffect(() => {
