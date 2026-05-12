@@ -147,7 +147,7 @@ Claude 在 sandbox 里看到的：
 | `/loop/<id>/.claude/` | `~/.loopat/<ws>/loops/<id>/.claude/` | rw | SDK session JSONL + settings.json |
 | `/context/knowledge/` | `~/.loopat/<ws>/context/knowledge/` | **ro** | 团队沉淀；git repo |
 | `/context/notes/` | `~/.loopat/<ws>/context/notes/` | rw | 团队 prose；git repo；保存自动 commit |
-| `/personal/` | `~/.loopat/<ws>/personal/<user>/` | rw | 用户私有；含 `memory/`、`secrets/` |
+| `/personal/` | `~/.loopat/<ws>/personal/<user>/` | rw | 用户私有；含 `memory/`、`.loopat/`（platform-managed：per-user config + secrets） |
 
 系统路径以 `--ro-bind-try` 逐项暴露：`/usr /etc /lib /lib64 /bin /sbin /opt /var /run`（read-only）。`/tmp` 共享 host（rw，让 socat unix socket / mktemp / IPC 工作）。`$HOME` (`/home/$USER`) 是 tmpfs，**personal-dep 的 symlink 目标会被 re-bind 回 $HOME 原位置**（让 ssh 等工具找到 `$HOME/.ssh`）。
 
@@ -161,10 +161,10 @@ Claude 在 sandbox 里看到的：
 
 例：
 ```sh
-ln -s ~/.ssh ~/.loopat/personal/simpx/secrets/.ssh
+ln -s ~/.ssh ~/.loopat/personal/simpx/.loopat/secrets/.ssh
 ```
 之后沙箱里：
-- `/personal/secrets/.ssh` 可见（因为 `/personal` 已 bind）
+- `/personal/.loopat/secrets/.ssh` 可见（因为 `/personal` 已 bind）
 - `/home/simpx/.ssh` 也可见（因为 `--bind /home/simpx/.ssh /home/simpx/.ssh`）—— 让 ssh 客户端读 `$HOME/.ssh` 拿到密钥
 
 Sandbox 默认看不到 `~/.ssh` `~/.aws` `~/.config/gh` 这些敏感路径。要 opt-in 必须在 `personal/<user>/` 下显式 ln -s。**目录就是 ACL** 这条原则的体现。
@@ -237,7 +237,7 @@ bun run --hot src/index.ts
 |---|---|
 | Claude 想 `cat ~/.aws/credentials` | tmpfs `/home/$USER` + 没 personal symlink → "No such file" |
 | Claude 想 `rm -rf /` | RO bind /usr /etc 等 → 写不动；rw 区域只有 workdir / context/notes / personal |
-| Claude 想 ssh 到外网机器 | personal/.ssh 没 ln 进来 → ssh client 找不到 key → 无法连。要 opt-in：用户 `ln -s ~/.ssh personal/secrets/.ssh` |
+| Claude 想 ssh 到外网机器 | personal/.ssh 没 ln 进来 → ssh client 找不到 key → 无法连。要 opt-in：用户 `ln -s ~/.ssh personal/.loopat/secrets/.ssh` |
 | Claude 写 memory 时引用真路径 | 不会发生 —— CLI 在 sandbox 内，看到的就是虚拟路径 |
 | 多 loop 间数据隔离 | 每 loop 自己的 `/loop/<id>/` 独立 bind；跨 loop 看不见 |
 | /tmp 写恶意东西 | 共享 host /tmp，但 tmp 本来就是 ephemeral，无害 |

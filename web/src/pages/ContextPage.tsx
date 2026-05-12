@@ -286,10 +286,10 @@ function SearchIcon() {
 }
 
 function isSecretsFolder(vault: VaultId, path: string): boolean {
-  return vault === "personal" && (path === "secrets" || path.endsWith("/secrets"))
+  return vault === "personal" && (path === ".loopat/secrets" || path.endsWith("/.loopat/secrets"))
 }
 function isSecretFile(vault: VaultId, path: string): boolean {
-  return vault === "personal" && path.startsWith("secrets/")
+  return vault === "personal" && path.startsWith(".loopat/secrets/")
 }
 
 function TreeNode({
