@@ -22,7 +22,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
       <DialogContent className="sm:max-w-sm bg-white">
         <DialogHeader>
           <DialogTitle className="text-center">
-            <img src="/logo.png" alt="loopat" className="h-12 w-12 mx-auto mb-2" />
+            <img src="/logo.png" alt="loopat" className="w-full max-w-[240px] mx-auto mb-2" />
             loopat
           </DialogTitle>
         </DialogHeader>
