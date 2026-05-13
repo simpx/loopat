@@ -140,3 +140,31 @@ export function resizeTerm(loopId: string, cols: number, rows: number) {
     t.proc.resize(cols, rows)
   } catch {}
 }
+
+/** Force-kill a loop's terminal PTY process and disconnect all subscribers.
+ *  Handles the in-flight spawn case (pending promise). */
+export function killTerm(loopId: string) {
+  const inflight = pending.get(loopId)
+  if (inflight) {
+    inflight.then((t) => {
+      terms.delete(loopId)
+      for (const ws of t.subscribers) {
+        try { ws.send(JSON.stringify({ type: "exit", code: -1 })); ws.close() } catch {}
+      }
+      try { t.proc.kill() } catch {}
+    }).catch(() => {})
+    pending.delete(loopId)
+    return
+  }
+  const t = terms.get(loopId)
+  if (!t) return
+  terms.delete(loopId)
+  for (const ws of t.subscribers) {
+    try {
+      ws.send(JSON.stringify({ type: "exit", code: -1 }))
+      ws.close()
+    } catch {}
+  }
+  t.subscribers.clear()
+  try { t.proc.kill() } catch {}
+}
