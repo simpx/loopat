@@ -24,8 +24,8 @@ import {
   personalDir,
   personalMemoryDir,
   teamMemoryDir,
-  personalLoopatDir,
-  personalSshPrivateKeyPath,
+  hostDeployKeyPath,
+  personalGitCryptKeyPath,
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
@@ -158,7 +158,7 @@ export async function ensureWorkspaceDirs() {
  *   1. mkdir + `git init` an empty personal/<user>/
  *   2. seed `memory/MEMORY.md` so SDK auto-recall sees something
  *   3. generate a loopat-managed ed25519 keypair under
- *      `.loopat/secrets/.ssh/` (deploy-key flow)
+ *      `host-secrets/<user>/deploy-key` (deploy-key flow, host-only)
  *
  * If `personalRepo` was given at register, the user goes through a separate
  * confirm step (see `importPersonalFromRepo`) AFTER they paste the public key
@@ -183,15 +183,17 @@ export async function provisionUserPersonal(userId: string): Promise<{ publicKey
 
 /**
  * Detect whether `personal/<user>/` is "fresh" — i.e. only has the
- * scaffolding we put there (`.git`, `memory/`, `.loopat/`). If yes, it's
- * safe to wipe + clone over the top. Anything else (existing notes, files
- * the user has written) means we refuse to overwrite.
+ * scaffolding we put there (`.git`, `memory/`). If yes, it's safe to wipe +
+ * clone over the top. Anything else means we refuse to overwrite.
+ *
+ * Note: host-secrets/<user>/ lives OUTSIDE personal/<user>/ so it's not
+ * part of this check and survives import without preservation logic.
  */
 export async function isPersonalFresh(userId: string): Promise<boolean> {
   const dir = personalDir(userId)
   try {
     const entries = await readdir(dir)
-    const SCAFFOLD = new Set([".git", "memory", ".loopat"])
+    const SCAFFOLD = new Set([".git", "memory"])
     return entries.every((e) => SCAFFOLD.has(e))
   } catch {
     return true
@@ -200,9 +202,12 @@ export async function isPersonalFresh(userId: string): Promise<boolean> {
 
 /**
  * One-shot clone using the user's loopat-managed deploy key. Replaces the
- * fresh-scaffolded `personal/<user>/` with the cloned repo, preserving our
- * managed `.loopat/secrets/` (keypair) and topping up `memory/MEMORY.md` if
- * the remote didn't ship one.
+ * fresh-scaffolded `personal/<user>/` with the cloned repo.
+ *
+ * If the cloned repo has `.gitattributes` with git-crypt entries, `cryptKey`
+ * (base64-encoded git-crypt key) must be provided — we run `git-crypt unlock`
+ * against it to decrypt the worktree. Save the key under host-secrets/ so
+ * subsequent `git pull` / re-clone can re-unlock without re-prompting.
  *
  * Returns { ok: false, error } on any failure; on failure personal/<user>/
  * is left untouched (we clone into a temp dir first).
@@ -210,7 +215,11 @@ export async function isPersonalFresh(userId: string): Promise<boolean> {
 export async function importPersonalFromRepo(
   userId: string,
   repoUrl: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  cryptKey?: string,
+): Promise<
+  | { ok: true; needsCryptKey?: boolean }
+  | { ok: false; error: string; needsCryptKey?: boolean; secretsExposed?: boolean; exposedFiles?: string[] }
+> {
   if (!repoUrl?.trim()) return { ok: false, error: "repoUrl required" }
 
   // Refuse if the user has already populated personal/. We don't want to nuke
@@ -219,7 +228,7 @@ export async function importPersonalFromRepo(
     return { ok: false, error: "personal/ is not empty — refusing to overwrite" }
   }
 
-  const priv = personalSshPrivateKeyPath(userId)
+  const priv = hostDeployKeyPath(userId)
   if (!existsSyncBase(priv)) {
     return { ok: false, error: "deploy keypair missing — re-register" }
   }
@@ -239,35 +248,42 @@ export async function importPersonalFromRepo(
     return { ok: false, error: `clone failed: ${msg}` }
   }
 
-  // Swap: preserve our managed .loopat/ dir (contains the deploy key), then
-  // replace personal/<user>/ with the clone, then move .loopat/ back in.
+  // Exposure check: refuse to adopt a repo whose .loopat/secrets/** are
+  // plaintext in git. Force user to set up git-crypt FIRST (and rotate the
+  // already-exposed secrets). If we proceeded, loopat would silently take
+  // ownership of leaked data — bad outcome, hard to undo.
+  const exposed = await detectExposedSecrets(tmp)
+  if (exposed.length > 0) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    return {
+      ok: false,
+      error: "secrets are exposed (plaintext) in this repo's git history",
+      secretsExposed: true,
+      exposedFiles: exposed.slice(0, 20),
+    }
+  }
+
+  // Detect git-crypt: presence of `filter=git-crypt` in any tracked
+  // .gitattributes. If yes, require cryptKey and unlock the worktree.
+  const isEncrypted = await detectGitCryptEnabled(tmp)
+  if (isEncrypted) {
+    if (!cryptKey?.trim()) {
+      await rm(tmp, { recursive: true, force: true }).catch(() => {})
+      return { ok: false, error: "repo uses git-crypt — paste your git-crypt key to unlock", needsCryptKey: true }
+    }
+    const unlockResult = await unlockWithCryptKey(tmp, userId, cryptKey)
+    if (!unlockResult.ok) {
+      await rm(tmp, { recursive: true, force: true }).catch(() => {})
+      return { ok: false, error: unlockResult.error }
+    }
+  }
+
+  // Replace personal/<user>/ with the clone. host-secrets/<user>/ is outside
+  // this dir so nothing to preserve.
   const dir = personalDir(userId)
-  const preserveDir = join(tmpdir(), `loopat-preserve-${userId}-${randomUUID().slice(0, 8)}`)
-  const loopatDir = personalLoopatDir(userId)
   try {
-    if (existsSyncBase(loopatDir)) await rename(loopatDir, preserveDir)
     await rm(dir, { recursive: true, force: true })
     await rename(tmp, dir)
-    if (existsSyncBase(preserveDir)) {
-      const dest = personalLoopatDir(userId)
-      if (existsSyncBase(dest)) {
-        // Cloned repo has its own .loopat/ — merge secrets/ from preserved
-        // (our deploy key) into the cloned dir.
-        const preservedSecrets = join(preserveDir, "secrets")
-        if (existsSyncBase(preservedSecrets)) {
-          const destSecrets = join(dest, "secrets")
-          await mkdir(destSecrets, { recursive: true })
-          // Move our secrets in, overwriting any committed secrets in the
-          // cloned repo (those shouldn't have been committed in the first place).
-          for (const e of await readdir(preservedSecrets)) {
-            await rename(join(preservedSecrets, e), join(destSecrets, e)).catch(() => {})
-          }
-        }
-        await rm(preserveDir, { recursive: true, force: true })
-      } else {
-        await rename(preserveDir, dest)
-      }
-    }
     // Top up memory/ index if remote didn't ship one
     const pm = personalMemoryDir(userId)
     await mkdir(pm, { recursive: true })
@@ -276,6 +292,96 @@ export async function importPersonalFromRepo(
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: `swap failed: ${e?.message ?? e}` }
+  }
+}
+
+// git-crypt's per-file magic header (10 bytes): \x00 G I T C R Y P T \x00
+const GIT_CRYPT_MAGIC = Buffer.from([0x00, 0x47, 0x49, 0x54, 0x43, 0x52, 0x59, 0x50, 0x54, 0x00])
+
+/**
+ * Returns tracked files under `.loopat/secrets/**` that are stored as
+ * plaintext (i.e., the worktree blob doesn't start with the git-crypt magic
+ * header). Reads the worktree directly: in a fresh clone where git-crypt
+ * isn't unlocked, the worktree contents ARE the raw blobs, so non-encrypted
+ * files are visibly plaintext here.
+ */
+async function detectExposedSecrets(repoDir: string): Promise<string[]> {
+  let stdout = ""
+  try {
+    const r = await execFileP("git", ["-C", repoDir, "ls-files", "-z", ".loopat/secrets"])
+    stdout = r.stdout
+  } catch {
+    return []
+  }
+  const files = stdout.split("\0").filter(Boolean)
+  const exposed: string[] = []
+  for (const f of files) {
+    try {
+      const buf = await readFile(join(repoDir, f))
+      if (buf.length === 0) continue // empty file is not "exposed", just useless
+      if (!buf.subarray(0, GIT_CRYPT_MAGIC.length).equals(GIT_CRYPT_MAGIC)) {
+        exposed.push(f)
+      }
+    } catch {
+      // unreadable — skip
+    }
+  }
+  return exposed
+}
+
+async function detectGitCryptEnabled(repoDir: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileP("git", ["-C", repoDir, "ls-files", "-z"])
+    const files = stdout.split("\0").filter((f) => f.endsWith(".gitattributes"))
+    for (const f of files) {
+      try {
+        const content = await readFile(join(repoDir, f), "utf8")
+        if (/filter=git-crypt/.test(content)) return true
+      } catch {}
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Persist cryptKey (base64) to host-secrets/<user>/git-crypt.key and run
+ * `git-crypt unlock` against the cloned repo. On failure, removes the saved
+ * keyfile so a retry can paste a different key.
+ */
+async function unlockWithCryptKey(
+  repoDir: string,
+  userId: string,
+  cryptKeyB64: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { saveGitCryptKey, gitCryptKeyExists } = await import("./git-crypt-key")
+  try {
+    const keyBuf = Buffer.from(cryptKeyB64.trim(), "base64")
+    if (keyBuf.length < 32) {
+      return { ok: false, error: "invalid git-crypt key (too short — must be base64-encoded export-key output)" }
+    }
+    await saveGitCryptKey(userId, keyBuf)
+  } catch (e: any) {
+    return { ok: false, error: `failed to save git-crypt key: ${e?.message ?? e}` }
+  }
+  const keyPath = personalGitCryptKeyPath(userId)
+  try {
+    await execFileP("git-crypt", ["unlock", keyPath], { cwd: repoDir })
+    return { ok: true }
+  } catch (e: any) {
+    if (await gitCryptKeyExists(userId)) {
+      const { rm: rmFile } = await import("node:fs/promises")
+      await rmFile(keyPath, { force: true }).catch(() => {})
+    }
+    const stderr = (e?.stderr ?? "").toString().trim()
+    if (/not the file you generated/i.test(stderr) || /Invalid key file/i.test(stderr)) {
+      return { ok: false, error: "git-crypt unlock failed: wrong key (HMAC mismatch)" }
+    }
+    if (/command not found/i.test(stderr) || e?.code === "ENOENT") {
+      return { ok: false, error: "git-crypt not installed on host (apt install git-crypt)" }
+    }
+    return { ok: false, error: `git-crypt unlock failed: ${stderr || e?.message || e}` }
   }
 }
 

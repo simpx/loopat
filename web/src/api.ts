@@ -95,14 +95,34 @@ export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   return (await r.json()) as PersonalStatus
 }
 
-export async function importPersonal(repoUrl?: string): Promise<{ ok: boolean; error?: string }> {
+export async function importPersonal(
+  repoUrl?: string,
+  cryptKey?: string,
+): Promise<{
+  ok: boolean
+  error?: string
+  needsCryptKey?: boolean
+  secretsExposed?: boolean
+  exposedFiles?: string[]
+}> {
+  const payload: Record<string, string> = {}
+  if (repoUrl) payload.repoUrl = repoUrl
+  if (cryptKey) payload.cryptKey = cryptKey
   const r = await apiFetch("/api/personal/import", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(repoUrl ? { repoUrl } : {}),
+    body: JSON.stringify(payload),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j.error ?? `import failed (${r.status})` }
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: j.error ?? `import failed (${r.status})`,
+      needsCryptKey: !!j.needsCryptKey,
+      secretsExposed: !!j.secretsExposed,
+      exposedFiles: Array.isArray(j.exposedFiles) ? j.exposedFiles : [],
+    }
+  }
   return { ok: true }
 }
 

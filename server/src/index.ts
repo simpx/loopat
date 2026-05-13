@@ -185,13 +185,23 @@ app.post("/api/personal/import", requireAuth, async (c) => {
   const provided = typeof body.repoUrl === "string" && body.repoUrl.trim() ? body.repoUrl.trim() : ""
   const repoUrl = provided || user.personalRepo
   if (!repoUrl) return c.json({ error: "no personalRepo on file and none provided" }, 400)
+  const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
   // If the user typed a fresh URL (had none on file, or changed it), persist
   // before attempting clone — keeps users.json + personal/ consistent.
   if (provided && provided !== user.personalRepo) {
     await setPersonalRepo(userId, provided)
   }
-  const r = await importPersonalFromRepo(userId, repoUrl)
-  if (!r.ok) return c.json({ error: r.error }, 400)
+  const r = await importPersonalFromRepo(userId, repoUrl, cryptKey)
+  if (!r.ok) {
+    // 422 = data condition prevents proceeding (secrets leaked — user must
+    // fix locally first, no amount of input here helps).
+    if (r.secretsExposed) {
+      return c.json({ error: r.error, secretsExposed: true, exposedFiles: r.exposedFiles ?? [] }, 422)
+    }
+    // 409 when the only thing missing is the git-crypt key — UI re-prompts.
+    if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
+    return c.json({ error: r.error }, 400)
+  }
   return c.json({ ok: true })
 })
 
