@@ -35,7 +35,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const personalCfg = await loadPersonalConfig(meta.createdBy)
-    const innerShell = personalCfg.sandbox?.shell ?? process.env.SHELL ?? "/bin/bash"
+    const innerShell = personalCfg.sandbox?.shell ?? process.env.SHELL ?? "/usr/bin/fish"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
     const bwrapArgs = await buildOuterBwrapArgs(loopId, meta.createdBy, { TERM: "xterm-256color" })
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
