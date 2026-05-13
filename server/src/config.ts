@@ -109,14 +109,8 @@ const WORKSPACE_TEMPLATE: WorkspaceConfig = {
 }
 
 const PERSONAL_TEMPLATE: PersonalConfig = {
-  default: "anthropic",
-  providers: {
-    anthropic: {
-      model: "claude-opus-4-7",
-      baseUrl: "https://api.anthropic.com",
-      apiKey: "",
-    },
-  },
+  default: "",
+  providers: {},
 }
 
 export const configPath = () => join(workspaceDir(), "config.json")
@@ -196,7 +190,7 @@ export async function loadPersonalConfig(user: string): Promise<PersonalConfig> 
     if (!parsed.providers || typeof parsed.providers !== "object") {
       throw new Error(`missing providers`)
     }
-    if (!parsed.default || !parsed.providers[parsed.default]) {
+    if (parsed.default && !parsed.providers[parsed.default]) {
       throw new Error(`default "${parsed.default}" not in providers`)
     }
   } catch (e: any) {
@@ -214,8 +208,10 @@ export async function loadPersonalConfig(user: string): Promise<PersonalConfig> 
   return parsed
 }
 
-export function getActiveProvider(cfg: PersonalConfig): { name: string; provider: ProviderConfig } {
-  return { name: cfg.default, provider: cfg.providers[cfg.default] }
+export function getActiveProvider(cfg: PersonalConfig): { name: string; provider: ProviderConfig } | null {
+  const name = cfg.default
+  if (!name || !cfg.providers[name]) return null
+  return { name, provider: cfg.providers[name] }
 }
 
 /**
