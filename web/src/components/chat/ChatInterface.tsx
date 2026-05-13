@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, useCallback, type FC } from "react";
 import {
   ThreadPrimitive,
   AuiIf,
+  useAuiState,
+  useComposerRuntime,
 } from "@assistant-ui/react";
 import { ArrowDownIcon } from "lucide-react";
 import UserMessage from "./UserMessage";
@@ -30,10 +32,15 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+/* ─── Composer draft cache ─── */
+
+// Survives LoopMain unmount/remount across loop switches (key={id}).
+const composerDrafts = new Map<string, string>();
+
 /* ─── Chat Interface ─── */
 
 export default function ChatInterface({ archived = false, onUnarchive }: { archived?: boolean; onUnarchive?: () => void } = {}) {
-  const { questions, sendAnswers, loadingHistory } = useLoopRuntimeExtra();
+  const { questions, sendAnswers, loadingHistory, loopId } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
 
@@ -44,6 +51,24 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
     if (!vp) return;
     vp.scrollTo({ top: vp.scrollHeight, behavior: "smooth" });
   }, []);
+
+  // Persist composer text across loop switches.
+  const composer = useComposerRuntime();
+  const composerText = useAuiState((s) => s.composer.text);
+  const composerTextRef = useRef(composerText);
+  composerTextRef.current = composerText;
+  useEffect(() => {
+    const draft = composerDrafts.get(loopId);
+    if (draft) {
+      composer.setText(draft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    return () => {
+      composerDrafts.set(loopId, composerTextRef.current);
+    };
+  }, [loopId]);
 
   // Auto-scroll to bottom: instant on load, throttled during streaming.
   // During history replay (loadingHistory=true), keep snapping to bottom on
