@@ -114,6 +114,8 @@ interface AskQuestionPending {
   reject: (err: Error) => void
 }
 
+const IDLE_TIMEOUT_MS = Number(process.env.LOOPAT_SESSION_IDLE_MS) || 5 * 60 * 1000
+
 class LoopSession {
   id: string
   private q: Query | null = null
@@ -123,10 +125,33 @@ class LoopSession {
   private historyLoaded: Promise<void>
   private pendingQuestions = new Map<string, AskQuestionPending>()
   private providerOverride: string | null = null
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private consuming = false
 
   constructor(id: string) {
     this.id = id
     this.historyLoaded = this.loadHistoryFromDisk()
+  }
+
+  private cancelIdleCleanup() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer)
+      this.idleTimer = null
+    }
+  }
+
+  private scheduleIdleCleanup() {
+    if (this.idleTimer) return
+    if (this.subscribers.size > 0) return
+    if (this.consuming) return // never interrupt an active generation
+    const tag = this.id.slice(0, 8)
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null
+      if (this.subscribers.size === 0) {
+        console.log(`[loop:${tag}] idle timeout — destroying session`)
+        this.destroy()
+      }
+    }, IDLE_TIMEOUT_MS)
   }
 
   /** Walk personal + workspace configs, preferring candidateNames order, and
@@ -387,6 +412,7 @@ class LoopSession {
   }
 
   private async consume(q: Query) {
+    this.consuming = true
     const tag = this.id.slice(0, 8)
     try {
       for await (const msg of q) {
@@ -412,11 +438,13 @@ class LoopSession {
       this.persist(err)
       this.broadcast(err)
     } finally {
+      this.consuming = false
       // Always emit a result marker so the frontend knows the run is done,
       // even if the generator ended without one (e.g. after interrupt).
       const result = { type: "result" as const }
       this.history.push(result as any)
       this.broadcast(result)
+      if (this.subscribers.size === 0) this.scheduleIdleCleanup()
     }
   }
 
@@ -493,6 +521,7 @@ class LoopSession {
     try {
       ws.send(JSON.stringify({ type: "history_end" }))
     } catch {}
+    this.cancelIdleCleanup()
     this.broadcastViewers()
     console.log(`[loop:${this.id.slice(0, 8)}] attach → viewers=${this.subscribers.size}`)
   }
@@ -500,6 +529,7 @@ class LoopSession {
   detach(ws: WSContext) {
     this.subscribers.delete(ws)
     this.broadcastViewers()
+    if (this.subscribers.size === 0) this.scheduleIdleCleanup()
     console.log(`[loop:${this.id.slice(0, 8)}] detach → viewers=${this.subscribers.size}`)
   }
 
@@ -527,6 +557,27 @@ class LoopSession {
 
   async interrupt() {
     if (this.q) await this.q.interrupt().catch(() => {})
+  }
+
+  /** Tear down the SDK process and disconnect all subscribers. Used when a
+   *  loop is archived so no orphaned processes remain. */
+  async destroy() {
+    this.cancelIdleCleanup()
+    sessions.delete(this.id)
+    if (this.q) {
+      try { await this.q.interrupt() } catch {}
+      this.q = null
+    }
+    for (const [, pending] of this.pendingQuestions) {
+      pending.reject(new Error("loop archived"))
+    }
+    this.pendingQuestions.clear()
+    const closeMsg = JSON.stringify({ type: "error", message: "loop archived" })
+    for (const [ws] of this.subscribers) {
+      try { ws.send(closeMsg) } catch {}
+      try { ws.close() } catch {}
+    }
+    this.subscribers.clear()
   }
 
   /**
@@ -653,4 +704,12 @@ export function getSession(id: string): LoopSession {
     sessions.set(id, s)
   }
   return s
+}
+
+/** Destroy a loop's session if one exists. No-op if there is no active session. */
+export function destroySession(id: string): boolean {
+  const s = sessions.get(id)
+  if (!s) return false
+  s.destroy()
+  return true
 }
