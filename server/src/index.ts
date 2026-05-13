@@ -5,10 +5,12 @@ import { existsSync } from "node:fs"
 import { execSync } from "node:child_process"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh } from "./loops"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
-import { getSession } from "./session"
+// `destroySession` here clashes with auth's session-token destroyer; alias to
+// keep both callable without import-order-dependent shadowing.
+import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
-import { attachTerm, detachTerm, writeTerm, resizeTerm } from "./term"
+import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
   WORKSPACE,
@@ -247,6 +249,12 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   }
   if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
   const updated = await patchLoopMeta(id, patch)
+  // On archive: tear down the Claude SDK process and terminal PTY so no
+  // orphaned processes linger. Un-archive is fine — next connect re-spawns.
+  if (body.archived === true) {
+    destroyLoopSession(id)
+    killTerm(id)
+  }
   return c.json(updated)
 })
 
