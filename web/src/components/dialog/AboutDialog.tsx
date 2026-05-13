@@ -19,26 +19,26 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-sm bg-white">
         <DialogHeader>
           <DialogTitle className="text-center">
-            <span className="text-5xl block mb-3">🧶</span>
+            <img src="/logo.png" alt="loopat" className="h-12 w-12 mx-auto mb-2" />
             loopat
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
-          <div>
-            <div className="text-gray-400 text-xs mb-0.5">Server</div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-gray-400 text-xs mb-1">Server</div>
             <div className="font-mono text-gray-700">
               {server.branch}@{server.commit.slice(0, 7)}
             </div>
           </div>
-          <div>
-            <div className="text-gray-400 text-xs mb-0.5">Build</div>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="text-gray-400 text-xs mb-1">Build</div>
             <div className="font-mono text-gray-700">
               {build.commit.slice(0, 7)}
             </div>
-            <div className="font-mono text-gray-400 text-xs">
+            <div className="font-mono text-gray-400 text-xs mt-0.5">
               {build.time}
             </div>
           </div>
