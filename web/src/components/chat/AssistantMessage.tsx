@@ -2,7 +2,7 @@ import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { ChevronDownIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
 import {
@@ -148,18 +148,19 @@ export default function AssistantMessage() {
               <Collapsible
                 open={running ? true : thinkingOpen}
                 onOpenChange={setThinkingOpen}
-                className="group/think my-1.5 overflow-hidden rounded-lg border border-gray-200 bg-white border-l-[3px] border-l-gray-300"
+                className="group/think my-1 overflow-hidden rounded-md border border-gray-100 bg-gray-50/50"
               >
-                <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-gray-50">
-                  <span className="font-medium text-gray-500 text-xs">{label}</span>
+                <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors hover:bg-gray-100/50">
+                  <BrainIcon className="h-3 w-3 shrink-0 text-gray-400" />
+                  <span className="text-gray-400">{label}</span>
                   {running && (
-                    <span className="shrink-0 rounded px-1.5 py-px text-[10px] font-medium bg-sky-100 text-sky-700">
+                    <span className="shrink-0 rounded px-1 py-px text-[10px] font-medium text-gray-400">
                       thinking
                     </span>
                   )}
                   <ChevronDownIcon
                     className={cn(
-                      "ml-auto h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform",
+                      "ml-auto h-3 w-3 shrink-0 text-gray-300 transition-transform",
                       (running || thinkingOpen) && "rotate-180",
                     )}
                   />
@@ -172,7 +173,7 @@ export default function AssistantMessage() {
                   )}
                 >
                   <div className="border-t border-gray-100 px-3 py-2">
-                    <div className="max-h-64 overflow-y-auto text-[12px] text-gray-600 leading-relaxed">
+                    <div className="max-h-64 overflow-y-auto text-[12px] text-gray-500 leading-relaxed">
                       {children}
                     </div>
                   </div>
