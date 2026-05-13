@@ -10,6 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
+import { AboutDialog } from "./components/dialog/AboutDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
 import { FocusDetail } from "./pages/FocusDetail"
@@ -38,6 +39,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
   const loggedIn = !!ws.currentUser
 
@@ -131,6 +133,16 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                 <div className="absolute right-0 top-full mt-1 z-20 w-32 bg-white border border-gray-200 rounded shadow-md py-1">
                   <button
                     type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setAboutOpen(true)
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    About
+                  </button>
+                  <button
+                    type="button"
                     onClick={async () => {
                       setMenuOpen(false)
                       await ws.logout()
@@ -162,6 +174,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} />
       )}
       {authOpen && <AuthPage onClose={() => setAuthOpen(false)} />}
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   )
 }
