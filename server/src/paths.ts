@@ -63,8 +63,11 @@ export const personalLoopatSecretsDir = (user: string) => join(personalLoopatDir
 export const personalProviderKeyPath = (user: string, providerName: string) =>
   join(personalLoopatSecretsDir(user), "provider-keys", providerName)
 
-// Loopat-managed deploy key for the user's personal git repo. Generated at
-// register time; private key never leaves disk under this path.
-export const personalSshDir = (user: string) => join(personalLoopatSecretsDir(user), ".ssh")
-export const personalSshPrivateKeyPath = (user: string) => join(personalSshDir(user), "id_ed25519")
-export const personalSshPublicKeyPath = (user: string) => join(personalSshDir(user), "id_ed25519.pub")
+// Host-only per-user state: deploy key (loopat → personal repo) and git-crypt
+// key (decrypts secrets/ inside the cloned personal repo). Kept OUTSIDE
+// personal/<user>/ so it never appears in the sandbox bind view. The user
+// can't see these from inside their loop's terminal / file browser.
+export const hostSecretsDir = (user: string) => join(LOOPAT_HOME, "host-secrets", user)
+export const hostDeployKeyPath = (user: string) => join(hostSecretsDir(user), "deploy-key")
+export const hostDeployKeyPubPath = (user: string) => join(hostSecretsDir(user), "deploy-key.pub")
+export const personalGitCryptKeyPath = (user: string) => join(hostSecretsDir(user), "git-crypt.key")

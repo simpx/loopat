@@ -1,11 +1,13 @@
 /**
  * Loopat-managed SSH keypair for the user's personal git repo (deploy key).
  *
- * - Private key lives at `personal/<user>/.loopat/secrets/.ssh/id_ed25519`
- *   (mode 0600). Only that user's sandbox sees it (via the personal bind +
- *   outer-sandbox $HOME/.ssh rebind).
- * - Public key is rendered to the UI once at register time so the user can
- *   register it as a deploy key on their GitHub personal repo.
+ * Lives under `host-secrets/<user>/deploy-key` — OUTSIDE personal/<user>/ so
+ * it never enters the sandbox bind view. The user can't see this key from
+ * inside their loop. It's loopat-the-platform's clone credential, not a
+ * user-owned tool.
+ *
+ * Public key is rendered to the UI once at register time so the user can
+ * register it as a deploy key on their personal git repo (aone / github).
  *
  * Idempotent: if the keypair already exists, returns the existing public key.
  */
@@ -14,9 +16,9 @@ import { mkdir, readFile, chmod } from "node:fs/promises"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import {
-  personalSshDir,
-  personalSshPrivateKeyPath,
-  personalSshPublicKeyPath,
+  hostSecretsDir,
+  hostDeployKeyPath,
+  hostDeployKeyPubPath,
 } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -28,9 +30,9 @@ const execFileP = promisify(execFile)
  * and retrigger key gen via /api/personal/import (which calls this again).
  */
 export async function ensurePersonalKeypair(userId: string): Promise<{ publicKey: string | null }> {
-  const dir = personalSshDir(userId)
-  const priv = personalSshPrivateKeyPath(userId)
-  const pub = personalSshPublicKeyPath(userId)
+  const dir = hostSecretsDir(userId)
+  const priv = hostDeployKeyPath(userId)
+  const pub = hostDeployKeyPubPath(userId)
 
   await mkdir(dir, { recursive: true })
   await chmod(dir, 0o700).catch(() => {})
@@ -52,7 +54,7 @@ export async function ensurePersonalKeypair(userId: string): Promise<{ publicKey
 }
 
 export async function getPublicKey(userId: string): Promise<string | null> {
-  const pub = personalSshPublicKeyPath(userId)
+  const pub = hostDeployKeyPubPath(userId)
   if (!existsSync(pub)) return null
   return (await readFile(pub, "utf8")).trim()
 }
