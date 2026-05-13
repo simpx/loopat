@@ -16,7 +16,7 @@ import { FocusDetail } from "./pages/FocusDetail"
 import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { AuthPage } from "./pages/AuthPage"
-import { getServerWorkspace } from "./api"
+import { getServerWorkspace, getVersion, getBuildInfo } from "./api"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
@@ -52,6 +52,20 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         setWorkspaceName(name)
         document.title = `${name} · loopat`
       }
+    })
+  }, [])
+
+  useEffect(() => {
+    const build = getBuildInfo()
+    getVersion().then((v) => {
+      console.log(
+        `%cloopat %cserver:%c ${v.branch}@${v.commit.slice(0, 7)} %cbuild:%c ${build.commit.slice(0, 7)} @ ${build.time}`,
+        "font-weight:bold",
+        "color:#666",
+        "color:#61afef",
+        "color:#666",
+        "color:#98c379",
+      )
     })
   }, [])
 
