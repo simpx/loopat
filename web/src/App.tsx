@@ -17,12 +17,14 @@ import { FocusPage } from "./pages/FocusPage"
 import { FocusDetail } from "./pages/FocusDetail"
 import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
+import { KanbanPage } from "./pages/KanbanPage"
 import { AuthPage } from "./pages/AuthPage"
 import { getServerWorkspace, getVersion, getBuildInfo } from "./api"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
   { id: "focus", label: "Focus", icon: "◉" },
+  { id: "kanban", label: "Kanban", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
 ] as const
 
@@ -227,6 +229,7 @@ export function App() {
             <Route path="/" element={<Navigate to="/loop" replace />} />
             <Route path="/loop" element={<LoopRedirect />} />
             <Route path="/loop/:id" element={<LoopPage />} />
+            <Route path="/kanban" element={<KanbanPage />} />
             <Route path="/focus" element={<FocusPage />} />
             <Route path="/focus/:name" element={<FocusDetail />} />
             <Route path="/topic/:name" element={<TopicView />} />
