@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
+import { execSync } from "node:child_process"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal } from "./loops"
 import { getSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
@@ -41,6 +42,13 @@ app.use("/api/*", cors({ origin: (o) => o ?? "*", credentials: true }))
 
 // public routes
 app.get("/api/health", (c) => c.json({ ok: true, loopatHome: LOOPAT_HOME, workspace: WORKSPACE }))
+
+app.get("/api/version", (c) => {
+  let branch = "unknown", commit = "unknown"
+  try { branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim() } catch {}
+  try { commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim() } catch {}
+  return c.json({ branch, commit })
+})
 
 // ── providers (public) ──
 // Merges personal + workspace configs. Personal providers take precedence

@@ -268,3 +268,16 @@ export async function getProviders(): Promise<ProvidersResponse> {
   if (!r.ok) return { providers: {}, default: "" }
   return (await r.json()) as ProvidersResponse
 }
+
+export type VersionInfo = { branch: string; commit: string }
+export async function getVersion(): Promise<VersionInfo> {
+  const r = await apiFetch("/api/version")
+  if (!r.ok) return { branch: "unknown", commit: "unknown" }
+  return (await r.json()) as VersionInfo
+}
+
+declare const __BUILD_COMMIT__: string
+declare const __BUILD_TIME__: string
+export function getBuildInfo() {
+  return { commit: __BUILD_COMMIT__, time: __BUILD_TIME__ }
+}
