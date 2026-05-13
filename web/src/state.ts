@@ -25,7 +25,12 @@ export type WorkspaceState = {
   currentUser: User | null
   authLoading: boolean
   login: (username: string, password: string) => Promise<{ error?: string }>
-  register: (input: { username: string; password: string; personalRepo?: string }) => Promise<{ error?: string }>
+  register: (input: { username: string; password: string; personalRepo?: string }) => Promise<{
+    error?: string
+    publicKey?: string | null
+    personalRepo?: string | null
+    needsImport?: boolean
+  }>
   logout: () => Promise<void>
 }
 
@@ -89,7 +94,12 @@ export function useWorkspaceState(): WorkspaceState {
     async (input: { username: string; password: string; personalRepo?: string }) => {
       const r = await apiRegister(input)
       if (r.user) setCurrentUser(r.user)
-      return { error: r.error }
+      return {
+        error: r.error,
+        publicKey: r.publicKey,
+        personalRepo: r.personalRepo,
+        needsImport: r.needsImport,
+      }
     },
     [],
   )
