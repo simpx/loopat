@@ -110,6 +110,22 @@ export async function createUser(input: {
   return user
 }
 
+/**
+ * Persist a user's personalRepo URL. Used when the user filled it in after
+ * registration (via the import dialog). Idempotent — no-op if the value is
+ * unchanged.
+ */
+export async function setPersonalRepo(userId: string, repoUrl: string): Promise<User | null> {
+  const f = await readUsersFile()
+  const idx = f.users.findIndex((u) => u.id === userId)
+  if (idx < 0) return null
+  const updated = { ...f.users[idx], personalRepo: repoUrl.trim() || undefined }
+  const users = f.users.slice()
+  users[idx] = updated
+  await writeUsersFile({ users })
+  return updated
+}
+
 // ── Persistent sessions (disk-backed, survives restarts) ──
 
 function sessionsPath(): string {

@@ -11,6 +11,7 @@ import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
+import { PersonalImportDialog } from "./components/dialog/PersonalImportDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
 import { FocusDetail } from "./pages/FocusDetail"
@@ -40,6 +41,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [authOpen, setAuthOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
+  const [personalOpen, setPersonalOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
   const loggedIn = !!ws.currentUser
 
@@ -130,7 +132,17 @@ function Shell({ ws }: { ws: WorkspaceState }) {
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 w-32 bg-white border border-gray-200 rounded shadow-md py-1">
+                <div className="absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-gray-200 rounded shadow-md py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setPersonalOpen(true)
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Personal repo
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -175,6 +187,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
       )}
       {authOpen && <AuthPage onClose={() => setAuthOpen(false)} />}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <PersonalImportDialog open={personalOpen} onClose={() => setPersonalOpen(false)} />
     </div>
   )
 }

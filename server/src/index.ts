@@ -3,8 +3,8 @@ import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync } from "node:child_process"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo } from "./loops"
-import { getPublicKey } from "./personal-keys"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh } from "./loops"
+import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 import { getSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
@@ -22,6 +22,7 @@ import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
   findUser,
+  setPersonalRepo,
   verifyPassword,
   createSession,
   destroySession,
@@ -157,11 +158,20 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const user = await findUser(userId)
   if (!user) return c.json({ error: "user missing" }, 500)
-  const publicKey = await getPublicKey(userId)
+  // If the user never went through register-with-personalRepo (or ssh-keygen
+  // was unavailable then), the keypair may be missing — try once now so this
+  // endpoint can serve as the lazy-init for the deploy-key flow.
+  let publicKey = await getPublicKey(userId)
+  if (!publicKey) {
+    const r = await ensurePersonalKeypair(userId)
+    publicKey = r.publicKey
+  }
+  const imported = !(await isPersonalFresh(userId))
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
     publicKey,
+    imported,
   })
 })
 
@@ -170,10 +180,14 @@ app.post("/api/personal/import", requireAuth, async (c) => {
   const user = await findUser(userId)
   if (!user) return c.json({ error: "user missing" }, 500)
   const body = await c.req.json().catch(() => ({}))
-  const repoUrl = typeof body.repoUrl === "string" && body.repoUrl.trim()
-    ? body.repoUrl.trim()
-    : user.personalRepo
+  const provided = typeof body.repoUrl === "string" && body.repoUrl.trim() ? body.repoUrl.trim() : ""
+  const repoUrl = provided || user.personalRepo
   if (!repoUrl) return c.json({ error: "no personalRepo on file and none provided" }, 400)
+  // If the user typed a fresh URL (had none on file, or changed it), persist
+  // before attempting clone — keeps users.json + personal/ consistent.
+  if (provided && provided !== user.personalRepo) {
+    await setPersonalRepo(userId, provided)
+  }
   const r = await importPersonalFromRepo(userId, repoUrl)
   if (!r.ok) return c.json({ error: r.error }, 400)
   return c.json({ ok: true })

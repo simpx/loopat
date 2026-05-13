@@ -82,14 +82,17 @@ export async function register(input: {
 
 // ── personal repo bootstrap ──
 
-export async function getPersonalStatus(): Promise<{
+export type PersonalStatus = {
   userId: string
   personalRepo: string | null
   publicKey: string | null
-} | null> {
+  imported: boolean
+}
+
+export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   const r = await apiFetch("/api/personal/status")
   if (!r.ok) return null
-  return (await r.json()) as { userId: string; personalRepo: string | null; publicKey: string | null }
+  return (await r.json()) as PersonalStatus
 }
 
 export async function importPersonal(repoUrl?: string): Promise<{ ok: boolean; error?: string }> {
