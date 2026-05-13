@@ -187,7 +187,7 @@ export async function provisionUserPersonal(userId: string): Promise<{ publicKey
  * safe to wipe + clone over the top. Anything else (existing notes, files
  * the user has written) means we refuse to overwrite.
  */
-async function isPersonalFresh(userId: string): Promise<boolean> {
+export async function isPersonalFresh(userId: string): Promise<boolean> {
   const dir = personalDir(userId)
   try {
     const entries = await readdir(dir)
