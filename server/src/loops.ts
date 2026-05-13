@@ -1,9 +1,10 @@
-import { mkdir, readdir, readFile, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rename, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
+import { tmpdir } from "node:os"
 import {
   loopsDir,
   loopDir,
@@ -23,10 +24,13 @@ import {
   personalDir,
   personalMemoryDir,
   teamMemoryDir,
+  personalLoopatDir,
+  personalSshPrivateKeyPath,
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
+import { ensurePersonalKeypair } from "./personal-keys"
 
 const execFileP = promisify(execFile)
 
@@ -148,20 +152,131 @@ export async function ensureWorkspaceDirs() {
 }
 
 /**
- * Provision a freshly-registered user's personal/ tree. Tries to clone
- * personalRepo if provided; on failure (network, auth, bad URL) falls back
- * to an empty git-init'd dir so vaultWrite auto-commits still work.
+ * Provision a freshly-registered user's personal/ tree. NEVER clones the
+ * user's remote repo here — the server has no credentials for private repos
+ * at register time. We:
+ *   1. mkdir + `git init` an empty personal/<user>/
+ *   2. seed `memory/MEMORY.md` so SDK auto-recall sees something
+ *   3. generate a loopat-managed ed25519 keypair under
+ *      `.loopat/secrets/.ssh/` (deploy-key flow)
+ *
+ * If `personalRepo` was given at register, the user goes through a separate
+ * confirm step (see `importPersonalFromRepo`) AFTER they paste the public key
+ * as a deploy key on the remote.
+ *
+ * Returns the public key so the UI can show it.
  */
-export async function provisionUserPersonal(userId: string, personalRepo?: string): Promise<void> {
+export async function provisionUserPersonal(userId: string): Promise<{ publicKey: string | null }> {
   const dir = personalDir(userId)
-  const r = await cloneOrMkdir(dir, personalRepo)
+  await mkdir(dir, { recursive: true })
 
   const pm = personalMemoryDir(userId)
   await mkdir(pm, { recursive: true })
   const pmIdx = `${pm}/MEMORY.md`
   if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
 
-  if (!r.cloned) await gitInitIfMissing(dir)
+  await gitInitIfMissing(dir)
+
+  const { publicKey } = await ensurePersonalKeypair(userId)
+  return { publicKey }
+}
+
+/**
+ * Detect whether `personal/<user>/` is "fresh" — i.e. only has the
+ * scaffolding we put there (`.git`, `memory/`, `.loopat/`). If yes, it's
+ * safe to wipe + clone over the top. Anything else (existing notes, files
+ * the user has written) means we refuse to overwrite.
+ */
+export async function isPersonalFresh(userId: string): Promise<boolean> {
+  const dir = personalDir(userId)
+  try {
+    const entries = await readdir(dir)
+    const SCAFFOLD = new Set([".git", "memory", ".loopat"])
+    return entries.every((e) => SCAFFOLD.has(e))
+  } catch {
+    return true
+  }
+}
+
+/**
+ * One-shot clone using the user's loopat-managed deploy key. Replaces the
+ * fresh-scaffolded `personal/<user>/` with the cloned repo, preserving our
+ * managed `.loopat/secrets/` (keypair) and topping up `memory/MEMORY.md` if
+ * the remote didn't ship one.
+ *
+ * Returns { ok: false, error } on any failure; on failure personal/<user>/
+ * is left untouched (we clone into a temp dir first).
+ */
+export async function importPersonalFromRepo(
+  userId: string,
+  repoUrl: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!repoUrl?.trim()) return { ok: false, error: "repoUrl required" }
+
+  // Refuse if the user has already populated personal/. We don't want to nuke
+  // their work. They can `rm -rf` manually and retry if that's really intended.
+  if (!(await isPersonalFresh(userId))) {
+    return { ok: false, error: "personal/ is not empty — refusing to overwrite" }
+  }
+
+  const priv = personalSshPrivateKeyPath(userId)
+  if (!existsSyncBase(priv)) {
+    return { ok: false, error: "deploy keypair missing — re-register" }
+  }
+
+  // Clone into a tmp dir using the user's deploy key. StrictHostKeyChecking=
+  // accept-new because we have no pre-populated known_hosts for github/gitlab
+  // on first run; UserKnownHostsFile=/dev/null avoids polluting any host file.
+  const tmp = await mkdtemp(join(tmpdir(), `loopat-import-${userId}-`))
+  const gitSsh = `ssh -i ${priv} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+  try {
+    await execFileP("git", ["clone", "--", repoUrl, tmp], {
+      env: { ...process.env, GIT_SSH_COMMAND: gitSsh },
+    })
+  } catch (e: any) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    const msg = (e?.stderr || e?.message || String(e)).toString().trim().split("\n").slice(-3).join(" ")
+    return { ok: false, error: `clone failed: ${msg}` }
+  }
+
+  // Swap: preserve our managed .loopat/ dir (contains the deploy key), then
+  // replace personal/<user>/ with the clone, then move .loopat/ back in.
+  const dir = personalDir(userId)
+  const preserveDir = join(tmpdir(), `loopat-preserve-${userId}-${randomUUID().slice(0, 8)}`)
+  const loopatDir = personalLoopatDir(userId)
+  try {
+    if (existsSyncBase(loopatDir)) await rename(loopatDir, preserveDir)
+    await rm(dir, { recursive: true, force: true })
+    await rename(tmp, dir)
+    if (existsSyncBase(preserveDir)) {
+      const dest = personalLoopatDir(userId)
+      if (existsSyncBase(dest)) {
+        // Cloned repo has its own .loopat/ — merge secrets/ from preserved
+        // (our deploy key) into the cloned dir.
+        const preservedSecrets = join(preserveDir, "secrets")
+        if (existsSyncBase(preservedSecrets)) {
+          const destSecrets = join(dest, "secrets")
+          await mkdir(destSecrets, { recursive: true })
+          // Move our secrets in, overwriting any committed secrets in the
+          // cloned repo (those shouldn't have been committed in the first place).
+          for (const e of await readdir(preservedSecrets)) {
+            await rename(join(preservedSecrets, e), join(destSecrets, e)).catch(() => {})
+          }
+        }
+        await rm(preserveDir, { recursive: true, force: true })
+      } else {
+        await rename(preserveDir, dest)
+      }
+    }
+    // Top up memory/ index if remote didn't ship one
+    const pm = personalMemoryDir(userId)
+    await mkdir(pm, { recursive: true })
+    const pmIdx = `${pm}/MEMORY.md`
+    if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: `swap failed: ${e?.message ?? e}` }
+  }
 }
 
 async function ensureSymlink(link: string, target: string) {

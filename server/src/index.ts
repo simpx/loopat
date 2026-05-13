@@ -3,8 +3,11 @@ import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync } from "node:child_process"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal } from "./loops"
-import { getSession, destroySession } from "./session"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh } from "./loops"
+import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
+// `destroySession` here clashes with auth's session-token destroyer; alias to
+// keep both callable without import-order-dependent shadowing.
+import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
@@ -21,6 +24,7 @@ import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
   findUser,
+  setPersonalRepo,
   verifyPassword,
   createSession,
   destroySession,
@@ -92,11 +96,21 @@ app.post("/api/auth/register", async (c) => {
   if (!password) return c.json({ error: "password required" }, 400)
   try {
     const user = await createUser({ id: username, password, personalRepo })
-    // best-effort: clone personalRepo if given, fall back to empty git-init'd dir
-    await provisionUserPersonal(user.id, user.personalRepo)
+    // Scaffold personal/<user>/ (empty git init + memory stub) and generate a
+    // loopat-managed deploy keypair. NO clone here — server has no creds to
+    // pull a private repo. The UI shows publicKey + asks user to register it
+    // as a deploy key on `personalRepo`, then calls /api/personal/import.
+    const { publicKey } = await provisionUserPersonal(user.id)
     const token = createSession(user.id)
     setSessionCookie(c, token)
-    return c.json({ user: { id: user.id } })
+    // needsImport only if user wants a clone AND we have a key to give them.
+    // Otherwise UI skips straight to the workspace.
+    return c.json({
+      user: { id: user.id },
+      publicKey,
+      personalRepo: user.personalRepo ?? null,
+      needsImport: !!user.personalRepo && !!publicKey,
+    })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "register failed" }, 400)
   }
@@ -127,6 +141,58 @@ app.get("/api/auth/me", async (c) => {
   const userId = getRequestUserId(c)
   if (!userId) return c.json({ error: "unauthorized" }, 401)
   return c.json({ user: { id: userId } })
+})
+
+// ── personal repo bootstrap (deploy-key flow) ──
+//
+// Two-step:
+//   1. POST /api/auth/register  → user created, personal/<id>/ scaffolded with
+//      `git init` + ed25519 deploy keypair. Response carries `publicKey`.
+//   2. User registers publicKey as a deploy key (write access) on their
+//      personalRepo, then calls POST /api/personal/import to clone the repo
+//      using the managed private key. Cloned content replaces the empty
+//      scaffold; the keypair is preserved.
+//
+// GET /api/personal/status reports current state so the UI can render
+// "needs import" banner + retry button.
+
+app.get("/api/personal/status", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "user missing" }, 500)
+  // If the user never went through register-with-personalRepo (or ssh-keygen
+  // was unavailable then), the keypair may be missing — try once now so this
+  // endpoint can serve as the lazy-init for the deploy-key flow.
+  let publicKey = await getPublicKey(userId)
+  if (!publicKey) {
+    const r = await ensurePersonalKeypair(userId)
+    publicKey = r.publicKey
+  }
+  const imported = !(await isPersonalFresh(userId))
+  return c.json({
+    userId,
+    personalRepo: user.personalRepo ?? null,
+    publicKey,
+    imported,
+  })
+})
+
+app.post("/api/personal/import", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "user missing" }, 500)
+  const body = await c.req.json().catch(() => ({}))
+  const provided = typeof body.repoUrl === "string" && body.repoUrl.trim() ? body.repoUrl.trim() : ""
+  const repoUrl = provided || user.personalRepo
+  if (!repoUrl) return c.json({ error: "no personalRepo on file and none provided" }, 400)
+  // If the user typed a fresh URL (had none on file, or changed it), persist
+  // before attempting clone — keeps users.json + personal/ consistent.
+  if (provided && provided !== user.personalRepo) {
+    await setPersonalRepo(userId, provided)
+  }
+  const r = await importPersonalFromRepo(userId, repoUrl)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
 })
 
 // All non-auth /api/* routes below are publicly readable; writes go through
@@ -186,7 +252,7 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   // On archive: tear down the Claude SDK process and terminal PTY so no
   // orphaned processes linger. Un-archive is fine — next connect re-spawns.
   if (body.archived === true) {
-    destroySession(id)
+    destroyLoopSession(id)
     killTerm(id)
   }
   return c.json(updated)

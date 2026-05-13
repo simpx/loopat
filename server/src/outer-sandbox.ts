@@ -22,6 +22,7 @@
  * See memory: project_loop_dir_is_sandbox.md
  */
 import { existsSync } from "node:fs"
+import { lstat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
@@ -33,6 +34,7 @@ import {
   workspaceReposDir,
   workspaceTeamClaudePath,
   personalDir,
+  personalSshDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
 import { resolvePersonalDeps } from "./personal-deps"
@@ -140,6 +142,19 @@ export async function buildOuterBwrapArgs(
   // re-bind personal-dep targets so e.g. /home/<user>/.ssh works for ssh client
   for (const target of personalDeps) {
     args.push("--bind", target, target)
+  }
+
+  // Loopat-managed deploy key: if `personal/<user>/.loopat/secrets/.ssh/` is a
+  // real directory (not a symlink — symlinks are the legacy path, handled by
+  // personalDeps above), bind it onto $HOME/.ssh so ssh/git find the key at
+  // the standard location. Idempotent with personalDeps: if user symlinked the
+  // .ssh dir, lstat returns isSymbolicLink and we skip this block.
+  const sshSrc = personalSshDir(createdBy)
+  if (existsSync(sshSrc)) {
+    const st = await lstat(sshSrc).catch(() => null)
+    if (st && st.isDirectory() && !st.isSymbolicLink()) {
+      args.push("--bind", sshSrc, join(home, ".ssh"))
+    }
   }
 
   // user-declared host -> sandbox mounts (personal/<user>/.loopat/config.json sandbox.mounts)
