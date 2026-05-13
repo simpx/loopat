@@ -81,12 +81,10 @@ export default function Composer() {
                 />
               </div>
 
-              <div className="hidden sm:block">
-                <TokenUsagePie
-                  used={Math.min(usedTokens, contextWindow)}
-                  total={contextWindow}
-                />
-              </div>
+              <TokenUsagePie
+                used={Math.min(usedTokens, contextWindow)}
+                total={contextWindow}
+              />
 
               <ModelSelector />
             </div>
@@ -99,7 +97,7 @@ export default function Composer() {
 
               <div
                 className={cn(
-                  "hidden text-xs text-gray-300 transition-opacity lg:block",
+                  "hidden text-xs text-gray-400 transition-opacity lg:block",
                   hasInput ? "opacity-0" : "opacity-100",
                 )}
               >
