@@ -251,6 +251,9 @@ export interface LoopRuntimeExtra {
   thinkingBlockCount: number
   /** This loop's id — needed by ModelSelector to call /strip-thinking. */
   loopId: string
+  /** True while server is replaying history on connect. Chat scrolls to bottom
+   *  instantly during this phase; after it ends, normal scroll behavior resumes. */
+  loadingHistory: boolean
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -267,6 +270,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   clearContext: () => {},
   thinkingBlockCount: 0,
   loopId: "",
+  loadingHistory: true,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -299,6 +303,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
   const loadingHistoryRef = useRef(true)
+  const [loadingHistory, setLoadingHistory] = useState(true)
   const reconnectTimerRef = useRef<number | null>(null)
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
@@ -373,8 +378,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [raw])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "" }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
   )
 
   useEffect(() => {
@@ -388,6 +393,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setRaw([])
       setRunning(false)
       loadingHistoryRef.current = true
+      setLoadingHistory(true)
       // Clear tool progress & task state & questions on reconnect
       toolProgressRef.current = new Map()
       setToolProgressVersion((v) => v + 1)
@@ -434,6 +440,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }
         if (m?.type === "history_end") {
           loadingHistoryRef.current = false
+          setLoadingHistory(false)
           setRunning(false)
           return
         }

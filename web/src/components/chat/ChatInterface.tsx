@@ -33,7 +33,7 @@ const ThreadWelcome: FC = () => {
 /* ─── Chat Interface ─── */
 
 export default function ChatInterface({ archived = false, onUnarchive }: { archived?: boolean; onUnarchive?: () => void } = {}) {
-  const { questions, sendAnswers } = useLoopRuntimeExtra();
+  const { questions, sendAnswers, loadingHistory } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
 
@@ -45,11 +45,15 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
     vp.scrollTo({ top: vp.scrollHeight, behavior: "smooth" });
   }, []);
 
-  // Auto-scroll to bottom: instant on first load, throttled during streaming.
-  // Tracks whether the user has scrolled away via scroll events, so we know
-  // their intent before content changes push them out of the near-bottom zone.
+  // Auto-scroll to bottom: instant on load, throttled during streaming.
+  // During history replay (loadingHistory=true), keep snapping to bottom on
+  // every content change without setting didInitialScroll — content-visibility
+  // may cause scrollHeight to be underestimated until all messages render.
   const bottomRef = useRef<HTMLDivElement>(null);
   const didInitialScroll = useRef(false);
+  const loadingHistoryRef = useRef(loadingHistory);
+  loadingHistoryRef.current = loadingHistory;
+  const prevLoading = useRef(loadingHistory);
   useEffect(() => {
     const inner = containerRef.current;
     const vp = inner?.parentElement as HTMLElement | null;
@@ -57,8 +61,6 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
     vpRef.current = vp;
     const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
 
-    // Track user intent: if the user manually scrolls up, we stop following.
-    // Reset when they scroll back to the bottom (or we programmatically put them there).
     let userScrolledUp = false;
     const onScroll = () => {
       if (nearBottom()) {
@@ -66,7 +68,6 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
       } else {
         userScrolledUp = true;
       }
-      // Show button when > 200px from bottom
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
@@ -79,7 +80,12 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
         vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
         vp.style.scrollBehavior = prev;
-        didInitialScroll.current = true;
+        // Only finalize initial-scroll phase when history is no longer loading.
+        // While loading, content-visibility underestimates scrollHeight, so we
+        // keep re-snapping on every resize until all messages are in.
+        if (!loadingHistoryRef.current) {
+          didInitialScroll.current = true;
+        }
         userScrolledUp = false;
       } else if (didInitialScroll.current) {
         vp.scrollTop = vp.scrollHeight;
@@ -97,6 +103,22 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
       vp.removeEventListener("scroll", onScroll);
     };
   }, []);
+  // When history finishes loading, do one final snap to bottom and finalize
+  // initial-scroll.  No resize may happen at the exact moment loadingHistory
+  // flips, so we drive the scroll directly.
+  useEffect(() => {
+    if (prevLoading.current && !loadingHistory) {
+      const vp = vpRef.current;
+      if (vp && !didInitialScroll.current) {
+        const prev = vp.style.scrollBehavior;
+        vp.style.scrollBehavior = "auto";
+        vp.scrollTop = vp.scrollHeight;
+        vp.style.scrollBehavior = prev;
+        didInitialScroll.current = true;
+      }
+    }
+    prevLoading.current = loadingHistory;
+  }, [loadingHistory]);
 
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
