@@ -22,7 +22,8 @@ bun install                          # also pulls the platform-specific claude b
 ### 3. first run — bootstraps the workspace
 
 ```sh
-bun run dev
+bun run dev                # listens on localhost
+bun run dev:host           # listens on 0.0.0.0 (accessible from LAN)
 ```
 
 On the very first run the server populates `LOOPAT_HOME` (default `~/.loopat`) with:
@@ -67,6 +68,7 @@ To put a reverse proxy in front, point `/` to `web/dist/` (or `localhost:7787`) 
 |---|---|---|
 | `LOOPAT_HOME` | `~/.loopat` | the workspace directory itself. Single workspace per loopat instance — to run a second workspace, start another loopat with a different `LOOPAT_HOME`. URL/display name = basename minus leading dots (`~/.loopat` → `loopat`). |
 | `LOOPAT_USER` | `$USER` | active driver name; also where `personal/` lives |
+| `HOST` | `127.0.0.1` | server bind address. Set to `0.0.0.0` to accept connections from LAN / ngrok. Also passed to Vite dev server. |
 | `PORT` | `7787` | server port |
 
 ## Layout

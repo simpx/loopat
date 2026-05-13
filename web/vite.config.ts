@@ -28,13 +28,13 @@ export default defineConfig({
     },
   },
   server: {
-    host: "localhost",
+    host: process.env.HOST ?? "localhost",
     port: 5173,
     allowedHosts: [".ngrok-free.app"],
     proxy: {
-      "/api": "http://localhost:7787",
+      "/api": { target: `http://${process.env.HOST ?? "localhost"}:7787` },
       "/ws": {
-        target: "ws://localhost:7787",
+        target: `ws://${process.env.HOST ?? "localhost"}:7787`,
         ws: true,
       },
     },
