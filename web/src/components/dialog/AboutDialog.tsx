@@ -39,7 +39,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
               {build.commit.slice(0, 7)}
             </div>
             <div className="font-mono text-gray-400 text-xs mt-0.5">
-              {build.time}
+              {new Date(build.time).toLocaleString()}
             </div>
           </div>
         </div>
