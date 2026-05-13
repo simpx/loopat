@@ -62,3 +62,9 @@ export const personalLoopatConfigPath = (user: string) => join(personalLoopatDir
 export const personalLoopatSecretsDir = (user: string) => join(personalLoopatDir(user), "secrets")
 export const personalProviderKeyPath = (user: string, providerName: string) =>
   join(personalLoopatSecretsDir(user), "provider-keys", providerName)
+
+// Loopat-managed deploy key for the user's personal git repo. Generated at
+// register time; private key never leaves disk under this path.
+export const personalSshDir = (user: string) => join(personalLoopatSecretsDir(user), ".ssh")
+export const personalSshPrivateKeyPath = (user: string) => join(personalSshDir(user), "id_ed25519")
+export const personalSshPublicKeyPath = (user: string) => join(personalSshDir(user), "id_ed25519.pub")

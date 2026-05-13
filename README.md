@@ -7,7 +7,7 @@ Single-binary collaborative AI coding workspace. Loop = context + AI + workdir, 
 ### 1. system deps
 
 ```sh
-sudo apt install bubblewrap          # Linux only — required for the sandbox
+sudo apt install bubblewrap openssh-client  # bubblewrap: sandbox (Linux only) · openssh-client: deploy-key flow for personal/ import
 curl -fsSL https://bun.sh/install | bash
 ```
 

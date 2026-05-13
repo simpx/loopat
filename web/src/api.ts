@@ -46,11 +46,25 @@ export async function login(username: string, password: string): Promise<{ user?
   return { user: j.user as User }
 }
 
+export type RegisterResult = {
+  user?: User
+  /** ed25519 public key for the loopat-managed deploy keypair (server-generated).
+   *  Null if ssh-keygen was missing on the host — register still succeeds, but
+   *  the deploy-key import flow is unavailable until the host installs it. */
+  publicKey?: string | null
+  /** Repo URL the user wants imported into personal/. Null if not provided. */
+  personalRepo?: string | null
+  /** True iff user supplied a personalRepo AND publicKey was generated. The
+   *  UI should walk them through the deploy-key + import step. */
+  needsImport?: boolean
+  error?: string
+}
+
 export async function register(input: {
   username: string
   password: string
   personalRepo?: string
-}): Promise<{ user?: User; error?: string }> {
+}): Promise<RegisterResult> {
   const r = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -58,7 +72,38 @@ export async function register(input: {
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { error: j.error ?? `register failed (${r.status})` }
-  return { user: j.user as User }
+  return {
+    user: j.user as User,
+    publicKey: j.publicKey,
+    personalRepo: j.personalRepo ?? null,
+    needsImport: !!j.needsImport,
+  }
+}
+
+// ── personal repo bootstrap ──
+
+export type PersonalStatus = {
+  userId: string
+  personalRepo: string | null
+  publicKey: string | null
+  imported: boolean
+}
+
+export async function getPersonalStatus(): Promise<PersonalStatus | null> {
+  const r = await apiFetch("/api/personal/status")
+  if (!r.ok) return null
+  return (await r.json()) as PersonalStatus
+}
+
+export async function importPersonal(repoUrl?: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/personal/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(repoUrl ? { repoUrl } : {}),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `import failed (${r.status})` }
+  return { ok: true }
 }
 
 export async function logout(): Promise<void> {
