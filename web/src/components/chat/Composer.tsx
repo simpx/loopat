@@ -127,7 +127,7 @@ export default function Composer() {
                     type="button"
                     variant="default"
                     size="icon"
-                    className="h-8 w-8 rounded-lg bg-red-500 hover:bg-red-600"
+                    className="h-8 w-8 rounded-lg bg-red-500 hover:bg-red-600 text-white"
                     aria-label="Stop generating"
                   >
                     <SquareIcon className="h-3 w-3 fill-current" />
