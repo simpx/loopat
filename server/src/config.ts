@@ -62,6 +62,8 @@ export type SandboxMount = {
 }
 
 export type SandboxConfig = {
+  /** Shell for PTY sessions (e.g. /usr/bin/fish). Falls back to SHELL env var then /bin/bash. */
+  shell?: string
   /** Extra binds from host into sandbox. */
   mounts?: SandboxMount[]
   /** Dirs prepended to PATH inside sandbox (after `~`/`$VAR` expansion). */
