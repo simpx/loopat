@@ -39,6 +39,7 @@ export type LoopMeta = {
   title: string
   createdAt: string
   createdBy: string
+  driver?: string
   repo?: string
   branch?: string
   config?: {
