@@ -188,12 +188,19 @@ export async function loadPersonalConfig(user: string): Promise<PersonalConfig> 
   }
 
   const raw = await readFile(path, "utf8")
-  const parsed = JSON.parse(raw) as PersonalConfig
-  if (!parsed.providers || typeof parsed.providers !== "object") {
-    throw new Error(`${path}: malformed, missing providers`)
-  }
-  if (!parsed.default || !parsed.providers[parsed.default]) {
-    throw new Error(`${path}: default "${parsed.default}" not in providers`)
+  let parsed: PersonalConfig
+  try {
+    parsed = JSON.parse(raw) as PersonalConfig
+    if (!parsed.providers || typeof parsed.providers !== "object") {
+      throw new Error(`missing providers`)
+    }
+    if (!parsed.default || !parsed.providers[parsed.default]) {
+      throw new Error(`default "${parsed.default}" not in providers`)
+    }
+  } catch (e: any) {
+    console.warn(`[loopat] personal config: ${path} is malformed (${e?.message ?? e}), rewriting template`)
+    await writeFile(path, JSON.stringify(PERSONAL_TEMPLATE, null, 2) + "\n")
+    parsed = JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
   }
   const keyMtimes: Record<string, number> = {}
   for (const [name, p] of Object.entries(parsed.providers)) {
