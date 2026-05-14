@@ -5,11 +5,12 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check } from "lucide-react"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
+import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
 import { GitDiffSidebar } from "../components/GitDiffSidebar"
@@ -24,6 +25,14 @@ export function LoopPage() {
   const ws = useWorkspace()
 
   if (!id) return <Navigate to={`/loop`} replace />
+
+  // Anonymous on /loop/:id → read-only share view. Server gates by meta.public.
+  // ws.loops is empty for anonymous visitors (the list endpoint requires auth),
+  // so we don't even look in it; the share view fetches meta on its own.
+  if (!ws.currentUser) {
+    return <SharePage />
+  }
+
   const meta = ws.loops.find((l) => l.id === id)
   if (!meta) {
     // Loop not in current filtered list. Most common cause: user just archived
@@ -356,6 +365,8 @@ function LoopHeader({
             👥 {viewers}
           </span>
         )}
+        <div className="flex-1" />
+        <ShareToggle meta={meta} />
       </div>
 
       {/* workdir + branch + mode toggles */}
@@ -397,6 +408,90 @@ function LoopHeader({
         ))}
       </div>
     </header>
+  )
+}
+
+/**
+ * Toggles meta.public on the loop. When on, shows the /share/<id> URL with a
+ * copy button. Only the loop's `createdBy` is allowed to flip the flag —
+ * server enforces this too; the button is hidden for non-owners since they
+ * can't change it anyway.
+ */
+function ShareToggle({ meta }: { meta: LoopMeta }) {
+  const ws = useWorkspace()
+  const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const isOwner = ws.currentUser?.id === meta.createdBy
+  const isPublic = meta.public === true
+  if (!ws.currentUser) return null
+
+  const shareUrl = `${location.origin}/loop/${meta.id}`
+
+  const onToggle = async () => {
+    if (!isOwner || busy) return
+    setBusy(true)
+    try {
+      await ws.setLoopPublic(meta.id, !isPublic)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  if (!isOwner) {
+    // Non-owner: just show a static badge so collaborators can see the state.
+    return (
+      <span
+        title={isPublic ? "this loop is shared publicly" : "this loop is private"}
+        className={
+          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] " +
+          (isPublic
+            ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+            : "bg-gray-100 text-gray-600")
+        }
+      >
+        {isPublic ? <Globe size={11} /> : <Lock size={11} />}
+        {isPublic ? "public" : "private"}
+      </span>
+    )
+  }
+
+  return (
+    <div className="inline-flex items-center gap-1">
+      {isPublic && (
+        <button
+          type="button"
+          onClick={onCopy}
+          title={shareUrl}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-gray-600 hover:bg-gray-100"
+        >
+          {copied ? <Check size={11} /> : <Copy size={11} />}
+          <span className="hidden md:inline">{copied ? "copied" : "copy link"}</span>
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={busy}
+        title={isPublic ? "stop sharing" : "share publicly (anyone with the link can view)"}
+        className={
+          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border disabled:opacity-50 " +
+          (isPublic
+            ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+            : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100")
+        }
+      >
+        {isPublic ? <Globe size={11} /> : <Lock size={11} />}
+        {isPublic ? "shared" : "share"}
+      </button>
+    </div>
   )
 }
 
@@ -492,6 +587,7 @@ function InfoPanel({ meta }: { meta: LoopMeta }) {
         <Row label="created" value={new Date(meta.createdAt).toLocaleString()} />
         <Row label="status" value="active" />
         <Row label="driver" value={isMine ? `${meta.createdBy} (you)` : meta.createdBy} />
+        <Row label="sharing" value={meta.public ? `public — /loop/${meta.id.slice(0, 8)}…` : "private"} />
       </Section>
       <Section label="workdir">
         <Row label="id" value={meta.id} mono />

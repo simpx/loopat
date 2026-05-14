@@ -55,6 +55,13 @@ export type LoopMeta = {
    */
   archived?: boolean
   archivedAt?: string
+  /**
+   * If true, this loop's chat (and only the chat) is readable by anonymous
+   * visitors at `/share/:id`. Everything else (workspace, files, kanban, ...)
+   * still requires auth. Only the loop's `createdBy` may toggle it.
+   */
+  public?: boolean
+  publicAt?: string
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index

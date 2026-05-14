@@ -7,6 +7,9 @@ export type LoopMeta = {
   branch?: string
   archived?: boolean
   archivedAt?: string
+  /** If true, /share/:id is publicly viewable. Toggle via setLoopPublic. */
+  public?: boolean
+  publicAt?: string
 }
 
 export type User = { id: string }
@@ -156,6 +159,22 @@ export async function setLoopArchived(id: string, archived: boolean): Promise<Lo
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ archived }),
   })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+export async function setLoopPublic(id: string, isPublic: boolean): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ public: isPublic }),
+  })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+export async function getLoopMeta(id: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}`)
   if (!r.ok) return null
   return (await r.json()) as LoopMeta
 }
