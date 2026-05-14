@@ -30,6 +30,7 @@ interface ToolRendererProps {
   status?: ToolStatus;
   elapsedSeconds?: number;
   taskState?: TaskState;
+  toolCallId?: string;
 }
 
 /* ─── Elapsed timer helpers ─── */
@@ -301,6 +302,7 @@ export default function ToolRenderer({
   status = "complete",
   elapsedSeconds,
   taskState,
+  toolCallId,
 }: ToolRendererProps) {
   const meta = getToolMeta(toolName);
   const Icon = meta.icon;
@@ -348,7 +350,7 @@ export default function ToolRenderer({
       open={open}
       onOpenChange={setOpen}
       className={cn(
-        "group/tool my-1.5 overflow-hidden rounded-lg border border-gray-200 bg-white border-l-[3px]",
+        "group/tool my-1.5 overflow-hidden rounded-lg border border-gray-100 bg-gray-50/60 border-l-[3px]",
         meta.borderClass,
         isRunning && "animate-pulse",
       )}
@@ -473,6 +475,7 @@ export default function ToolRenderer({
               status={status}
               taskState={taskState}
               elapsedSeconds={elapsed}
+              toolCallId={toolCallId}
             />
           )}
 

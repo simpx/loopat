@@ -210,6 +210,7 @@ export default function AssistantMessage() {
                   status={status}
                   elapsedSeconds={toolProgress?.elapsed_time_seconds}
                   taskState={taskFromToolUseId}
+                  toolCallId={toolCallId}
                 />
               </ErrorBoundary>
             );

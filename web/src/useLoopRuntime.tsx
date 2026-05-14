@@ -6,6 +6,7 @@ type RawMsg = {
   id: string
   role: "user" | "assistant"
   content: any[]
+  parent_tool_use_id?: string | null
 }
 
 function asContentArray(c: any): any[] {
@@ -139,7 +140,7 @@ function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
   return out
 }
 
-function convertMessage(raw: RawMsg) {
+export function convertMessage(raw: RawMsg) {
   const parts: any[] = []
   for (const b of raw.content) {
     if (b?.type === "text") {
@@ -277,6 +278,10 @@ export interface LoopRuntimeExtra {
   /** True while server is replaying history on connect. Chat scrolls to bottom
    *  instantly during this phase; after it ends, normal scroll behavior resumes. */
   loadingHistory: boolean
+  /** Set of tool_use_ids that are Agent or Task tools. */
+  agentToolUseIds: ReadonlySet<string>
+  /** Agent tool_use_id → child RawMsgs that belong to that agent. */
+  childMessagesByAgentId: ReadonlyMap<string, RawMsg[]>
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -300,6 +305,8 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   thinkingBlockCount: 0,
   loopId: "",
   loadingHistory: true,
+  agentToolUseIds: new Set(),
+  childMessagesByAgentId: new Map(),
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -431,9 +438,56 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     return n
   }, [raw])
 
+  const { aggregated, agentToolUseIds, childMessagesByAgentId } = useMemo(() => {
+    try {
+      let from = 0
+      for (let i = raw.length - 1; i >= 0; i--) {
+        const m: any = raw[i]
+        const firstPart = Array.isArray(m?.content) ? m.content[0] : null
+        if (firstPart?.type === "clear-divider") {
+          from = i + 1
+          break
+        }
+      }
+      const allEnriched = aggregateToolResults(from === 0 ? raw : raw.slice(from))
+
+      const agentIds = new Set<string>()
+      for (const m of allEnriched) {
+        if (!Array.isArray(m.content)) continue
+        for (const b of m.content) {
+          if (b?.type === "tool_use" && (b.name === "Agent" || b.name === "Task") && b.id) {
+            agentIds.add(b.id)
+          }
+        }
+      }
+
+      const main: RawMsg[] = []
+      const childrenByAgent = new Map<string, RawMsg[]>()
+      for (const m of allEnriched) {
+        const pid = m.parent_tool_use_id
+        if (pid && agentIds.has(pid)) {
+          const existing = childrenByAgent.get(pid)
+          if (existing) existing.push(m)
+          else childrenByAgent.set(pid, [m])
+        } else {
+          main.push(m)
+        }
+      }
+
+      return {
+        aggregated: main,
+        agentToolUseIds: agentIds as ReadonlySet<string>,
+        childMessagesByAgentId: childrenByAgent as ReadonlyMap<string, RawMsg[]>,
+      }
+    } catch (e) {
+      console.error("[fe:aggregateToolResults]", e)
+      return { aggregated: [] as RawMsg[], agentToolUseIds: new Set() as ReadonlySet<string>, childMessagesByAgentId: new Map() as ReadonlyMap<string, RawMsg[]> }
+    }
+  }, [raw])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId],
   )
 
   useEffect(() => {
@@ -637,10 +691,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         if (m?.type === "user" && m.message) {
           // upsert by uuid: dedup against history-replay + StrictMode double-mount
           const uuid: string = m.uuid || freshId("u")
+          const parentId: string | null = m.parent_tool_use_id ?? null
           try {
             setRaw((prev) => {
               if (prev.some((x) => x.id === uuid)) return prev
-              return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content) }]
+              return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content), parent_tool_use_id: parentId }]
             })
           } catch {}
         } else if (m?.type === "assistant" && m.message?.content) {
@@ -650,9 +705,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           // and replace it — otherwise both appear side-by-side.
           const uuid: string = m.uuid ?? freshId("a")
           const content = m.message.content
+          const parentId: string | null = m.parent_tool_use_id ?? null
           try {
             setRaw((prev) => {
-              const full: RawMsg = { id: uuid, role: "assistant", content }
+              const full: RawMsg = { id: uuid, role: "assistant", content, parent_tool_use_id: parentId }
               const idx = prev.findIndex((x) => x.id === uuid)
               if (idx >= 0) {
                 const out = prev.slice()
@@ -719,29 +775,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       attemptsRef.current = 0
     }
   }, [loopId, currentUserId])
-
-  const aggregated = useMemo(() => {
-    try {
-      // CC-style: after a /clear, hide everything from prior sessions in
-      // the UI. The clear-boundary marker itself is dropped too — a fresh
-      // empty thread is the visual cue, matching CC's terminal-clearing
-      // behavior. The raw history (and messages.jsonl) is intact, just
-      // not displayed.
-      let from = 0
-      for (let i = raw.length - 1; i >= 0; i--) {
-        const m: any = raw[i]
-        const firstPart = Array.isArray(m?.content) ? m.content[0] : null
-        if (firstPart?.type === "clear-divider") {
-          from = i + 1
-          break
-        }
-      }
-      return aggregateToolResults(from === 0 ? raw : raw.slice(from))
-    } catch (e) {
-      console.error("[fe:aggregateToolResults]", e)
-      return []
-    }
-  }, [raw])
 
   const onNew = useCallback(async (message: AppendMessage) => {
     let text = ""
