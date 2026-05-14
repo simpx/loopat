@@ -19,6 +19,8 @@ import {
 import { cn } from "@/lib/utils";
 import TodoRenderer from "./TodoRenderer";
 import AgentRenderer from "./AgentRenderer";
+import PermissionPrompt from "./PermissionPrompt";
+import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 import type { TaskState } from "@/useLoopRuntime";
 
 type ToolStatus = "running" | "complete" | "incomplete" | "requires-action";
@@ -310,7 +312,14 @@ export default function ToolRenderer({
   const [open, setOpen] = useState(false);
   const isDone = status === "complete";
   const isRunning = status === "running";
+  const isActionNeeded = status === "requires-action";
   const statusCfg = STATUS_CONFIG[status];
+
+  const { permissionPrompt, answerPermission } = useLoopRuntimeExtra();
+  const needsPermission = isActionNeeded || (permissionPrompt?.toolUseId === toolCallId);
+
+  // Auto-expand when waiting for permission
+  const effectiveOpen = open || needsPermission;
 
   // Per-tool elapsed timer (SDK or local fallback)
   const elapsed = useElapsedTimer(isRunning, elapsedSeconds);
@@ -336,8 +345,8 @@ export default function ToolRenderer({
         : [])
     : null;
 
-  // Collapsed preview content for Write/Edit
-  const collapsedPreview = !open
+  // Collapsed preview content for Write/Edit (skip when permission prompt is forcing open)
+  const collapsedPreview = !effectiveOpen
     ? isWrite && writeContent
       ? briefContent(writeContent, 200)
       : isEdit && (hasDiff || editHasChange)
@@ -347,7 +356,7 @@ export default function ToolRenderer({
 
   return (
     <Collapsible
-      open={open}
+      open={effectiveOpen}
       onOpenChange={setOpen}
       className={cn(
         "group/tool my-1.5 overflow-hidden rounded-lg border border-gray-100 bg-gray-50/60 border-l-[3px]",
@@ -372,14 +381,16 @@ export default function ToolRenderer({
             </>
           )}
 
-          {/* Elapsed time badge when running */}
-          {isRunning && (
+          {/* Status badge */}
+          {needsPermission ? (
+            <span className="ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium bg-amber-100 text-amber-700">
+              Action needed
+            </span>
+          ) : isRunning ? (
             <span className="ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium tabular-nums bg-sky-100 text-sky-700">
               {formatElapsed(elapsed)}
             </span>
-          )}
-
-          {!isRunning && (
+          ) : (
             <span
               className={cn(
                 "ml-auto shrink-0 rounded px-1.5 py-px text-[10px] font-medium",
@@ -441,6 +452,17 @@ export default function ToolRenderer({
         )}
       >
         <div className="border-t border-gray-100 px-2 md:px-3 py-2">
+          {/* Permission prompt — shown when this tool needs user approval */}
+          {needsPermission && permissionPrompt && (
+            <PermissionPrompt
+              toolName={permissionPrompt.toolName}
+              title={permissionPrompt.title}
+              displayName={permissionPrompt.displayName}
+              onAllow={() => answerPermission(permissionPrompt.toolUseId, true)}
+              onDeny={() => answerPermission(permissionPrompt.toolUseId, false)}
+            />
+          )}
+
           {/* Write — show full content with file header */}
           {isWrite && isDone && writeContent && (
             <WriteContentBlock filePath={summary} content={writeContent} />
@@ -484,8 +506,8 @@ export default function ToolRenderer({
             <CodeBlock text={typeof result === "string" ? result : JSON.stringify(result, null, 2)} />
           )}
 
-          {/* Running state — show loader when no meaningful content yet */}
-          {isRunning && !result && !hasArgs && !isAgent && !(isTodo && todos && todos.length > 0) && (
+          {/* Running state — show loader when no meaningful content yet (skip when waiting for permission) */}
+          {isRunning && !needsPermission && !result && !hasArgs && !isAgent && !(isTodo && todos && todos.length > 0) && (
             <div className="flex items-center gap-2 py-1 text-xs text-gray-400">
               <LoaderIcon className="h-3 w-3 animate-spin" />
               Working...

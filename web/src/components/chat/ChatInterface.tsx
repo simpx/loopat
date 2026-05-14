@@ -10,7 +10,7 @@ import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import Composer from "./Composer";
 import AskUserQuestionRenderer from "./AskUserQuestionRenderer";
-import PermissionPrompt from "./PermissionPrompt";
+
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -187,11 +187,6 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
 
       {/* Footer — outside viewport so it stays fixed, never scrolls */}
       <div className="shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-1 md:pt-2 pb-3 md:pb-6">
-        {/* Pending permission prompt — fixed above questions */}
-        <ErrorBoundary name="PermissionPrompt">
-          <PermissionPrompt />
-        </ErrorBoundary>
-
         {/* Pending questions (AskUserQuestion tool) — fixed above input */}
         {questionEntries.length > 0 && (
           <ErrorBoundary name="QuestionsPanel">
