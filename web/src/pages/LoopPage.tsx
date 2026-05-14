@@ -5,18 +5,19 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch } from "lucide-react"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { getContext, type ContextMount, type LoopMeta } from "../api"
 import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
+import { GitDiffSidebar } from "../components/GitDiffSidebar"
 import { lazy, Suspense } from "react"
 const Editor = lazy(() => import("../Editor").then(m => ({ default: m.Editor })))
 const Terminal = lazy(() => import("../Terminal").then(m => ({ default: m.Terminal })))
 
-type RightMode = "info" | "workdir" | "editor" | "terminal"
+type RightMode = "info" | "workdir" | "editor" | "terminal" | "git"
 
 export function LoopPage() {
   const { id } = useParams<{ id: string }>()
@@ -207,6 +208,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 
 function LoopMain({ meta }: { meta: LoopMeta }) {
   const ws = useWorkspace()
+  const isMobile = useIsMobile()
   const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
@@ -256,7 +258,13 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           </LoopRuntimeProvider>
         </div>
       </main>
-      {rightOpen && (
+      {rightOpen && rightMode === "git" && isMobile ? (
+        <div className="fixed inset-0 z-40">
+          <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
+        </div>
+      ) : rightOpen && rightMode === "git" ? (
+        <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
+      ) : rightOpen && (
         <RightPanel
           loopId={meta.id}
           meta={meta}
@@ -367,6 +375,17 @@ function LoopHeader({
           {modeBtn("▤ workdir", "workdir")}
           {modeBtn("✎ editor", "editor")}
           {modeBtn("▷ terminal", "terminal")}
+          <button
+            className={
+              rightOpen && rightMode === "git"
+                ? "px-2 py-0.5 rounded bg-gray-100 text-gray-900"
+                : "px-2 py-0.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+            }
+            onClick={() => toggleMode("git")}
+            title="git changes"
+          >
+            <GitBranch size={14} />
+          </button>
         </div>
       </div>
 
