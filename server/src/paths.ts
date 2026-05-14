@@ -71,3 +71,6 @@ export const hostSecretsDir = (user: string) => join(LOOPAT_HOME, "host-secrets"
 export const hostDeployKeyPath = (user: string) => join(hostSecretsDir(user), "deploy-key")
 export const hostDeployKeyPubPath = (user: string) => join(hostSecretsDir(user), "deploy-key.pub")
 export const personalGitCryptKeyPath = (user: string) => join(hostSecretsDir(user), "git-crypt.key")
+export const personalTokenUsagePath = (user: string) => join(personalLoopatDir(user), "token-usage.json")
+export const workspaceSecretsDir = () => join(workspaceDir(), "secrets")
+export const teamProviderKeyPath = (providerName: string) => join(workspaceSecretsDir(), "team-keys", providerName)

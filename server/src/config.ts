@@ -1,10 +1,12 @@
 import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   personalLoopatConfigPath,
   personalLoopatDir,
   personalProviderKeyPath,
+  personalTokenUsagePath,
+  teamProviderKeyPath,
   workspaceDir,
   workspaceTeamClaudeJsonPath,
 } from "./paths"
@@ -82,6 +84,9 @@ export type WorkspaceConfig = {
   knowledge?: RemoteSpec
   notes?: RemoteSpec
   repos?: RepoSpec[]
+  /** Team-level provider definitions (no apiKey — keys are per-user in personal secrets). */
+  providers?: Record<string, Omit<ProviderConfig, "apiKey">>
+  default?: string
 }
 
 /**
@@ -98,6 +103,8 @@ export type PersonalConfig = {
   default: string
   providers: Record<string, ProviderConfig>
   sandbox?: SandboxConfig
+  /** IM webhook URL for user notifications (e.g. WeCom, DingTalk, Feishu). */
+  webhookUrl?: string
 }
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
@@ -227,5 +234,112 @@ export async function loadTeamClaudeJson(): Promise<TeamClaudeJson> {
   } catch (e: any) {
     console.warn(`[loopat] team claude.json malformed at ${p}: ${e?.message ?? e}`)
     return {}
+  }
+}
+
+// ── token usage ──
+
+export type TokenUsage = Record<string, { inputTokens: number; outputTokens: number }>
+
+export async function loadTokenUsage(user: string): Promise<TokenUsage> {
+  const p = personalTokenUsagePath(user)
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(await readFile(p, "utf8")) as TokenUsage
+  } catch {
+    return {}
+  }
+}
+
+export async function saveTokenUsage(user: string, usage: TokenUsage): Promise<void> {
+  await mkdir(personalLoopatDir(user), { recursive: true })
+  await writeFile(personalTokenUsagePath(user), JSON.stringify(usage, null, 2) + "\n")
+}
+
+export async function addTokenUsage(user: string, model: string, inputTokens: number, outputTokens: number): Promise<void> {
+  if (!model || (inputTokens === 0 && outputTokens === 0)) return
+  const usage = await loadTokenUsage(user)
+  const entry = usage[model] ?? { inputTokens: 0, outputTokens: 0 }
+  entry.inputTokens += inputTokens
+  entry.outputTokens += outputTokens
+  usage[model] = entry
+  await saveTokenUsage(user, usage)
+}
+
+// ── team API keys ──
+
+export async function readTeamApiKey(providerName: string): Promise<string> {
+  const p = teamProviderKeyPath(providerName)
+  if (!existsSync(p)) return ""
+  try {
+    return (await readFile(p, "utf8")).trim()
+  } catch {
+    return ""
+  }
+}
+
+// ── config persistence ──
+
+/** Save personal config to disk. apiKeys are written separately to secrets files
+ *  only when non-empty values are provided (otherwise existing keys are kept). */
+export async function savePersonalConfig(user: string, cfg: {
+  default?: string
+  providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
+  webhookUrl?: string
+}): Promise<void> {
+  // Load existing config to merge
+  const existing = await loadPersonalConfig(user)
+  // Build the config.json content (no apiKeys)
+  const providers: Record<string, Omit<ProviderConfig, "apiKey">> = {}
+  if (cfg.providers) {
+    for (const [name, p] of Object.entries(cfg.providers)) {
+      providers[name] = {
+        model: p.model,
+        baseUrl: p.baseUrl,
+        ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
+      }
+      // Write apiKey to secrets file only if a non-empty value was provided
+      if (p.apiKey !== undefined && p.apiKey.trim()) {
+        const keyDir = dirname(personalProviderKeyPath(user, name))
+        await mkdir(keyDir, { recursive: true })
+        await writeFile(personalProviderKeyPath(user, name), p.apiKey.trim() + "\n")
+      }
+    }
+  }
+  const out: PersonalConfig = {
+    default: cfg.default ?? existing.default,
+    providers: cfg.providers !== undefined ? providers as any : existing.providers,
+    ...(existing.sandbox ? { sandbox: existing.sandbox } : {}),
+    webhookUrl: cfg.webhookUrl !== undefined ? cfg.webhookUrl : existing.webhookUrl,
+  }
+  await mkdir(personalLoopatDir(user), { recursive: true })
+  await writeFile(personalLoopatConfigPath(user), JSON.stringify(out, null, 2) + "\n")
+  // Clear cache for this user so next load picks up changes
+  personalCache.delete(user)
+}
+
+/** Save workspace config to disk. Only provided fields are overwritten.
+ *  Team API keys are written to secrets/team-keys/<name> when provided. */
+export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig> & {
+  providerApiKeys?: Record<string, string>
+}): Promise<void> {
+  const existing = await loadConfig()
+  const merged: WorkspaceConfig = { ...existing }
+  if (cfg.providers !== undefined) merged.providers = cfg.providers
+  if (cfg.default !== undefined) merged.default = cfg.default
+  if (cfg.knowledge !== undefined) merged.knowledge = cfg.knowledge
+  if (cfg.notes !== undefined) merged.notes = cfg.notes
+  if (cfg.repos !== undefined) merged.repos = cfg.repos
+  await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
+  cachedWorkspace = null
+  // Write team API keys
+  if (cfg.providerApiKeys) {
+    for (const [name, key] of Object.entries(cfg.providerApiKeys)) {
+      if (key !== undefined && key.trim()) {
+        const keyDir = dirname(teamProviderKeyPath(name))
+        await mkdir(keyDir, { recursive: true })
+        await writeFile(teamProviderKeyPath(name), key.trim() + "\n")
+      }
+    }
   }
 }

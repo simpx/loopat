@@ -20,8 +20,9 @@ import {
   loopContextPersonal,
   loopContextRepos,
   loopWorkdir,
+  loopHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, readTeamApiKey, getActiveProvider, type ProviderConfig } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -65,17 +66,13 @@ app.get("/api/version", (c) => {
 app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
   const providers: Record<string, { model: string; baseUrl: string; source: "personal" | "workspace" }> = {}
-  // Start with workspace providers (workspace config historically carries
-  // providers on disk even though the TS type was split)
-  const wp = (wCfg as any).providers as Record<string, { model: string; baseUrl: string }> | undefined
-  if (wp) {
-    for (const [name, p] of Object.entries(wp)) {
+  if (wCfg.providers) {
+    for (const [name, p] of Object.entries(wCfg.providers)) {
       providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "workspace" }
     }
   }
   // Overlay personal providers (they take precedence)
-  const wDefault = (wCfg as any).default as string | undefined
-  let active = wDefault ?? ""
+  let active = wCfg.default ?? ""
   const userId = c.get("userId") as string
   try {
     const pCfg = await loadPersonalConfig(userId)
@@ -145,6 +142,198 @@ app.get("/api/auth/me", async (c) => {
   if (!userId) return c.json({ error: "unauthorized" }, 401)
   return c.json({ user: { id: userId } })
 })
+
+// ── settings (auth required) ──
+
+app.get("/api/settings/personal", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const cfg = await loadPersonalConfig(userId)
+  // Recompute token usage from persisted message histories (modelUsage in result messages)
+  const tokenUsage = await recomputeTokenUsage(userId)
+  const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean; maxContextTokens?: number }> = {}
+  for (const [name, p] of Object.entries(cfg.providers)) {
+    providers[name] = {
+      model: p.model,
+      baseUrl: p.baseUrl,
+      hasKey: !!p.apiKey,
+      ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
+    }
+  }
+  return c.json({
+    providers,
+    default: cfg.default,
+    webhookUrl: cfg.webhookUrl ?? "",
+    tokenUsage,
+  })
+})
+
+app.put("/api/settings/personal", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    await savePersonalConfig(userId, {
+      default: typeof body.default === "string" ? body.default : undefined,
+      providers: body.providers,
+      webhookUrl: typeof body.webhookUrl === "string" ? body.webhookUrl : undefined,
+    })
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "save failed" }, 500)
+  }
+})
+
+app.get("/api/settings/team", requireAuth, async (c) => {
+  const cfg = await loadConfig()
+  const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }> = {}
+  if (cfg.providers) {
+    for (const [name, p] of Object.entries(cfg.providers)) {
+      const apiKey = await readTeamApiKey(name)
+      providers[name] = { model: p.model, baseUrl: p.baseUrl, hasKey: !!apiKey }
+    }
+  }
+  // Recompute token usage across all users' loops (team-wide view)
+  const tokenUsage = await recomputeTeamTokenUsage()
+  return c.json({
+    providers,
+    default: cfg.default ?? "",
+    tokenUsage,
+  })
+})
+
+app.put("/api/settings/team", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  try {
+    const providerApiKeys: Record<string, string> = {}
+    if (body.providers) {
+      for (const [name, p] of Object.entries(body.providers)) {
+        const prov = p as any
+        if (prov.apiKey !== undefined && prov.apiKey.trim()) {
+          providerApiKeys[name] = prov.apiKey
+        }
+        // Strip apiKey from provider config (not stored in config.json)
+        delete prov.apiKey
+      }
+    }
+    await saveWorkspaceConfig({
+      providers: body.providers,
+      default: typeof body.default === "string" ? body.default : undefined,
+      providerApiKeys: Object.keys(providerApiKeys).length > 0 ? providerApiKeys : undefined,
+    })
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "save failed" }, 500)
+  }
+})
+
+app.get("/api/settings/token-usage/daily", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const daily = await recomputeDailyTokenUsage(userId)
+  return c.json(daily)
+})
+
+// ── token usage recompute helpers ──
+
+import { readFile } from "node:fs/promises"
+
+async function recomputeTokenUsage(userId: string): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
+  const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
+  try {
+    const allLoops = await listLoops()
+    const userLoops = allLoops.filter((l) => l.createdBy === userId)
+    for (const loop of userLoops) {
+      const hp = loopHistoryPath(loop.id)
+      if (!existsSync(hp)) continue
+      let raw: string
+      try { raw = await readFile(hp, "utf8") } catch { continue }
+      for (const line of raw.split("\n")) {
+        if (!line) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg.type === "result" && msg.modelUsage) {
+            for (const [model, u] of Object.entries(msg.modelUsage)) {
+              const mu = u as any
+              const entry = usage[model] ?? { inputTokens: 0, outputTokens: 0 }
+              entry.inputTokens += mu.inputTokens ?? 0
+              entry.outputTokens += mu.outputTokens ?? 0
+              usage[model] = entry
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return usage
+}
+
+async function recomputeTeamTokenUsage(): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
+  const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
+  try {
+    const allLoops = await listLoops()
+    for (const loop of allLoops) {
+      const hp = loopHistoryPath(loop.id)
+      if (!existsSync(hp)) continue
+      let raw: string
+      try { raw = await readFile(hp, "utf8") } catch { continue }
+      for (const line of raw.split("\n")) {
+        if (!line) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg.type === "result" && msg.modelUsage) {
+            for (const [model, u] of Object.entries(msg.modelUsage)) {
+              const mu = u as any
+              const entry = usage[model] ?? { inputTokens: 0, outputTokens: 0 }
+              entry.inputTokens += mu.inputTokens ?? 0
+              entry.outputTokens += mu.outputTokens ?? 0
+              usage[model] = entry
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return usage
+}
+
+async function recomputeDailyTokenUsage(userId: string): Promise<Record<string, Record<string, { inputTokens: number; outputTokens: number }>>> {
+  // daily[model][date] = { inputTokens, outputTokens }
+  const daily: Record<string, Record<string, { inputTokens: number; outputTokens: number }>> = {}
+  try {
+    const allLoops = await listLoops()
+    const userLoops = allLoops.filter((l) => l.createdBy === userId)
+    for (const loop of userLoops) {
+      const hp = loopHistoryPath(loop.id)
+      if (!existsSync(hp)) continue
+      let raw: string
+      try { raw = await readFile(hp, "utf8") } catch { continue }
+      // Fallback date for historical messages without _ts: loop creation date
+      const fallbackDate = (loop.createdAt ?? new Date().toISOString()).slice(0, 10)
+      let currentDate = fallbackDate
+      for (const line of raw.split("\n")) {
+        if (!line) continue
+        try {
+          const msg = JSON.parse(line)
+          // Track date: explicit _ts wins, clear-boundary ts updates the sliding window
+          if (msg.type === "clear-boundary" && typeof msg.ts === "string") {
+            currentDate = msg.ts.slice(0, 10)
+          }
+          const ts = typeof msg._ts === "string" ? msg._ts : null
+          const date = ts ? ts.slice(0, 10) : currentDate
+          if (msg.type === "result" && msg.modelUsage) {
+            for (const [model, u] of Object.entries(msg.modelUsage)) {
+              const mu = u as any
+              daily[model] ??= {}
+              const entry = daily[model][date] ?? { inputTokens: 0, outputTokens: 0 }
+              entry.inputTokens += mu.inputTokens ?? 0
+              entry.outputTokens += mu.outputTokens ?? 0
+              daily[model][date] = entry
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return daily
+}
 
 // ── personal repo bootstrap (deploy-key flow) ──
 //
@@ -874,8 +1063,8 @@ app.get(
                   } catch {}
                 }
                 if (!p) {
-                  const wCfg = await loadConfig() as any
-                  p = wCfg?.providers?.[msg.provider]
+                  const wCfg = await loadConfig()
+                  p = wCfg.providers?.[msg.provider]
                 }
                 if (p) {
                   ws.send(JSON.stringify({
