@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
+import type { PermissionMode } from "@/components/chat/PlanModeToggle"
 
 type RawMsg = {
   id: string
@@ -184,6 +185,15 @@ function convertMessage(raw: RawMsg) {
   } as const
 }
 
+/* ─── Permission prompt ─── */
+
+export interface PermissionPrompt {
+  toolUseId: string
+  toolName: string
+  title: string
+  displayName: string
+}
+
 /* ─── Tool progress & task tracking ─── */
 
 export interface ToolProgress {
@@ -232,6 +242,13 @@ export interface ProviderInfo {
   contextWindow: number
 }
 
+export interface ContextUsage {
+  totalTokens: number
+  maxTokens: number
+  percentage: number
+  model: string
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
@@ -239,8 +256,13 @@ export interface LoopRuntimeExtra {
   sendAnswers: (toolUseId: string, answers: Record<string, string>) => void
   thinkingOpen: boolean
   setThinkingOpen: (open: boolean) => void
-  planMode: boolean
-  setPlanMode: (active: boolean) => void
+  permissionMode: PermissionMode
+  setPermissionMode: (mode: PermissionMode) => void
+  permissionPrompt: PermissionPrompt | null
+  answerPermission: (toolUseId: string, allow: boolean) => void
+  setMaxThinkingTokens: (tokens: number | null) => void
+  getContextUsage: () => void
+  contextUsage: ContextUsage | null
   provider: ProviderInfo | null
   selectProvider: (name: string, source?: "personal" | "workspace") => void
   /** Drop SDK context (like CC's /clear); next message starts with 0 history. */
@@ -263,8 +285,13 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   sendAnswers: () => {},
   thinkingOpen: false,
   setThinkingOpen: () => {},
-  planMode: false,
-  setPlanMode: () => {},
+  permissionMode: "bypassPermissions" as PermissionMode,
+  setPermissionMode: () => {},
+  permissionPrompt: null,
+  answerPermission: () => {},
+  setMaxThinkingTokens: () => {},
+  getContextUsage: () => {},
+  contextUsage: null,
   provider: null,
   selectProvider: () => {},
   clearContext: () => {},
@@ -318,9 +345,32 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
   const [thinkingOpen, setThinkingOpen] = useState(false)
-  const [planMode, setPlanMode] = useState(false)
-  const planModeRef = useRef(false)
-  planModeRef.current = planMode
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>("bypassPermissions")
+  const permissionModeRef = useRef<PermissionMode>("bypassPermissions")
+  permissionModeRef.current = permissionMode
+
+  const [permissionPrompt, setPermissionPrompt] = useState<PermissionPrompt | null>(null)
+
+  const answerPermission = useCallback((toolUseId: string, allow: boolean) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "permission_answer", tool_use_id: toolUseId, allow }))
+    setPermissionPrompt(null)
+  }, [])
+
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
+
+  const setMaxThinkingTokens = useCallback((tokens: number | null) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "set_max_thinking_tokens", tokens }))
+  }, [])
+
+  const getContextUsage = useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "get_context_usage" }))
+  }, [])
 
   const sendAnswers = useMemo(() => {
     const fn = (toolUseId: string, answers: Record<string, string>) => {
@@ -378,8 +428,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [raw])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, planMode, setPlanMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, planMode, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
   )
 
   useEffect(() => {
@@ -400,6 +450,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       taskRef.current = new Map()
       setTaskVersion((v) => v + 1)
       setQuestionsObj({})
+      setPermissionPrompt(null)
+      setContextUsage(null)
       setThinkingOpen(false)
       const ws = new WebSocket(url)
       wsRef.current = ws
@@ -457,6 +509,24 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           return
         }
 
+        if (m?.type === "permission_mode" && typeof m.mode === "string") {
+          const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
+          if (validModes.includes(m.mode)) {
+            setPermissionMode(m.mode as PermissionMode)
+          }
+          return
+        }
+
+        if (m?.type === "context_usage") {
+          setContextUsage({
+            totalTokens: m.totalTokens ?? 0,
+            maxTokens: m.maxTokens ?? 0,
+            percentage: m.percentage ?? 0,
+            model: m.model ?? "",
+          })
+          return
+        }
+
         // ── tool_progress ──
         if (m?.type === "tool_progress") {
           const tp: ToolProgress = {
@@ -468,6 +538,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           }
           toolProgressRef.current.set(m.tool_use_id, tp)
           setToolProgressVersion((v) => v + 1)
+          return
+        }
+
+        // ── permission prompt ──
+        if (m?.type === "permission_prompt" && typeof m.tool_use_id === "string") {
+          setPermissionPrompt({
+            toolUseId: m.tool_use_id,
+            toolName: m.tool_name || "?",
+            title: m.title || "Permission required",
+            displayName: m.displayName || m.tool_name || "?",
+          })
           return
         }
 
@@ -666,13 +747,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     }
     text = text.trim()
     if (!text) return
-    if (planModeRef.current) {
-      text = "Plan first: " + text
-    }
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     setRunning(true)
-    ws.send(JSON.stringify({ type: "user", text }))
+    ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
   }, [])
 
   const onCancel = useCallback(async () => {
