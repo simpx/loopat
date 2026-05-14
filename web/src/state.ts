@@ -3,6 +3,7 @@ import {
   listLoops,
   createLoop as apiCreateLoop,
   setLoopArchived as apiSetLoopArchived,
+  setLoopPublic as apiSetLoopPublic,
   getMe,
   login as apiLogin,
   register as apiRegister,
@@ -20,6 +21,7 @@ export type WorkspaceState = {
   refresh: () => Promise<void>
   createLoop: (opts: { title: string; repo?: string }) => Promise<LoopMeta>
   setLoopArchived: (id: string, archived: boolean) => Promise<void>
+  setLoopPublic: (id: string, isPublic: boolean) => Promise<void>
   newLoopDialogOpen: boolean
   newLoopDialogTitle: string
   kanbanCreateCtx: KanbanCreateCtx | null
@@ -90,6 +92,12 @@ export function useWorkspaceState(): WorkspaceState {
     })
   }, [showArchived])
 
+  const setLoopPublic = useCallback(async (id: string, isPublic: boolean) => {
+    const updated = await apiSetLoopPublic(id, isPublic)
+    if (!updated) return
+    setLoops((prev) => prev.map((l) => (l.id === id ? updated : l)))
+  }, [])
+
   const login = useCallback(async (username: string, password: string) => {
     const r = await apiLogin(username, password)
     if (r.user) setCurrentUser(r.user)
@@ -131,6 +139,7 @@ export function useWorkspaceState(): WorkspaceState {
     refresh,
     createLoop,
     setLoopArchived,
+    setLoopPublic,
     newLoopDialogOpen,
     newLoopDialogTitle,
     kanbanCreateCtx,

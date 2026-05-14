@@ -59,10 +59,10 @@ app.get("/api/version", (c) => {
   return c.json({ branch, commit })
 })
 
-// ── providers (public) ──
+// ── providers (auth required) ──
 // Merges personal + workspace configs. Personal providers take precedence
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
-app.get("/api/providers", async (c) => {
+app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
   const providers: Record<string, { model: string; baseUrl: string; source: "personal" | "workspace" }> = {}
   // Start with workspace providers (workspace config historically carries
@@ -76,16 +76,14 @@ app.get("/api/providers", async (c) => {
   // Overlay personal providers (they take precedence)
   const wDefault = (wCfg as any).default as string | undefined
   let active = wDefault ?? ""
-  const userId = getRequestUserId(c)
-  if (userId) {
-    try {
-      const pCfg = await loadPersonalConfig(userId)
-      for (const [name, p] of Object.entries(pCfg.providers)) {
-        providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "personal" }
-      }
-      active = pCfg.default || active
-    } catch {}
-  }
+  const userId = c.get("userId") as string
+  try {
+    const pCfg = await loadPersonalConfig(userId)
+    for (const [name, p] of Object.entries(pCfg.providers)) {
+      providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "personal" }
+    }
+    active = pCfg.default || active
+  } catch {}
   return c.json({ providers, default: active })
 })
 
@@ -210,15 +208,12 @@ app.post("/api/personal/import", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-// All non-auth /api/* routes below are publicly readable; writes go through
-// requireAuth (per-route). Anonymous reads can NOT touch personal data: the
-// personal vault and any loop path under context/personal are blocked.
+// All /api/* routes below require auth, EXCEPT the two endpoints used by the
+// public share view (GET /api/loops/:id and WS /ws/loop/:id), which allow
+// anonymous read iff meta.public === true. There is no anonymous workspace
+// access at all.
 
-function isPersonalLoopPath(path: string): boolean {
-  return path === "context/personal" || path.startsWith("context/personal/")
-}
-
-app.get("/api/loops", async (c) => {
+app.get("/api/loops", requireAuth, async (c) => {
   // ?archived=true → only archived; ?archived=all → both; default → hide archived
   const filter = c.req.query("archived") ?? ""
   const all = await listLoops()
@@ -242,10 +237,14 @@ app.post("/api/loops", requireAuth, async (c) => {
   }
 })
 
+// Public-or-auth: anonymous visitors get meta only when the loop is public.
 app.get("/api/loops/:id", async (c) => {
   const id = c.req.param("id") ?? ""
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
+  if (!meta.public && !getRequestUserId(c)) {
+    return c.json({ error: "unauthorized" }, 401)
+  }
   return c.json(meta)
 })
 
@@ -261,6 +260,10 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   if (typeof body.archived === "boolean") {
     patch.archived = body.archived
     patch.archivedAt = body.archived ? new Date().toISOString() : undefined
+  }
+  if (typeof body.public === "boolean") {
+    patch.public = body.public
+    patch.publicAt = body.public ? new Date().toISOString() : undefined
   }
   if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
   const updated = await patchLoopMeta(id, patch)
@@ -287,7 +290,7 @@ app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
   return c.json(r)
 })
 
-app.get("/api/loops/:id/context", async (c) => {
+app.get("/api/loops/:id/context", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
   if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
   const mounts: { name: string; path: string }[] = []
@@ -298,24 +301,18 @@ app.get("/api/loops/:id/context", async (c) => {
   return c.json({ mounts })
 })
 
-app.get("/api/loops/:id/files", async (c) => {
+app.get("/api/loops/:id/files", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
   if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
   const path = c.req.query("path") ?? ""
-  if (isPersonalLoopPath(path) && !getRequestUserId(c)) {
-    return c.json({ error: "login required" }, 401)
-  }
   return c.json({ entries: await listDir(id, path) })
 })
 
-app.get("/api/loops/:id/file", async (c) => {
+app.get("/api/loops/:id/file", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
   if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
-  if (isPersonalLoopPath(path) && !getRequestUserId(c)) {
-    return c.json({ error: "login required" }, 401)
-  }
   const r = await readWorkdirFile(id, path)
   if (!r) return c.json({ error: "not a file or unreadable" }, 404)
   return c.json(r)
@@ -476,26 +473,24 @@ app.post("/api/loops/:id/git-discard", requireAuth, async (c) => {
 // Workspace vault APIs (Context tab)
 const VAULTS = new Set(["knowledge", "notes", "personal", "repos"])
 
-app.get("/api/workspace/files", async (c) => {
+app.get("/api/workspace/files", requireAuth, async (c) => {
   const vault = c.req.query("vault") ?? ""
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
-  const userId = getRequestUserId(c)
-  if (vault === "personal" && !userId) return c.json({ error: "login required" }, 401)
+  const userId = c.get("userId") as string
   const path = c.req.query("path") ?? ""
   if (c.req.query("flat") === "1") {
-    return c.json({ entries: await vaultFlatList(vault as VaultId, userId ?? "") })
+    return c.json({ entries: await vaultFlatList(vault as VaultId, userId) })
   }
-  return c.json({ entries: await vaultList(vault as VaultId, path, userId ?? "") })
+  return c.json({ entries: await vaultList(vault as VaultId, path, userId) })
 })
 
-app.get("/api/workspace/file", async (c) => {
+app.get("/api/workspace/file", requireAuth, async (c) => {
   const vault = c.req.query("vault") ?? ""
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
-  const userId = getRequestUserId(c)
-  if (vault === "personal" && !userId) return c.json({ error: "login required" }, 401)
+  const userId = c.get("userId") as string
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
-  const r = await vaultRead(vault as VaultId, path, userId ?? "")
+  const r = await vaultRead(vault as VaultId, path, userId)
   if (!r) return c.json({ error: "not a file" }, 404)
   return c.json(r)
 })
@@ -524,21 +519,20 @@ app.post("/api/workspace/file", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-app.get("/api/workspace/backlinks", async (c) => {
+app.get("/api/workspace/backlinks", requireAuth, async (c) => {
   const vault = c.req.query("vault") ?? ""
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
-  const userId = getRequestUserId(c)
-  if (vault === "personal" && !userId) return c.json({ error: "login required" }, 401)
+  const userId = c.get("userId") as string
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ backlinks: [] })
-  return c.json({ backlinks: await vaultBacklinks(vault as VaultId, path, userId ?? "") })
+  return c.json({ backlinks: await vaultBacklinks(vault as VaultId, path, userId) })
 })
 
-app.get("/api/workspace/repos", async (c) => {
+app.get("/api/workspace/repos", requireAuth, async (c) => {
   return c.json({ repos: await listRepos() })
 })
 
-app.get("/api/workspace/repo/:name", async (c) => {
+app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   const detail = await readRepoDetail(name)
   if (!detail) return c.json({ error: "not found" }, 404)
@@ -549,12 +543,12 @@ app.get("/api/workspace/repo/:name", async (c) => {
 })
 
 // ── focus + topics ──
-app.get("/api/focus", async (c) => {
+app.get("/api/focus", requireAuth, async (c) => {
   const focuses = await listFocuses()
   return c.json({ focuses })
 })
 
-app.get("/api/focus/:name", async (c) => {
+app.get("/api/focus/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   const r = await readFocus(decodeURIComponent(name))
   if (!r) return c.json({ error: "not found" }, 404)
@@ -571,7 +565,7 @@ app.put("/api/focus/:name", requireAuth, async (c) => {
 })
 
 // ── kanban: notes/todo/*.md board (one file = one column) ──
-app.get("/api/kanban", async (c) => {
+app.get("/api/kanban", requireAuth, async (c) => {
   const columns = await listKanbanColumns()
   return c.json({ columns })
 })
@@ -642,7 +636,7 @@ app.post("/api/kanban/columns", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-app.get("/api/kanban/config", async (c) => {
+app.get("/api/kanban/config", requireAuth, async (c) => {
   const cfg = await readKanbanConfig()
   return c.json(cfg ?? { columns: [] })
 })
@@ -719,7 +713,7 @@ app.post("/api/kanban/:filename/cards/:cid/link-loop", requireAuth, async (c) =>
   return c.json({ ok: true })
 })
 
-app.get("/api/topics", async (c) => {
+app.get("/api/topics", requireAuth, async (c) => {
   const loops = await listLoops()
   const titles = loops
     .filter((l) => !l.archived)
@@ -731,7 +725,16 @@ app.get(
   "/ws/loop/:id/term",
   upgradeWebSocket(async (c) => {
     const id = c.req.param("id") ?? ""
-    const canWrite = !!getRequestUserId(c)
+    const userId = getRequestUserId(c)
+    if (!userId) {
+      return {
+        onOpen(_e, ws) {
+          ws.send(JSON.stringify({ type: "error", message: "unauthorized" }))
+          ws.close()
+        },
+      }
+    }
+    const canWrite = true
     const exists = await loopExists(id)
     if (!exists) {
       return {
@@ -791,6 +794,20 @@ app.get(
           ws.send(JSON.stringify({ type: "error", message: `loop ${id} not found` }))
           ws.close()
         },
+      }
+    }
+    // Anonymous attach is only allowed for loops that have been explicitly
+    // shared (meta.public). Logged-in users can attach to any loop they can
+    // see. Writes (sendUserText/clear/etc) for anon are blocked below.
+    if (!userId) {
+      const meta = await getLoop(id)
+      if (!meta?.public) {
+        return {
+          onOpen(_e, ws) {
+            ws.send(JSON.stringify({ type: "error", message: "unauthorized" }))
+            ws.close()
+          },
+        }
       }
     }
     const session = getSession(id)
