@@ -6,7 +6,6 @@ import {
   updateKanbanCardBlock,
   deleteKanbanCard,
   assignKanbanDriver,
-  createKanbanLoop,
   type KanbanCard,
 } from "../../api"
 import { TopicChip } from "../TopicChip"
@@ -52,7 +51,6 @@ export function CardDetailDialog({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [assigning, setAssigning] = useState(false)
-  const [creating, setCreating] = useState(false)
 
   function toggleSub(i: number) { setSubtasks((p) => p.map((s, j) => j === i ? { ...s, done: !s.done } : s)) }
   function setSubText(i: number, t: string) { setSubtasks((p) => p.map((s, j) => j === i ? { ...s, text: t } : s)) }
@@ -94,12 +92,9 @@ export function CardDetailDialog({
     else { alert("No associated loop on this card") }
   }
 
-  async function handleCreateLoop() {
-    setCreating(true)
-    const r = await createKanbanLoop(colFilename, card.cid)
-    setCreating(false)
-    if (r.ok && r.loopId) { navigate(`/loop/${r.loopId}`) }
-    else { alert("Failed to create loop") }
+  function handleCreateLoop() {
+    onClose()
+    ws.setNewLoopDialogOpen(true, card.text, { filename: colFilename, cid: card.cid })
   }
 
   return (
@@ -194,7 +189,7 @@ export function CardDetailDialog({
         {/* actions */}
         <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-100">
           {loggedIn && <button type="button" disabled={assigning} onClick={handleAssignDriver} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-50">{assigning ? "…" : "Assign Driver"}</button>}
-          {loggedIn && <button type="button" disabled={creating} onClick={handleCreateLoop} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-50">{creating ? "…" : "Create Loop"}</button>}
+          {loggedIn && <button type="button" onClick={handleCreateLoop} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700">Create Loop</button>}
           <div className="flex-1" />
           {loggedIn && <button type="button" disabled={saving} onClick={handleSave} className="px-3 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>}
           {loggedIn && <button type="button" disabled={deleting} onClick={handleDelete} className="px-2.5 h-7 rounded text-[11px] text-red-600 hover:bg-red-50 disabled:opacity-50">{deleting ? "…" : "Delete"}</button>}

@@ -9,11 +9,13 @@ import { listRepos, type RepoEntry } from "../../api"
 export function NewLoopDialog({
   onClose,
   onCreate,
+  initialTitle,
 }: {
   onClose: () => void
   onCreate: (opts: { title: string; repo?: string }) => Promise<string> | string
+  initialTitle?: string
 }) {
-  const [title, setTitle] = useState("")
+  const [title, setTitle] = useState(initialTitle ?? "")
   const [repo, setRepo] = useState("")
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [busy, setBusy] = useState(false)

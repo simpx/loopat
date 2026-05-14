@@ -11,6 +11,8 @@ import {
   type User,
 } from "./api"
 
+export type KanbanCreateCtx = { filename: string; cid: string }
+
 export type WorkspaceState = {
   loops: LoopMeta[]
   showArchived: boolean
@@ -19,7 +21,9 @@ export type WorkspaceState = {
   createLoop: (opts: { title: string; repo?: string }) => Promise<LoopMeta>
   setLoopArchived: (id: string, archived: boolean) => Promise<void>
   newLoopDialogOpen: boolean
-  setNewLoopDialogOpen: (b: boolean) => void
+  newLoopDialogTitle: string
+  kanbanCreateCtx: KanbanCreateCtx | null
+  setNewLoopDialogOpen: (open: boolean, title?: string, kanbanCtx?: KanbanCreateCtx) => void
 
   // auth
   currentUser: User | null
@@ -37,7 +41,9 @@ export type WorkspaceState = {
 export function useWorkspaceState(): WorkspaceState {
   const [loops, setLoops] = useState<LoopMeta[]>([])
   const [showArchived, setShowArchived] = useState(false)
-  const [newLoopDialogOpen, setNewLoopDialogOpen] = useState(false)
+  const [newLoopDialogOpen, setNewLoopDialogOpenRaw] = useState(false)
+  const [newLoopDialogTitle, setNewLoopDialogTitle] = useState("")
+  const [kanbanCreateCtx, setKanbanCreateCtx] = useState<KanbanCreateCtx | null>(null)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
 
@@ -109,6 +115,15 @@ export function useWorkspaceState(): WorkspaceState {
     setCurrentUser(null)
   }, [])
 
+  const setNewLoopDialogOpen = useCallback(
+    (open: boolean, title?: string, kanbanCtx?: KanbanCreateCtx) => {
+      setNewLoopDialogOpenRaw(open)
+      setNewLoopDialogTitle(title ?? "")
+      setKanbanCreateCtx(kanbanCtx ?? null)
+    },
+    [],
+  )
+
   return {
     loops,
     showArchived,
@@ -117,6 +132,8 @@ export function useWorkspaceState(): WorkspaceState {
     createLoop,
     setLoopArchived,
     newLoopDialogOpen,
+    newLoopDialogTitle,
+    kanbanCreateCtx,
     setNewLoopDialogOpen,
     currentUser,
     authLoading,

@@ -19,7 +19,7 @@ import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
 import { AuthPage } from "./pages/AuthPage"
-import { getServerWorkspace, getVersion, getBuildInfo } from "./api"
+import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
@@ -77,6 +77,9 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 
   const handleCreate = async (opts: { title: string; repo?: string }) => {
     const m = await ws.createLoop(opts)
+    if (ws.kanbanCreateCtx) {
+      await linkKanbanLoop(ws.kanbanCreateCtx.filename, ws.kanbanCreateCtx.cid, m.id)
+    }
     ws.setNewLoopDialogOpen(false)
     navigate(`/loop/${m.id}`)
     return m.id
@@ -185,7 +188,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         <Outlet />
       </main>
       {ws.newLoopDialogOpen && loggedIn && (
-        <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} />
+        <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
       )}
       {authOpen && <AuthPage onClose={() => setAuthOpen(false)} />}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />

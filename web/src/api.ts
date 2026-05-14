@@ -436,6 +436,15 @@ export async function createKanbanLoop(filename: string, cid: string): Promise<{
   return await r.json()
 }
 
+export async function linkKanbanLoop(filename: string, cid: string, loopId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/link-loop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ loopId }),
+  })
+  return r.ok
+}
+
 // ── focus + topics ──
 //
 // Storage in notes/focus/<name>.md, ccx-style markdown task tree. See

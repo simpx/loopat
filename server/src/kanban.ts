@@ -471,6 +471,26 @@ export async function assignDriverForCard(
   return { ok: true, loopId: card.loopId }
 }
 
+export async function linkLoopToCard(
+  filename: string,
+  cid: string,
+  loopId: string,
+  userId: string
+): Promise<boolean> {
+  const raw = await readColumnRaw(filename)
+  if (!raw) return false
+
+  const range = findCardRange(raw.body, cid)
+  if (!range) return false
+
+  const lines = raw.body.split("\n")
+  lines.splice(range.start + 1, 0, `  > loop: ${loopId}`)
+  await writeFile(raw.path, lines.join("\n"))
+
+  await patchLoopMeta(loopId, { driver: userId } as Partial<LoopMeta>)
+  return true
+}
+
 export async function createLoopFromCard(
   filename: string,
   cid: string,
