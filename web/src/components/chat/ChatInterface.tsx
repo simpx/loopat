@@ -200,7 +200,7 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
                 Array.isArray(qs) && qs.length > 0 ? (
                   <div
                     key={toolUseId}
-                    className="rounded-lg border border-violet-200 bg-white p-4 shadow-md"
+                    className="rounded-lg border border-violet-100 bg-violet-50/30 p-4 shadow-sm"
                   >
                     <AskUserQuestionRenderer
                       questions={qs}
