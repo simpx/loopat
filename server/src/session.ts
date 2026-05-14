@@ -200,15 +200,15 @@ class LoopSession {
     const names = [
       ...candidateNames,
       pCfg.default,
-      (wCfg as any).default,
+      wCfg.default,
       ...Object.keys(pCfg.providers),
-      ...Object.keys((wCfg as any).providers ?? {}),
+      ...Object.keys(wCfg.providers ?? {}),
     ].filter(Boolean) as string[]
     const seen = new Set<string>()
     for (const name of names) {
       if (seen.has(name)) continue
       seen.add(name)
-      const p = pCfg.providers[name] ?? (wCfg as any).providers?.[name] as ProviderConfig | undefined
+      const p = pCfg.providers[name] ?? wCfg.providers?.[name] as ProviderConfig | undefined
       if (p && (!requireKey || p.apiKey)) return { name, provider: p }
     }
     return null
@@ -539,7 +539,8 @@ class LoopSession {
   }
 
   private persist(msg: any) {
-    appendFile(loopHistoryPath(this.id), JSON.stringify(msg) + "\n").catch((e) => {
+    const stamped = { ...msg, _ts: new Date().toISOString() }
+    appendFile(loopHistoryPath(this.id), JSON.stringify(stamped) + "\n").catch((e) => {
       console.error("[loopat] persist failed", e)
     })
   }

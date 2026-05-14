@@ -12,6 +12,7 @@ import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
 import { PersonalImportDialog } from "./components/dialog/PersonalImportDialog"
+import { SettingsDialog } from "./components/dialog/SettingsDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
 import { FocusDetail } from "./pages/FocusDetail"
@@ -43,6 +44,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
   const loggedIn = !!ws.currentUser
   const onLoopRoute = !!useMatch("/loop/:id")
@@ -166,6 +168,16 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
+                    setSettingsOpen(true)
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
                     setAboutOpen(true)
                   }}
                   className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
@@ -196,6 +208,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
       )}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
       <PersonalImportDialog open={personalOpen} onClose={() => setPersonalOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

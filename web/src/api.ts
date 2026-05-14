@@ -582,3 +582,71 @@ export async function gitDiscardFile(loopId: string, file: string): Promise<bool
   })
   return r.ok
 }
+
+// ── settings ──
+
+export type SettingsProvider = {
+  model: string
+  baseUrl: string
+  hasKey?: boolean
+  maxContextTokens?: number
+  apiKey?: string
+}
+
+export type TokenUsage = Record<string, { inputTokens: number; outputTokens: number }>
+
+export type PersonalSettings = {
+  providers: Record<string, SettingsProvider>
+  default: string
+  webhookUrl: string
+  tokenUsage: TokenUsage
+}
+
+export type TeamSettings = {
+  providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }>
+  default: string
+  tokenUsage: TokenUsage
+}
+
+export async function getPersonalSettings(): Promise<PersonalSettings> {
+  const r = await apiFetch("/api/settings/personal")
+  return (await r.json()) as PersonalSettings
+}
+
+export async function updatePersonalSettings(patch: {
+  providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
+  default?: string
+  webhookUrl?: string
+}): Promise<boolean> {
+  const r = await apiFetch("/api/settings/personal", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  return r.ok
+}
+
+export async function getTeamSettings(): Promise<TeamSettings> {
+  const r = await apiFetch("/api/settings/team")
+  return (await r.json()) as TeamSettings
+}
+
+export async function updateTeamSettings(patch: {
+  providers?: Record<string, { model: string; baseUrl: string; apiKey?: string }>
+  default?: string
+}): Promise<boolean> {
+  const r = await apiFetch("/api/settings/team", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  return r.ok
+}
+
+export type DailyUsage = Record<string, Record<string, { inputTokens: number; outputTokens: number }>>
+
+export async function getDailyTokenUsage(): Promise<DailyUsage> {
+  const r = await apiFetch("/api/settings/token-usage/daily")
+  if (!r.ok) return {}
+  return (await r.json()) as DailyUsage
+}
