@@ -1,14 +1,21 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { ContextUsage } from "@/useLoopRuntime";
 
 interface TokenUsagePieProps {
   used: number;
   total: number;
+  contextUsage?: ContextUsage | null;
 }
 
-export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
-  if (used == null || total == null || total <= 0) return null;
+export default function TokenUsagePie({ used, total, contextUsage }: TokenUsagePieProps) {
+  // Prefer server-reported accurate data over client estimate
+  const displayTotal = contextUsage?.maxTokens || total;
+  const displayUsed = contextUsage?.totalTokens ?? used;
+  const displayPercentage = contextUsage?.percentage ?? Math.min(100, (used / total) * 100);
 
-  const percentage = Math.min(100, (used / total) * 100);
+  if (!displayTotal || displayTotal <= 0) return null;
+
+  const percentage = Math.min(100, displayPercentage);
   const radius = 10;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percentage / 100) * circumference;
@@ -19,10 +26,13 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
     return "#ef4444";
   };
 
+  // Accurate tag shows when server data is available
+  const accurate = !!contextUsage;
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-1.5 text-xs text-gray-500">
           <svg
             width="24"
             height="24"
@@ -51,12 +61,24 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
             />
           </svg>
           <span>
-            {percentage.toFixed(1)}%
+            {percentage.toFixed(0)}%{accurate ? "" : "~"}
           </span>
         </div>
       </TooltipTrigger>
       <TooltipContent>
-        {used.toLocaleString()} / {total.toLocaleString()} tokens
+        <div className="text-xs">
+          <p>
+            {displayUsed.toLocaleString()} / {displayTotal.toLocaleString()} tokens
+          </p>
+          {accurate && (
+            <p className="text-gray-400 mt-0.5">
+              {contextUsage!.model}
+            </p>
+          )}
+          {!accurate && (
+            <p className="text-gray-400 mt-0.5">estimated (run /usage for accurate)</p>
+          )}
+        </div>
       </TooltipContent>
     </Tooltip>
   );

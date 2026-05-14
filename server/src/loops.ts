@@ -45,6 +45,7 @@ export type LoopMeta = {
   config?: {
     default_model?: string
     default_model_source?: "personal" | "workspace"
+    permission_mode?: string
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes

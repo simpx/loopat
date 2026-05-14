@@ -1,4 +1,4 @@
-import { query, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
+import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
@@ -8,7 +8,7 @@ import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadTeamClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
-import { getLoop } from "./loops"
+import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildOuterBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./outer-sandbox"
 
@@ -24,6 +24,14 @@ function resolveContextWindow(p: ProviderConfig): number {
   if (p.maxContextTokens && p.maxContextTokens > 0) return p.maxContextTokens
   if (/\[1m\]/i.test(p.model)) return 1_000_000
   return 200_000
+}
+
+/** Subset of SDK PermissionMode that the frontend sends. */
+const VALID_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"] as const
+type FrontendPermissionMode = (typeof VALID_MODES)[number]
+
+function isValidMode(m: unknown): m is FrontendPermissionMode {
+  return typeof m === "string" && (VALID_MODES as readonly string[]).includes(m)
 }
 
 function maskEnv(env: Record<string, string | undefined>): Record<string, string> {
@@ -114,6 +122,25 @@ interface AskQuestionPending {
   reject: (err: Error) => void
 }
 
+interface PermissionPending {
+  toolUseID: string
+  toolName: string
+  resolve: (result: PermissionResult) => void
+  reject: (err: Error) => void
+}
+
+type PermissionResult = { behavior: 'allow'; updatedInput: Record<string, unknown> } | { behavior: 'deny'; message: string }
+
+/** Tools that are always safe (read-only) — auto-allowed in every mode. */
+const SAFE_TOOLS = new Set([
+  "Read", "Grep", "Glob", "WebSearch", "WebFetch",
+  "TaskOutput", "CronList", "TodoWrite",
+  "EnterPlanMode", "ExitPlanMode",
+])
+
+/** Tools that edit files — auto-allowed in acceptEdits mode. */
+const EDIT_TOOLS = new Set(["Write", "Edit", "NotebookEdit"])
+
 const IDLE_TIMEOUT_MS = Number(process.env.LOOPAT_SESSION_IDLE_MS) || 5 * 60 * 1000
 
 class LoopSession {
@@ -124,7 +151,9 @@ class LoopSession {
   private history: SDKMessage[] = []
   private historyLoaded: Promise<void>
   private pendingQuestions = new Map<string, AskQuestionPending>()
+  private pendingPermissions = new Map<string, PermissionPending>()
   private providerOverride: string | null = null
+  private currentPermissionMode: SdkPermissionMode = "bypassPermissions"
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private consuming = false
 
@@ -282,36 +311,86 @@ class LoopSession {
           ANTHROPIC_BASE_URL: provider.baseUrl,
         },
         model: provider.model,
+        permissionMode: this.currentPermissionMode,
+        // Required by SDK when using permissionMode: "bypassPermissions"
+        ...(this.currentPermissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
         mcpServers,
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
-        canUseTool: async (toolName, input, { toolUseID, signal }) => {
-          // Only intercept AskUserQuestion — allow everything else immediately.
-          // SDK Zod schema requires `updatedInput` on allow (echo input back).
-          if (toolName !== "AskUserQuestion") {
+        canUseTool: async (toolName, input, { toolUseID, signal, title, displayName }) => {
+          // ── AskUserQuestion: always broadcast to frontend ──
+          if (toolName === "AskUserQuestion") {
+            const questions = (input as any)?.questions
+            if (!Array.isArray(questions) || questions.length === 0) {
+              return { behavior: "allow" as const, updatedInput: {} }
+            }
+            const questionMsg = {
+              type: "question",
+              tool_use_id: toolUseID,
+              questions,
+            }
+            this.broadcast(questionMsg)
+            return new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                this.pendingQuestions.delete(toolUseID)
+                reject(new Error("question timed out"))
+              }, 300_000)
+              this.pendingQuestions.set(toolUseID, {
+                toolUseID,
+                questions,
+                resolve: (result) => {
+                  clearTimeout(timeout)
+                  resolve(result)
+                },
+                reject: (err) => {
+                  clearTimeout(timeout)
+                  reject(err)
+                },
+              })
+              signal.addEventListener("abort", () => {
+                clearTimeout(timeout)
+                this.pendingQuestions.delete(toolUseID)
+                reject(new Error("question cancelled"))
+              }, { once: true })
+            })
+          }
+
+          // ── Safe (read-only) tools: always allow ──
+          if (SAFE_TOOLS.has(toolName)) {
             return { behavior: "allow" as const, updatedInput: {} }
           }
-          const questions = (input as any)?.questions
-          if (!Array.isArray(questions) || questions.length === 0) {
+
+          const mode = this.currentPermissionMode
+
+          // ── Full-auto modes: allow everything ──
+          if (mode === "bypassPermissions" || mode === "auto" || mode === "dontAsk") {
             return { behavior: "allow" as const, updatedInput: {} }
           }
-          // Broadcast questions to frontend and wait for answers.
-          // Don't persist to history — questions are ephemeral and stale on replay.
-          const questionMsg = {
-            type: "question",
+
+          // ── acceptEdits: auto-allow file-editing tools; prompt for the rest ──
+          if (mode === "acceptEdits" && EDIT_TOOLS.has(toolName)) {
+            return { behavior: "allow" as const, updatedInput: {} }
+          }
+
+          // ── default / plan / acceptEdits(non-edit): prompt the user ──
+          const promptMsg = {
+            type: "permission_prompt",
             tool_use_id: toolUseID,
-            questions,
+            tool_name: toolName,
+            title: title || `Claude wants to use ${toolName}`,
+            displayName: displayName || toolName,
           }
-          this.broadcast(questionMsg)
+          this.broadcast(promptMsg)
+
           return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-              this.pendingQuestions.delete(toolUseID)
-              reject(new Error("question timed out"))
-            }, 300_000) // 5 min timeout
-            this.pendingQuestions.set(toolUseID, {
+              this.pendingPermissions.delete(toolUseID)
+              resolve({ behavior: "deny" as const, message: "Permission timed out" })
+            }, 120_000) // 2 min timeout
+            this.pendingPermissions.set(toolUseID, {
               toolUseID,
-              questions,
+              toolName,
               resolve: (result) => {
                 clearTimeout(timeout)
                 resolve(result)
@@ -323,8 +402,8 @@ class LoopSession {
             })
             signal.addEventListener("abort", () => {
               clearTimeout(timeout)
-              this.pendingQuestions.delete(toolUseID)
-              reject(new Error("question cancelled"))
+              this.pendingPermissions.delete(toolUseID)
+              reject(new Error("permission cancelled"))
             }, { once: true })
           })
         },
@@ -500,6 +579,19 @@ class LoopSession {
         } else {
           console.warn(`[loop:${this.id.slice(0, 8)}] no provider found in personal or workspace config`)
         }
+        // Restore persisted permission mode
+        const pm = meta.config?.permission_mode
+        if (isValidMode(pm) && pm !== this.currentPermissionMode) {
+          this.currentPermissionMode = pm
+          if (this.q) {
+            try { await this.q.setPermissionMode(pm) } catch {}
+          }
+        }
+        // Tell frontend the current mode so it can sync its selector
+        ws.send(JSON.stringify({
+          type: "permission_mode",
+          mode: this.currentPermissionMode,
+        }))
       }
     } catch (e: any) {
       console.error(`[loop:${this.id.slice(0, 8)}] attach provider error:`, e?.message ?? e)
@@ -533,7 +625,18 @@ class LoopSession {
     console.log(`[loop:${this.id.slice(0, 8)}] detach → viewers=${this.subscribers.size}`)
   }
 
-  async sendUserText(text: string) {
+  async sendUserText(text: string, permissionMode?: SdkPermissionMode) {
+    // Apply permission mode before ensureStarted so the initial query() gets it.
+    // When switching to bypassPermissions the q.setPermissionMode() call alone
+    // is sufficient — the SDK re-evaluates permissions for the next turn.
+    if (permissionMode && permissionMode !== this.currentPermissionMode) {
+      this.currentPermissionMode = permissionMode
+      // Persist to loop meta so it survives page reloads
+      patchLoopMeta(this.id, { config: { permission_mode: permissionMode } }).catch(() => {})
+      if (this.q) {
+        try { await this.q.setPermissionMode(permissionMode) } catch {}
+      }
+    }
     await this.ensureStarted()
     const userMsg: SDKUserMessage = {
       type: "user",
@@ -553,6 +656,32 @@ class LoopSession {
     this.pendingQuestions.delete(toolUseID)
     // Include original questions alongside answers so the CLI tool receives both
     pending.resolve({ behavior: "allow", updatedInput: { questions: pending.questions, answers } })
+  }
+
+  async answerPermission(toolUseID: string, allow: boolean) {
+    const pending = this.pendingPermissions.get(toolUseID)
+    if (!pending) return
+    this.pendingPermissions.delete(toolUseID)
+    if (allow) {
+      pending.resolve({ behavior: "allow", updatedInput: {} })
+    } else {
+      pending.resolve({ behavior: "deny", message: "User denied permission" })
+    }
+  }
+
+  async setMaxThinkingTokens(tokens: number | null) {
+    if (this.q) {
+      try { await this.q.setMaxThinkingTokens(tokens) } catch {}
+    }
+  }
+
+  async getContextUsage() {
+    if (!this.q) return null
+    try {
+      return await this.q.getContextUsage()
+    } catch {
+      return null
+    }
   }
 
   async interrupt() {

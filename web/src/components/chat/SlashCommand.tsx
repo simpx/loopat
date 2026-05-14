@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useComposerRuntime } from "@assistant-ui/react";
-import { Brain, Zap, Sparkles, Route, Eraser } from "lucide-react";
+import { Brain, Zap, Sparkles, Route, Eraser, BarChart3 } from "lucide-react";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import type { PermissionMode } from "./PlanModeToggle";
 
 interface SlashCommand {
   id: string;
@@ -11,44 +12,63 @@ interface SlashCommand {
   icon: React.ElementType;
   action: "insert" | "toggle" | "command";
   prefix: string;
-  toggleKey?: "planMode";
+  toggleKey?: "permissionMode";
   /** Required when action === "command"; identifies which runtime action to fire. */
-  commandKey?: "clearContext";
+  commandKey?: "clearContext" | "setMaxThinkingTokens" | "getContextUsage";
+  /** Budget in tokens for setMaxThinkingTokens (null = unlimited). */
+  tokens?: number | null;
+  /** Show ON badge when true. */
+  isActive?: boolean;
 }
 
 const COMMANDS: SlashCommand[] = [
   {
     id: "think",
     name: "Think",
-    description: "Basic extended thinking",
+    description: "Extended thinking (16k token budget)",
     icon: Brain,
-    action: "insert",
-    prefix: "/think ",
+    action: "command",
+    prefix: "",
+    commandKey: "setMaxThinkingTokens",
+    tokens: 16000,
   },
   {
     id: "think-hard",
     name: "Think Hard",
-    description: "More thorough evaluation",
+    description: "Deep thinking (32k token budget)",
     icon: Zap,
-    action: "insert",
-    prefix: "/think-hard ",
+    action: "command",
+    prefix: "",
+    commandKey: "setMaxThinkingTokens",
+    tokens: 32000,
   },
   {
     id: "ultrathink",
     name: "Ultrathink",
-    description: "Maximum thinking budget",
+    description: "Maximum thinking (no budget limit)",
     icon: Sparkles,
-    action: "insert",
-    prefix: "/ultrathink ",
+    action: "command",
+    prefix: "",
+    commandKey: "setMaxThinkingTokens",
+    tokens: null,
   },
   {
     id: "plan",
-    name: "Plan Mode",
-    description: "Plan first before implementation",
+    name: "Permission",
+    description: "Cycle permission mode",
     icon: Route,
     action: "toggle",
     prefix: "",
-    toggleKey: "planMode",
+    toggleKey: "permissionMode",
+  },
+  {
+    id: "usage",
+    name: "Context Usage",
+    description: "Show context window token usage",
+    icon: BarChart3,
+    action: "command",
+    prefix: "",
+    commandKey: "getContextUsage",
   },
   {
     id: "clear",
@@ -64,7 +84,13 @@ const COMMANDS: SlashCommand[] = [
 export default function SlashCommand() {
   const text = useAuiState((s) => s.composer.text);
   const composerRuntime = useComposerRuntime();
-  const { planMode, setPlanMode, clearContext } = useLoopRuntimeExtra();
+  const {
+    permissionMode,
+    setPermissionMode,
+    clearContext,
+    setMaxThinkingTokens,
+    getContextUsage,
+  } = useLoopRuntimeExtra();
   const [open, setOpen] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [filter, setFilter] = useState("");
@@ -94,18 +120,27 @@ export default function SlashCommand() {
 
   const executeCommand = useCallback(
     (cmd: SlashCommand) => {
-      if (cmd.action === "toggle" && cmd.toggleKey === "planMode") {
-        setPlanMode(!planMode);
+      if (cmd.action === "toggle" && cmd.toggleKey === "permissionMode") {
+        const modes: PermissionMode[] = ["bypassPermissions", "auto", "dontAsk", "acceptEdits", "plan", "default"];
+        const idx = modes.indexOf(permissionMode);
+        const next = modes[(idx + 1) % modes.length];
+        setPermissionMode(next);
         composerRuntime.setText("");
-      } else if (cmd.action === "insert") {
-        composerRuntime.setText(cmd.prefix);
-      } else if (cmd.action === "command" && cmd.commandKey === "clearContext") {
-        clearContext();
-        composerRuntime.setText("");
+      } else if (cmd.action === "command") {
+        if (cmd.commandKey === "clearContext") {
+          clearContext();
+          composerRuntime.setText("");
+        } else if (cmd.commandKey === "setMaxThinkingTokens") {
+          setMaxThinkingTokens(cmd.tokens ?? null);
+          composerRuntime.setText("");
+        } else if (cmd.commandKey === "getContextUsage") {
+          getContextUsage();
+          composerRuntime.setText("");
+        }
       }
       setOpen(false);
     },
-    [composerRuntime, planMode, setPlanMode, clearContext],
+    [composerRuntime, permissionMode, setPermissionMode, clearContext, setMaxThinkingTokens, getContextUsage],
   );
 
   // Keyboard navigation — uses capture phase to intercept before composer
@@ -156,7 +191,8 @@ export default function SlashCommand() {
           const Icon = cmd.icon;
           const isSelected = i === selectedIdx;
           const isActive =
-            cmd.toggleKey === "planMode" && planMode;
+            (cmd.toggleKey === "permissionMode" && permissionMode !== "bypassPermissions") ||
+            cmd.isActive;
           return (
             <button
               key={cmd.id}

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   ComposerPrimitive,
   AuiIf,
@@ -14,7 +13,7 @@ import {
   ComposerAddAttachment,
 } from "@/components/assistant-ui/attachment";
 import ClaudeStatus from "./ClaudeStatus";
-import ThinkingModeSelector from "./ThinkingModeSelector";
+
 import PlanModeToggle from "./PlanModeToggle";
 import ModelSelector from "./ModelSelector";
 import SlashCommand from "./SlashCommand";
@@ -35,8 +34,6 @@ function estimateTokens(messages: readonly unknown[]): number {
 }
 
 export default function Composer() {
-  const [thinkingMode, setThinkingMode] = useState("none");
-
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const hasInput = useAuiState(
     (s) => typeof s.composer.text === "string" && s.composer.text.trim().length > 0,
@@ -44,7 +41,7 @@ export default function Composer() {
 
   const messagesArray = useAuiState((s) => s.thread.messages);
   const usedTokens = estimateTokens(messagesArray);
-  const { provider, planMode, setPlanMode } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, contextUsage } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   return (
@@ -74,16 +71,10 @@ export default function Composer() {
             <div className="flex items-center gap-0.5 min-w-0">
               <ComposerAddAttachment />
 
-              <div className="hidden md:block">
-                <ThinkingModeSelector
-                  selectedMode={thinkingMode}
-                  onModeChange={setThinkingMode}
-                />
-              </div>
-
               <TokenUsagePie
                 used={Math.min(usedTokens, contextWindow)}
                 total={contextWindow}
+                contextUsage={contextUsage}
               />
 
               <ModelSelector />
@@ -91,18 +82,9 @@ export default function Composer() {
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               <PlanModeToggle
-                active={planMode}
-                onChange={setPlanMode}
+                mode={permissionMode}
+                onChange={setPermissionMode}
               />
-
-              <div
-                className={cn(
-                  "hidden text-xs text-gray-400 transition-opacity lg:block",
-                  hasInput ? "opacity-0" : "opacity-100",
-                )}
-              >
-                Enter to send
-              </div>
 
               <AuiIf condition={(s) => !s.thread.isRunning}>
                 <ComposerPrimitive.Send asChild>

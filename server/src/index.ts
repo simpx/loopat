@@ -816,13 +816,31 @@ app.get(
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
           const msg = JSON.parse(data)
           if (msg?.type === "user" && typeof msg.text === "string") {
-            session.sendUserText(msg.text)
+            // Validate against SDK PermissionMode values
+            const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
+            const pm = msg.permissionMode
+            const permissionMode = typeof pm === "string" && validModes.includes(pm)
+              ? pm as "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
+              : undefined
+            session.sendUserText(msg.text, permissionMode)
           } else if (msg?.type === "clear") {
             session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
             session.interrupt()
           } else if (msg?.type === "answers") {
             session.answerQuestions(msg.tool_use_id, msg.answers)
+          } else if (msg?.type === "permission_answer") {
+            session.answerPermission(msg.tool_use_id, !!msg.allow)
+          } else if (msg?.type === "set_max_thinking_tokens") {
+            session.setMaxThinkingTokens(
+              typeof msg.tokens === "number" || msg.tokens === null ? msg.tokens : null,
+            )
+          } else if (msg?.type === "get_context_usage") {
+            session.getContextUsage().then((usage) => {
+              if (usage) {
+                try { ws.send(JSON.stringify({ type: "context_usage", ...usage })) } catch {}
+              }
+            }).catch(() => {})
           } else if (msg?.type === "provider_select" && typeof msg.provider === "string") {
             const ok = session.setProvider(msg.provider)
             if (ok) {
