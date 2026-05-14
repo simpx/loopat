@@ -125,6 +125,7 @@ interface AskQuestionPending {
 interface PermissionPending {
   toolUseID: string
   toolName: string
+  promptMsg: Record<string, unknown>
   resolve: (result: PermissionResult) => void
   reject: (err: Error) => void
 }
@@ -392,6 +393,7 @@ class LoopSession {
             this.pendingPermissions.set(toolUseID, {
               toolUseID,
               toolName,
+              promptMsg,
               resolve: (result) => {
                 clearTimeout(timeout)
                 resolve(result)
@@ -630,6 +632,22 @@ class LoopSession {
     if (this.generating) {
       try {
         ws.send(JSON.stringify({ type: "system", subtype: "init" }))
+      } catch {}
+    }
+    // Re-broadcast active permission prompts that survived history replay
+    for (const [_, pending] of this.pendingPermissions) {
+      try {
+        ws.send(JSON.stringify(pending.promptMsg))
+      } catch {}
+    }
+    // Re-broadcast active AskUserQuestion prompts
+    for (const [_id, pending] of this.pendingQuestions) {
+      try {
+        ws.send(JSON.stringify({
+          type: "question",
+          tool_use_id: pending.toolUseID,
+          questions: pending.questions,
+        }))
       } catch {}
     }
     this.cancelIdleCleanup()
