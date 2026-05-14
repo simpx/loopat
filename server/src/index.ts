@@ -20,7 +20,7 @@ import {
   loopContextRepos,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, getActiveProvider, type ProviderConfig } from "./config"
-import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard } from "./kanban"
+import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
@@ -564,6 +564,17 @@ app.post("/api/kanban/:filename/cards/:cid/create-loop", requireAuth, async (c) 
   const r = await createLoopFromCard(filename, cid, userId)
   if (!r.ok) return c.json({ error: "create failed" }, 500)
   return c.json(r)
+})
+
+app.post("/api/kanban/:filename/cards/:cid/link-loop", requireAuth, async (c) => {
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const userId = c.get("userId") as string
+  const { loopId } = (await c.req.json().catch(() => ({}))) as { loopId?: string }
+  if (!loopId) return c.json({ error: "loopId required" }, 400)
+  const ok = await linkLoopToCard(filename, cid, loopId, userId)
+  if (!ok) return c.json({ error: "link failed" }, 500)
+  return c.json({ ok: true })
 })
 
 app.get("/api/topics", async (c) => {
