@@ -10,6 +10,7 @@
     "dev": "HOST=${HOST:-127.0.0.1} bun run --filter '*' dev",
     "dev:host": "HOST=0.0.0.0 bun run --filter '*' dev",
     "dev:server": "bun --cwd server run dev",
-    "dev:web": "bun --cwd web run dev"
+    "dev:web": "bun --cwd web run dev",
+    "build": "bun install && bun --cwd web run build"
   }
 }

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import { KanbanBoard } from "../components/kanban/KanbanBoard"
 import { CardDetailDialog } from "../components/kanban/CardDetailDialog"
-import { moveKanbanCard, type KanbanCard } from "../api"
+import { moveKanbanCard, createKanbanColumn, type KanbanCard } from "../api"
 
 type UndoState = { cid: string; card: KanbanCard; fromFile: string; toFile: string } | null
 const ARCHIVE_FILE = "archived.md"
@@ -22,6 +22,8 @@ export function KanbanPage() {
   useEffect(() => { return () => { if (undoTimer.current) clearTimeout(undoTimer.current) } }, [])
 
   async function handleArchive(card: KanbanCard, colFilename: string) {
+    // ensure archived column exists
+    await createKanbanColumn("archived")
     const ok = await moveKanbanCard(colFilename, card.cid, ARCHIVE_FILE)
     if (ok) { setUndoWithTimeout({ cid: card.cid, card, fromFile: colFilename, toFile: ARCHIVE_FILE }); refresh() }
   }
