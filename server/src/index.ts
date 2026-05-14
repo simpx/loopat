@@ -2,7 +2,8 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
-import { execSync } from "node:child_process"
+import { execSync, execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh } from "./loops"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
@@ -18,6 +19,7 @@ import {
   loopContextNotes,
   loopContextPersonal,
   loopContextRepos,
+  loopWorkdir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, getActiveProvider, type ProviderConfig } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
@@ -37,6 +39,8 @@ import {
   isValidUsername,
 } from "./auth"
 import { getCookie } from "hono/cookie"
+
+const execFileP = promisify(execFile)
 
 const { upgradeWebSocket, websocket } = createBunWebSocket()
 
@@ -329,6 +333,144 @@ app.put("/api/loops/:id/file", requireAuth, async (c) => {
   const ok = await writeWorkdirFile(id, path, body.content)
   if (!ok) return c.json({ error: "write failed" }, 500)
   return c.json({ ok: true })
+})
+
+// ── git operations (workdir) ──
+
+type GitFileInfo = {
+  path: string
+  status: "A" | "M" | "D" | "R" | "?"
+  additions: number
+  deletions: number
+  isBinary: boolean
+}
+
+async function getGitStatus(loopId: string): Promise<{ unstaged: GitFileInfo[]; staged: GitFileInfo[] }> {
+  const dir = loopWorkdir(loopId)
+  if (!existsSync(join(dir, ".git"))) return { unstaged: [], staged: [] }
+
+  const execOpts = { encoding: "utf8" as const, timeout: 10_000 }
+  const unstaged: GitFileInfo[] = []
+  const staged: GitFileInfo[] = []
+
+  // Parse git status --porcelain for file statuses
+  let porcelain = ""
+  try {
+    porcelain = (await execFileP("git", ["-C", dir, "status", "--porcelain"], execOpts)).stdout.trim()
+  } catch { return { unstaged: [], staged: [] } }
+
+  // Get numstat for unstaged and staged changes
+  let unstagedNumstat = ""
+  let stagedNumstat = ""
+  try { unstagedNumstat = (await execFileP("git", ["-C", dir, "diff", "--numstat"], execOpts)).stdout.trim() } catch {}
+  try { stagedNumstat = (await execFileP("git", ["-C", dir, "diff", "--cached", "--numstat"], execOpts)).stdout.trim() } catch {}
+
+  // Parse numstat into map: path -> { additions, deletions, isBinary }
+  const numstatMap = new Map<string, { additions: number; deletions: number; isBinary: boolean }>()
+  for (const line of [...stagedNumstat.split("\n"), ...unstagedNumstat.split("\n")]) {
+    const parts = line.split("\t")
+    if (parts.length < 3) continue
+    const adds = parseInt(parts[0], 10)
+    const dels = parseInt(parts[1], 10)
+    const isBinary = isNaN(adds) || isNaN(dels)
+    const p = parts[2]
+    // Only set if not already present or if the new one has more info
+    if (!numstatMap.has(p) || (!isBinary && numstatMap.get(p)!.isBinary)) {
+      numstatMap.set(p, { additions: isNaN(adds) ? 0 : adds, deletions: isNaN(dels) ? 0 : dels, isBinary })
+    }
+  }
+
+  for (const line of porcelain.split("\n")) {
+    if (!line || line.length < 3) continue
+    const xy = line.slice(0, 2)
+    const p = line.slice(3)
+    if (!p) continue
+
+    const stat = numstatMap.get(p) ?? { additions: 0, deletions: 0, isBinary: false }
+
+    // Index status (staged)
+    if (xy[0] !== " " && xy[0] !== "?") {
+      const code = xy[0] as GitFileInfo["status"]
+      staged.push({ path: p, status: code, ...stat })
+    }
+    // Worktree status (unstaged)
+    if (xy[1] !== " " && xy[1] !== "!") {
+      const code = xy[1] === "?" ? "?" : xy[1] as GitFileInfo["status"]
+      unstaged.push({ path: p, status: code, ...stat })
+    }
+  }
+
+  return { unstaged, staged }
+}
+
+app.get("/api/loops/:id/git-status", async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  return c.json(await getGitStatus(id))
+})
+
+app.get("/api/loops/:id/git-diff", async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const path = c.req.query("path") ?? ""
+  if (!path) return c.json({ error: "path required" }, 400)
+  const staged = c.req.query("staged") === "1"
+  const dir = loopWorkdir(id)
+  if (!existsSync(join(dir, ".git"))) return c.json({ error: "not a git repo" }, 400)
+  try {
+    const args = ["-C", dir, "diff", "--", path]
+    if (staged) args.splice(3, 0, "--cached")
+    let diff = (await execFileP("git", args, { encoding: "utf8", timeout: 10_000 })).stdout.trim()
+    // Untracked files have nothing in the index to diff against — fall back to
+    // --no-index /dev/null to show the full file content as additions.
+    if (!diff && !staged) {
+      diff = (await execFileP("git", ["-C", dir, "diff", "--no-index", "/dev/null", path], { encoding: "utf8", timeout: 10_000 })).stdout.trim()
+    }
+    return c.json({ diff })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "diff failed" }, 500)
+  }
+})
+
+app.post("/api/loops/:id/git-stage", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const files: string[] = Array.isArray(body.files) ? body.files : []
+  const unstage = body.unstage === true
+  if (files.length === 0) return c.json({ error: "files required" }, 400)
+  const dir = loopWorkdir(id)
+  if (!existsSync(join(dir, ".git"))) return c.json({ error: "not a git repo" }, 400)
+  try {
+    const args = unstage ? ["-C", dir, "reset", "HEAD", "--", ...files] : ["-C", dir, "add", "--", ...files]
+    await execFileP("git", args, { encoding: "utf8", timeout: 10_000 })
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "stage failed" }, 500)
+  }
+})
+
+app.post("/api/loops/:id/git-discard", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const file: string = typeof body.file === "string" ? body.file : ""
+  if (!file) return c.json({ error: "file required" }, 400)
+  const dir = loopWorkdir(id)
+  if (!existsSync(join(dir, ".git"))) return c.json({ error: "not a git repo" }, 400)
+  try {
+    // First check if the file is tracked. Untracked files can't be
+    // checked out — remove them instead.
+    const tracked = (await execFileP("git", ["-C", dir, "ls-files", "--error-unmatch", file], { encoding: "utf8", timeout: 5_000 }).catch(() => null)) !== null
+    if (tracked) {
+      await execFileP("git", ["-C", dir, "checkout", "--", file], { encoding: "utf8", timeout: 10_000 })
+    } else {
+      await execFileP("rm", ["-f", join(dir, file)], { encoding: "utf8", timeout: 5_000 })
+    }
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "discard failed" }, 500)
+  }
 })
 
 // Workspace vault APIs (Context tab)

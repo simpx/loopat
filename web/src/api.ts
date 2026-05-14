@@ -517,3 +517,49 @@ declare const __BUILD_TIME__: string
 export function getBuildInfo() {
   return { commit: __BUILD_COMMIT__, time: __BUILD_TIME__ }
 }
+
+// ── git (workdir) ──
+
+export type GitFileInfo = {
+  path: string
+  status: "A" | "M" | "D" | "R" | "?"
+  additions: number
+  deletions: number
+  isBinary: boolean
+}
+
+export type GitStatus = {
+  unstaged: GitFileInfo[]
+  staged: GitFileInfo[]
+}
+
+export async function getGitStatus(loopId: string): Promise<GitStatus> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-status`)
+  if (!r.ok) return { unstaged: [], staged: [] }
+  return (await r.json()) as GitStatus
+}
+
+export async function getGitDiff(loopId: string, path: string, staged: boolean): Promise<string | null> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-diff?path=${encodeURIComponent(path)}&staged=${staged ? "1" : "0"}`)
+  if (!r.ok) return null
+  const j = await r.json()
+  return j.diff as string ?? null
+}
+
+export async function gitStageFiles(loopId: string, files: string[], unstage: boolean = false): Promise<boolean> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-stage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ files, unstage }),
+  })
+  return r.ok
+}
+
+export async function gitDiscardFile(loopId: string, file: string): Promise<boolean> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-discard`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ file }),
+  })
+  return r.ok
+}
