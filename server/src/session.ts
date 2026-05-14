@@ -156,6 +156,7 @@ class LoopSession {
   private currentPermissionMode: SdkPermissionMode = "bypassPermissions"
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private consuming = false
+  private generating = false
 
   constructor(id: string) {
     this.id = id
@@ -500,6 +501,13 @@ class LoopSession {
           const event = (msg as any).event?.type ? ` event=${(msg as any).event.type}` : ""
           console.error(`[sdk:${tag}] msg ${msg.type}${subtype}${event}`)
         }
+        // Track generating state: init → true, result → false
+        if (msg.type === "system" && (msg as any).subtype === "init") {
+          this.generating = true
+        } else if (msg.type === "result") {
+          this.generating = false
+        }
+
         // ephemeral live-feed events: don't persist or replay; just broadcast
         // so already-attached clients see the streaming.
         const ephemeral = msg.type === "stream_event" || msg.type === "tool_progress"
@@ -518,6 +526,7 @@ class LoopSession {
       this.broadcast(err)
     } finally {
       this.consuming = false
+      this.generating = false
       // Always emit a result marker so the frontend knows the run is done,
       // even if the generator ended without one (e.g. after interrupt).
       const result = { type: "result" as const }
@@ -613,6 +622,16 @@ class LoopSession {
     try {
       ws.send(JSON.stringify({ type: "history_end" }))
     } catch {}
+    // If the server is mid-generation right now, the frontend needs a
+    // synthetic init to show the running status bar. The original init
+    // was replayed during history (and ignored because loadingHistory
+    // was true). After history_end, loadingHistory is false, so this
+    // one will take effect.
+    if (this.generating) {
+      try {
+        ws.send(JSON.stringify({ type: "system", subtype: "init" }))
+      } catch {}
+    }
     this.cancelIdleCleanup()
     this.broadcastViewers()
     console.log(`[loop:${this.id.slice(0, 8)}] attach → viewers=${this.subscribers.size}`)
@@ -685,6 +704,7 @@ class LoopSession {
   }
 
   async interrupt() {
+    this.generating = false
     if (this.q) await this.q.interrupt().catch(() => {})
   }
 
@@ -692,6 +712,7 @@ class LoopSession {
    *  loop is archived so no orphaned processes remain. */
   async destroy() {
     this.cancelIdleCleanup()
+    this.generating = false
     sessions.delete(this.id)
     if (this.q) {
       try { await this.q.interrupt() } catch {}

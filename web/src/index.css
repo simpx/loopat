@@ -64,6 +64,35 @@ html, body {
   50% { background-color: #bbf7d0; }
 }
 
+/* ─── ClaudeStatus morphing icon ─── */
+@keyframes morph {
+  0%, 100% {
+    border-radius: 50% 50% 60% 40%;
+    background-color: #3b82f6;
+    transform: scale(1);
+  }
+  25% {
+    border-radius: 40% 60% 50% 50%;
+    background-color: #6366f1;
+    transform: scale(1.15);
+  }
+  50% {
+    border-radius: 55% 45% 40% 60%;
+    background-color: #8b5cf6;
+    transform: scale(0.9);
+  }
+  75% {
+    border-radius: 45% 55% 60% 40%;
+    background-color: #6366f1;
+    transform: scale(1.1);
+  }
+}
+
+@keyframes glow {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.8); }
+}
+
 /* ─── User message gradient fade (collapsed state) ─── */
 .user-msg-fade {
   position: absolute;

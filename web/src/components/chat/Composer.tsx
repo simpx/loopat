@@ -47,7 +47,7 @@ export default function Composer() {
   return (
     <ComposerPrimitive.Root className="relative flex w-full flex-col">
       {/* Claude Status bar */}
-      <ClaudeStatus isLoading={isRunning} />
+      <ClaudeStatus isLoading={isRunning} tokenCount={usedTokens} />
 
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div

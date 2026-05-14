@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
-import { BrainIcon, SquareIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState, useRef } from "react";
+import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 
 const ACTION_WORDS = [
   "Thinking",
@@ -17,35 +16,75 @@ function formatElapsedTime(totalSeconds: number) {
   return mins < 1 ? `${secs}s` : `${mins}m ${secs}s`;
 }
 
-interface ClaudeStatusProps {
-  isLoading: boolean;
-  onAbort?: () => void;
+function formatTokens(n: number) {
+  if (n < 0) n = 0;
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-export default function ClaudeStatus({
-  isLoading,
-  onAbort,
-}: ClaudeStatusProps) {
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [dots, setDots] = useState("");
+interface ClaudeStatusProps {
+  isLoading: boolean;
+  tokenCount: number;
+}
 
+export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProps) {
+  const { thinkingBudget } = useLoopRuntimeExtra();
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [displayTokens, setDisplayTokens] = useState(0);
+  const [ellipsis, setEllipsis] = useState("");
+
+  const startTokensRef = useRef(0);
+
+  // Elapsed timer + ellipsis cycle
   useEffect(() => {
     if (!isLoading) {
       setElapsedTime(0);
+      setDisplayTokens(0);
+      setEllipsis("");
       return;
     }
     const startTime = Date.now();
     const timer = setInterval(() => {
       setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
-    }, 1000);
+    }, 250);
     const dotTimer = setInterval(() => {
-      setDots((prev) => (prev.length >= 3 ? "" : prev + "."));
-    }, 500);
-
+      setEllipsis((prev) => (prev.length >= 3 ? "" : prev + "."));
+    }, 400);
     return () => {
       clearInterval(timer);
       clearInterval(dotTimer);
     };
+  }, [isLoading]);
+
+  // Keep target in sync so the rAF loop reads latest without re-subscribing
+  const targetRef = useRef(0);
+  if (isLoading && startTokensRef.current === 0) {
+    startTokensRef.current = tokenCount;
+  }
+  targetRef.current = Math.max(0, tokenCount - startTokensRef.current);
+
+  // Smooth easing rAF loop — only restarts on isLoading change
+  useEffect(() => {
+    if (!isLoading) {
+      startTokensRef.current = 0;
+      targetRef.current = 0;
+      return;
+    }
+
+    let raf: number;
+    const step = () => {
+      const target = targetRef.current;
+      setDisplayTokens((prev) => {
+        if (Math.abs(target - prev) < 0.5) return target;
+        const diff = target - prev;
+        const speed = Math.max(1, Math.ceil(Math.abs(diff) / 8));
+        return prev + Math.sign(diff) * Math.min(speed, Math.abs(diff));
+      });
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
   }, [isLoading]);
 
   if (!isLoading) return null;
@@ -53,52 +92,47 @@ export default function ClaudeStatus({
   const statusText =
     ACTION_WORDS[Math.floor(elapsedTime / 3) % ACTION_WORDS.length];
 
+  const budgetLabel =
+    thinkingBudget === null
+      ? null
+      : thinkingBudget >= 32000
+        ? "think-hard"
+        : thinkingBudget >= 16000
+          ? "think"
+          : null;
+
   return (
-    <div className="mb-3 w-full">
-      <div className="mx-auto flex max-w-full md:max-w-4xl items-center justify-between gap-2 md:gap-3 overflow-hidden rounded-full border border-gray-200 bg-gray-100 px-2 md:px-3 py-1.5 shadow-sm">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 ring-1 ring-blue-200">
-            <BrainIcon className="h-3.5 w-3.5 text-blue-600" />
-            <span className="absolute inset-0 animate-pulse rounded-full ring-2 ring-emerald-500/20" />
-          </div>
+    <div className="relative mb-1.5 pl-6 md:pl-8">
 
-          <div className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Claude
+      {/* Morphing dot — vertically centered with text line */}
+      <div className="absolute left-[3px] top-1/2 -translate-y-1/2 z-10 h-[6px] w-[6px] animate-[morph_2s_ease-in-out_infinite] bg-blue-500 shadow-[0_0_6px_rgba(59,130,246,0.4)]" />
+
+      {/* Content */}
+      <div className="flex items-center gap-2 md:gap-3 text-xs text-gray-500 py-1">
+        {/* Status text + ellipsis */}
+        <span className="font-medium text-gray-600">
+          {statusText}<span className="inline-block w-4 tabular-nums">{ellipsis}</span>
+        </span>
+
+        {/* Thinking budget badge (skip ultrathink) */}
+        {budgetLabel && (
+          <>
+            <span className="text-gray-300">·</span>
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-600">
+              {budgetLabel}
             </span>
-            <div className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-              <p className="truncate text-xs font-medium text-gray-700">
-                {statusText}
-                <span className="inline-block w-4 text-blue-600">
-                  {dots}
-                </span>
-              </p>
-            </div>
-          </div>
-        </div>
+          </>
+        )}
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center rounded-md bg-gray-200/50 px-2 py-0.5 text-[10px] font-medium tabular-nums text-gray-500">
-            {formatElapsedTime(elapsedTime)}
-          </div>
+        {/* Elapsed time — pushed right but not flush */}
+        <span className="tabular-nums text-gray-500 ml-auto mr-1">
+          {formatElapsedTime(elapsedTime)}
+        </span>
 
-          {onAbort && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="xs"
-              onClick={onAbort}
-              className="group rounded-full text-[10px] font-bold"
-            >
-              <SquareIcon className="h-3 w-3 fill-current" />
-              <span className="hidden sm:inline">STOP</span>
-              <kbd className="hidden rounded bg-black/10 px-1 text-[9px] group-hover:bg-white/20 sm:block">
-                ESC
-              </kbd>
-            </Button>
-          )}
-        </div>
+        {/* Token count — new tokens this turn, eased toward real value */}
+        <span className="tabular-nums text-gray-600 font-medium">
+          +{formatTokens(displayTokens)} tk
+        </span>
       </div>
     </div>
   );

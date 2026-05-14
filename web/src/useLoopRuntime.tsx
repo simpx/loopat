@@ -263,6 +263,7 @@ export interface LoopRuntimeExtra {
   setMaxThinkingTokens: (tokens: number | null) => void
   getContextUsage: () => void
   contextUsage: ContextUsage | null
+  thinkingBudget: number | null
   provider: ProviderInfo | null
   selectProvider: (name: string, source?: "personal" | "workspace") => void
   /** Drop SDK context (like CC's /clear); next message starts with 0 history. */
@@ -292,6 +293,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   setMaxThinkingTokens: () => {},
   getContextUsage: () => {},
   contextUsage: null,
+  thinkingBudget: null,
   provider: null,
   selectProvider: () => {},
   clearContext: () => {},
@@ -359,11 +361,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
+  const [thinkingBudget, setThinkingBudget] = useState<number | null>(null)
 
   const setMaxThinkingTokens = useCallback((tokens: number | null) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: "set_max_thinking_tokens", tokens }))
+    setThinkingBudget(tokens)
   }, [])
 
   const getContextUsage = useCallback(() => {
@@ -428,8 +432,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [raw])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory],
   )
 
   useEffect(() => {
@@ -452,6 +456,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setQuestionsObj({})
       setPermissionPrompt(null)
       setContextUsage(null)
+      setThinkingBudget(null)
       setThinkingOpen(false)
       const ws = new WebSocket(url)
       wsRef.current = ws
