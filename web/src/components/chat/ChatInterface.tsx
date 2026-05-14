@@ -40,7 +40,7 @@ const composerDrafts = new Map<string, string>();
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive }: { archived?: boolean; onUnarchive?: () => void } = {}) {
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
@@ -228,7 +228,7 @@ export default function ChatInterface({ archived = false, onUnarchive }: { archi
               </button>
             )}
           </div>
-        ) : (
+        ) : readOnly ? null : (
           <Composer />
         )}
       </div>

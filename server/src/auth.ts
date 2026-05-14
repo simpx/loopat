@@ -29,10 +29,15 @@ const USERNAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
 export type User = {
   id: string
-  salt: string
-  hash: string
+  /** Empty/missing on whitelist stubs that haven't been claimed yet. */
+  salt?: string
+  hash?: string
   personalRepo?: string
   createdAt: string
+}
+
+export function isUserClaimed(u: User): boolean {
+  return !!(u.salt && u.hash)
 }
 
 export type PublicUser = { id: string }
@@ -78,7 +83,8 @@ export async function hashPassword(password: string, salt?: string): Promise<{ s
   return { salt: s, hash: buf.toString("hex") }
 }
 
-export async function verifyPassword(password: string, salt: string, hash: string): Promise<boolean> {
+export async function verifyPassword(password: string, salt: string | undefined, hash: string | undefined): Promise<boolean> {
+  if (!salt || !hash) return false
   const buf = await scrypt(password, salt, SCRYPT_KEYLEN)
   const expected = Buffer.from(hash, "hex")
   if (buf.length !== expected.length) return false
@@ -89,6 +95,12 @@ export function isValidUsername(id: string): boolean {
   return USERNAME_RE.test(id)
 }
 
+/**
+ * Whitelist-based registration. The id must already exist in users.json as a
+ * stub `{ id, createdAt }` (added by an admin) — anonymous "register a fresh
+ * account" is not allowed. If the stub already has a password (salt+hash),
+ * it's already claimed and we refuse.
+ */
 export async function createUser(input: {
   id: string
   password: string
@@ -97,16 +109,21 @@ export async function createUser(input: {
   if (!isValidUsername(input.id)) throw new Error("invalid username (lowercase a-z0-9_- , 1-32 chars, leading alnum)")
   if (!input.password || input.password.length < 1) throw new Error("password required")
   const f = await readUsersFile()
-  if (f.users.some((u) => u.id === input.id)) throw new Error("username taken")
+  const idx = f.users.findIndex((u) => u.id === input.id)
+  if (idx < 0) throw new Error("registration not allowed — id is not in the user whitelist")
+  if (isUserClaimed(f.users[idx])) throw new Error("username taken")
   const { salt, hash } = await hashPassword(input.password)
+  const stub = f.users[idx]
   const user: User = {
-    id: input.id,
+    ...stub,
     salt,
     hash,
-    personalRepo: input.personalRepo?.trim() || undefined,
-    createdAt: new Date().toISOString(),
+    personalRepo: input.personalRepo?.trim() || stub.personalRepo,
+    createdAt: stub.createdAt || new Date().toISOString(),
   }
-  await writeUsersFile({ users: [...f.users, user] })
+  const users = f.users.slice()
+  users[idx] = user
+  await writeUsersFile({ users })
   return user
 }
 

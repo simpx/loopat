@@ -5,7 +5,7 @@
  * LOOPAT_HOME, server-side).
  */
 import { useEffect, useState } from "react"
-import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
@@ -41,27 +41,29 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const navigate = useNavigate()
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
-  const [authOpen, setAuthOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
   const loggedIn = !!ws.currentUser
+  const onLoopRoute = !!useMatch("/loop/:id")
+  // Anonymous viewers on a loop URL get the "shared" experience: no header,
+  // no tabs, no login affordance, no dialogs. The page itself enforces
+  // meta.public via server gating; if it's not public the page renders its
+  // own "unavailable" state.
+  const shareMode = !loggedIn && onLoopRoute
 
-  // auto-close auth dialog when login succeeds
   useEffect(() => {
-    if (loggedIn && authOpen) setAuthOpen(false)
-  }, [loggedIn])
-
-  useEffect(() => {
+    if (shareMode) return
     getServerWorkspace().then((name) => {
       if (name) {
         setWorkspaceName(name)
         document.title = `${name} · loopat`
       }
     })
-  }, [])
+  }, [shareMode])
 
   useEffect(() => {
+    if (shareMode) return
     const build = getBuildInfo()
     getVersion().then((v) => {
       console.log(
@@ -73,7 +75,22 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         "color:#98c379",
       )
     })
-  }, [])
+  }, [shareMode])
+
+  if (shareMode) {
+    return (
+      <div className="h-full w-full bg-white text-gray-900">
+        <Outlet />
+      </div>
+    )
+  }
+
+  // Anyone not on a (shared) loop URL must be logged in. Show the login page
+  // as the entire screen — no header, no tabs, no nav. Successful login
+  // re-renders the Shell with the normal chrome.
+  if (!loggedIn) {
+    return <AuthPage />
+  }
 
   const handleCreate = async (opts: { title: string; repo?: string }) => {
     const m = await ws.createLoop(opts)
@@ -109,88 +126,74 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           ))}
         </nav>
         <div className="flex-1" />
-        {loggedIn && (
+        <button
+          type="button"
+          onClick={() => ws.setNewLoopDialogOpen(true)}
+          className="flex items-center gap-1 md:gap-1.5 px-2 md:px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
+          title="create new loop"
+        >
+          <span className="text-base leading-none">+</span>
+          <span className="hidden md:inline">New Loop</span>
+        </button>
+        <div className="relative">
           <button
             type="button"
-            onClick={() => ws.setNewLoopDialogOpen(true)}
-            className="flex items-center gap-1 md:gap-1.5 px-2 md:px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
-            title="create new loop"
+            onClick={() => setMenuOpen((v) => !v)}
+            className="flex items-center gap-1 md:gap-2 px-1 md:px-2 h-8 rounded hover:bg-gray-100"
+            title="account"
           >
-            <span className="text-base leading-none">+</span>
-            <span className="hidden md:inline">New Loop</span>
+            <span className="w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center">
+              {me[0]?.toUpperCase() ?? "?"}
+            </span>
+            <span className="hidden md:inline text-sm text-gray-700">{me}</span>
+            <span className="text-gray-400 text-xs">▾</span>
           </button>
-        )}
-        {loggedIn ? (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              className="flex items-center gap-1 md:gap-2 px-1 md:px-2 h-8 rounded hover:bg-gray-100"
-              title="account"
-            >
-              <span className="w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center">
-                {me[0]?.toUpperCase() ?? "?"}
-              </span>
-              <span className="hidden md:inline text-sm text-gray-700">{me}</span>
-              <span className="text-gray-400 text-xs">▾</span>
-            </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-gray-200 rounded shadow-md py-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      setPersonalOpen(true)
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Personal repo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
-                      setAboutOpen(true)
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    About
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setMenuOpen(false)
-                      await ws.logout()
-                      navigate("/loop")
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Logout
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAuthOpen(true)}
-            className="px-2 md:px-3 h-8 rounded text-xs md:text-sm border border-gray-300 text-gray-700 hover:bg-gray-100"
-            title="login or register"
-          >
-            Login
-          </button>
-        )}
+          {menuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-20 w-40 bg-white border border-gray-200 rounded shadow-md py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setPersonalOpen(true)
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Personal repo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    setAboutOpen(true)
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  About
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMenuOpen(false)
+                    await ws.logout()
+                    navigate("/loop")
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                >
+                  Logout
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </header>
       <main className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <Outlet />
       </main>
-      {ws.newLoopDialogOpen && loggedIn && (
+      {ws.newLoopDialogOpen && (
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
       )}
-      {authOpen && <AuthPage onClose={() => setAuthOpen(false)} />}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
       <PersonalImportDialog open={personalOpen} onClose={() => setPersonalOpen(false)} />
     </div>
@@ -231,6 +234,9 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Navigate to="/loop" replace />} />
             <Route path="/loop" element={<LoopRedirect />} />
+            {/* Dual-mode: logged-in → full LoopPage with chrome; anonymous →
+                read-only share view (server gates by meta.public). Shell
+                drops the chrome when anonymous. */}
             <Route path="/loop/:id" element={<LoopPage />} />
             <Route path="/kanban" element={<KanbanPage />} />
             <Route path="/focus" element={<FocusPage />} />
