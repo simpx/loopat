@@ -35,8 +35,33 @@ const ThreadWelcome: FC = () => {
 
 /* ─── Composer draft cache ─── */
 
-// Survives LoopMain unmount/remount across loop switches (key={id}).
-const composerDrafts = new Map<string, string>();
+const DRAFT_STORAGE_KEY = "loopat:composer:drafts";
+
+function getDraft(loopId: string): string | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const drafts = JSON.parse(raw) as Record<string, string>;
+    return drafts[loopId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function setDraft(loopId: string, text: string): void {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const drafts: Record<string, string> = raw ? JSON.parse(raw) : {};
+    if (text.trim()) {
+      drafts[loopId] = text;
+    } else {
+      delete drafts[loopId];
+    }
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(drafts));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 /* ─── Chat Interface ─── */
 
@@ -53,23 +78,46 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     vp.scrollTo({ top: vp.scrollHeight, behavior: "smooth" });
   }, []);
 
-  // Persist composer text across loop switches.
+  // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
   const composerText = useAuiState((s) => s.composer.text);
   const composerTextRef = useRef(composerText);
   composerTextRef.current = composerText;
+
+  // Load draft from localStorage on mount
   useEffect(() => {
-    const draft = composerDrafts.get(loopId);
+    const draft = getDraft(loopId);
     if (draft) {
       composer.setText(draft);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Save draft to localStorage on unmount and when text changes
   useEffect(() => {
     return () => {
-      composerDrafts.set(loopId, composerTextRef.current);
+      setDraft(loopId, composerTextRef.current);
     };
   }, [loopId]);
+
+  // Also save when text changes (debounced)
+  useEffect(() => {
+    if (!composerText) return;
+    const timer = setTimeout(() => {
+      setDraft(loopId, composerText);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [composerText, loopId]);
+
+  // Clear draft when message is sent (composer text becomes empty after send)
+  const [prevText, setPrevText] = useState(composerText);
+  useEffect(() => {
+    // If user manually cleared the input, also clear storage
+    if (prevText && !composerText) {
+      setDraft(loopId, "");
+    }
+    setPrevText(composerText);
+  }, [composerText, loopId]);
 
   // Auto-scroll to bottom: instant on load, throttled during streaming.
   // During history replay (loadingHistory=true), keep snapping to bottom on
