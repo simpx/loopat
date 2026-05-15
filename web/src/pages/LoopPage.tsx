@@ -218,7 +218,7 @@ function LoopsList({ currentId }: { currentId: string }) {
 function LoopMain({ meta }: { meta: LoopMeta }) {
   const ws = useWorkspace()
   const isMobile = useIsMobile()
-  const { runtime, connected, reconnecting, running, viewers, extra } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
+  const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
   const [rightOpen, setRightOpen] = useState(false)
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
@@ -252,6 +252,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           reconnecting={reconnecting}
           running={running}
           viewers={viewers}
+          queue={queue}
+          onClearQueue={onClearQueue}
           rightOpen={rightOpen}
           rightMode={rightMode}
           toggleMode={toggleMode}
@@ -299,6 +301,8 @@ function LoopHeader({
   reconnecting,
   running,
   viewers,
+  queue,
+  onClearQueue,
   rightOpen,
   rightMode,
   toggleMode,
@@ -309,6 +313,8 @@ function LoopHeader({
   reconnecting: boolean
   running: boolean
   viewers: number
+  queue: string[]
+  onClearQueue: () => void
   rightOpen: boolean
   rightMode: RightMode
   toggleMode: (m: RightMode) => void

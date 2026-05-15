@@ -144,6 +144,8 @@ const EDIT_TOOLS = new Set(["Write", "Edit", "NotebookEdit"])
 
 const IDLE_TIMEOUT_MS = Number(process.env.LOOPAT_SESSION_IDLE_MS) || 5 * 60 * 1000
 
+type QueuedMessage = { text: string; permissionMode?: SdkPermissionMode }
+
 class LoopSession {
   id: string
   private q: Query | null = null
@@ -158,6 +160,8 @@ class LoopSession {
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private consuming = false
   private generating = false
+  private messageQueue: QueuedMessage[] = []
+  private queueProcessing = false
 
   constructor(id: string) {
     this.id = id
@@ -508,6 +512,9 @@ class LoopSession {
           this.generating = true
         } else if (msg.type === "result") {
           this.generating = false
+          this.queueProcessing = false
+          // Process next queued message immediately after result
+          this.processNextInQueue()
         }
 
         // ephemeral live-feed events: don't persist or replay; just broadcast
@@ -529,12 +536,18 @@ class LoopSession {
     } finally {
       this.consuming = false
       this.generating = false
+      this.queueProcessing = false
+      // Reset query so the next queued message gets a fresh Query instance.
+      this.q = null
+      this.input = pushIterable<SDKUserMessage>()
       // Always emit a result marker so the frontend knows the run is done,
       // even if the generator ended without one (e.g. after interrupt).
       const result = { type: "result" as const }
       this.history.push(result as any)
       this.broadcast(result)
       if (this.subscribers.size === 0) this.scheduleIdleCleanup()
+      // Process next queued message after interrupt/error too
+      this.processNextInQueue()
     }
   }
 
@@ -651,6 +664,10 @@ class LoopSession {
         }))
       } catch {}
     }
+    // Send current queue status to reconnected clients
+    if (this.messageQueue.length > 0) {
+      try { ws.send(JSON.stringify({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })) } catch {}
+    }
     this.cancelIdleCleanup()
     this.broadcastViewers()
     console.log(`[loop:${this.id.slice(0, 8)}] attach → viewers=${this.subscribers.size}`)
@@ -664,12 +681,17 @@ class LoopSession {
   }
 
   async sendUserText(text: string, permissionMode?: SdkPermissionMode) {
-    // Apply permission mode before ensureStarted so the initial query() gets it.
-    // When switching to bypassPermissions the q.setPermissionMode() call alone
-    // is sufficient — the SDK re-evaluates permissions for the next turn.
+    if (this.generating || this.messageQueue.length > 0 || this.queueProcessing) {
+      this.messageQueue.push({ text, permissionMode })
+      this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
+      return
+    }
+    await this._pushUserMessage(text, permissionMode)
+  }
+
+  private async _pushUserMessage(text: string, permissionMode?: SdkPermissionMode) {
     if (permissionMode && permissionMode !== this.currentPermissionMode) {
       this.currentPermissionMode = permissionMode
-      // Persist to loop meta so it survives page reloads
       patchLoopMeta(this.id, { config: { permission_mode: permissionMode } }).catch(() => {})
       if (this.q) {
         try { await this.q.setPermissionMode(permissionMode) } catch {}
@@ -686,6 +708,27 @@ class LoopSession {
     this.persist(userMsg)
     this.broadcast(userMsg)
     this.input.push(userMsg)
+  }
+
+  /** Process the next queued message. Called from consume()'s finally block
+   *  after each generation completes. Only starts the next message; subsequent
+   *  messages are handled recursively by consume()'s finally. */
+  private processNextInQueue() {
+    if (this.queueProcessing) return // already processing
+    if (this.messageQueue.length === 0) {
+      this.broadcast({ type: "queue_update", queue: [] })
+      return
+    }
+    this.queueProcessing = true
+    const next = this.messageQueue.shift()!
+    this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
+    this._pushUserMessage(next.text, next.permissionMode).catch((e) => {
+      console.error("[loopat] queued message failed:", e)
+      this.queueProcessing = false
+      // Try next message on failure
+      if (this.messageQueue.length > 0) this.processNextInQueue()
+      else this.broadcast({ type: "queue_update", queue: [] })
+    })
   }
 
   async answerQuestions(toolUseID: string, answers: Record<string, string>) {
@@ -727,11 +770,23 @@ class LoopSession {
     if (this.q) await this.q.interrupt().catch(() => {})
   }
 
+  getQueueLength(): number {
+    return this.messageQueue.length
+  }
+
+  clearQueue() {
+    this.messageQueue = []
+    this.queueProcessing = false
+    this.broadcast({ type: "queue_update", queue: [] })
+  }
+
   /** Tear down the SDK process and disconnect all subscribers. Used when a
    *  loop is archived so no orphaned processes remain. */
   async destroy() {
     this.cancelIdleCleanup()
     this.generating = false
+    this.queueProcessing = false
+    this.messageQueue = []
     sessions.delete(this.id)
     if (this.q) {
       try { await this.q.interrupt() } catch {}
