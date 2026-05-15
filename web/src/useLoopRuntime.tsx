@@ -282,6 +282,14 @@ export interface LoopRuntimeExtra {
   agentToolUseIds: ReadonlySet<string>
   /** Agent tool_use_id → child RawMsgs that belong to that agent. */
   childMessagesByAgentId: ReadonlyMap<string, RawMsg[]>
+  /** True while SDK is generating. */
+  isRunning: boolean
+  /** Enqueue a message to be sent after current generation completes. */
+  enqueueMessage: (text: string) => void
+  /** Messages waiting in the server queue. */
+  queue: string[]
+  /** Clear the pending message queue. */
+  clearQueue: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -307,6 +315,10 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   loadingHistory: true,
   agentToolUseIds: new Set(),
   childMessagesByAgentId: new Map(),
+  isRunning: false,
+  enqueueMessage: () => {},
+  queue: [],
+  clearQueue: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -357,6 +369,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("bypassPermissions")
   const permissionModeRef = useRef<PermissionMode>("bypassPermissions")
   permissionModeRef.current = permissionMode
+  const [queue, setQueue] = useState<string[]>([])
 
   const [permissionPrompt, setPermissionPrompt] = useState<PermissionPrompt | null>(null)
 
@@ -485,9 +498,28 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     }
   }, [raw])
 
+  const onCancel = useCallback(async () => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "interrupt" }))
+    setRunning(false)
+  }, [])
+
+  const onClearQueue = useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "queue_clear" }))
+  }, [])
+
+  const enqueueMessage = useCallback((text: string) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
+  }, [])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue],
   )
 
   useEffect(() => {
@@ -557,6 +589,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }
         if (m?.type === "viewers") {
           setViewers(typeof m.count === "number" ? m.count : 0)
+          return
+        }
+        if (m?.type === "queue_update") {
+          setQueue(Array.isArray(m.queue) ? m.queue : [])
           return
         }
         if (m?.type === "provider") {
@@ -791,13 +827,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
   }, [])
 
-  const onCancel = useCallback(async () => {
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "interrupt" }))
-    setRunning(false)
-  }, [])
-
   const safeConvert = useCallback((raw: RawMsg) => {
     try {
       return convertMessage(raw)
@@ -815,5 +844,5 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     onCancel,
   })
 
-  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts, provider, extra }
+  return { runtime, connected, reconnecting, running, viewers, mounts, setMounts, provider, extra, queue, onClearQueue }
 }
