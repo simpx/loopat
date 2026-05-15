@@ -147,9 +147,15 @@ export function convertMessage(raw: RawMsg) {
       const txt = (b.text ?? "").trim()
       if (txt) parts.push({ type: "text", text: txt })
     } else if (b?.type === "clear-divider") {
-      // Pass through as-is; AssistantMessage recognizes this part type
-      // and renders a custom banner.
-      parts.push(b)
+      const ts = (b as any).ts
+      const by = (b as any).by
+      const timeStr = ts ? new Date(ts).toLocaleString() : ""
+      const byStr = by ? ` by ${by}` : ""
+      const stamp = [byStr, timeStr].filter(Boolean).join(" · ")
+      parts.push({
+        type: "text",
+        text: `---\n*Context cleared${stamp ? ` ${stamp}` : ""}*\n---`,
+      })
     } else if (b?.type === "thinking") {
       parts.push({
         type: "reasoning",
@@ -292,6 +298,12 @@ export interface LoopRuntimeExtra {
   clearQueue: () => void
   /** Remove a single item from the queue by index. */
   removeFromQueue: (index: number) => void
+  /** Whether there are messages before a clear boundary (history available). */
+  hasHistory: boolean
+  /** Whether to show pre-clear history messages. */
+  showHistory: boolean
+  /** Toggle showing pre-clear history. */
+  toggleShowHistory: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -322,6 +334,9 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   queue: [],
   clearQueue: () => {},
   removeFromQueue: () => {},
+  hasHistory: false,
+  showHistory: false,
+  toggleShowHistory: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -373,6 +388,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const permissionModeRef = useRef<PermissionMode>("bypassPermissions")
   permissionModeRef.current = permissionMode
   const [queue, setQueue] = useState<string[]>([])
+
+  const [showHistory, setShowHistory] = useState(false)
 
   const [permissionPrompt, setPermissionPrompt] = useState<PermissionPrompt | null>(null)
 
@@ -454,15 +471,26 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     return n
   }, [raw])
 
+  const hasHistory = useMemo(() => {
+    for (const m of raw) {
+      if (Array.isArray(m?.content) && m.content[0]?.type === "clear-divider") {
+        return true
+      }
+    }
+    return false
+  }, [raw])
+
   const { aggregated, agentToolUseIds, childMessagesByAgentId } = useMemo(() => {
     try {
       let from = 0
-      for (let i = raw.length - 1; i >= 0; i--) {
-        const m: any = raw[i]
-        const firstPart = Array.isArray(m?.content) ? m.content[0] : null
-        if (firstPart?.type === "clear-divider") {
-          from = i + 1
-          break
+      if (!showHistory) {
+        for (let i = raw.length - 1; i >= 0; i--) {
+          const m: any = raw[i]
+          const firstPart = Array.isArray(m?.content) ? m.content[0] : null
+          if (firstPart?.type === "clear-divider") {
+            from = i + 1
+            break
+          }
         }
       }
       const allEnriched = aggregateToolResults(from === 0 ? raw : raw.slice(from))
@@ -499,7 +527,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       console.error("[fe:aggregateToolResults]", e)
       return { aggregated: [] as RawMsg[], agentToolUseIds: new Set() as ReadonlySet<string>, childMessagesByAgentId: new Map() as ReadonlyMap<string, RawMsg[]> }
     }
-  }, [raw])
+  }, [raw, showHistory])
 
   const onCancel = useCallback(async () => {
     const ws = wsRef.current
@@ -526,9 +554,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
   }, [])
 
+  const toggleShowHistory = useCallback(() => {
+    setShowHistory((v) => !v)
+  }, [])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory],
   )
 
   useEffect(() => {
