@@ -69,8 +69,8 @@ export default function Composer() {
               key={i}
               className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1.5"
             >
-              <span className="text-xs text-gray-600 truncate min-w-0">
-                <span className="text-gray-400 mr-1.5">{i + 1}.</span>
+              <span className="text-xs text-gray-600 line-clamp-3 break-words whitespace-pre-wrap min-w-0">
+                <span className="text-gray-400 mr-1.5 shrink-0">{i + 1}.</span>
                 {msg}
               </span>
               <button
