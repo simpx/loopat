@@ -1019,6 +1019,10 @@ app.get(
             session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
             session.interrupt()
+          } else if (msg?.type === "queue_clear") {
+            session.clearQueue()
+          } else if (msg?.type === "queue_status") {
+            try { ws.send(JSON.stringify({ type: "queue_update", queueLength: session.getQueueLength() })) } catch {}
           } else if (msg?.type === "answers") {
             session.answerQuestions(msg.tool_use_id, msg.answers)
           } else if (msg?.type === "permission_answer") {
