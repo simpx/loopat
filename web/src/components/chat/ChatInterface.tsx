@@ -171,6 +171,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       timer = setTimeout(() => { timer = null; scroll(); }, 80);
     });
     ro.observe(inner);
+    ro.observe(vp);
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);

@@ -131,7 +131,7 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
 
         {/* Token count — new tokens this turn, eased toward real value */}
         <span className="tabular-nums text-gray-600 font-medium">
-          +{formatTokens(displayTokens)} tk
+          ↓{formatTokens(displayTokens)} tk
         </span>
       </div>
     </div>
