@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   ComposerPrimitive,
   AuiIf,
@@ -45,11 +44,10 @@ export default function Composer() {
 
   const messagesArray = useAuiState((s) => s.thread.messages);
   const usedTokens = estimateTokens(messagesArray);
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
-  const [queueOpen, setQueueOpen] = useState(false);
 
   const handleEnqueue = () => {
     const text = typeof composerText === "string" ? composerText.trim() : "";
@@ -63,41 +61,27 @@ export default function Composer() {
       {/* Claude Status bar */}
       <ClaudeStatus isLoading={isRunning} tokenCount={usedTokens} />
 
-      {/* Queue indicator */}
+      {/* Queue: inline items with per-item remove */}
       {queue.length > 0 && (
-        <div className="relative mb-1.5 pl-6 md:pl-8">
-          <div className="absolute left-[3px] top-1/2 -translate-y-1/2 z-10 h-[6px] w-[6px] bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.4)]" />
-          <div className="flex items-center gap-2 md:gap-3 text-xs text-gray-500 py-1">
-            <button
-              onClick={() => setQueueOpen(!queueOpen)}
-              className="flex items-center gap-1 font-medium text-amber-600 hover:text-amber-700"
+        <div className="mb-1.5 space-y-1 px-2">
+          {queue.map((msg, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1.5"
             >
-              <ListOrderedIcon className="h-3.5 w-3.5" /> {queue.length} queued
-            </button>
-          </div>
-          {queueOpen && (
-            <>
-              <div className="fixed inset-0 z-40 sm:hidden" onClick={() => setQueueOpen(false)} />
-              <div className="absolute left-0 top-full mt-1 w-72 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg z-50">
-                <div className="flex items-center justify-between p-2 border-b border-gray-100">
-                  <span className="text-xs font-medium text-gray-500">Queued Messages</span>
-                  <button
-                    onClick={clearQueue}
-                    className="text-xs text-gray-400 hover:text-red-500 p-1 rounded hover:bg-gray-50"
-                    title="Clear queue"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                {queue.map((msg, i) => (
-                  <div key={i} className="px-3 py-2 text-xs text-gray-700 border-b border-gray-50 last:border-b-0 truncate">
-                    <span className="text-gray-400 mr-1.5">{i + 1}.</span>
-                    {msg}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+              <span className="text-xs text-gray-600 truncate min-w-0">
+                <span className="text-gray-400 mr-1.5">{i + 1}.</span>
+                {msg}
+              </span>
+              <button
+                onClick={() => removeFromQueue(i)}
+                className="text-gray-400 hover:text-gray-600 shrink-0 p-0.5 rounded hover:bg-gray-100 transition-colors"
+                title="Remove from queue"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
