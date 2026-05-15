@@ -118,10 +118,10 @@ export function KanbanCardView({
       </div>
       {/* hover buttons */}
       <button type="button" onClick={(e) => { e.stopPropagation(); onClick() }}
-        className="absolute top-2 right-2 z-10 w-5 h-5 rounded-full bg-white border border-gray-300 text-[10px] text-gray-400 hover:text-gray-700 hover:border-gray-500 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center shadow-sm" title="Edit card">✎</button>
+        className="absolute top-2 right-2 z-10 w-5 h-5 rounded-full bg-white border border-gray-300 text-[10px] text-gray-400 hover:text-gray-700 hover:border-gray-500 opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100 transition-opacity flex items-center justify-center shadow-sm" title="Edit card">✎</button>
       {card.done && onArchive && (
         <button type="button" onClick={(e) => { e.stopPropagation(); onArchive() }}
-          className="absolute top-2 right-9 z-10 w-5 h-5 rounded-full bg-white border border-gray-300 text-[10px] text-gray-400 hover:text-orange-600 hover:border-orange-400 opacity-0 group-hover/card:opacity-100 transition-opacity flex items-center justify-center shadow-sm" title="Archive card">◧</button>
+          className="absolute top-2 right-9 z-10 w-5 h-5 rounded-full bg-white border border-gray-300 text-[10px] text-gray-400 hover:text-orange-600 hover:border-orange-400 opacity-100 sm:opacity-0 sm:group-hover/card:opacity-100 transition-opacity flex items-center justify-center shadow-sm" title="Archive card">◧</button>
       )}
     </div>
   )

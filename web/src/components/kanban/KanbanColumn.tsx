@@ -72,6 +72,7 @@ export function KanbanColumn({
   return (
     <div ref={(node) => { setDropRef(node); setHeaderRef(node) }} {...hAttrs} style={colStyle}
       onMouseEnter={() => setShowEdit(true)} onMouseLeave={() => setShowEdit(false)}
+      onTouchStart={() => setShowEdit(true)}
       className={`w-64 shrink-0 flex flex-col rounded-lg transition-colors ${isOver ? "bg-gray-100" : "bg-gray-50"}`}>
 
       {/* header */}
