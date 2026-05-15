@@ -513,8 +513,22 @@ class LoopSession {
         } else if (msg.type === "result") {
           this.generating = false
           this.queueProcessing = false
-          // Process next queued message immediately after result
+          this.q = null
           this.processNextInQueue()
+        } else if (
+          // Inject queued messages at tool-result boundaries — matching
+          // real Claude Code's per-step queue consumption.
+          this.messageQueue.length > 0 &&
+          msg.type === "user" &&
+          Array.isArray((msg as any).message?.content) &&
+          (msg as any).message.content.some((b: any) => b?.type === "tool_result")
+        ) {
+          this.generating = false
+          this.queueProcessing = false
+          await q.interrupt().catch(() => {})
+          this.q = null
+          this.processNextInQueue()
+          return
         }
 
         // ephemeral live-feed events: don't persist or replay; just broadcast
@@ -534,20 +548,20 @@ class LoopSession {
       this.persist(err)
       this.broadcast(err)
     } finally {
+      // If a new Query was started by processNextInQueue() above, skip cleanup —
+      // the new consume owns the lifecycle from here on.
+      if (this.q !== q) return
       this.consuming = false
       this.generating = false
       this.queueProcessing = false
-      // Reset query so the next queued message gets a fresh Query instance.
       this.q = null
       this.input = pushIterable<SDKUserMessage>()
-      // Always emit a result marker so the frontend knows the run is done,
+      // Emit a result marker so the frontend knows the run is done,
       // even if the generator ended without one (e.g. after interrupt).
       const result = { type: "result" as const }
       this.history.push(result as any)
       this.broadcast(result)
       if (this.subscribers.size === 0) this.scheduleIdleCleanup()
-      // Process next queued message after interrupt/error too
-      this.processNextInQueue()
     }
   }
 
@@ -772,6 +786,13 @@ class LoopSession {
 
   getQueueLength(): number {
     return this.messageQueue.length
+  }
+
+  removeQueueItem(index: number) {
+    if (index >= 0 && index < this.messageQueue.length) {
+      this.messageQueue.splice(index, 1)
+      this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
+    }
   }
 
   clearQueue() {

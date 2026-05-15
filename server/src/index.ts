@@ -1021,6 +1021,8 @@ app.get(
             session.interrupt()
           } else if (msg?.type === "queue_clear") {
             session.clearQueue()
+          } else if (msg?.type === "queue_remove") {
+            if (typeof msg?.index === "number") session.removeQueueItem(msg.index)
           } else if (msg?.type === "queue_status") {
             try { ws.send(JSON.stringify({ type: "queue_update", queueLength: session.getQueueLength() })) } catch {}
           } else if (msg?.type === "answers") {

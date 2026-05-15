@@ -290,6 +290,8 @@ export interface LoopRuntimeExtra {
   queue: string[]
   /** Clear the pending message queue. */
   clearQueue: () => void
+  /** Remove a single item from the queue by index. */
+  removeFromQueue: (index: number) => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -319,6 +321,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   enqueueMessage: () => {},
   queue: [],
   clearQueue: () => {},
+  removeFromQueue: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -511,6 +514,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     ws.send(JSON.stringify({ type: "queue_clear" }))
   }, [])
 
+  const onRemoveFromQueue = useCallback((index: number) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "queue_remove", index }))
+  }, [])
+
   const enqueueMessage = useCallback((text: string) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -518,8 +527,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue],
   )
 
   useEffect(() => {
