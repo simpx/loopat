@@ -4,16 +4,16 @@ import { Button } from "@/components/ui/button"
 import {
   getPersonalSettings,
   updatePersonalSettings,
-  getTeamSettings,
-  updateTeamSettings,
+  getWorkspaceSettings,
+  updateWorkspaceSettings,
   getDailyTokenUsage,
   type PersonalSettings,
-  type TeamSettings,
+  type WorkspaceSettings,
   type TokenUsage,
   type DailyUsage,
 } from "@/api"
 
-type Category = "personal" | "team"
+type Category = "personal" | "workspace"
 type SidebarTab = "models" | "notifications"
 
 function formatTokens(n: number): string {
@@ -115,10 +115,10 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const [personalDefault, setPersonalDefault] = useState("")
   const [webhookUrl, setWebhookUrl] = useState("")
 
-  // Team settings
-  const [team, setTeam] = useState<TeamSettings | null>(null)
-  const [teamProviders, setTeamProviders] = useState<Record<string, ProviderForm>>({})
-  const [teamDefault, setTeamDefault] = useState("")
+  // Workspace settings
+  const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null)
+  const [workspaceProviders, setWorkspaceProviders] = useState<Record<string, ProviderForm>>({})
+  const [workspaceDefault, setWorkspaceDefault] = useState("")
 
   // New provider form
   const [newProviderName, setNewProviderName] = useState("")
@@ -136,9 +136,9 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setError("")
     Promise.all([
       getPersonalSettings().catch(() => null),
-      getTeamSettings().catch(() => null),
+      getWorkspaceSettings().catch(() => null),
       getDailyTokenUsage().catch(() => ({})),
-    ]).then(([p, t, daily]) => {
+    ]).then(([p, w, daily]) => {
       if (p) {
         setPersonal(p)
         const forms: Record<string, ProviderForm> = {}
@@ -155,10 +155,10 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         setPersonalDefault(p.default ?? "")
         setWebhookUrl(p.webhookUrl ?? "")
       }
-      if (t) {
-        setTeam(t)
+      if (w) {
+        setWorkspace(w)
         const forms: Record<string, ProviderForm> = {}
-        for (const [name, prov] of Object.entries(t.providers)) {
+        for (const [name, prov] of Object.entries(w.providers)) {
           forms[name] = {
             model: prov.model ?? "",
             baseUrl: prov.baseUrl ?? "",
@@ -167,8 +167,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             keyDirty: false,
           }
         }
-        setTeamProviders(forms)
-        setTeamDefault(t.default ?? "")
+        setWorkspaceProviders(forms)
+        setWorkspaceDefault(w.default ?? "")
       }
       if (daily) setDailyUsage(daily)
       setLoading(false)
@@ -176,12 +176,12 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   }, [open])
 
   function handleProviderChange(
-    target: "personal" | "team",
+    target: "personal" | "workspace",
     name: string,
     field: keyof ProviderForm,
     value: string,
   ) {
-    const setter = target === "personal" ? setPersonalProviders : setTeamProviders
+    const setter = target === "personal" ? setPersonalProviders : setWorkspaceProviders
     setter((prev) => {
       const updated = { ...prev }
       if (!updated[name]) return prev
@@ -191,9 +191,9 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     })
   }
 
-  function handleRemoveProvider(target: "personal" | "team", name: string) {
-    const setForms = target === "personal" ? setPersonalProviders : setTeamProviders
-    const setDef = target === "personal" ? setPersonalDefault : setTeamDefault
+  function handleRemoveProvider(target: "personal" | "workspace", name: string) {
+    const setForms = target === "personal" ? setPersonalProviders : setWorkspaceProviders
+    const setDef = target === "personal" ? setPersonalDefault : setWorkspaceDefault
     setForms((prev) => {
       const updated = { ...prev }
       delete updated[name]
@@ -202,11 +202,11 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setDef((prev) => (prev === name ? "" : prev))
   }
 
-  function handleAddProvider(target: "personal" | "team") {
+  function handleAddProvider(target: "personal" | "workspace") {
     const name = newProviderName.trim()
     if (!name) return
-    const setter = target === "personal" ? setPersonalProviders : setTeamProviders
-    const existing = target === "personal" ? personalProviders : teamProviders
+    const setter = target === "personal" ? setPersonalProviders : setWorkspaceProviders
+    const existing = target === "personal" ? personalProviders : workspaceProviders
     if (existing[name]) { setError("provider name already exists"); return }
     setter((prev) => ({
       ...prev,
@@ -217,7 +217,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setError("")
   }
 
-  async function handleSave(target: "personal" | "team") {
+  async function handleSave(target: "personal" | "workspace") {
     setSaving(true)
     setError("")
     try {
@@ -236,7 +236,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         const ok = await updatePersonalSettings({ providers, default: personalDefault, webhookUrl })
         if (!ok) setError("save failed")
         else {
-          // Clear key dirty flags after save
           setPersonalProviders((prev) => {
             const updated = { ...prev }
             for (const k of Object.keys(updated)) {
@@ -248,16 +247,16 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         }
       } else {
         const providers: Record<string, { model: string; baseUrl: string; apiKey?: string }> = {}
-        for (const [name, f] of Object.entries(teamProviders)) {
+        for (const [name, f] of Object.entries(workspaceProviders)) {
           providers[name] = { model: f.model, baseUrl: f.baseUrl }
           if (f.keyDirty && f.apiKey) {
             providers[name].apiKey = f.apiKey
           }
         }
-        const ok = await updateTeamSettings({ providers, default: teamDefault })
+        const ok = await updateWorkspaceSettings({ providers, default: workspaceDefault })
         if (!ok) setError("save failed")
         else {
-          setTeamProviders((prev) => {
+          setWorkspaceProviders((prev) => {
             const updated = { ...prev }
             for (const k of Object.keys(updated)) {
               updated[k] = { ...updated[k], keyDirty: false, apiKey: "" }
@@ -280,7 +279,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       if (next[name]) {
         delete next[name]
         // Clear the key field when canceling (affects current category)
-        const setter = category === "personal" ? setPersonalProviders : setTeamProviders
+        const setter = category === "personal" ? setPersonalProviders : setWorkspaceProviders
         setter((pp) => {
           const updated = { ...pp }
           if (updated[name]) updated[name] = { ...updated[name], apiKey: "", keyDirty: false }
@@ -293,10 +292,10 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     })
   }
 
-  const currentProviders = category === "personal" ? personalProviders : teamProviders
-  const currentDefault = category === "personal" ? personalDefault : teamDefault
-  const setCurrentDefault = category === "personal" ? setPersonalDefault : setTeamDefault
-  const currentSettings = category === "personal" ? personal : team
+  const currentProviders = category === "personal" ? personalProviders : workspaceProviders
+  const currentDefault = category === "personal" ? personalDefault : workspaceDefault
+  const setCurrentDefault = category === "personal" ? setPersonalDefault : setWorkspaceDefault
+  const currentSettings = category === "personal" ? personal : workspace
   const providerNames = Object.keys(currentProviders)
   const tokenUsage = currentSettings?.tokenUsage ?? {}
 
@@ -330,14 +329,14 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           </button>
           <button
             type="button"
-            onClick={() => { setCategory("team"); setSidebar("models") }}
+            onClick={() => { setCategory("workspace"); setSidebar("models") }}
             className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              category === "team"
+              category === "workspace"
                 ? "border-gray-900 text-gray-900"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            Team
+            Workspace
           </button>
         </div>
 

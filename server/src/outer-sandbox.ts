@@ -8,8 +8,8 @@
  *   - Virtual paths Claude / user sees (all under /loopat/):
  *       /loopat/loop/<id>/workdir/    ← workdir (rw)
  *       /loopat/loop/<id>/.claude/    ← SDK CLAUDE_CONFIG_DIR (rw)
- *       /loopat/context/knowledge/    ← team docs (ro)
- *       /loopat/context/notes/        ← team prose (rw)
+ *       /loopat/context/knowledge/    ← workspace docs (ro)
+ *       /loopat/context/notes/        ← workspace prose (rw)
  *       /loopat/context/personal/     ← driver private (rw, memory/ + .loopat/{config.json,secrets/})
  *       /loopat/context/repos/<name>/ ← workspace repos (rw; commits go via workdir worktree)
  *   - $HOME (/home/$USER) is tmpfs; personal-dep symlink targets are re-bound
@@ -31,7 +31,7 @@ import {
   workspaceLoopatSkillsDir,
   workspaceNotesDir,
   workspaceReposDir,
-  workspaceTeamClaudePath,
+  workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
@@ -93,19 +93,19 @@ export async function buildOuterBwrapArgs(
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
-  // team skills: nested ro-bind over .claude/ so Claude Code discovers them
+  // workspace skills: nested ro-bind over .claude/ so Claude Code discovers them
   // as user-tier skills (CLAUDE_CONFIG_DIR/skills). Only mount if populated.
   const skillsSrc = workspaceLoopatSkillsDir()
   if (existsSync(skillsSrc)) {
     args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
   }
 
-  // team CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
+  // workspace CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
   // Code natively loads it as user-tier (settingSources includes "user").
   // The platform doctrine (L2) is still injected via systemPrompt.append.
-  const teamClaudeMd = workspaceTeamClaudePath()
-  if (existsSync(teamClaudeMd)) {
-    args.push("--ro-bind", teamClaudeMd, join(V_LOOP_CLAUDE(loopId), "CLAUDE.md"))
+  const workspaceClaudeMd = workspaceClaudePath()
+  if (existsSync(workspaceClaudeMd)) {
+    args.push("--ro-bind", workspaceClaudeMd, join(V_LOOP_CLAUDE(loopId), "CLAUDE.md"))
   }
 
   // Claude Code's OAuth credentials for MCP servers (coop / yuque / aone-* …)

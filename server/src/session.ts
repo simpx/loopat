@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadTeamClaudeJson, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
@@ -273,12 +273,12 @@ class LoopSession {
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
-    // Team Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
+    // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
     // servers should keep their token in `env`/`headers` directly (only ever
-    // commit OAuth-flow servers like `coop` to the team repo).
-    const team = await loadTeamClaudeJson()
-    const mcpServers = team.mcpServers
+    // commit OAuth-flow servers like `coop` to the workspace repo).
+    const workspace = await loadWorkspaceClaudeJson()
+    const mcpServers = workspace.mcpServers
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.

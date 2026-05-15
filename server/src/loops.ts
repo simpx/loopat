@@ -23,7 +23,7 @@ import {
   workspaceRepoDir,
   personalDir,
   personalMemoryDir,
-  teamMemoryDir,
+  workspaceMemoryDir,
   hostDeployKeyPath,
   personalGitCryptKeyPath,
 } from "./paths"
@@ -147,8 +147,8 @@ export async function ensureWorkspaceDirs() {
   const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
   if (cfg.repos?.length) await ensureRepos(cfg.repos)
 
-  // team memory dir + stub
-  const tm = teamMemoryDir()
+  // workspace memory dir + stub
+  const tm = workspaceMemoryDir()
   await mkdir(tm, { recursive: true })
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)

@@ -4,7 +4,7 @@
  *   L2 (doctrine)   bundled platform doctrine (server/templates/CLAUDE.md):
  *                   sandbox layout, virtual paths, memory model. Always loaded.
  *                   Injected via `systemPrompt.append`.
- *   L2+ (team)      optional team supplement at knowledge/.loopat/claude/CLAUDE.md.
+ *   L2+ (workspace) optional workspace supplement at knowledge/.loopat/claude/CLAUDE.md.
  *                   Bound into CLAUDE_CONFIG_DIR/CLAUDE.md and auto-loaded by
  *                   Claude Code as user-tier (settingSources: ["user", ...]).
  *                   See outer-sandbox.ts for the bind.

@@ -6,9 +6,9 @@ import {
   personalLoopatDir,
   personalProviderKeyPath,
   personalTokenUsagePath,
-  teamProviderKeyPath,
+  workspaceProviderKeyPath,
   workspaceDir,
-  workspaceTeamClaudeJsonPath,
+  workspaceClaudeJsonPath,
 } from "./paths"
 
 /**
@@ -21,7 +21,7 @@ export type McpServerConfig =
   | { type: "http"; url: string; headers?: Record<string, string> }
   | { type: "sse"; url: string; headers?: Record<string, string> }
 
-export type TeamClaudeJson = {
+export type WorkspaceClaudeJson = {
   mcpServers?: Record<string, McpServerConfig>
 }
 
@@ -73,7 +73,7 @@ export type SandboxConfig = {
 }
 
 /**
- * Workspace config (~/.loopat/config.json): team-shared, no per-user content.
+ * Workspace config (~/.loopat/config.json): workspace-shared, no per-user content.
  * Hand this file to a clean machine and bootstrap can reconstruct the
  * workspace: clone knowledge/notes/repos from remotes, seed doctrine.
  *
@@ -84,7 +84,7 @@ export type WorkspaceConfig = {
   knowledge?: RemoteSpec
   notes?: RemoteSpec
   repos?: RepoSpec[]
-  /** Team-level provider definitions (no apiKey — keys are per-user in personal secrets). */
+  /** Workspace-level provider definitions (no apiKey — keys are per-user in personal secrets). */
   providers?: Record<string, Omit<ProviderConfig, "apiKey">>
   default?: string
 }
@@ -222,17 +222,17 @@ export function getActiveProvider(cfg: PersonalConfig): { name: string; provider
 }
 
 /**
- * Read team-shared Claude Code config from knowledge/.loopat/claude/claude.json.
+ * Read workspace-shared Claude Code config from knowledge/.loopat/claude/claude.json.
  * Currently used only for mcpServers (passed through to SDK query options).
- * Missing / malformed → {} (so loops still start without team MCP servers).
+ * Missing / malformed → {} (so loops still start without workspace MCP servers).
  */
-export async function loadTeamClaudeJson(): Promise<TeamClaudeJson> {
-  const p = workspaceTeamClaudeJsonPath()
+export async function loadWorkspaceClaudeJson(): Promise<WorkspaceClaudeJson> {
+  const p = workspaceClaudeJsonPath()
   if (!existsSync(p)) return {}
   try {
-    return JSON.parse(await readFile(p, "utf8")) as TeamClaudeJson
+    return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
   } catch (e: any) {
-    console.warn(`[loopat] team claude.json malformed at ${p}: ${e?.message ?? e}`)
+    console.warn(`[loopat] workspace claude.json malformed at ${p}: ${e?.message ?? e}`)
     return {}
   }
 }
@@ -266,10 +266,10 @@ export async function addTokenUsage(user: string, model: string, inputTokens: nu
   await saveTokenUsage(user, usage)
 }
 
-// ── team API keys ──
+// ── workspace API keys ──
 
-export async function readTeamApiKey(providerName: string): Promise<string> {
-  const p = teamProviderKeyPath(providerName)
+export async function readWorkspaceApiKey(providerName: string): Promise<string> {
+  const p = workspaceProviderKeyPath(providerName)
   if (!existsSync(p)) return ""
   try {
     return (await readFile(p, "utf8")).trim()
@@ -319,7 +319,7 @@ export async function savePersonalConfig(user: string, cfg: {
 }
 
 /** Save workspace config to disk. Only provided fields are overwritten.
- *  Team API keys are written to secrets/team-keys/<name> when provided. */
+ *  Workspace API keys are written to secrets/workspace-keys/<name> when provided. */
 export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig> & {
   providerApiKeys?: Record<string, string>
 }): Promise<void> {
@@ -332,13 +332,13 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig> & {
   if (cfg.repos !== undefined) merged.repos = cfg.repos
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
-  // Write team API keys
+  // Write workspace API keys
   if (cfg.providerApiKeys) {
     for (const [name, key] of Object.entries(cfg.providerApiKeys)) {
       if (key !== undefined && key.trim()) {
-        const keyDir = dirname(teamProviderKeyPath(name))
+        const keyDir = dirname(workspaceProviderKeyPath(name))
         await mkdir(keyDir, { recursive: true })
-        await writeFile(teamProviderKeyPath(name), key.trim() + "\n")
+        await writeFile(workspaceProviderKeyPath(name), key.trim() + "\n")
       }
     }
   }
