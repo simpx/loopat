@@ -124,9 +124,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const [newProviderName, setNewProviderName] = useState("")
   const [addingProvider, setAddingProvider] = useState(false)
 
-  // Key edit state: { providerName: true }
-  const [editingKeys, setEditingKeys] = useState<Record<string, boolean>>({})
-
   // Daily usage chart data
   const [dailyUsage, setDailyUsage] = useState<DailyUsage>({})
 
@@ -185,8 +182,9 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setter((prev) => {
       const updated = { ...prev }
       if (!updated[name]) return prev
-      updated[name] = { ...updated[name], [field]: value }
-      if (field === "apiKey") updated[name].keyDirty = true
+      const entry = { ...updated[name], [field]: value }
+      if (field === "apiKey") entry.keyDirty = true
+      updated[name] = entry
       return updated
     })
   }
@@ -243,7 +241,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             }
             return updated
           })
-          setEditingKeys({})
         }
       } else {
         const providers: Record<string, { model: string; baseUrl: string; apiKey?: string }> = {}
@@ -263,7 +260,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             }
             return updated
           })
-          setEditingKeys({})
         }
       }
     } catch (e: any) {
@@ -271,25 +267,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     } finally {
       setSaving(false)
     }
-  }
-
-  function toggleEditKey(name: string) {
-    setEditingKeys((prev) => {
-      const next = { ...prev }
-      if (next[name]) {
-        delete next[name]
-        // Clear the key field when canceling (affects current category)
-        const setter = category === "personal" ? setPersonalProviders : setWorkspaceProviders
-        setter((pp) => {
-          const updated = { ...pp }
-          if (updated[name]) updated[name] = { ...updated[name], apiKey: "", keyDirty: false }
-          return updated
-        })
-      } else {
-        next[name] = true
-      }
-      return next
-    })
   }
 
   const currentProviders = category === "personal" ? personalProviders : workspaceProviders
@@ -403,8 +380,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                   {/* Provider cards */}
                   {providerNames.map((name) => {
                     const f = currentProviders[name]!
-                    const hasExistingKey = currentSettings?.providers?.[name]?.hasKey ?? false
-                    const isEditingKey = editingKeys[name] ?? false
 
                     return (
                       <div key={name} className="border border-gray-200 rounded-lg p-3 sm:p-4">
@@ -441,42 +416,13 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
-                            {isEditingKey || !hasExistingKey ? (
-                              <div className="flex gap-1.5">
-                                <input
-                                  type="password"
-                                  value={f.apiKey}
-                                  onChange={(e) => handleProviderChange(category, name, "apiKey", e.target.value)}
-                                  placeholder={hasExistingKey ? "enter new key to replace" : "API key"}
-                                  className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                                />
-                                {hasExistingKey && (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleEditKey(name)}
-                                    className="text-xs text-gray-400 hover:text-gray-600 px-1"
-                                  >
-                                    cancel
-                                  </button>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5">
-                                <input
-                                  type="text"
-                                  value="********"
-                                  disabled
-                                  className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded text-sm bg-gray-50 text-gray-400"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => toggleEditKey(name)}
-                                  className="text-xs text-gray-500 hover:text-gray-900 px-1.5 py-0.5 border border-gray-200 rounded transition-colors"
-                                >
-                                  Edit
-                                </button>
-                              </div>
-                            )}
+                            <input
+                              type="password"
+                              value={f.apiKey}
+                              onChange={(e) => handleProviderChange(category, name, "apiKey", e.target.value)}
+                              placeholder="API key"
+                              className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                            />
                           </div>
                           <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Max Context Tokens</label>

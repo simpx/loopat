@@ -22,7 +22,7 @@ import {
   loopWorkdir,
   loopHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, readWorkspaceApiKey, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, type ProviderConfig } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -187,8 +187,7 @@ app.get("/api/settings/workspace", requireAuth, async (c) => {
   const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }> = {}
   if (cfg.providers) {
     for (const [name, p] of Object.entries(cfg.providers)) {
-      const apiKey = await readWorkspaceApiKey(name)
-      providers[name] = { model: p.model, baseUrl: p.baseUrl, hasKey: !!apiKey }
+      providers[name] = { model: p.model, baseUrl: p.baseUrl, hasKey: !!(p as any).apiKey }
     }
   }
   const tokenUsage = await recomputeWorkspaceTokenUsage()
@@ -202,21 +201,9 @@ app.get("/api/settings/workspace", requireAuth, async (c) => {
 app.put("/api/settings/workspace", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   try {
-    const providerApiKeys: Record<string, string> = {}
-    if (body.providers) {
-      for (const [name, p] of Object.entries(body.providers)) {
-        const prov = p as any
-        if (prov.apiKey !== undefined && prov.apiKey.trim()) {
-          providerApiKeys[name] = prov.apiKey
-        }
-        // Strip apiKey from provider config (not stored in config.json)
-        delete prov.apiKey
-      }
-    }
     await saveWorkspaceConfig({
       providers: body.providers,
       default: typeof body.default === "string" ? body.default : undefined,
-      providerApiKeys: Object.keys(providerApiKeys).length > 0 ? providerApiKeys : undefined,
     })
     return c.json({ ok: true })
   } catch (e: any) {

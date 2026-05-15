@@ -6,7 +6,6 @@ import {
   personalLoopatDir,
   personalProviderKeyPath,
   personalTokenUsagePath,
-  workspaceProviderKeyPath,
   workspaceDir,
   workspaceClaudeJsonPath,
 } from "./paths"
@@ -84,8 +83,7 @@ export type WorkspaceConfig = {
   knowledge?: RemoteSpec
   notes?: RemoteSpec
   repos?: RepoSpec[]
-  /** Workspace-level provider definitions (no apiKey — keys are per-user in personal secrets). */
-  providers?: Record<string, Omit<ProviderConfig, "apiKey">>
+  providers?: Record<string, ProviderConfig>
   default?: string
 }
 
@@ -266,18 +264,6 @@ export async function addTokenUsage(user: string, model: string, inputTokens: nu
   await saveTokenUsage(user, usage)
 }
 
-// ── workspace API keys ──
-
-export async function readWorkspaceApiKey(providerName: string): Promise<string> {
-  const p = workspaceProviderKeyPath(providerName)
-  if (!existsSync(p)) return ""
-  try {
-    return (await readFile(p, "utf8")).trim()
-  } catch {
-    return ""
-  }
-}
-
 // ── config persistence ──
 
 /** Save personal config to disk. apiKeys are written separately to secrets files
@@ -319,27 +305,27 @@ export async function savePersonalConfig(user: string, cfg: {
 }
 
 /** Save workspace config to disk. Only provided fields are overwritten.
- *  Workspace API keys are written to secrets/workspace-keys/<name> when provided. */
-export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig> & {
-  providerApiKeys?: Record<string, string>
-}): Promise<void> {
+ *  Preserves existing apiKeys unless explicitly replaced. */
+export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promise<void> {
   const existing = await loadConfig()
   const merged: WorkspaceConfig = { ...existing }
-  if (cfg.providers !== undefined) merged.providers = cfg.providers
+  if (cfg.providers !== undefined) {
+    merged.providers = merged.providers ?? {}
+    for (const [name, p] of Object.entries(cfg.providers)) {
+      const existingProv = merged.providers[name]
+      const incoming = p as any
+      merged.providers[name] = {
+        model: incoming.model ?? existingProv?.model ?? "",
+        baseUrl: incoming.baseUrl ?? existingProv?.baseUrl ?? "",
+        ...(incoming.maxContextTokens ? { maxContextTokens: incoming.maxContextTokens } : {}),
+        apiKey: incoming.apiKey || existingProv?.apiKey || "",
+      }
+    }
+  }
   if (cfg.default !== undefined) merged.default = cfg.default
   if (cfg.knowledge !== undefined) merged.knowledge = cfg.knowledge
   if (cfg.notes !== undefined) merged.notes = cfg.notes
   if (cfg.repos !== undefined) merged.repos = cfg.repos
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
-  // Write workspace API keys
-  if (cfg.providerApiKeys) {
-    for (const [name, key] of Object.entries(cfg.providerApiKeys)) {
-      if (key !== undefined && key.trim()) {
-        const keyDir = dirname(workspaceProviderKeyPath(name))
-        await mkdir(keyDir, { recursive: true })
-        await writeFile(workspaceProviderKeyPath(name), key.trim() + "\n")
-      }
-    }
-  }
 }

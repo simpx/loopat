@@ -73,4 +73,3 @@ export const hostDeployKeyPubPath = (user: string) => join(hostSecretsDir(user),
 export const personalGitCryptKeyPath = (user: string) => join(hostSecretsDir(user), "git-crypt.key")
 export const personalTokenUsagePath = (user: string) => join(personalLoopatDir(user), "token-usage.json")
 export const workspaceSecretsDir = () => join(workspaceDir(), "secrets")
-export const workspaceProviderKeyPath = (providerName: string) => join(workspaceSecretsDir(), "workspace-keys", providerName)
