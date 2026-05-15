@@ -36,7 +36,7 @@ export function KanbanPage() {
 
   return (
     <div className="flex flex-col h-full w-full bg-white">
-      <header className="h-10 shrink-0 flex items-center gap-3 px-6 border-b border-gray-200">
+      <header className="h-10 shrink-0 flex items-center gap-3 px-3 sm:px-6 border-b border-gray-200">
         <span className="text-[13px] text-gray-700 tracking-tight">kanban · notes/todo/</span>
         <div className="flex-1" />
         <button onClick={() => setShowArchived((v) => !v)}

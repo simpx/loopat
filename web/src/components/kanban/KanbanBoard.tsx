@@ -3,6 +3,10 @@ import {
   DndContext,
   DragOverlay,
   closestCorners,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core"
@@ -20,6 +24,10 @@ export function KanbanBoard({
   onCardArchive: (card: KanbanCard, colFilename: string) => void
   showArchived: boolean
 }) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
+  )
   const [columns, setColumns] = useState<KanbanColumn[]>([])
   const [orderedFiles, setOrderedFiles] = useState<string[]>([])
   const [colConfig, setColConfig] = useState<{ file: string; color?: string }[]>([])
@@ -194,9 +202,9 @@ export function KanbanBoard({
   }
 
   return (
-    <DndContext collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <SortableContext items={visibleColumns.map((c) => `col:${c.filename}`)} strategy={horizontalListSortingStrategy}>
-        <div className="h-full flex gap-3 px-4 py-3 overflow-x-auto">
+        <div className="h-full flex gap-3 px-3 py-3 overflow-x-auto">
           {visibleColumns.map((col) => {
             const cfg = colConfig.find((c) => c.file === col.filename)
             return (

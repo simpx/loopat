@@ -74,7 +74,7 @@ export function GitDiffSidebar({ loopId, onClose, onPickFile }: { loopId: string
   const empty = !status || (status.unstaged.length === 0 && status.staged.length === 0)
 
   return (
-    <aside className="w-72 min-w-0 border-l border-gray-200 bg-white flex flex-col">
+    <aside className="w-full sm:w-72 min-w-0 border-l sm:border-l border-gray-200 bg-white flex flex-col">
       {/* Header */}
       <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
         <span className="tracking-wide">Git Changes</span>
@@ -201,7 +201,7 @@ function Section({
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); bulkAction.onClick() }}
-          className="opacity-0 group-hover/section:opacity-100 transition-opacity px-1 py-0.5 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-900 flex items-center gap-0.5"
+          className="opacity-100 sm:opacity-0 sm:group-hover/section:opacity-100 transition-opacity px-1 py-0.5 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-900 flex items-center gap-0.5"
           title={bulkAction.label}
         >
           {bulkAction.icon}
@@ -277,7 +277,7 @@ function FileRow({
         )}
 
         {/* Hover actions */}
-        <span className="inline-flex items-center gap-0.5 opacity-0 group-hover/row:opacity-100 transition-opacity shrink-0">
+        <span className="inline-flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover/row:opacity-100 transition-opacity shrink-0">
           <button
             type="button"
             onClick={() => onEdit(editorPath)}
