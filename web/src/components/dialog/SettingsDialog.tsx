@@ -51,7 +51,7 @@ function DailyChart({ daily, modelName }: { daily: DailyUsage; modelName: string
   return (
     <div className="mt-3 pt-3 border-t border-gray-100">
       <p className="text-xs font-medium text-gray-500 mb-2">Daily Usage (last 14 days)</p>
-      <div className="flex items-end gap-[2px] h-20">
+      <div className="flex items-end gap-[2px] h-16 sm:h-20">
         {shown.map((date) => {
           const d = modelData[date]
           const total = d.inputTokens + d.outputTokens
@@ -61,7 +61,7 @@ function DailyChart({ daily, modelName }: { daily: DailyUsage; modelName: string
           return (
             <div
               key={date}
-              className="flex-1 flex flex-col items-center justify-end h-full group relative"
+              className="flex-1 flex flex-col items-center justify-end h-full group relative min-w-0"
             >
               <div
                 className="w-full rounded-sm overflow-hidden flex flex-col justify-end"
@@ -77,7 +77,7 @@ function DailyChart({ daily, modelName }: { daily: DailyUsage; modelName: string
                   style={{ height: `${100 - inPct}%` }}
                 />
               </div>
-              <span className="text-[10px] text-gray-400 mt-1 leading-none">{label}</span>
+              <span className="text-[8px] sm:text-[10px] text-gray-400 mt-1 leading-none truncate max-w-full">{label}</span>
               {/* Tooltip */}
               <div className="absolute bottom-full mb-1 hidden group-hover:block bg-gray-900 text-white text-[10px] rounded px-2 py-1 whitespace-nowrap z-10">
                 {date}: in {formatTokens(d.inputTokens)} out {formatTokens(d.outputTokens)}
@@ -305,10 +305,10 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent
-        className="sm:max-w-[720px] h-[80vh] p-0 gap-0 overflow-hidden flex flex-col"
+        className="max-w-[95vw] sm:max-w-[720px] h-[85vh] sm:h-[80vh] p-0 gap-0 overflow-hidden flex flex-col"
         showCloseButton
       >
-        <DialogHeader className="px-6 pt-5 pb-0 shrink-0">
+        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-5 pb-0 shrink-0">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="sr-only">
             Configure model providers, API keys, and notification webhooks.
@@ -316,11 +316,11 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         </DialogHeader>
 
         {/* Top category tabs */}
-        <div className="flex gap-0 px-6 pt-4 border-b border-gray-200 shrink-0">
+        <div className="flex gap-0 px-4 sm:px-6 pt-4 border-b border-gray-200 shrink-0">
           <button
             type="button"
             onClick={() => { setCategory("personal"); setSidebar("models") }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               category === "personal"
                 ? "border-gray-900 text-gray-900"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -331,7 +331,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           <button
             type="button"
             onClick={() => { setCategory("team"); setSidebar("models") }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               category === "team"
                 ? "border-gray-900 text-gray-900"
                 : "border-transparent text-gray-500 hover:text-gray-700"
@@ -341,13 +341,13 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           </button>
         </div>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* Left sidebar */}
-          <div className="w-40 shrink-0 border-r border-gray-200 p-3 flex flex-col gap-1">
+        <div className="flex flex-col sm:flex-row min-h-0 flex-1 overflow-hidden">
+          {/* Left sidebar - horizontal on mobile, vertical on desktop */}
+          <div className="w-full sm:w-40 shrink-0 border-b sm:border-b-0 sm:border-r border-gray-200 p-2 sm:p-3 flex sm:flex-col gap-1 overflow-x-auto">
             <button
               type="button"
               onClick={() => setSidebar("models")}
-              className={`text-left px-3 py-1.5 rounded text-sm transition-colors ${
+              className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
                 sidebar === "models"
                   ? "bg-gray-100 text-gray-900 font-medium"
                   : "text-gray-600 hover:bg-gray-50"
@@ -359,7 +359,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
               <button
                 type="button"
                 onClick={() => setSidebar("notifications")}
-                className={`text-left px-3 py-1.5 rounded text-sm transition-colors ${
+                className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
                   sidebar === "notifications"
                     ? "bg-gray-100 text-gray-900 font-medium"
                     : "text-gray-600 hover:bg-gray-50"
@@ -371,7 +371,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           </div>
 
           {/* Right content */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-5">
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5">
             {loading ? (
               <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
             ) : sidebar === "notifications" ? (
@@ -408,7 +408,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                     const isEditingKey = editingKeys[name] ?? false
 
                     return (
-                      <div key={name} className="border border-gray-200 rounded-lg p-4">
+                      <div key={name} className="border border-gray-200 rounded-lg p-3 sm:p-4">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-sm font-semibold text-gray-900">{name}</span>
                           <button
@@ -419,7 +419,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                             Remove
                           </button>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
                             <input
