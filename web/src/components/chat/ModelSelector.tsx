@@ -18,20 +18,21 @@ export default function ModelSelector() {
   const entries = providers ? Object.entries(providers.providers) : [];
 
   // Thinking blocks are cryptographically signed by the provider that
-  // generated them. Switching to a provider with a different baseUrl
-  // (gateway / account) makes those signatures invalid → API 400 on
-  // the next turn. We pre-empt that by offering to strip them.
+  // generated them. Switching between Claude and non-Claude models makes
+  // those signatures invalid → API 400 on the next turn. We pre-empt that
+  // by offering to strip them.
+  const isClaudeModel = (model: string) => model.toLowerCase().startsWith("claude");
   const onPickProvider = async (name: string, source?: "personal" | "workspace") => {
     setOpen(false);
     if (name === currentName) return;
-    const currentBase = providers?.providers?.[currentName]?.baseUrl;
-    const newBase = providers?.providers?.[name]?.baseUrl;
-    const crossProvider = currentBase && newBase && currentBase !== newBase;
-    if (crossProvider && thinkingBlockCount > 0 && loopId) {
+    const currentModel = providers?.providers?.[currentName]?.model || "";
+    const newModel = providers?.providers?.[name]?.model || "";
+    const crossClaudeBoundary = isClaudeModel(currentModel) !== isClaudeModel(newModel);
+    if (crossClaudeBoundary && thinkingBlockCount > 0 && loopId) {
       const msg =
-        `Switching to "${name}" uses a different API endpoint, so the ${thinkingBlockCount} ` +
+        `Switching between Claude and non-Claude models makes the ${thinkingBlockCount} ` +
         `existing thinking block${thinkingBlockCount === 1 ? "" : "s"} in this conversation ` +
-        `won't pass signature validation.\n\n` +
+        `fail signature validation.\n\n` +
         `Click OK to remove them from the AI's context (chat history stays). ` +
         `Cancel to keep the current provider.`;
       if (!window.confirm(msg)) return;
