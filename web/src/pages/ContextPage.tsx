@@ -74,8 +74,8 @@ export function ContextPage() {
 // ============================================================================
 
 const VAULT_TAGLINE: Record<VaultId, string> = {
-  knowledge: "team's distilled materials",
-  notes: "team · public",
+  knowledge: "workspace's distilled materials",
+  notes: "workspace · public",
   personal: "yours · private",
   repos: "registered code repos",
 }

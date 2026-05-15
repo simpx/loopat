@@ -22,7 +22,7 @@ import {
   loopWorkdir,
   loopHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, readTeamApiKey, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, readWorkspaceApiKey, getActiveProvider, type ProviderConfig } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -182,17 +182,16 @@ app.put("/api/settings/personal", requireAuth, async (c) => {
   }
 })
 
-app.get("/api/settings/team", requireAuth, async (c) => {
+app.get("/api/settings/workspace", requireAuth, async (c) => {
   const cfg = await loadConfig()
   const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }> = {}
   if (cfg.providers) {
     for (const [name, p] of Object.entries(cfg.providers)) {
-      const apiKey = await readTeamApiKey(name)
+      const apiKey = await readWorkspaceApiKey(name)
       providers[name] = { model: p.model, baseUrl: p.baseUrl, hasKey: !!apiKey }
     }
   }
-  // Recompute token usage across all users' loops (team-wide view)
-  const tokenUsage = await recomputeTeamTokenUsage()
+  const tokenUsage = await recomputeWorkspaceTokenUsage()
   return c.json({
     providers,
     default: cfg.default ?? "",
@@ -200,7 +199,7 @@ app.get("/api/settings/team", requireAuth, async (c) => {
   })
 })
 
-app.put("/api/settings/team", requireAuth, async (c) => {
+app.put("/api/settings/workspace", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   try {
     const providerApiKeys: Record<string, string> = {}
@@ -265,7 +264,7 @@ async function recomputeTokenUsage(userId: string): Promise<Record<string, { inp
   return usage
 }
 
-async function recomputeTeamTokenUsage(): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
+async function recomputeWorkspaceTokenUsage(): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
   const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
   try {
     const allLoops = await listLoops()

@@ -40,18 +40,18 @@ export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
 
 export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
-export const teamMemoryDir = () => join(workspaceNotesDir(), "memory")
-// `.loopat/` is a reserved namespace under knowledge — slots for team Claude
-// supplements (skills, optional team CLAUDE.md). Everything else under
-// knowledge/ is plain team-owned docs.
+export const workspaceMemoryDir = () => join(workspaceNotesDir(), "memory")
+// `.loopat/` is a reserved namespace under knowledge — slots for workspace Claude
+// supplements (skills, optional workspace CLAUDE.md). Everything else under
+// knowledge/ is plain workspace-owned docs.
 export const workspaceLoopatReservedDir = () => join(workspaceKnowledgeDir(), ".loopat")
 export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(), "claude")
 // Optional. If present, appended after the bundled platform doctrine.
-export const workspaceTeamClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
+export const workspaceClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
 export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
-// Optional team-shared Claude Code config (mcpServers, future: hooks, ...).
+// Workspace-shared Claude Code config (mcpServers, future: hooks, ...).
 // Shape mirrors `.claude.json`. Workspace-versioned in knowledge repo.
-export const workspaceTeamClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
+export const workspaceClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 
@@ -73,4 +73,4 @@ export const hostDeployKeyPubPath = (user: string) => join(hostSecretsDir(user),
 export const personalGitCryptKeyPath = (user: string) => join(hostSecretsDir(user), "git-crypt.key")
 export const personalTokenUsagePath = (user: string) => join(personalLoopatDir(user), "token-usage.json")
 export const workspaceSecretsDir = () => join(workspaceDir(), "secrets")
-export const teamProviderKeyPath = (providerName: string) => join(workspaceSecretsDir(), "team-keys", providerName)
+export const workspaceProviderKeyPath = (providerName: string) => join(workspaceSecretsDir(), "workspace-keys", providerName)

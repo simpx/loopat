@@ -602,7 +602,7 @@ export type PersonalSettings = {
   tokenUsage: TokenUsage
 }
 
-export type TeamSettings = {
+export type WorkspaceSettings = {
   providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }>
   default: string
   tokenUsage: TokenUsage
@@ -626,16 +626,16 @@ export async function updatePersonalSettings(patch: {
   return r.ok
 }
 
-export async function getTeamSettings(): Promise<TeamSettings> {
-  const r = await apiFetch("/api/settings/team")
-  return (await r.json()) as TeamSettings
+export async function getWorkspaceSettings(): Promise<WorkspaceSettings> {
+  const r = await apiFetch("/api/settings/workspace")
+  return (await r.json()) as WorkspaceSettings
 }
 
-export async function updateTeamSettings(patch: {
+export async function updateWorkspaceSettings(patch: {
   providers?: Record<string, { model: string; baseUrl: string; apiKey?: string }>
   default?: string
 }): Promise<boolean> {
-  const r = await apiFetch("/api/settings/team", {
+  const r = await apiFetch("/api/settings/workspace", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
