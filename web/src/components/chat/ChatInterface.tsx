@@ -66,7 +66,7 @@ function setDraft(loopId: string, text: string): void {
 /* ─── Chat Interface ─── */
 
 export default function ChatInterface({ archived = false, onUnarchive, readOnly = false }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean } = {}) {
-  const { questions, sendAnswers, loadingHistory, loopId } = useLoopRuntimeExtra();
+  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
 
@@ -77,6 +77,31 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     if (!vp) return;
     vp.scrollTo({ top: vp.scrollHeight, behavior: "smooth" });
   }, []);
+
+  // Ref-backed copies so the scroll listener (which runs in a []-memoized effect)
+  // always sees the latest values without re-subscribing.
+  const hasHistoryRef = useRef(hasHistory);
+  hasHistoryRef.current = hasHistory;
+  const showHistoryRef = useRef(showHistory);
+  showHistoryRef.current = showHistory;
+
+  // Scroll-to-top history button — shows when user scrolls to the very top
+  // and there is pre-clear history to reveal.
+  const [showHistoryButton, setShowHistoryButton] = useState(false);
+
+  // Scroll-anchor refs: preserve scroll position when history is toggled
+  const scrollAnchorRef = useRef({ oldScrollTop: 0, oldScrollHeight: 0, active: false });
+  const handleShowHistory = useCallback(() => {
+    const vp = vpRef.current;
+    if (vp) {
+      scrollAnchorRef.current = {
+        oldScrollTop: vp.scrollTop,
+        oldScrollHeight: vp.scrollHeight,
+        active: true,
+      };
+    }
+    toggleShowHistory();
+  }, [toggleShowHistory]);
 
   // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
@@ -143,6 +168,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         userScrolledUp = true;
       }
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
+      setShowHistoryButton(vp.scrollTop < 20 && hasHistoryRef.current);
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
 
@@ -195,6 +221,20 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     prevLoading.current = loadingHistory;
   }, [loadingHistory]);
 
+  // When showHistory toggles, preserve the user's visible scroll position
+  // so prepended/removed messages don't cause a jump.
+  useEffect(() => {
+    if (!scrollAnchorRef.current.active) return;
+    const vp = vpRef.current;
+    if (!vp) return;
+    const { oldScrollTop, oldScrollHeight } = scrollAnchorRef.current;
+    scrollAnchorRef.current.active = false;
+    requestAnimationFrame(() => {
+      const delta = vp.scrollHeight - oldScrollHeight;
+      vp.scrollTop = oldScrollTop + delta;
+    });
+  }, [showHistory]);
+
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
     : [];
@@ -217,6 +257,19 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
           <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
           </AuiIf>
+
+          {/* View/collapse earlier messages — appears when scrolled to top and there is pre-clear history */}
+          {showHistoryButton && (
+            <div className="flex justify-center pb-2">
+              <button
+                type="button"
+                onClick={handleShowHistory}
+                className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
+              >
+                {showHistory ? "Collapse earlier messages" : "View earlier messages"}
+              </button>
+            </div>
+          )}
 
           {/* Message list */}
           <div className="flex flex-col gap-2 pb-1">
