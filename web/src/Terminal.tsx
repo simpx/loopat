@@ -53,6 +53,7 @@ export function Terminal({ loopId, currentUserId }: { loopId: string; currentUse
       drawBoldTextInBrightColors: true,
       minimumContrastRatio: 4,
       rightClickSelectsWord: true,
+      ignoreBracketedPasteMode: true,
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
