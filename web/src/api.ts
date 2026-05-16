@@ -304,8 +304,11 @@ export async function listEnvs(): Promise<EnvEntry[]> {
   return (j.envs ?? []) as EnvEntry[]
 }
 
-export async function readEnv(name: string): Promise<string | null> {
-  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`)
+/** Files inside an env dir that the editor can address. Mirrors server EnvFile. */
+export type EnvFile = "mise.toml" | "env.json"
+
+export async function readEnv(name: string, file: EnvFile = "mise.toml"): Promise<string | null> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`)
   if (!r.ok) return null
   const j = await r.json()
   return typeof j.content === "string" ? j.content : null
@@ -329,8 +332,17 @@ export async function refreshLoopEnv(id: string): Promise<{ ok: boolean; version
   return { ok: true, version: j.version }
 }
 
-export async function writeEnv(name: string, content: string): Promise<{ ok: boolean; error?: string; locked?: boolean; lockError?: string }> {
-  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`, {
+export async function deleteEnv(name: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`, { method: "DELETE" })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    return { ok: false, error: j.error ?? `http ${r.status}` }
+  }
+  return { ok: true }
+}
+
+export async function writeEnv(name: string, content: string, file: EnvFile = "mise.toml"): Promise<{ ok: boolean; error?: string; locked?: boolean; lockError?: string }> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ content }),

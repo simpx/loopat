@@ -21,12 +21,14 @@ import {
   listEnvs,
   readEnv,
   writeEnv,
+  deleteEnv,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
   type RepoDetail,
   type Backlink,
   type EnvEntry,
+  type EnvFile,
 } from "../api"
 import { useEffect, useState, useCallback, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
@@ -34,7 +36,7 @@ import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react"
 
 type SubId = VaultId | "envs"
 
@@ -968,20 +970,35 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
 
 const ENV_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 
-const ENV_TEMPLATE = `# mise.toml — declares the runtime toolchain for this env.
-# Docs: https://mise.jdx.dev/configuration.html
+const ENV_FILES: EnvFile[] = ["mise.toml", "env.json"]
 
+// Seeded into new envs. Picks a small useful set so terminals work out of
+// the box; users can edit / delete any line they don't want.
+const NEW_ENV_MISE_TOML = `# mise.toml — runtime toolchain for this env. Docs: https://mise.jdx.dev
 [tools]
-# node = "22"
-# python = "3.12"
-# "ubi:oven-sh/bun" = "latest"
+# Use \`ubi:owner/repo\` for any GitHub release; bare names hit mise's registry.
+"ubi:fish-shell/fish-shell" = { version = "latest", exe = "fish" }
+bun = "latest"
+uv = "latest"
+gh = "latest"
+jq = "latest"
+`
+
+// env.json — loopat-side metadata. `shell` decides which binary the terminal
+// PTY runs (resolved against sandbox PATH; the mise tools above provide fish).
+const NEW_ENV_META_JSON = `{
+  "shell": "fish"
+}
 `
 
 function EnvsPane() {
   const [envs, setEnvs] = useState<EnvEntry[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [content, setContent] = useState("")
-  const [original, setOriginal] = useState("")
+  // Per-file state — switching tabs doesn't lose unsaved edits in the other.
+  // null = file doesn't exist yet (e.g. env created before env.json was a thing)
+  const [contents, setContents] = useState<Record<EnvFile, string>>({ "mise.toml": "", "env.json": "" })
+  const [originals, setOriginals] = useState<Record<EnvFile, string | null>>({ "mise.toml": null, "env.json": null })
+  const [activeFile, setActiveFile] = useState<EnvFile>("mise.toml")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1005,37 +1022,58 @@ function EnvsPane() {
 
   useEffect(() => {
     if (!selected) {
-      setContent("")
-      setOriginal("")
+      setContents({ "mise.toml": "", "env.json": "" })
+      setOriginals({ "mise.toml": null, "env.json": null })
       return
     }
     setLoading(true)
     setErr(null)
-    readEnv(selected).then((c) => {
-      const text = c ?? ""
-      setContent(text)
-      setOriginal(text)
+    setActiveFile("mise.toml")
+    // Load both files in parallel; null original means "file doesn't exist
+    // on disk yet" — first save will create it.
+    Promise.all(ENV_FILES.map((f) => readEnv(selected, f))).then((vals) => {
+      const newContents: Record<EnvFile, string> = { "mise.toml": "", "env.json": "" }
+      const newOriginals: Record<EnvFile, string | null> = { "mise.toml": null, "env.json": null }
+      ENV_FILES.forEach((f, i) => {
+        const text = vals[i] ?? ""
+        newContents[f] = text
+        newOriginals[f] = vals[i]
+      })
+      setContents(newContents)
+      setOriginals(newOriginals)
       setLoading(false)
     })
   }, [selected])
 
-  const dirty = content !== original
+  const isDirty = (f: EnvFile) => contents[f] !== (originals[f] ?? "")
+  const activeDirty = isDirty(activeFile)
+
   const onSave = async () => {
     if (!selected || saving) return
     setSaving(true)
     setErr(null)
-    const r = await writeEnv(selected, content)
+    const r = await writeEnv(selected, contents[activeFile], activeFile)
     setSaving(false)
     if (!r.ok) {
       setErr(r.error ?? "save failed")
       return
     }
-    setOriginal(content)
-    // Lock generation runs server-side after write; surface its result so the
-    // user knows the env is reproducibly pinned (or why it isn't).
-    if (r.locked === false) {
+    setOriginals((prev) => ({ ...prev, [activeFile]: contents[activeFile] }))
+    // Lock only runs server-side for mise.toml; env.json saves don't touch it.
+    if (activeFile === "mise.toml" && r.locked === false) {
       setErr(`saved, but lock failed: ${r.lockError ?? "unknown"}`)
     }
+  }
+
+  const onDelete = async (name: string) => {
+    if (!confirm(`delete env "${name}"? per-loop snapshots already created stay intact.`)) return
+    const r = await deleteEnv(name)
+    if (!r.ok) {
+      setErr(r.error ?? "delete failed")
+      return
+    }
+    if (selected === name) setSelected(null)
+    await refreshList()
   }
 
   const onSubmitNew = async (e: FormEvent) => {
@@ -1050,9 +1088,16 @@ function EnvsPane() {
       return
     }
     setNewErr(null)
-    const r = await writeEnv(trimmed, ENV_TEMPLATE)
-    if (!r.ok) {
-      setNewErr(r.error ?? "create failed")
+    // Seed both files. Write mise.toml first (which also generates the
+    // initial lockfile); env.json second.
+    const r1 = await writeEnv(trimmed, NEW_ENV_MISE_TOML, "mise.toml")
+    if (!r1.ok) {
+      setNewErr(r1.error ?? "create failed (mise.toml)")
+      return
+    }
+    const r2 = await writeEnv(trimmed, NEW_ENV_META_JSON, "env.json")
+    if (!r2.ok) {
+      setNewErr(r2.error ?? "create failed (env.json)")
       return
     }
     await refreshList()
@@ -1081,22 +1126,32 @@ function EnvsPane() {
         {envs.map((e) => {
           const sel = selected === e.name
           return (
-            <button
+            <div
               key={e.name}
-              type="button"
-              onClick={() => {
-                setSelected(e.name)
-                if (isMobile) setSidebarOpen(false)
-              }}
               className={
-                sel
-                  ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
-                  : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
+                "group/envrow relative flex items-stretch " +
+                (sel ? "bg-gray-100" : "hover:bg-gray-50")
               }
             >
-              <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{e.name}</span>
-              <span className="text-[10px] text-gray-400">.toml</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelected(e.name)
+                  if (isMobile) setSidebarOpen(false)
+                }}
+                className="flex-1 min-w-0 px-3 py-2 flex items-center gap-2 text-left"
+              >
+                <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{e.name}</span>
+              </button>
+              <button
+                type="button"
+                onClick={(ev) => { ev.stopPropagation(); onDelete(e.name) }}
+                className="opacity-0 group-hover/envrow:opacity-100 transition-opacity w-7 flex items-center justify-center text-gray-400 hover:text-red-600"
+                title={`delete env "${e.name}"`}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
           )
         })}
         {envs.length === 0 && (
@@ -1146,33 +1201,52 @@ function EnvsPane() {
       <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {selected ? (
           <>
-            <header className="h-9 shrink-0 border-b border-gray-200 px-3 flex items-center gap-3">
-              <span className="text-[13px] font-medium text-gray-900">{selected}.toml</span>
-              <span className="text-[11px] text-gray-400">workspace · mise format</span>
+            <header className="h-9 shrink-0 border-b border-gray-200 px-3 flex items-center gap-1">
+              <span className="text-[11px] text-gray-400 mr-2 font-mono">{selected}/</span>
+              {ENV_FILES.map((f) => {
+                const isActive = activeFile === f
+                const dirty = isDirty(f)
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setActiveFile(f)}
+                    className={
+                      "h-7 px-2.5 text-[12px] rounded flex items-center gap-1 " +
+                      (isActive
+                        ? "bg-gray-100 text-gray-900"
+                        : "text-gray-500 hover:bg-gray-50 hover:text-gray-900")
+                    }
+                  >
+                    <span>{f}</span>
+                    {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="unsaved" />}
+                  </button>
+                )
+              })}
               <div className="flex-1" />
               {err && <span className="text-[11px] text-red-600">{err}</span>}
               <button
                 type="button"
                 onClick={onSave}
-                disabled={!dirty || saving || loading}
+                disabled={!activeDirty || saving || loading}
                 className="px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {saving ? "saving…" : dirty ? "save" : "saved"}
+                {saving ? "saving…" : activeDirty ? "save" : "saved"}
               </button>
             </header>
             <div className="flex-1 min-h-0">
               {loading ? (
                 <div className="p-3 text-[13px] text-gray-400 italic">loading…</div>
               ) : (
-                // path passed for language detection (.toml → TOML highlighting).
-                // key on selected forces a fresh editor when switching envs so
-                // CodeMirror state (history, cursor) doesn't bleed across files.
+                // path drives language detection (.toml / .json). key includes
+                // both env + file so CodeMirror remounts when switching either,
+                // keeping per-file undo history clean.
                 <Suspense fallback={<div className="p-3 text-[13px] text-gray-400 italic">loading editor…</div>}>
                   <CodeEditor
-                    key={selected}
-                    path={`${selected}.toml`}
-                    value={content}
-                    onChange={setContent}
+                    key={`${selected}/${activeFile}`}
+                    path={`${selected}/${activeFile}`}
+                    value={contents[activeFile]}
+                    onChange={(v) => setContents((prev) => ({ ...prev, [activeFile]: v }))}
                   />
                 </Suspense>
               )}
