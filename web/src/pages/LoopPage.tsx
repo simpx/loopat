@@ -10,9 +10,10 @@ import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, getLoopEnv, refreshLoopEnv, type ContextMount, type LoopEnvInfo, type LoopMeta } from "../api"
+import { getContext, getLoopEnv, refreshLoopEnv, type ContextMount, type LoopEnvInfo, type LoopMeta, markLoopViewed } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
+import { useLoopStatus } from "../useLoopStatus"
 import { FileTree } from "../FileTree"
 import { GitDiffSidebar } from "../components/GitDiffSidebar"
 import { ShareArtifactDialog } from "../components/ShareArtifactDialog"
@@ -61,6 +62,7 @@ function LoopsList({ currentId }: { currentId: string }) {
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loopat:loopsList:collapsed") === "1")
   const isMobile = useIsMobile()
+  const statusMap = useLoopStatus(ws.loops.map(l => l.id))
 
   // single-user MVP — "我的" / "全部" filter both show everything; RFD always 0
   const filtered = ws.loops
@@ -120,6 +122,9 @@ function LoopsList({ currentId }: { currentId: string }) {
           // Server rejects PATCH from non-owners with 403 — surface that
           // upfront so users don't think the button is broken.
           const isOwner = ws.currentUser?.id === loop.createdBy
+          const entry = statusMap[loop.id]
+          const isDone = entry?.status === "Done"
+          const isRunning = entry !== undefined && !isDone
           return (
             <div
               key={loop.id}
@@ -131,6 +136,7 @@ function LoopsList({ currentId }: { currentId: string }) {
               <button
                 type="button"
                 onClick={() => {
+                  markLoopViewed(loop.id)
                   navigate(`/loop/${loop.id}`)
                   if (isMobile) setCollapsedPersist(true)
                 }}
@@ -139,12 +145,20 @@ function LoopsList({ currentId }: { currentId: string }) {
                   (archived ? "opacity-60" : "")
                 }
               >
-                <span className={"w-1.5 h-1.5 rounded-full shrink-0 " + (archived ? "bg-gray-400" : "bg-emerald-500")} />
+                <span className={
+                  "w-1.5 h-1.5 rounded-full shrink-0 " +
+                  (archived ? "bg-gray-400" : isRunning ? "bg-blue-500 animate-pulse" : isDone && !entry?.viewed ? "bg-yellow-500" : isDone ? "bg-emerald-500" : "bg-gray-300")
+                } />
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] text-gray-900 truncate flex items-center gap-1">
                     {archived && <Archive size={10} className="text-gray-400 shrink-0" />}
                     <span className="truncate">{loop.title}</span>
                   </div>
+                  {entry && (
+                    <div className="text-[10px] text-gray-500 truncate mt-0.5">
+                      {entry.status}
+                    </div>
+                  )}
                   <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
                     <span className="text-gray-400 font-mono text-[10px]">‹›</span>
                     <span>{loop.createdBy}</span>
