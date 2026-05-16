@@ -17,7 +17,7 @@
  */
 import { execFile } from "node:child_process"
 import { existsSync, statSync } from "node:fs"
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { promisify } from "node:util"
 import {
   workspaceKnowledgeDir,
@@ -106,18 +106,42 @@ export function resolveEnvFile(name: string): string | null {
   return existsSync(p) ? p : null
 }
 
-/** Read mise.toml content. Returns null if missing. */
-export async function readEnv(name: string): Promise<string | null> {
-  const p = resolveEnvFile(name)
-  if (!p) return null
+/**
+ * Files inside an env dir that the editor UI can read/write. Whitelist so a
+ * malicious `?file=../../../etc/passwd` can't escape — only these basenames
+ * resolve to a path inside the env dir.
+ */
+export type EnvFile = "mise.toml" | "env.json"
+const ENV_FILES: readonly EnvFile[] = ["mise.toml", "env.json"]
+export function isValidEnvFile(file: string): file is EnvFile {
+  return (ENV_FILES as readonly string[]).includes(file)
+}
+
+function envFilePath(name: string, file: EnvFile): string {
+  return `${workspaceLoopatEnvDir(name)}/${file}`
+}
+
+/** Read one file from an env. Returns null if missing. */
+export async function readEnvFile(name: string, file: EnvFile): Promise<string | null> {
+  const p = envFilePath(name, file)
+  if (!existsSync(p)) return null
   return await readFile(p, "utf8")
 }
 
-/** Write mise.toml content (creates env dir if needed). Overwrites existing. */
-export async function writeEnv(name: string, content: string): Promise<void> {
+/** Write one file into an env, creating the env dir if needed. */
+export async function writeEnvFile(name: string, file: EnvFile, content: string): Promise<void> {
   const dir = workspaceLoopatEnvDir(name)
   await mkdir(dir, { recursive: true })
-  await writeFile(workspaceLoopatEnvPath(name), content)
+  await writeFile(envFilePath(name, file), content)
+}
+
+/**
+ * Remove an env from the catalog. Per-loop snapshots already copied are
+ * untouched — they continue to work standalone (decoupling is the whole
+ * point of the snapshot model). Caller has already validated the name.
+ */
+export async function deleteEnv(name: string): Promise<void> {
+  await rm(workspaceLoopatEnvDir(name), { recursive: true, force: true })
 }
 
 /**

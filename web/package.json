@@ -11,6 +11,7 @@
     "@assistant-ui/react": "^0.14.5",
     "@assistant-ui/react-markdown": "^0.14.0",
     "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/language": "^6.12.3",

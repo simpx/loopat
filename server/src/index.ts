@@ -11,7 +11,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
-import { getEnvVersion, isValidEnvName, listEnvs, lockEnv, readEnv, writeEnv } from "./envs"
+import { deleteEnv, getEnvVersion, isValidEnvFile, isValidEnvName, listEnvs, lockEnv, readEnvFile, writeEnvFile } from "./envs"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -889,25 +889,44 @@ app.get("/api/envs", requireAuth, async (c) => {
   return c.json({ envs: await listEnvs() })
 })
 
+// Per-file read/write inside an env dir. `file` defaults to mise.toml (the
+// "main" file). Whitelist guards path traversal — only known basenames map
+// to actual files inside the env dir.
 app.get("/api/envs/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
-  const content = await readEnv(name)
+  const file = c.req.query("file") ?? "mise.toml"
+  if (!isValidEnvFile(file)) return c.json({ error: "invalid file" }, 400)
+  const content = await readEnvFile(name, file)
   if (content === null) return c.json({ error: "not found" }, 404)
-  return c.json({ name, content })
+  return c.json({ name, file, content })
 })
 
 app.put("/api/envs/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  const file = c.req.query("file") ?? "mise.toml"
+  if (!isValidEnvFile(file)) return c.json({ error: "invalid file" }, 400)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
-  await writeEnv(name, body.content)
-  // After save, regenerate the lockfile (pin "latest" → exact versions). Save
-  // never fails on lock errors — surface them so the UI can show "saved but
-  // lock failed: <msg>" rather than silently leaving the env unpinned.
-  const lockRes = await lockEnv(name)
-  return c.json({ ok: true, name, locked: lockRes.ok, lockError: lockRes.error })
+  await writeEnvFile(name, file, body.content)
+  // Only mise.toml changes affect the version lockfile; env.json edits skip
+  // the lock step (just declarative metadata for term.ts / agents).
+  if (file === "mise.toml") {
+    const lockRes = await lockEnv(name)
+    return c.json({ ok: true, name, file, locked: lockRes.ok, lockError: lockRes.error })
+  }
+  return c.json({ ok: true, name, file })
+})
+
+// Remove an env from the catalog. Per-loop snapshots already copied stay
+// intact (they're standalone), so deleting "default" doesn't break loops
+// that already use it — they keep running off their own env/ dir.
+app.delete("/api/envs/:name", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  await deleteEnv(name)
+  return c.json({ ok: true, name })
 })
 
 app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
