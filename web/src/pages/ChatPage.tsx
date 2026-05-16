@@ -1,25 +1,30 @@
 /**
- * Chat tab — Slack-like channels + 1:1 DMs.
+ * Chat tab — Slack-like channels + 1:1 DMs with single-level threads.
  *
- * Persistent storage of record is server-side SQLite (chat.db). When a
- * loop is spawned from a chat conversation, the last 1024 messages are
- * snapshotted to /loopat/context/chat/<convId>.jsonl inside the new
- * loop's sandbox view so AI inside the loop can read the source thread.
+ * Storage of record is server-side SQLite (chat.db). Threading model:
+ * every top-level message IS a thread (length ≥ 1); a reply has
+ * `parentId` set to the root's id. Replies cannot themselves be replied
+ * to (no nesting). When a loop is spawned, it's spawned FROM A THREAD —
+ * root + replies snapshot to /loopat/context/chat/<rootId>.jsonl in the
+ * new loop's sandbox, giving the AI a clean semantic unit (vs. a noisy
+ * whole-channel dump).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   listChatConversations,
   listChatMessages,
+  getChatThread,
   listChatUsers,
   sendChatMessage,
   markChatRead,
   createChatChannel,
   deleteChatChannel,
   openChatDm,
-  spawnLoopFromChat,
+  spawnLoopFromThread,
   type ChatConversation,
   type ChatMessage,
+  type ChatThreadRoot,
   type ChatWorkspaceUser,
 } from "../api"
 import { useChatWebSocket, type ChatWsEvent } from "../useChatWebSocket"
@@ -54,15 +59,25 @@ export function ChatPage() {
 
   const [convs, setConvs] = useState<ChatConversation[]>([])
   const [users, setUsers] = useState<ChatWorkspaceUser[]>([])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatThreadRoot[]>([])
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
+  // Thread panel state. activeThreadRootId = which message's thread is open
+  // in the right pane. thread = root + replies (loaded async). spawning is
+  // per-thread (button lives in panel header).
+  const [activeThreadRootId, setActiveThreadRootId] = useState<number | null>(null)
+  const [thread, setThread] = useState<{ root: ChatMessage; replies: ChatMessage[] } | null>(null)
+  const [threadDraft, setThreadDraft] = useState("")
+  const [threadSending, setThreadSending] = useState(false)
   const [spawning, setSpawning] = useState(false)
   const [showDmPicker, setShowDmPicker] = useState(false)
   const [showNewChannel, setShowNewChannel] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const threadEndRef = useRef<HTMLDivElement | null>(null)
   const activeConvIdRef = useRef<string | undefined>(convId)
   activeConvIdRef.current = convId
+  const activeThreadRootIdRef = useRef<number | null>(null)
+  activeThreadRootIdRef.current = activeThreadRootId
 
   const active = useMemo(() => convs.find((c) => c.id === convId), [convs, convId])
   const channels = useMemo(() => convs.filter((c) => c.kind === "channel").sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")), [convs])
@@ -91,9 +106,12 @@ export function ChatPage() {
     refreshUsers()
   }, [refreshConvs, refreshUsers])
 
-  // On URL convId change → fetch messages, mark read, optimistically zero unread.
+  // On URL convId change → fetch messages, mark read, optimistically zero
+  // unread. Also close any open thread panel — threads are conv-scoped.
   useEffect(() => {
     if (!convId) return
+    setActiveThreadRootId(null)
+    setThread(null)
     let cancelled = false
     listChatMessages(convId, { limit: 100 }).then((msgs) => {
       if (cancelled) return
@@ -103,12 +121,34 @@ export function ChatPage() {
       if (last) {
         markChatRead(convId, last.id).catch(() => {})
         setConvs((prev) => prev.map((c) => (c.id === convId ? { ...c, unread: 0 } : c)))
+        // Notify the global tab-title hook so the (N) prefix drops
+        // immediately, without waiting for a refetch.
+        window.dispatchEvent(new CustomEvent("loopat:chat-read", { detail: { convId } }))
       }
     })
     return () => {
       cancelled = true
     }
   }, [convId])
+
+  // Fetch thread on open. The selected root may have arrived as part of a
+  // ws-pushed reply count bump on a message we don't have in `messages`
+  // yet, so we don't try to read it from local state — always GET.
+  useEffect(() => {
+    if (activeThreadRootId == null) {
+      setThread(null)
+      return
+    }
+    let cancelled = false
+    setThread(null)
+    getChatThread(activeThreadRootId).then((t) => {
+      if (cancelled) return
+      setThread(t)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [activeThreadRootId])
 
   // Default redirect to first channel when no convId
   useEffect(() => {
@@ -118,10 +158,13 @@ export function ChatPage() {
     if (first) navigate(`/chat/${first.id}`, { replace: true })
   }, [convId, convs, channels, navigate])
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages (main feed + open thread panel)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [thread?.replies.length])
 
   // ── websocket ──
 
@@ -130,7 +173,29 @@ export function ChatPage() {
       if (e.type === "message") {
         const m = e.message
         if (m.convId === activeConvIdRef.current) {
-          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]))
+          if (m.parentId == null) {
+            // New thread root → append to main feed (with 0 replies stats).
+            setMessages((prev) => (
+              prev.some((x) => x.id === m.id)
+                ? prev
+                : [...prev, { ...m, replyCount: 0, lastReplyTs: null }]
+            ))
+          } else {
+            // Reply → bump parent's replyCount/lastReplyTs in main feed,
+            // and append to thread panel if that thread is open.
+            setMessages((prev) => prev.map((x) =>
+              x.id === m.parentId
+                ? { ...x, replyCount: x.replyCount + 1, lastReplyTs: m.ts }
+                : x,
+            ))
+            if (activeThreadRootIdRef.current === m.parentId) {
+              setThread((prev) =>
+                prev && !prev.replies.some((r) => r.id === m.id)
+                  ? { ...prev, replies: [...prev.replies, m] }
+                  : prev,
+              )
+            }
+          }
           markChatRead(m.convId, m.id).catch(() => {})
         } else {
           setConvs((prev) =>
@@ -177,17 +242,42 @@ export function ChatPage() {
     setSending(false)
     if (r.message) {
       setDraft("")
-      // Optimistically append — ws will dedupe if it races.
-      setMessages((prev) => (prev.some((x) => x.id === r.message!.id) ? prev : [...prev, r.message!]))
+      // Optimistically append as a fresh thread root — ws will dedupe.
+      setMessages((prev) => (
+        prev.some((x) => x.id === r.message!.id)
+          ? prev
+          : [...prev, { ...r.message!, replyCount: 0, lastReplyTs: null }]
+      ))
     } else if (r.error) {
       console.error("send failed:", r.error)
     }
   }
 
-  const handleSpawnLoop = async () => {
-    if (!convId || spawning) return
+  const handleThreadSend = async () => {
+    const text = threadDraft.trim()
+    if (!text || !convId || !thread || threadSending) return
+    setThreadSending(true)
+    const r = await sendChatMessage(convId, text, thread.root.id)
+    setThreadSending(false)
+    if (r.message) {
+      setThreadDraft("")
+      // Optimistically append the reply (dedupe by id when ws races).
+      // Do NOT bump replyCount here — the ws "message" event will bump,
+      // and bumping in both places double-counts (was the "+3" bug).
+      setThread((prev) =>
+        prev && !prev.replies.some((x) => x.id === r.message!.id)
+          ? { ...prev, replies: [...prev.replies, r.message!] }
+          : prev,
+      )
+    } else if (r.error) {
+      console.error("thread send failed:", r.error)
+    }
+  }
+
+  const handleSpawnLoopFromThread = async () => {
+    if (!thread || spawning) return
     setSpawning(true)
-    const r = await spawnLoopFromChat(convId)
+    const r = await spawnLoopFromThread(thread.root.id)
     if (r.loopId) {
       // The server created the loop directly — refresh ws.loops so LoopPage
       // finds it on mount (otherwise it falls back to /loop which redirects
@@ -298,18 +388,6 @@ export function ChatPage() {
                   <span className="text-xs text-gray-500 truncate">— {active.topic}</span>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSpawnLoop}
-                  disabled={spawning}
-                  className="px-2.5 py-1 rounded border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 flex items-center gap-1.5"
-                  title="spawn a loop seeded with this conversation's history (last 1024 messages snapshot to /loopat/context/chat/<convId>.jsonl)"
-                >
-                  <span className="text-gray-500">⑂</span>
-                  <span>{spawning ? "spawning…" : "spawn loop"}</span>
-                </button>
-              </div>
             </header>
 
             <div className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3">
@@ -317,7 +395,13 @@ export function ChatPage() {
                 <div className="text-[13px] text-gray-500">no messages yet — say hi</div>
               )}
               {messages.map((m) => (
-                <MessageRow key={m.id} message={m} isMe={m.author === me} />
+                <MessageRow
+                  key={m.id}
+                  message={m}
+                  isMe={m.author === me}
+                  active={m.id === activeThreadRootId}
+                  onOpenThread={() => setActiveThreadRootId(m.id)}
+                />
               ))}
               <div ref={messagesEndRef} />
             </div>
@@ -328,6 +412,10 @@ export function ChatPage() {
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
+                    // Skip Enter while IME is composing (CJK input methods
+                    // use Enter to commit the candidate; firing send here
+                    // sends the wrong text and steals the commit keystroke).
+                    if (e.nativeEvent.isComposing) return
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault()
                       handleSend()
@@ -355,6 +443,82 @@ export function ChatPage() {
           </div>
         )}
       </main>
+
+      {/* Thread panel — Slack-style slide-out from the right. Renders only
+          when a thread is open. Width is fixed-ish (96 → 30vw) so the main
+          feed shrinks gracefully on smaller screens. */}
+      {active && activeThreadRootId != null && (
+        <aside className="w-[28rem] max-w-[40vw] min-w-[20rem] shrink-0 border-l border-gray-200 bg-white flex flex-col">
+          <header className="px-4 h-12 shrink-0 border-b border-gray-200 flex items-center justify-between">
+            <div className="text-[13px] font-medium text-gray-900">Thread</div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSpawnLoopFromThread}
+                disabled={spawning || !thread}
+                className="px-2 py-1 rounded border border-gray-200 text-[11px] text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 flex items-center gap-1"
+                title="spawn a loop seeded with this thread (root + replies snapshot to /loopat/context/chat/<rootId>.jsonl)"
+              >
+                <span className="text-gray-500">⑂</span>
+                <span>{spawning ? "spawning…" : "spawn loop"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveThreadRootId(null)}
+                className="text-gray-400 hover:text-gray-900 text-base leading-none px-1"
+                title="close thread"
+              >×</button>
+            </div>
+          </header>
+          <div className="flex-1 min-h-0 overflow-auto px-4 py-3 flex flex-col gap-3">
+            {thread === null ? (
+              <div className="text-[12px] text-gray-400 italic">loading…</div>
+            ) : (
+              <>
+                <MessageRow message={thread.root} isMe={thread.root.author === me} compact />
+                {thread.replies.length > 0 && (
+                  <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                    <span className="flex-1 h-px bg-gray-200" />
+                    <span>{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</span>
+                    <span className="flex-1 h-px bg-gray-200" />
+                  </div>
+                )}
+                {thread.replies.map((r) => (
+                  <MessageRow key={r.id} message={r} isMe={r.author === me} compact />
+                ))}
+                <div ref={threadEndRef} />
+              </>
+            )}
+          </div>
+          <div className="px-4 pb-4 pt-2 shrink-0">
+            <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm flex flex-col gap-2">
+              <textarea
+                value={threadDraft}
+                onChange={(e) => setThreadDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    handleThreadSend()
+                  }
+                }}
+                rows={1}
+                placeholder="Reply…"
+                className="field-sizing-content w-full max-h-40 min-h-10 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+              />
+              <div className="flex items-center justify-between border-t border-gray-100 pt-2 px-0.5">
+                <div className="text-[10px] text-gray-400">Enter to reply · Shift+Enter for newline</div>
+                <button
+                  type="button"
+                  onClick={handleThreadSend}
+                  disabled={threadSending || !threadDraft.trim() || !thread}
+                  className="px-3 py-1 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-40"
+                >reply</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      )}
 
       {showNewChannel && (
         <NewChannelDialog
@@ -410,11 +574,31 @@ function ConvRow(props: {
   )
 }
 
-function MessageRow(props: { message: ChatMessage; isMe: boolean }) {
+/**
+ * Single message row. If `message` is a ChatThreadRoot (has replyCount),
+ * renders the "💬 N replies" affordance and a hover "Reply" button. The
+ * `compact` variant disables both (used inside ThreadPanel where the
+ * thread is already open).
+ */
+function MessageRow(props: {
+  message: ChatMessage | ChatThreadRoot
+  isMe: boolean
+  active?: boolean
+  compact?: boolean
+  onOpenThread?: () => void
+}) {
   const m = props.message
   const isMe = props.isMe
+  const replyCount = "replyCount" in m ? m.replyCount : 0
+  const lastReplyTs = "lastReplyTs" in m ? m.lastReplyTs : null
   return (
-    <div className={`flex gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
+    <div
+      className={
+        "group/msg relative -mx-1 px-1 py-0.5 rounded flex gap-3 " +
+        (isMe ? "flex-row-reverse " : "") +
+        (props.active ? "bg-amber-50/60" : "hover:bg-gray-50")
+      }
+    >
       <div
         className={
           isMe
@@ -443,6 +627,29 @@ function MessageRow(props: { message: ChatMessage; isMe: boolean }) {
         <div className={`text-[13px] text-gray-900 whitespace-pre-wrap leading-relaxed break-words ${isMe ? "text-right" : ""}`}>
           {m.text}
         </div>
+        {/* Two states, same position (predictable scan path):
+            - replies exist → persistent "💬 N replies · last X" (always shown)
+            - no replies → bare "💬 Reply" shown ONLY on row hover (less noise) */}
+        {!props.compact && props.onOpenThread && replyCount > 0 && (
+          <button
+            type="button"
+            onClick={props.onOpenThread}
+            className={`mt-1 text-[11px] text-blue-600 hover:underline ${isMe ? "ml-auto block text-right" : ""}`}
+          >
+            💬 {replyCount} {replyCount === 1 ? "reply" : "replies"}
+            {lastReplyTs && <span className="text-gray-400 ml-1.5">· last {formatTime(lastReplyTs)}</span>}
+          </button>
+        )}
+        {!props.compact && props.onOpenThread && replyCount === 0 && (
+          <button
+            type="button"
+            onClick={props.onOpenThread}
+            className={
+              "mt-1 text-[11px] text-gray-400 hover:text-blue-600 hover:underline opacity-0 group-hover/msg:opacity-100 transition-opacity " +
+              (isMe ? "ml-auto block text-right" : "")
+            }
+          >💬 Reply</button>
+        )}
       </div>
     </div>
   )
