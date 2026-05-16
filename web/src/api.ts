@@ -10,6 +10,10 @@ export type LoopMeta = {
   /** If true, /share/:id is publicly viewable. Toggle via setLoopPublic. */
   public?: boolean
   publicAt?: string
+  shareEnabled?: boolean
+  shareMode?: "static" | "port"
+  shareAlias?: string
+  sharePort?: number
 }
 
 export type UserRole = "admin" | "member"
@@ -229,6 +233,18 @@ export async function writeFile(loopId: string, path: string, content: string): 
     body: JSON.stringify({ content }),
   })
   return r.ok
+}
+
+export async function uploadFile(loopId: string, file: File): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const formData = new FormData()
+  formData.append("file", file)
+  const r = await apiFetch(`/api/loops/${loopId}/upload`, {
+    method: "POST",
+    body: formData,
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? "upload failed" }
+  return { ok: true, path: j.path }
 }
 
 export type ContextMount = { name: string; path: string }
@@ -802,4 +818,31 @@ export async function deleteAdminUser(id: string): Promise<{ ok: boolean; error?
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { ok: false, error: j.error ?? `delete failed (${r.status})` }
   return { ok: true }
+}
+
+// ── workspace serve ──
+
+export type ServeDomain = { domain: string; ip: string; baseUrl: string; withPort: boolean; https: boolean; displayPort: number }
+
+export async function getServeDomain(): Promise<ServeDomain> {
+  const r = await apiFetch("/api/serve/domain")
+  if (!r.ok) return { domain: "nip.io", ip: "127.0.0.1", baseUrl: ".127.0.0.1.nip.io", withPort: false, https: false, displayPort: 7788 }
+  return (await r.json()) as ServeDomain
+}
+
+export async function setServeDomain(data: { domain?: string; withPort?: boolean; https?: boolean; displayPort?: number }): Promise<boolean> {
+  const r = await apiFetch("/api/serve/domain", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  return r.ok
+}
+
+export async function checkAliasAvailable(alias: string, loopId?: string): Promise<{ available: boolean; reason?: string }> {
+  const params = new URLSearchParams({ alias })
+  if (loopId) params.set("loopId", loopId)
+  const r = await apiFetch(`/api/serve/alias-check?${params}`)
+  if (!r.ok) return { available: false, reason: "check failed" }
+  return (await r.json()) as { available: boolean; reason?: string }
 }

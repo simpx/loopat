@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "bun run --hot src/index.ts",
+    "serve": "bun run --hot src/serve.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",

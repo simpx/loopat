@@ -7,10 +7,11 @@
     "web"
   ],
   "scripts": {
-    "dev": "HOST=${HOST:-127.0.0.1} bun run --filter '*' dev",
-    "dev:host": "HOST=0.0.0.0 bun run --filter '*' dev",
+    "dev": "HOST=${HOST:-127.0.0.1} LOOPAT_SERVE_HOST=${LOOPAT_SERVE_HOST:-127.0.0.1} bun run --filter '*' dev",
+    "dev:host": "HOST=0.0.0.0 LOOPAT_SERVE_HOST=0.0.0.0 bun run --filter '*' dev",
     "dev:server": "bun --cwd server run dev",
     "dev:web": "bun --cwd web run dev",
+    "dev:serve": "bun --cwd server run serve",
     "build": "bun install && bun --cwd web run build"
   }
 }

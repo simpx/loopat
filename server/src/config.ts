@@ -85,6 +85,14 @@ export type WorkspaceConfig = {
   repos?: RepoSpec[]
   providers?: Record<string, ProviderConfig>
   default?: string
+  /** Domain suffix for workspace serve (e.g. "nip.io"). Defaults to "nip.io". */
+  serveDomain?: string
+  /** Whether to include port in the share URL. */
+  serveWithPort?: boolean
+  /** Whether to use HTTPS for share URLs. */
+  serveHttps?: boolean
+  /** Custom port to show in share URL (does not affect actual server listen port). */
+  serveDisplayPort?: number
 }
 
 /**
@@ -322,6 +330,10 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   if (cfg.knowledge !== undefined) merged.knowledge = cfg.knowledge
   if (cfg.notes !== undefined) merged.notes = cfg.notes
   if (cfg.repos !== undefined) merged.repos = cfg.repos
+  if (cfg.serveDomain !== undefined) merged.serveDomain = cfg.serveDomain
+  if (cfg.serveWithPort !== undefined) merged.serveWithPort = cfg.serveWithPort
+  if (cfg.serveHttps !== undefined) merged.serveHttps = cfg.serveHttps
+  if (cfg.serveDisplayPort !== undefined) merged.serveDisplayPort = cfg.serveDisplayPort
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
 }
