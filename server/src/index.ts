@@ -76,6 +76,62 @@ app.get("/api/version", (c) => {
   return c.json({ branch, commit })
 })
 
+// ── workspace serve config ──
+
+function getLocalIp(): string {
+  const nets = networkInterfaces()
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] ?? []) {
+      if (!net.internal && net.family === "IPv4") return net.address
+    }
+  }
+  return "127.0.0.1"
+}
+
+app.get("/api/serve/domain", requireAuth, async (c) => {
+  const cfg = await loadConfig()
+  const domain = cfg.serveDomain ?? "nip.io"
+  const ip = getLocalIp()
+  const isNip = domain === "nip.io"
+  return c.json({
+    domain,
+    ip,
+    baseUrl: isNip ? `.${ip}.${domain}` : `.${domain}`,
+    withPort: cfg.serveWithPort ?? false,
+    https: cfg.serveHttps ?? false,
+    displayPort: cfg.serveDisplayPort ?? 7788,
+  })
+})
+
+app.put("/api/serve/domain", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const patch: Record<string, unknown> = {}
+  if (typeof body.domain === "string" && body.domain.trim()) patch.serveDomain = body.domain.trim()
+  if (typeof body.withPort === "boolean") patch.serveWithPort = body.withPort
+  if (typeof body.https === "boolean") patch.serveHttps = body.https
+  if (typeof body.displayPort === "number") patch.serveDisplayPort = body.displayPort
+  if (Object.keys(patch).length === 0) return c.json({ error: "no fields to update" }, 400)
+  await saveWorkspaceConfig(patch)
+  return c.json({ ok: true })
+})
+
+app.get("/api/serve/alias-check", requireAuth, async (c) => {
+  const alias = (c.req.query("alias") ?? "").trim().toLowerCase()
+  const loopId = (c.req.query("loopId") ?? "").trim()
+  if (!alias) return c.json({ available: false, reason: "alias required" })
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(alias)) {
+    return c.json({ available: false, reason: "Only lowercase letters, numbers, and hyphens allowed" })
+  }
+  const allLoops = await listLoops()
+  for (const loop of allLoops) {
+    if (loop.id === loopId) continue
+    if (loop.id.slice(0, 8) === alias || loop.shareAlias === alias) {
+      return c.json({ available: false, reason: "Already in use" })
+    }
+  }
+  return c.json({ available: true })
+})
+
 // ── providers (auth required) ──
 // Merges personal + workspace configs. Personal providers take precedence
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
@@ -456,6 +512,11 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
     patch.public = body.public
     patch.publicAt = body.public ? new Date().toISOString() : undefined
   }
+  // Share config fields
+  if (typeof body.shareEnabled === "boolean") patch.shareEnabled = body.shareEnabled
+  if (body.shareMode === "static" || body.shareMode === "port") patch.shareMode = body.shareMode
+  if (typeof body.shareAlias === "string") patch.shareAlias = body.shareAlias.trim() || undefined
+  if (typeof body.sharePort === "number") patch.sharePort = body.sharePort
   if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
   const updated = await patchLoopMeta(id, patch)
   // On archive: tear down the Claude SDK process and terminal PTY so no
@@ -1237,6 +1298,7 @@ app.get(
 
 // ── static assets (production) ──
 import { join } from "node:path"
+import { networkInterfaces } from "node:os"
 const webDist = join(import.meta.dir, "..", "..", "web", "dist")
 const indexHtml = join(webDist, "index.html")
 
@@ -1264,6 +1326,15 @@ const backfilled = await backfillAllMounts()
 const cfg = await loadConfig()
 await printBootstrapBanner(cfg)
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
+
+// Start workspace serve service (separate port)
+import "./serve"
+
+const serveHost = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
+const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
+
+console.log(`[loopat] server listening on http://${hostname}:${port}`)
+console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
 
 export default {
   port,

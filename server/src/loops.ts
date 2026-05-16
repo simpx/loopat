@@ -56,12 +56,21 @@ export type LoopMeta = {
   archived?: boolean
   archivedAt?: string
   /**
-   * If true, this loop's chat (and only the chat) is readable by anonymous
-   * visitors at `/share/:id`. Everything else (workspace, files, kanban, ...)
-   * still requires auth. Only the loop's `createdBy` may toggle it.
-   */
+    * If true, this loop's chat (and only the chat) is readable by anonymous
+    * visitors at `/share/:id`. Everything else (workspace, files, kanban, ...)
+    * still requires auth. Only the loop's `createdBy` may toggle it.
+    */
   public?: boolean
   publicAt?: string
+  /**
+   * Workspace serve config. When shareEnabled, the loop's workdir is accessible
+   * via <id|alias>.<domain>. Two modes: "static" serves files, "port" forwards
+   * HTTP to the configured sharePort (10000-20000). Mutually exclusive.
+   */
+  shareEnabled?: boolean
+  shareMode?: "static" | "port"
+  shareAlias?: string
+  sharePort?: number
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index
