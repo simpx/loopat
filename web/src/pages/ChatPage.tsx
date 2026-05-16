@@ -30,6 +30,26 @@ import {
 import { useChatWebSocket, type ChatWsEvent } from "../useChatWebSocket"
 import { useWorkspace } from "../ctx"
 
+/**
+ * Outbox entry for a send that hasn't been confirmed by the DB. We render it
+ * inline so the sender always sees feedback — pending while in flight,
+ * failed (with retry/discard) on error. Server-assigned `id: number` only
+ * exists after success, so we key by client-generated `tempId` until then.
+ */
+type PendingMsg = {
+  tempId: string
+  convId: string
+  parentId: number | null
+  text: string
+  ts: number
+  status: "pending" | "failed"
+  error?: string
+}
+
+function newTempId(): string {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
 function formatTime(ts: number): string {
   const d = new Date(ts)
   const today = new Date()
@@ -62,6 +82,15 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatThreadRoot[]>([])
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
+  // Outbox: locally-tracked sends that have NOT been confirmed by the DB.
+  // Renders inline below the confirmed feed (or replies) with a status:
+  //   - "pending": faded + "sending…", entry stays
+  //   - "failed":  red + error + retry/discard buttons
+  // On HTTP success the entry is removed and the server-returned message
+  // is appended to the confirmed list. WS for own message dedupes by id.
+  // Keyed by tempId — the only client-side identifier before DB assigns one.
+  const [pendingRoots, setPendingRoots] = useState<PendingMsg[]>([])
+  const [pendingReplies, setPendingReplies] = useState<PendingMsg[]>([])
   // Thread panel state. activeThreadRootId = which message's thread is open
   // in the right pane. thread = root + replies (loaded async). spawning is
   // per-thread (button lives in panel header).
@@ -234,22 +263,73 @@ export function ChatPage() {
 
   // ── actions ──
 
+  /** Push a top-level send through the outbox. On success the pending entry
+   *  is replaced by the server-confirmed message; on failure it stays
+   *  visible with retry/discard buttons. Shared by handleSend and the
+   *  per-pending retry handler. */
+  const submitRoot = async (text: string, tempId: string, targetConvId: string) => {
+    setPendingRoots((prev) => prev.map((p) =>
+      p.tempId === tempId ? { ...p, status: "pending", error: undefined } : p,
+    ))
+    const r = await sendChatMessage(targetConvId, text)
+    if (r.message) {
+      const m = r.message
+      setPendingRoots((prev) => prev.filter((p) => p.tempId !== tempId))
+      setMessages((prev) => (
+        prev.some((x) => x.id === m.id)
+          ? prev
+          : [...prev, { ...m, replyCount: 0, lastReplyTs: null }]
+      ))
+    } else {
+      setPendingRoots((prev) => prev.map((p) =>
+        p.tempId === tempId ? { ...p, status: "failed", error: r.error ?? "send failed" } : p,
+      ))
+    }
+  }
+
   const handleSend = async () => {
     const text = draft.trim()
     if (!text || !convId || sending) return
     setSending(true)
-    const r = await sendChatMessage(convId, text)
+    const tempId = newTempId()
+    setPendingRoots((prev) => [
+      ...prev,
+      { tempId, convId, parentId: null, text, ts: Date.now(), status: "pending" },
+    ])
+    setDraft("")
+    await submitRoot(text, tempId, convId)
     setSending(false)
+  }
+
+  const retryRoot = (p: PendingMsg) => {
+    if (!p.convId) return
+    submitRoot(p.text, p.tempId, p.convId).catch(() => {})
+  }
+
+  const discardRoot = (tempId: string) => {
+    setPendingRoots((prev) => prev.filter((p) => p.tempId !== tempId))
+  }
+
+  /** Same outbox pattern as submitRoot, but the destination is a thread
+   *  reply: success appends to thread.replies (WS dedupes), failure leaves
+   *  the pending entry visible with retry/discard. */
+  const submitReply = async (text: string, tempId: string, targetConvId: string, parentId: number) => {
+    setPendingReplies((prev) => prev.map((p) =>
+      p.tempId === tempId ? { ...p, status: "pending", error: undefined } : p,
+    ))
+    const r = await sendChatMessage(targetConvId, text, parentId)
     if (r.message) {
-      setDraft("")
-      // Optimistically append as a fresh thread root — ws will dedupe.
-      setMessages((prev) => (
-        prev.some((x) => x.id === r.message!.id)
-          ? prev
-          : [...prev, { ...r.message!, replyCount: 0, lastReplyTs: null }]
+      const m = r.message
+      setPendingReplies((prev) => prev.filter((p) => p.tempId !== tempId))
+      setThread((prev) =>
+        prev && !prev.replies.some((x) => x.id === m.id)
+          ? { ...prev, replies: [...prev.replies, m] }
+          : prev,
+      )
+    } else {
+      setPendingReplies((prev) => prev.map((p) =>
+        p.tempId === tempId ? { ...p, status: "failed", error: r.error ?? "send failed" } : p,
       ))
-    } else if (r.error) {
-      console.error("send failed:", r.error)
     }
   }
 
@@ -257,21 +337,23 @@ export function ChatPage() {
     const text = threadDraft.trim()
     if (!text || !convId || !thread || threadSending) return
     setThreadSending(true)
-    const r = await sendChatMessage(convId, text, thread.root.id)
+    const tempId = newTempId()
+    setPendingReplies((prev) => [
+      ...prev,
+      { tempId, convId, parentId: thread.root.id, text, ts: Date.now(), status: "pending" },
+    ])
+    setThreadDraft("")
+    await submitReply(text, tempId, convId, thread.root.id)
     setThreadSending(false)
-    if (r.message) {
-      setThreadDraft("")
-      // Optimistically append the reply (dedupe by id when ws races).
-      // Do NOT bump replyCount here — the ws "message" event will bump,
-      // and bumping in both places double-counts (was the "+3" bug).
-      setThread((prev) =>
-        prev && !prev.replies.some((x) => x.id === r.message!.id)
-          ? { ...prev, replies: [...prev.replies, r.message!] }
-          : prev,
-      )
-    } else if (r.error) {
-      console.error("thread send failed:", r.error)
-    }
+  }
+
+  const retryReply = (p: PendingMsg) => {
+    if (!p.convId || p.parentId == null) return
+    submitReply(p.text, p.tempId, p.convId, p.parentId).catch(() => {})
+  }
+
+  const discardReply = (tempId: string) => {
+    setPendingReplies((prev) => prev.filter((p) => p.tempId !== tempId))
   }
 
   const handleSpawnLoopFromThread = async () => {
@@ -403,6 +485,17 @@ export function ChatPage() {
                   onOpenThread={() => setActiveThreadRootId(m.id)}
                 />
               ))}
+              {pendingRoots
+                .filter((p) => p.convId === convId)
+                .map((p) => (
+                  <PendingRow
+                    key={p.tempId}
+                    pending={p}
+                    author={me}
+                    onRetry={() => retryRoot(p)}
+                    onDiscard={() => discardRoot(p.tempId)}
+                  />
+                ))}
               <div ref={messagesEndRef} />
             </div>
 
@@ -486,6 +579,18 @@ export function ChatPage() {
                 {thread.replies.map((r) => (
                   <MessageRow key={r.id} message={r} isMe={r.author === me} compact />
                 ))}
+                {pendingReplies
+                  .filter((p) => p.parentId === thread.root.id)
+                  .map((p) => (
+                    <PendingRow
+                      key={p.tempId}
+                      pending={p}
+                      author={me}
+                      compact
+                      onRetry={() => retryReply(p)}
+                      onDiscard={() => discardReply(p.tempId)}
+                    />
+                  ))}
                 <div ref={threadEndRef} />
               </>
             )}
@@ -649,6 +754,75 @@ function MessageRow(props: {
               (isMe ? "ml-auto block text-right" : "")
             }
           >💬 Reply</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Render an outbox entry. Visual matches MessageRow shape (so it sits in
+ * the feed naturally), but with a status badge — never let a "sending" or
+ * "failed" entry look identical to a confirmed message.
+ *
+ *   pending: faded body + "sending…" pill, no actions
+ *   failed:  red border + error text + Retry / Discard buttons
+ */
+function PendingRow(props: {
+  pending: PendingMsg
+  author: string
+  compact?: boolean
+  onRetry: () => void
+  onDiscard: () => void
+}) {
+  const p = props.pending
+  const isFailed = p.status === "failed"
+  return (
+    <div
+      className={
+        "flex flex-row-reverse gap-3 -mx-1 px-1 py-0.5 rounded " +
+        (isFailed ? "ring-1 ring-red-200 bg-red-50/40" : "")
+      }
+    >
+      <div className="w-7 h-7 rounded shrink-0 flex items-center justify-center text-[11px] font-medium bg-gray-900 text-white" title={props.author}>
+        {props.author.slice(0, 1).toUpperCase()}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 justify-end">
+          <span className="text-[11px] text-gray-500">{formatTime(p.ts)}</span>
+          <span className="text-[10px] text-gray-500">you</span>
+          <span className="text-[13px] font-medium text-gray-900">{props.author}</span>
+          {isFailed ? (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-200">failed</span>
+          ) : (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 inline-flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+              sending…
+            </span>
+          )}
+        </div>
+        <div
+          className={
+            "text-[13px] whitespace-pre-wrap leading-relaxed break-words text-right " +
+            (isFailed ? "text-gray-700" : "text-gray-400")
+          }
+        >
+          {p.text}
+        </div>
+        {isFailed && (
+          <div className="mt-1 flex items-center gap-2 justify-end text-[11px]">
+            {p.error && <span className="text-red-600">{p.error}</span>}
+            <button
+              type="button"
+              onClick={props.onRetry}
+              className="px-1.5 py-0.5 rounded border border-gray-300 text-gray-700 hover:bg-white"
+            >retry</button>
+            <button
+              type="button"
+              onClick={props.onDiscard}
+              className="px-1.5 py-0.5 rounded text-gray-500 hover:text-red-600"
+            >discard</button>
+          </div>
         )}
       </div>
     </div>
