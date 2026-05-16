@@ -7,6 +7,8 @@ import {
   getWorkspaceSettings,
   updateWorkspaceSettings,
   getDailyTokenUsage,
+  getServeDomain,
+  setServeDomain,
   type PersonalSettings,
   type WorkspaceSettings,
   type TokenUsage,
@@ -14,7 +16,7 @@ import {
 } from "@/api"
 
 type Category = "personal" | "workspace"
-type SidebarTab = "models" | "notifications"
+type SidebarTab = "models" | "notifications" | "serve"
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -119,6 +121,13 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null)
   const [workspaceProviders, setWorkspaceProviders] = useState<Record<string, ProviderForm>>({})
   const [workspaceDefault, setWorkspaceDefault] = useState("")
+  const [serveDomain, setServeDomainState] = useState("")
+  const [serveIp, setServeIp] = useState("")
+  const [serveBaseUrl, setServeBaseUrl] = useState("")
+  const [serveWithPort, setServeWithPort] = useState(false)
+  const [serveHttps, setServeHttps] = useState(false)
+  const [serveDisplayPort, setServeDisplayPort] = useState(7788)
+  const [savingServe, setSavingServe] = useState(false)
 
   // New provider form
   const [newProviderName, setNewProviderName] = useState("")
@@ -135,7 +144,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
       getPersonalSettings().catch(() => null),
       getWorkspaceSettings().catch(() => null),
       getDailyTokenUsage().catch(() => ({})),
-    ]).then(([p, w, daily]) => {
+      getServeDomain().catch(() => null),
+    ]).then(([p, w, daily, serve]) => {
       if (p) {
         setPersonal(p)
         const forms: Record<string, ProviderForm> = {}
@@ -168,6 +178,14 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         setWorkspaceDefault(w.default ?? "")
       }
       if (daily) setDailyUsage(daily)
+      if (serve) {
+        setServeDomainState(serve.domain)
+        setServeIp(serve.ip)
+        setServeBaseUrl(serve.baseUrl)
+        setServeWithPort(serve.withPort ?? false)
+        setServeHttps(serve.https ?? false)
+        setServeDisplayPort(serve.displayPort ?? 7788)
+      }
       setLoading(false)
     })
   }, [open])
@@ -344,6 +362,19 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                 Notifications
               </button>
             )}
+            {category === "workspace" && (
+              <button
+                type="button"
+                onClick={() => setSidebar("serve")}
+                className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
+                  sidebar === "serve"
+                    ? "bg-gray-100 text-gray-900 font-medium"
+                    : "text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                Workspace Serve
+              </button>
+            )}
           </div>
 
           {/* Right content */}
@@ -370,6 +401,85 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                   {error && <span className="text-xs text-red-500">{error}</span>}
                   <Button onClick={() => handleSave("personal")} disabled={saving}>
                     {saving ? "Saving..." : "Save"}
+                  </Button>
+                </div>
+              </div>
+            ) : sidebar === "serve" ? (
+              /* ── Workspace Serve Settings ── */
+              <div className="flex flex-col gap-4 min-h-full">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Domain Suffix</label>
+                  <input
+                    type="text"
+                    value={serveDomain}
+                    onChange={(e) => setServeDomainState(e.target.value)}
+                    placeholder="nip.io"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    Workspace sharing URLs: <code className="bg-gray-50 px-1 rounded">&lt;alias&gt;{serveBaseUrl}</code>
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Only <code className="bg-gray-50 px-1 rounded">nip.io</code> requires IP prefix. Custom domains use direct subdomain.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={serveHttps}
+                      onChange={(e) => setServeHttps(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    HTTPS
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={serveWithPort}
+                      onChange={(e) => setServeWithPort(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    Show port in URL
+                  </label>
+                </div>
+
+                {serveWithPort && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Display Port</label>
+                    <input
+                      type="number"
+                      value={serveDisplayPort}
+                      onChange={(e) => setServeDisplayPort(parseInt(e.target.value, 10) || 7788)}
+                      placeholder="7788"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Port shown in share URL (does not change actual server listen port).
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
+                  <Button onClick={async () => {
+                    setSavingServe(true)
+                    await setServeDomain({
+                      domain: serveDomain.trim(),
+                      withPort: serveWithPort,
+                      https: serveHttps,
+                      displayPort: serveDisplayPort,
+                    })
+                    const d = await getServeDomain()
+                    setServeDomainState(d.domain)
+                    setServeIp(d.ip)
+                    setServeBaseUrl(d.baseUrl)
+                    setServeWithPort(d.withPort)
+                    setServeHttps(d.https)
+                    setServeDisplayPort(d.displayPort)
+                    setSavingServe(false)
+                  }} disabled={savingServe}>
+                    {savingServe ? "Saving..." : "Save"}
                   </Button>
                 </div>
               </div>

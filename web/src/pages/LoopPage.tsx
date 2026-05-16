@@ -14,6 +14,7 @@ import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
 import { GitDiffSidebar } from "../components/GitDiffSidebar"
+import { ShareArtifactDialog } from "../components/ShareArtifactDialog"
 import { lazy, Suspense } from "react"
 const Editor = lazy(() => import("../Editor").then(m => ({ default: m.Editor })))
 const Terminal = lazy(() => import("../Terminal").then(m => ({ default: m.Terminal })))
@@ -223,6 +224,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
   const [mounts, setMounts] = useState<ContextMount[]>([])
+  const [shareOpen, setShareOpen] = useState(false)
 
   useEffect(() => {
     getContext(meta.id).then(setMounts)
@@ -257,6 +259,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           rightOpen={rightOpen}
           rightMode={rightMode}
           toggleMode={toggleMode}
+          onShareWork={() => setShareOpen(true)}
         />
         <div className="flex-1 min-h-0">
           <LoopRuntimeProvider extra={extra}>
@@ -288,6 +291,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           currentUserId={ws.currentUser?.id ?? ""}
         />
       )}
+      <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>
   )
 }
@@ -308,6 +312,7 @@ function LoopHeader({
   rightOpen,
   rightMode,
   toggleMode,
+  onShareWork,
 }: {
   meta: LoopMeta
   mounts: ContextMount[]
@@ -320,6 +325,7 @@ function LoopHeader({
   rightOpen: boolean
   rightMode: RightMode
   toggleMode: (m: RightMode) => void
+  onShareWork: () => void
 }) {
   const modeBtn = (label: string, m: RightMode) => (
     <button
@@ -374,6 +380,14 @@ function LoopHeader({
           </span>
         )}
         <div className="flex-1" />
+        <button
+          onClick={onShareWork}
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${meta.shareEnabled ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"}`}
+          title="Share workspace artifact (static files or port forward)"
+        >
+          <Globe size={11} />
+          Share Artifact
+        </button>
         <ShareToggle meta={meta} />
       </div>
 
