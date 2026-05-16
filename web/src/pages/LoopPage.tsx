@@ -454,7 +454,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           {renderPanel(mode)}
         </div>
       ))}
-      <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} />
+      <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} onSaved={() => ws.refresh()} />
     </div>
   )
 }

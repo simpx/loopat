@@ -111,7 +111,7 @@ function getLocalIp(): string {
   return "127.0.0.1"
 }
 
-app.get("/api/serve/domain", requireAuth, async (c) => {
+app.get("/api/serve/domain", requireAdmin, async (c) => {
   const cfg = await loadConfig()
   const domain = cfg.serveDomain ?? "nip.io"
   const ip = getLocalIp()
@@ -126,7 +126,7 @@ app.get("/api/serve/domain", requireAuth, async (c) => {
   })
 })
 
-app.put("/api/serve/domain", requireAuth, async (c) => {
+app.put("/api/serve/domain", requireAdmin, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const patch: Record<string, unknown> = {}
   if (typeof body.domain === "string" && body.domain.trim()) patch.serveDomain = body.domain.trim()

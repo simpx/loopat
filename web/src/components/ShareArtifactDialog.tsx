@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { getServeDomain, checkAliasAvailable, type LoopMeta } from "../api"
 import { Globe, Copy, Check, AlertCircle } from "lucide-react"
 
-export function ShareArtifactDialog({ loop, open, onClose }: { loop: LoopMeta; open: boolean; onClose: () => void }) {
+export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: LoopMeta; open: boolean; onClose: () => void; onSaved?: () => void }) {
   const [domain, setDomainState] = useState("")
   const [ip, setIp] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
@@ -86,6 +86,7 @@ export function ShareArtifactDialog({ loop, open, onClose }: { loop: LoopMeta; o
       body: JSON.stringify(patch),
     })
     setSaving(false)
+    onSaved?.()
     onClose()
   }
 

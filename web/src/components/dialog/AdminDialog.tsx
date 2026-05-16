@@ -8,11 +8,13 @@ import {
   deleteAdminUser,
   getWorkspaceSettings,
   updateWorkspaceSettings,
+  getServeDomain,
+  setServeDomain,
   type AdminUser,
   type WorkspaceSettings,
 } from "@/api"
 
-type Tab = "users" | "workspace"
+type Tab = "users" | "workspace" | "serve"
 
 export function AdminDialog({
   open,
@@ -43,13 +45,16 @@ export function AdminDialog({
         <div className="flex gap-0 px-4 sm:px-6 pt-4 border-b border-gray-200 shrink-0">
           <TabButton active={tab === "users"} onClick={() => setTab("users")}>Users</TabButton>
           <TabButton active={tab === "workspace"} onClick={() => setTab("workspace")}>Workspace</TabButton>
+          <TabButton active={tab === "serve"} onClick={() => setTab("serve")}>Workspace Serve</TabButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5">
           {tab === "users" ? (
             <UsersPanel currentUserId={currentUserId} />
-          ) : (
+          ) : tab === "workspace" ? (
             <WorkspacePanel />
+          ) : (
+            <ServePanel />
           )}
         </div>
       </DialogContent>
@@ -428,6 +433,121 @@ function WorkspacePanel() {
           </div>
         )}
       </div>
+
+      <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
+        {error && <span className="text-xs text-red-500">{error}</span>}
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Workspace Serve panel ──
+
+function ServePanel() {
+  const [domain, setDomainState] = useState("")
+  const [ip, setServeIp] = useState("")
+  const [baseUrl, setServeBaseUrl] = useState("")
+  const [withPort, setServeWithPort] = useState(false)
+  const [https, setServeHttps] = useState(false)
+  const [displayPort, setServeDisplayPort] = useState(7788)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    getServeDomain().then((d) => {
+      setDomainState(d.domain)
+      setServeIp(d.ip)
+      setServeBaseUrl(d.baseUrl)
+      setServeWithPort(d.withPort ?? false)
+      setServeHttps(d.https ?? false)
+      setServeDisplayPort(d.displayPort ?? 7788)
+    }).catch((e) => {
+      setError(e?.message ?? "load failed")
+    })
+  }, [])
+
+  async function handleSave() {
+    setSaving(true); setError("")
+    try {
+      const ok = await setServeDomain({
+        domain: domain.trim(),
+        withPort,
+        https,
+        displayPort,
+      })
+      if (!ok) { setError("save failed"); return }
+      const d = await getServeDomain()
+      setDomainState(d.domain)
+      setServeIp(d.ip)
+      setServeBaseUrl(d.baseUrl)
+      setServeWithPort(d.withPort)
+      setServeHttps(d.https)
+      setServeDisplayPort(d.displayPort)
+    } catch (e: any) {
+      setError(e?.message ?? "save failed")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4 min-h-full">
+      <div className="flex-1">
+        <label className="block text-sm font-medium text-gray-700 mb-1">Domain Suffix</label>
+        <input
+          type="text"
+          value={domain}
+          onChange={(e) => setDomainState(e.target.value)}
+          placeholder="nip.io"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+        />
+        <p className="text-xs text-gray-400 mt-1">
+          Workspace sharing URLs: <code className="bg-gray-50 px-1 rounded">&lt;alias&gt;{baseUrl}</code>
+        </p>
+        <p className="text-xs text-gray-400 mt-1">
+          Only <code className="bg-gray-50 px-1 rounded">nip.io</code> requires IP prefix. Custom domains use direct subdomain.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={https}
+            onChange={(e) => setServeHttps(e.target.checked)}
+            className="rounded border-gray-300"
+          />
+          HTTPS
+        </label>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={withPort}
+            onChange={(e) => setServeWithPort(e.target.checked)}
+            className="rounded border-gray-300"
+          />
+          Show port in URL
+        </label>
+      </div>
+
+      {withPort && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Display Port</label>
+          <input
+            type="number"
+            value={displayPort}
+            onChange={(e) => setServeDisplayPort(parseInt(e.target.value, 10) || 7788)}
+            placeholder="7788"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Port shown in share URL (does not change actual server listen port).
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
         {error && <span className="text-xs text-red-500">{error}</span>}
