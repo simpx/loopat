@@ -3,13 +3,18 @@
  * (FileTreeNode + workdir layout). Loop dir contains 2 top-level
  * "section" folders: `context` (cyan) and `workdir` (emerald).
  */
-import { useEffect, useState } from "react"
-import { listFiles, type FileEntry } from "./api"
+import { useEffect, useState, useRef } from "react"
+import { listFiles, uploadFile, type FileEntry } from "./api"
+import { Upload } from "lucide-react"
 
 const ROOTS: { name: string; section: "context" | "workdir"; emoji: string; hint?: string }[] = [
   { name: "context", section: "context", emoji: "🧷", hint: "knowledge / notes / personal" },
   { name: "workdir", section: "workdir", emoji: "▣" },
 ]
+
+export interface FileTreeHandle {
+  triggerUpload: () => void
+}
 
 export function FileTree({
   loopId,
@@ -21,18 +26,24 @@ export function FileTree({
   picked: string | null
 }) {
   const [reloadKey, setReloadKey] = useState(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    await uploadFile(loopId, file)
+    setReloadKey((k) => k + 1)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
   return (
     <aside className="flex-1 min-h-0 overflow-auto py-2 text-[13px]">
-      <div className="px-3 pb-2 flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wide text-gray-400">workdir</span>
-        <button
-          onClick={() => setReloadKey((k) => k + 1)}
-          className="text-[11px] text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
-          title="refresh"
-        >
-          ↻
-        </button>
-      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleUpload}
+      />
       {ROOTS.map((r) => (
         <SectionFolder
           key={r.name + reloadKey}
@@ -43,6 +54,7 @@ export function FileTree({
           hint={r.hint}
           onPick={onPick}
           picked={picked}
+          onUpload={r.section === "workdir" ? () => fileInputRef.current?.click() : undefined}
         />
       ))}
     </aside>
@@ -57,6 +69,7 @@ function SectionFolder({
   hint,
   onPick,
   picked,
+  onUpload,
 }: {
   loopId: string
   name: string
@@ -65,6 +78,7 @@ function SectionFolder({
   hint?: string
   onPick: (path: string) => void
   picked: string | null
+  onUpload?: () => void
 }) {
   const [open, setOpen] = useState(true)
   const sectionClass =
@@ -83,6 +97,18 @@ function SectionFolder({
         <span className="text-[12px]">{emoji}</span>
         <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-700">{name}</span>
         {hint && <span className="text-[10px] text-gray-500 italic ml-1">{hint}</span>}
+        {onUpload && (
+          <>
+            <div className="flex-1" />
+            <span
+              onClick={(e) => { e.stopPropagation(); onUpload() }}
+              className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-emerald-100/50 flex items-center gap-0.5"
+              title="upload file"
+            >
+              <Upload size={12} />
+            </span>
+          </>
+        )}
       </button>
       {open && <Branch loopId={loopId} path={name} depth={1} onPick={onPick} picked={picked} initialOpen />}
     </>

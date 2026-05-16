@@ -11,10 +11,6 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  ComposerAttachments,
-  ComposerAddAttachment,
-} from "@/components/assistant-ui/attachment";
 import ClaudeStatus from "./ClaudeStatus";
 
 import PlanModeToggle from "./PlanModeToggle";
@@ -85,16 +81,13 @@ export default function Composer() {
         </div>
       )}
 
-      <ComposerPrimitive.AttachmentDropzone asChild>
-        <div
-          data-slot="composer-shell"
-          className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
-        >
-          <SlashCommand />
+      <div
+        data-slot="composer-shell"
+        className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
+      >
+        <SlashCommand />
 
-          <ComposerAttachments />
-
-          <ComposerPrimitive.Input
+        <ComposerPrimitive.Input
             placeholder="Send a message..."
             className="max-h-32 min-h-10 w-full resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
             rows={1}
@@ -111,8 +104,6 @@ export default function Composer() {
           {/* Toolbar */}
           <div className="flex items-center justify-between gap-0.5 border-t border-gray-100 pt-2 overflow-hidden">
             <div className="flex items-center gap-0.5 min-w-0">
-              <ComposerAddAttachment />
-
               <TokenUsagePie
                 used={Math.min(usedTokens, contextWindow)}
                 total={contextWindow}
@@ -174,7 +165,6 @@ export default function Composer() {
             </div>
           </div>
         </div>
-      </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
   );
 }
