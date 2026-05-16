@@ -9,8 +9,9 @@ import {
   type TokenUsage,
   type DailyUsage,
 } from "@/api"
+import { PersonalRepoPanel } from "./PersonalRepoPanel"
 
-type SidebarTab = "models" | "notifications"
+type SidebarTab = "models" | "notifications" | "personal-repo"
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -258,12 +259,25 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             >
               Notifications
             </button>
+            <button
+              type="button"
+              onClick={() => setSidebar("personal-repo")}
+              className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
+                sidebar === "personal-repo"
+                  ? "bg-gray-100 text-gray-900 font-medium"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              Personal Repo
+            </button>
           </div>
 
           {/* Right content */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5">
             {loading ? (
               <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
+            ) : sidebar === "personal-repo" ? (
+              <PersonalRepoPanel onDone={onClose} />
             ) : sidebar === "notifications" ? (
               /* ── Notification Settings ── */
               <div className="flex flex-col gap-4 min-h-full">

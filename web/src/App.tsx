@@ -11,7 +11,6 @@ import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
-import { PersonalImportDialog } from "./components/dialog/PersonalImportDialog"
 import { SettingsDialog } from "./components/dialog/SettingsDialog"
 import { AdminDialog } from "./components/dialog/AdminDialog"
 import { LoopPage } from "./pages/LoopPage"
@@ -44,7 +43,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [personalOpen, setPersonalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
@@ -161,16 +159,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    setPersonalOpen(true)
-                  }}
-                  className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-                >
-                  Personal repo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false)
                     setSettingsOpen(true)
                   }}
                   className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
@@ -222,7 +210,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
       )}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <PersonalImportDialog open={personalOpen} onClose={() => setPersonalOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {isAdmin && (
         <AdminDialog
