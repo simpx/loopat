@@ -92,6 +92,17 @@ export type LoopMeta = {
   shareMode?: "static" | "port"
   shareAlias?: string
   sharePort?: number
+  /**
+   * Set when the loop was spawned from a chat conversation. The snapshot of
+   * the chat history is at loops/<id>/context/chat/<convId>.jsonl (mounted as
+   * /loopat/context/chat/<convId>.jsonl inside the sandbox).
+   */
+  seededFrom?: {
+    kind: "chat"
+    convId: string
+    messageCount: number
+    snapshotAt: string
+  }
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index
