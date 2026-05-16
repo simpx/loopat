@@ -7,6 +7,7 @@ export type LoopStatusMap = Record<string, LoopStatusEntry>
 
 const STATUS_FILE = join(LOOPAT_HOME, "loop-status.json")
 let cache: LoopStatusMap = {}
+const watchers = new Set<(curr: LoopStatusMap, prev: LoopStatusMap) => void>()
 
 if (existsSync(STATUS_FILE)) {
   try { cache = JSON.parse(readFileSync(STATUS_FILE, "utf8")) } catch {}
@@ -21,7 +22,7 @@ function save() {
 }
 
 export function updateLoopStatus(loopId: string, status: string) {
-  if (cache[loopId]?.status === status) return
+  const prev = { ...cache }
   const entry = cache[loopId] || { status: "", updated: "", viewed: false }
   entry.status = status
   entry.updated = new Date().toISOString()
@@ -30,6 +31,11 @@ export function updateLoopStatus(loopId: string, status: string) {
   }
   cache[loopId] = entry
   save()
+
+  // Immediately notify watchers without waiting for file system event
+  for (const fn of watchers) {
+    fn(cache, prev)
+  }
 }
 
 export function markLoopViewed(loopId: string) {
@@ -44,6 +50,7 @@ export function getLoopStatus(): LoopStatusMap {
 }
 
 export function watchStatusFile(fn: (curr: LoopStatusMap, prev: LoopStatusMap) => void) {
+  watchers.add(fn)
   let prev = { ...cache }
   try {
     watch(STATUS_FILE, (eventType) => {

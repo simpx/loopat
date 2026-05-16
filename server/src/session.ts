@@ -599,7 +599,6 @@ class LoopSession {
   }
 
   private updateStatus(msg: any) {
-    console.log(`[session:${this.id.slice(0,8)}] updateStatus msg.type:`, msg.type)
     // 1. 用户输入状态
     if (msg.type === "user") {
       const text = typeof msg.content === "string" ? msg.content : msg.content?.[0]?.text || ""
@@ -653,10 +652,6 @@ class LoopSession {
           updateLoopStatus(this.id, delta.text.slice(-60).replace(/\n/g, " "))
           return
         }
-      }
-      // Debug: log unknown structure
-      if (!evt) {
-        console.log("[session] stream_event structure:", JSON.stringify(msg).slice(0, 150))
       }
       return
     }
