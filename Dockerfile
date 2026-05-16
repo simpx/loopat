@@ -1,7 +1,7 @@
 FROM oven/bun:1-slim AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  bubblewrap openssh-client git ca-certificates fish \
+  bubblewrap openssh-client git ca-certificates fish vim \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
