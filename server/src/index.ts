@@ -517,6 +517,18 @@ type GitFileInfo = {
   isBinary: boolean
 }
 
+type GitCommit = {
+  hash: string
+  shortHash: string
+  subject: string
+  author: string
+  date: string
+  parentHashes: string[]
+  branch: string | null
+  branches: string[]
+  tags: string[]
+}
+
 async function getGitStatus(loopId: string): Promise<{ unstaged: GitFileInfo[]; staged: GitFileInfo[] }> {
   const dir = loopWorkdir(loopId)
   if (!existsSync(join(dir, ".git"))) return { unstaged: [], staged: [] }
@@ -553,10 +565,22 @@ async function getGitStatus(loopId: string): Promise<{ unstaged: GitFileInfo[]; 
   }
 
   for (const line of porcelain.split("\n")) {
-    if (!line || line.length < 3) continue
+    if (!line || line.length < 4) continue
     const xy = line.slice(0, 2)
-    const p = line.slice(3)
-    if (!p) continue
+    // Robust path extraction: skip 2-char status, then trim leading whitespace
+    // Handles both ` M README.md` and `?? hello.html` formats reliably
+    let rest = line.slice(2).trimStart()
+    if (!rest) continue
+    // git quotes paths containing spaces/special chars: ` M "my file.txt"`
+    if (rest.startsWith('"') && rest.endsWith('"')) {
+      rest = rest.slice(1, -1)
+    }
+    // Handle renamed files: `R  old.txt -> new.txt` — take the new name after `-> `
+    if (xy[0] === 'R' || xy[1] === 'R') {
+      const arrowIdx = rest.indexOf(' -> ')
+      if (arrowIdx >= 0) rest = rest.slice(arrowIdx + 4)
+    }
+    const p = rest
 
     const stat = numstatMap.get(p) ?? { additions: 0, deletions: 0, isBinary: false }
 
@@ -619,6 +643,58 @@ app.post("/api/loops/:id/git-stage", requireAuth, async (c) => {
     return c.json({ ok: true })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "stage failed" }, 500)
+  }
+})
+
+app.post("/api/loops/:id/git-commit", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const body = await c.req.json().catch(() => ({}))
+  const message = typeof body.message === "string" && body.message.trim() ? body.message.trim() : ""
+  if (!message) return c.json({ error: "commit message required" }, 400)
+  const dir = loopWorkdir(id)
+  if (!existsSync(join(dir, ".git"))) return c.json({ error: "not a git repo" }, 400)
+  try {
+    await execFileP("git", ["-C", dir, "commit", "-m", message], { encoding: "utf8", timeout: 10_000 })
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "commit failed" }, 500)
+  }
+})
+
+app.get("/api/loops/:id/git-log", async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const limit = parseInt(c.req.query("limit") ?? "50", 10)
+  const dir = loopWorkdir(id)
+  if (!existsSync(join(dir, ".git"))) return c.json({ commits: [] })
+  try {
+    const format = "%H%n%h%n%s%n%an%n%ai%n%P%n%D"
+    const raw = (await execFileP("git", ["-C", dir, "log", `--format=${format}`, "-n", String(Math.min(limit, 200))], { encoding: "utf8", timeout: 10_000 })).stdout.trim()
+    const commits: GitCommit[] = []
+    const lines = raw.split("\n")
+    for (let i = 0; i + 6 < lines.length || i < lines.length; i += 7) {
+      if (i + 6 >= lines.length) break
+      const refs = lines[i + 6]
+      const branchMatch = refs.match(/HEAD -> ([^,\]]+)/)
+      const branches = refs.split(",").map(s => s.trim()).filter(s => s && !s.startsWith("HEAD") && !s.startsWith("tag:"))
+      const tagMatches = refs.match(/tag: ([^,\)]+)/g)
+      const tags = tagMatches ? tagMatches.map(t => t.replace("tag: ", "").trim()) : []
+      commits.push({
+        hash: lines[i],
+        shortHash: lines[i + 1],
+        subject: lines[i + 2],
+        author: lines[i + 3],
+        date: lines[i + 4],
+        parentHashes: lines[i + 5].split(" ").filter(Boolean),
+        branch: branchMatch?.[1] ?? null,
+        branches,
+        tags,
+      })
+    }
+    return c.json({ commits })
+  } catch {
+    return c.json({ commits: [] })
   }
 })
 

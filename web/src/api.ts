@@ -583,6 +583,36 @@ export async function gitDiscardFile(loopId: string, file: string): Promise<bool
   return r.ok
 }
 
+export async function gitCommit(loopId: string, message: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-commit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? "commit failed" }
+  return { ok: true }
+}
+
+export type GitCommit = {
+  hash: string
+  shortHash: string
+  subject: string
+  author: string
+  date: string
+  parentHashes: string[]
+  branch: string | null
+  branches: string[]
+  tags: string[]
+}
+
+export async function getGitLog(loopId: string, limit = 50): Promise<GitCommit[]> {
+  const r = await apiFetch(`/api/loops/${loopId}/git-log?limit=${limit}`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.commits ?? []) as GitCommit[]
+}
+
 // ── settings ──
 
 export type SettingsProvider = {
