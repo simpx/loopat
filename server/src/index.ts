@@ -11,7 +11,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
-import { deleteEnv, getEnvVersion, isValidEnvFile, isValidEnvName, listEnvs, lockEnv, readEnvFile, writeEnvFile } from "./envs"
+import { commitEnvChange, deleteEnv, getEnvVersion, isValidEnvFile, isValidEnvName, listEnvs, lockEnv, readEnvFile, writeEnvFile } from "./envs"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -910,13 +910,18 @@ app.put("/api/envs/:name", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
   await writeEnvFile(name, file, body.content)
-  // Only mise.toml changes affect the version lockfile; env.json edits skip
-  // the lock step (just declarative metadata for term.ts / agents).
+  // Order: write → lock (mise.toml only) → commit. Lock comes before commit
+  // so the commit captures both toml and the regenerated lockfile atomically.
+  let lockRes: { ok: boolean; error?: string } | null = null
   if (file === "mise.toml") {
-    const lockRes = await lockEnv(name)
-    return c.json({ ok: true, name, file, locked: lockRes.ok, lockError: lockRes.error })
+    lockRes = await lockEnv(name)
   }
-  return c.json({ ok: true, name, file })
+  const commitRes = await commitEnvChange(name, { kind: "update", file })
+  return c.json({
+    ok: true, name, file,
+    ...(lockRes ? { locked: lockRes.ok, lockError: lockRes.error } : {}),
+    committed: commitRes.ok, commitSha: commitRes.sha, commitError: commitRes.error,
+  })
 })
 
 // Remove an env from the catalog. Per-loop snapshots already copied stay
@@ -926,7 +931,8 @@ app.delete("/api/envs/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
   await deleteEnv(name)
-  return c.json({ ok: true, name })
+  const commitRes = await commitEnvChange(name, { kind: "delete" })
+  return c.json({ ok: true, name, committed: commitRes.ok, commitSha: commitRes.sha, commitError: commitRes.error })
 })
 
 app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
