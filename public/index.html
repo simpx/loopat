@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>loopat — collaborative AI coding workspace</title>
+<meta name="description" content="Single-binary collaborative AI coding workspace. Loop = context + AI + workdir, sandboxed per-loop with bubblewrap.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧶</text></svg>">
+<style>
+  :root {
+    --bg: #09090b;
+    --bg-card: #131318;
+    --bg-card-hover: #1a1a22;
+    --border: #27272a;
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --text-dim: #71717a;
+    --amber: #f59e0b;
+    --amber-dim: #b45309;
+    --cyan: #22d3ee;
+    --cyan-dim: #0e7490;
+    --red: #fb7185;
+    --green: #34d399;
+    --radius: 12px;
+    --max-w: 1120px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 80% 60% at 50% -20%, rgba(245, 158, 11, 0.06), transparent),
+      radial-gradient(ellipse 50% 40% at 80% 60%, rgba(34, 211, 238, 0.04), transparent),
+      radial-gradient(ellipse 60% 50% at 20% 80%, rgba(245, 158, 11, 0.03), transparent);
+    min-height: 100vh;
+  }
+
+  /* ── Nav ──────────────────────────────── */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+    background: rgba(9, 9, 11, 0.8);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .nav-brand .yarn { font-size: 1.5rem; }
+  .nav-links { display: flex; gap: 24px; align-items: center; }
+  .nav-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 0.2s;
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-gh {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  .nav-gh:hover { border-color: var(--text-dim); color: var(--text); }
+  .nav-gh svg { width: 16px; height: 16px; }
+
+  /* ── Hero ─────────────────────────────── */
+  .hero {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    padding: 100px 24px 80px;
+    text-align: center;
+  }
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+    backdrop-filter: blur(8px);
+    background: rgba(19, 19, 24, 0.6);
+  }
+  .hero-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .hero h1 {
+    font-size: clamp(2.75rem, 6vw, 4.5rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 20px;
+  }
+  .hero h1 .gradient {
+    background: linear-gradient(135deg, var(--amber) 0%, #fbbf24 30%, var(--cyan) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p {
+    font-size: 1.125rem;
+    color: var(--text-muted);
+    max-width: 580px;
+    margin: 0 auto 36px;
+    line-height: 1.7;
+  }
+  .hero .formula {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    margin-bottom: 36px;
+  }
+  .hero .formula .op { color: var(--amber); font-weight: 600; }
+  .hero .formula .kw { color: var(--cyan); }
+  .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 28px;
+    border-radius: 10px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .btn-primary {
+    background: var(--amber);
+    color: #1a1202;
+    border: none;
+  }
+  .btn-primary:hover { background: #fbbf24; transform: translateY(-1px); box-shadow: 0 8px 30px rgba(245, 158, 11, 0.25); }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--text-dim); background: rgba(255,255,255,0.03); }
+
+  /* ── Section Shared ───────────────────── */
+  section { padding: 80px 24px; }
+  .section-inner { max-width: var(--max-w); margin: 0 auto; }
+  .section-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--amber);
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: clamp(1.75rem, 3vw, 2.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 16px;
+    line-height: 1.2;
+  }
+  .section-desc {
+    font-size: 1.0625rem;
+    color: var(--text-muted);
+    max-width: 600px;
+    line-height: 1.7;
+  }
+
+  /* ── Features ─────────────────────────── */
+  #features .section-inner { text-align: center; }
+  #features .section-desc { margin: 0 auto 56px; }
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .feature-card {
+    background: var(--bg-card);
+    padding: 36px 28px;
+    text-align: left;
+    transition: background 0.3s;
+    position: relative;
+  }
+  .feature-card:hover { background: var(--bg-card-hover); }
+  .feature-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    margin-bottom: 18px;
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--amber);
+  }
+  .feature-card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  .feature-card p {
+    font-size: 0.875rem;
+    color: var(--text-dim);
+    line-height: 1.65;
+  }
+
+  /* ── Architecture ─────────────────────── */
+  #architecture .section-inner { text-align: center; }
+  #architecture .section-desc { margin: 0 auto 56px; }
+  .arch-diagram {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 48px;
+  }
+  .arch-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    text-align: center;
+    min-width: 140px;
+  }
+  .arch-box .emoji { font-size: 2rem; margin-bottom: 10px; }
+  .arch-box h4 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 4px; }
+  .arch-box p { font-size: 0.8125rem; color: var(--text-dim); }
+  .arch-plus {
+    font-size: 1.5rem;
+    color: var(--amber);
+    font-weight: 300;
+  }
+  .arch-equals {
+    font-size: 1.5rem;
+    color: var(--text-dim);
+    font-weight: 300;
+  }
+  .arch-result {
+    border-color: var(--amber-dim) !important;
+    box-shadow: 0 0 40px rgba(245, 158, 11, 0.08);
+  }
+  .sandbox-layers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    margin-top: 32px;
+  }
+  .layer-card {
+    background: var(--bg-card);
+    padding: 28px 20px;
+    text-align: center;
+  }
+  .layer-card .layer-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(34, 211, 238, 0.12);
+    color: var(--cyan);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    margin-bottom: 12px;
+  }
+  .layer-card h4 { font-size: 0.875rem; font-weight: 600; margin-bottom: 4px; }
+  .layer-card p { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; }
+
+  /* ── Quick Start ──────────────────────── */
+  #quickstart .section-inner { text-align: center; }
+  #quickstart .section-desc { margin: 0 auto 40px; }
+  .code-block-wrapper {
+    max-width: 640px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .code-block {
+    background: #0d0d12;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    text-align: left;
+    font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+    font-size: 0.8125rem;
+    line-height: 1.8;
+    overflow-x: auto;
+    position: relative;
+  }
+  .code-block .c { color: var(--text-dim); }
+  .code-block .p { color: var(--cyan); }
+  .code-block .s { color: var(--green); }
+  .code-block .v { color: var(--amber); }
+  .copy-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .copy-btn:hover { border-color: var(--text-dim); color: var(--text); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
+  /* ── Stats / Principles ──────────────── */
+  .principles-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 48px;
+  }
+  .principle-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px 28px;
+    text-align: left;
+  }
+  .principle-card .num {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--amber);
+    opacity: 0.3;
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+  .principle-card h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; }
+  .principle-card p { font-size: 0.875rem; color: var(--text-dim); line-height: 1.6; }
+
+  /* ── Footer ───────────────────────────── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 40px 24px;
+  }
+  .footer-inner {
+    max-width: var(--max-w);
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .footer-text { font-size: 0.8125rem; color: var(--text-dim); }
+  .footer-text a { color: var(--text-muted); text-decoration: none; }
+  .footer-text a:hover { color: var(--text); }
+
+  /* ── Responsive ───────────────────────── */
+  @media (max-width: 768px) {
+    .features-grid { grid-template-columns: 1fr; }
+    .sandbox-layers { grid-template-columns: repeat(2, 1fr); }
+    .principles-grid { grid-template-columns: 1fr; }
+    .arch-diagram { flex-direction: column; }
+    .arch-plus, .arch-equals { transform: rotate(90deg); }
+    .hero { padding: 60px 20px 48px; }
+    section { padding: 56px 20px; }
+  }
+  @media (max-width: 480px) {
+    .sandbox-layers { grid-template-columns: 1fr; }
+    .hero-actions { flex-direction: column; align-items: center; }
+    .btn { width: 100%; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <span class="yarn">🧶</span>
+      <span>loopat</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#quickstart">Quick Start</a>
+      <a class="nav-gh" href="https://github.com/simpx/loopat" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <span class="dot"></span> v6 — stable
+  </div>
+  <h1>
+    <span class="gradient">loopat</span>
+  </h1>
+  <div class="formula">
+    <span class="kw">Loop</span>
+    <span class="op">=</span>
+    <span>context</span>
+    <span class="op">+</span>
+    <span>AI</span>
+    <span class="op">+</span>
+    <span>workdir</span>
+  </div>
+  <p>
+    A single-binary collaborative AI coding workspace.<br>
+    Each loop runs in its own sandbox — context, AI agent, and working directory — isolated with bubblewrap. Zero config, one command.
+  </p>
+  <div class="hero-actions">
+    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/simpx/loopat" class="btn btn-secondary" target="_blank" rel="noopener">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Everything you need to<br>collaborate with AI</h2>
+    <p class="section-desc">
+      loopat combines a web-based IDE, Claude-powered agent loops, and filesystem-level sandboxing into a single process you run locally.
+    </p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🧶</div>
+        <h3>Sandboxed Loops</h3>
+        <p>Each AI session runs in its own bubblewrap mount namespace. Isolated filesystem, shared context — the best of both worlds.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💬</div>
+        <h3>Collaborative Chat</h3>
+        <p>WebSocket-powered real-time chat with Claude. Multiple browser tabs can share the same loop session simultaneously.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>Kanban Boards</h3>
+        <p>Built-in Kanban with drag-and-drop, real-time sync across subscribers. Manage tasks alongside your AI agent.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">💻</div>
+        <h3>Web Terminal</h3>
+        <p>Full PTY terminal inside the sandbox. Shared across loop subscribers — everyone sees the same bash session.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📁</div>
+        <h3>File Tree & Editor</h3>
+        <p>Browse and edit files inside the sandbox from the web UI. Git integration with commit and log views.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Persistent Memory</h3>
+        <p>Two-tier memory system — personal (/personal/memory) and team (/context/notes/memory). Auto-recall across sessions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section id="architecture">
+  <div class="section-inner">
+    <div class="section-label">Architecture</div>
+    <h2 class="section-title">One loop, one sandbox</h2>
+    <p class="section-desc">
+      Every loop bundles its own context, AI agent, and working directory inside a Linux mount namespace. Portable, reproducible, and secure by default.
+    </p>
+    <div class="arch-diagram">
+      <div class="arch-box">
+        <div class="emoji">📚</div>
+        <h4>Context</h4>
+        <p>Knowledge + Notes + Memory</p>
+      </div>
+      <span class="arch-plus">+</span>
+      <div class="arch-box">
+        <div class="emoji">🤖</div>
+        <h4>AI Agent</h4>
+        <p>Claude CLI in bwrap</p>
+      </div>
+      <span class="arch-plus">+</span>
+      <div class="arch-box">
+        <div class="emoji">📂</div>
+        <h4>Workdir</h4>
+        <p>Git worktree per loop</p>
+      </div>
+      <span class="arch-equals">=</span>
+      <div class="arch-box arch-result">
+        <div class="emoji">🧶</div>
+        <h4>Sandboxed Loop</h4>
+        <p>Isolated & reproducible</p>
+      </div>
+    </div>
+    <div class="sandbox-layers">
+      <div class="layer-card">
+        <div class="layer-num">1</div>
+        <h4>URL Routing</h4>
+        <p>Hono router binds requests to loop IDs via closures</p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-num">2</div>
+        <h4>Map Partitioning</h4>
+        <p>Per-loop session maps prevent cross-loop broadcast</p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-num">3</div>
+        <h4>Process Isolation</h4>
+        <p>Each loop spawns independent Claude CLI subprocess</p>
+      </div>
+      <div class="layer-card">
+        <div class="layer-num">4</div>
+        <h4>Mount Namespace</h4>
+        <p>Kernel-enforced filesystem isolation via bubblewrap</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Design Principles -->
+<section>
+  <div class="section-inner">
+    <div class="section-label" style="text-align:center">Design Principles</div>
+    <h2 class="section-title" style="text-align:center">Filesystem-first, portable, transparent</h2>
+    <p class="section-desc" style="text-align:center;margin:0 auto 0;">
+      No database. Everything is a file. rsync your workspace to another machine and pick up exactly where you left off.
+    </p>
+    <div class="principles-grid">
+      <div class="principle-card">
+        <div class="num">01</div>
+        <h3>Sandbox = Directory</h3>
+        <p>Sandbox permissions arenʼt hidden in config files. Theyʼre derived from the physical structure of <code>loops/&lt;id&gt;/</code> — run <code>ls -laR</code> to see the full access scope.</p>
+      </div>
+      <div class="principle-card">
+        <div class="num">02</div>
+        <h3>Machine-Independent</h3>
+        <p>rsync <code>$LOOPAT_HOME</code> to any machine, restart the server, and everything works — chat history, sessions, memory, sandbox views. All paths are virtual.</p>
+      </div>
+      <div class="principle-card">
+        <div class="num">03</div>
+        <h3>Opt-in Secrets</h3>
+        <p>Sandbox canʼt see <code>~/.ssh</code>, <code>~/.aws</code>, or <code>~/.config/gh</code> by default. Expose only what you need via explicit symlinks in <code>personal/</code>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Quick Start -->
+<section id="quickstart">
+  <div class="section-inner">
+    <div class="section-label">Quick Start</div>
+    <h2 class="section-title">Up and running in seconds</h2>
+    <p class="section-desc">
+      One dependency, one command. Works on any Linux machine.
+    </p>
+    <div class="code-block-wrapper">
+      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+      <div class="code-block">
+<span class="c"># 1. Install system dependency</span>
+<span class="p">sudo apt install</span> bubblewrap openssh-client
+
+<span class="c"># 2. Install Bun</span>
+<span class="p">curl -fsSL</span> https://bun.sh/install <span class="p">|</span> bash
+
+<span class="c"># 3. Clone & install</span>
+<span class="p">git clone</span> git@github.com:simpx/loopat.git
+<span class="p">cd</span> loopat
+<span class="p">bun install</span>
+
+<span class="c"># 4. Start the server</span>
+<span class="p">bun run dev</span>
+
+<span class="c"># Open http://localhost:7787</span>
+</div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-text">
+      <a href="https://github.com/simpx/loopat" target="_blank" rel="noopener">loopat</a> — single-binary collaborative AI coding workspace.
+    </div>
+    <div class="footer-text">
+      Built with <a href="https://bun.sh" target="_blank" rel="noopener">Bun</a> ·
+      <a href="https://hono.dev" target="_blank" rel="noopener">Hono</a> ·
+      <a href="https://react.dev" target="_blank" rel="noopener">React</a> ·
+      <a href="https://docs.anthropic.com/en/docs/claude-code" target="_blank" rel="noopener">Claude Code</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function copyCode(btn) {
+    const code = btn.nextElementSibling.innerText;
+    navigator.clipboard.writeText(code).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+</script>
+
+</body>
+</html>
