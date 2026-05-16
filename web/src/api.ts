@@ -341,7 +341,16 @@ export async function deleteEnv(name: string): Promise<{ ok: boolean; error?: st
   return { ok: true }
 }
 
-export async function writeEnv(name: string, content: string, file: EnvFile = "mise.toml"): Promise<{ ok: boolean; error?: string; locked?: boolean; lockError?: string }> {
+export type WriteEnvResult = {
+  ok: boolean
+  error?: string
+  locked?: boolean
+  lockError?: string
+  committed?: boolean
+  commitSha?: string
+  commitError?: string
+}
+export async function writeEnv(name: string, content: string, file: EnvFile = "mise.toml"): Promise<WriteEnvResult> {
   const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -352,7 +361,14 @@ export async function writeEnv(name: string, content: string, file: EnvFile = "m
     return { ok: false, error: j.error ?? `http ${r.status}` }
   }
   const j = await r.json().catch(() => ({}))
-  return { ok: true, locked: j.locked, lockError: j.lockError }
+  return {
+    ok: true,
+    locked: j.locked,
+    lockError: j.lockError,
+    committed: j.committed,
+    commitSha: j.commitSha,
+    commitError: j.commitError,
+  }
 }
 
 export type RepoDetail = RepoEntry & {

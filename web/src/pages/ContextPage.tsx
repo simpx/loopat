@@ -1059,10 +1059,16 @@ function EnvsPane() {
       return
     }
     setOriginals((prev) => ({ ...prev, [activeFile]: contents[activeFile] }))
-    // Lock only runs server-side for mise.toml; env.json saves don't touch it.
+    // Surface lock / commit issues — both are best-effort follow-ups after
+    // the write succeeded, but the user wants to know if they happened.
+    const issues: string[] = []
     if (activeFile === "mise.toml" && r.locked === false) {
-      setErr(`saved, but lock failed: ${r.lockError ?? "unknown"}`)
+      issues.push(`lock failed: ${r.lockError ?? "unknown"}`)
     }
+    if (r.committed === false) {
+      issues.push(`commit failed: ${r.commitError ?? "unknown"}`)
+    }
+    if (issues.length) setErr(`saved, but ${issues.join("; ")}`)
   }
 
   const onDelete = async (name: string) => {

@@ -145,6 +145,69 @@ export async function deleteEnv(name: string): Promise<void> {
 }
 
 /**
+ * Synthetic git identity for auto-commits the loopat system makes on the
+ * user's behalf. The actor is "loopat" (the platform), not the logged-in
+ * user — UI edits are policy decisions about the workspace's shared env
+ * catalog, not personal commits. Push (when wired) uses the per-user deploy
+ * key separately; this just controls author/committer fields.
+ */
+const COMMIT_AUTHOR_NAME = "loopat"
+const COMMIT_AUTHOR_EMAIL = "loopat@localhost"
+
+/**
+ * Auto-commit env changes in the knowledge repo. Stages only the env's dir,
+ * commits as the loopat identity. Returns the new short sha or null when
+ * skipped (no git, nothing to commit, or commit failed).
+ *
+ * Called after every write / delete from the UI so getEnvVersion() always
+ * has a fresh sha to compare against — that's what powers the "→ <sha>"
+ * refresh link on the loop page.
+ *
+ * `action` shows up in the commit message; choose to match the verb users
+ * see in git log.
+ */
+export async function commitEnvChange(
+  name: string,
+  action: { kind: "update"; file: EnvFile } | { kind: "delete" } | { kind: "create" },
+): Promise<{ ok: boolean; sha?: string; error?: string }> {
+  const repoRoot = workspaceKnowledgeDir()
+  if (!existsSync(`${repoRoot}/.git`)) return { ok: false, error: "knowledge dir is not a git repo" }
+  const envPath = `.loopat/envs/${name}`
+  try {
+    // -A picks up both modifications and deletions inside the env dir.
+    // Scoping to the env path keeps unrelated dirty files in knowledge out
+    // of this commit.
+    await execFileP("git", ["-C", repoRoot, "add", "-A", "--", envPath], { timeout: 5000 })
+    // git diff --cached exit 0 = no staged changes → nothing to commit.
+    const diffRes = await execFileP(
+      "git",
+      ["-C", repoRoot, "diff", "--cached", "--quiet", "--", envPath],
+      { timeout: 5000 },
+    ).then(() => ({ code: 0 })).catch((e: any) => ({ code: e?.code ?? 1 }))
+    if (diffRes.code === 0) return { ok: true } // no-op write (content unchanged)
+    const msg =
+      action.kind === "update" ? `envs/${name}: update ${action.file}`
+      : action.kind === "create" ? `envs/${name}: create`
+      : `envs/${name}: delete`
+    await execFileP(
+      "git",
+      [
+        "-C", repoRoot,
+        "-c", `user.name=${COMMIT_AUTHOR_NAME}`,
+        "-c", `user.email=${COMMIT_AUTHOR_EMAIL}`,
+        "commit", "-m", msg, "--", envPath,
+      ],
+      { timeout: 10000 },
+    )
+    const r = await execFileP("git", ["-C", repoRoot, "rev-parse", "--short", "HEAD"], { timeout: 5000 })
+    return { ok: true, sha: r.stdout.trim() }
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: stderr || e?.message || "git commit failed" }
+  }
+}
+
+/**
  * Short commit id of the most recent commit in the knowledge repo that
  * touched this env's directory. Used as the env's "version" — convenient
  * because it gives a clickable audit trail straight to the git diff.
