@@ -38,6 +38,7 @@ import {
   loopClaudeDir,
   loopSandboxDir,
   loopSandboxPath,
+  loopContextChatDir,
   workspaceKnowledgeDir,
   workspaceLoopatSkillsDir,
   workspaceLoopatSandboxDir,
@@ -153,6 +154,7 @@ export const V_CONTEXT_NOTES_MEMORY = "/loopat/context/notes/memory"
 export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
 export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
 export const V_CONTEXT_REPOS = "/loopat/context/repos"
+export const V_CONTEXT_CHAT = "/loopat/context/chat"
 
 export type SandboxExtraEnv = Record<string, string>
 
@@ -246,6 +248,14 @@ export async function buildBwrapArgs(
   if (existsSync(reposDir)) {
     args.push("--bind", reposDir, V_CONTEXT_REPOS)
     args.push("--bind", reposDir, reposDir)
+  }
+
+  // chat snapshots (per-loop). Each conv that seeded this loop drops a jsonl
+  // here. Read-only — AI consumes, doesn't write. Only mount if populated
+  // (most loops never spawn from chat).
+  const chatDir = loopContextChatDir(loopId)
+  if (existsSync(chatDir)) {
+    args.push("--ro-bind", chatDir, V_CONTEXT_CHAT)
   }
 
   args.push(
