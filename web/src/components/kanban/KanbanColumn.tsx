@@ -19,7 +19,7 @@ export function KanbanColumn({
   color?: string
 }) {
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: column.id })
-  const { attributes: hAttrs, listeners: hListeners, setNodeRef: setHeaderRef, transform: colTransform, transition: colTransition, isDragging: headerDragging } =
+  const { attributes: hAttrs, listeners: hListeners, setNodeRef: setSortableRef, transform: colTransform, transition: colTransition, isDragging: headerDragging } =
     useSortable({ id: `col:${column.id}`, data: { columnId: column.id } })
   const colStyle = colTransform && (colTransform.x !== 0 || colTransform.y !== 0)
     ? { transform: `translate3d(${colTransform.x}px, ${colTransform.y}px, 0)`, transition: colTransition } : undefined
@@ -70,7 +70,7 @@ export function KanbanColumn({
   }
 
   return (
-    <div ref={setHeaderRef} {...hAttrs} style={colStyle}
+    <div ref={(node) => { setSortableRef(node); setDropRef(node) }} {...hAttrs} style={colStyle}
       onMouseEnter={() => setShowEdit(true)} onMouseLeave={() => setShowEdit(false)}
       onTouchStart={() => setShowEdit(true)}
       className={`w-64 shrink-0 h-full flex flex-col rounded-lg transition-colors ${isOver ? "bg-gray-100" : "bg-gray-50"}`}>

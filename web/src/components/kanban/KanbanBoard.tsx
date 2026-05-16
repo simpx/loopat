@@ -1,14 +1,15 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import {
   DndContext,
   DragOverlay,
-  rectIntersection,
+  closestCenter,
   PointerSensor,
   TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
+  type DragOverEvent,
 } from "@dnd-kit/core"
 import { SortableContext, arrayMove, verticalListSortingStrategy, horizontalListSortingStrategy } from "@dnd-kit/sortable"
 import { listKanbanColumns, getKanbanConfig, saveKanbanColumnOrder, toggleKanbanCard, moveKanbanCard, reorderKanbanCards, createKanbanColumn, type KanbanCard, type KanbanColumn } from "../../api"
@@ -37,6 +38,8 @@ export function KanbanBoard({
   const [activeColumn, setActiveColumn] = useState<KanbanColumn | null>(null)
   const [newColOpen, setNewColOpen] = useState(false)
   const [newColName, setNewColName] = useState("")
+  const [dropColIndex, setDropColIndex] = useState<number | null>(null)
+  const isDraggingColRef = useRef(false)
 
   const refresh = useCallback(() => {
     Promise.all([listKanbanColumns(), getKanbanConfig()]).then(([cols, cfg]) => {
@@ -71,17 +74,65 @@ export function KanbanBoard({
   function handleDragStart(event: DragStartEvent) {
     const cid = event.active.id as string
     if (cid.startsWith("col:")) {
+      isDraggingColRef.current = true
       const col = columns.find((c) => c.filename === cid.slice(4))
       if (col) setActiveColumn(col)
     } else {
+      isDraggingColRef.current = false
       const card = event.active.data.current?.card as KanbanCard | undefined
       if (card) setActiveCard(card)
     }
   }
 
+  function resolveColFile(overId: string): string | null {
+    // Direct column droppable
+    if (overId.startsWith("col:")) return overId.slice(4)
+    if (visibleColumns.some((c) => c.filename === overId)) return overId
+    // Card droppable — find which column it belongs to
+    for (const col of visibleColumns) {
+      if (col.cards.some((c) => c.cid === overId)) return col.filename
+    }
+    return null
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    if (!isDraggingColRef.current) {
+      setDropColIndex(null)
+      return
+    }
+    const { active, over, collisions } = event
+    if (!over) { setDropColIndex(null); return }
+
+    const overFile = resolveColFile(over.id as string)
+    if (!overFile) { setDropColIndex(null); return }
+    const overColIdx = visibleColumns.findIndex((c) => c.filename === overFile)
+    if (overColIdx < 0) { setDropColIndex(null); return }
+
+    const activeFile = resolveColFile(active.id as string)
+    const activeColIdx = activeFile ? visibleColumns.findIndex((c) => c.filename === activeFile) : -1
+    if (activeColIdx < 0) { setDropColIndex(null); return }
+    if (activeColIdx === overColIdx) { setDropColIndex(null); return }
+
+    // Use the first collision from closestCenter to determine left/right
+    const firstCollision = collisions?.[0]
+    if (!firstCollision) { setDropColIndex(null); return }
+
+    const activeCenter = active.rect.current.translated
+      ? active.rect.current.translated.left + (active.rect.current.translated.width ?? 0) / 2
+      : 0
+    const collisionCenter = firstCollision.data?.droppableRect
+      ? firstCollision.data.droppableRect.left + firstCollision.data.droppableRect.width / 2
+      : 0
+
+    const idx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
+    setDropColIndex(idx >= 0 && idx <= visibleColumns.length ? idx : null)
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     setActiveCard(null)
     setActiveColumn(null)
+    setDropColIndex(null)
+    isDraggingColRef.current = false
     const { active, over } = event
     if (!over) return
 
@@ -90,21 +141,29 @@ export function KanbanBoard({
     // ── column reorder ──
     if (activeId.startsWith("col:")) {
       const fromFile = activeId.slice(4)
-      let toFile = (over.id as string).startsWith("col:") ? (over.id as string).slice(4) : null
-      if (!toFile) {
-        // check if dropped on a column droppable
-        if (columns.some((c) => c.filename === over.id)) toFile = over.id as string
-      }
+      const toFile = resolveColFile(over.id as string)
       if (!toFile || fromFile === toFile) return
 
       const oldIdx = orderedFiles.indexOf(fromFile)
-      const newIdx = orderedFiles.indexOf(toFile)
-      if (oldIdx < 0 || newIdx < 0) return
+      const overColIdx = orderedFiles.indexOf(toFile)
+      if (oldIdx < 0 || overColIdx < 0) return
 
-      const newOrder = arrayMove([...orderedFiles], oldIdx, newIdx)
+      // Same center comparison as handleDragOver
+      const firstCollision = event.collisions?.[0]
+      const activeCenter = active.rect.current.translated
+        ? active.rect.current.translated.left + (active.rect.current.translated.width ?? 0) / 2
+        : 0
+      const collisionCenter = firstCollision?.data?.droppableRect
+        ? firstCollision.data.droppableRect.left + firstCollision.data.droppableRect.width / 2
+        : 0
+      // arrayMove's "to" is the final index — matches the indicator position
+      const targetIdx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
+      const clampedIdx = Math.max(0, Math.min(targetIdx, orderedFiles.length - 1))
+      if (clampedIdx === oldIdx) return
+
+      const newOrder = arrayMove([...orderedFiles], oldIdx, clampedIdx)
       setOrderedFiles(newOrder)
 
-      // re-sort columns
       setColumns((prev) => {
         const copy = [...prev]
         copy.sort((a, b) => {
@@ -205,25 +264,31 @@ export function KanbanBoard({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd}>
       <SortableContext items={visibleColumns.map((c) => `col:${c.filename}`)} strategy={horizontalListSortingStrategy}>
         <div className="h-full flex gap-3 px-3 py-3 overflow-x-auto">
-          {visibleColumns.map((col) => {
+          {visibleColumns.map((col, idx) => {
             const cfg = colConfig.find((c) => c.file === col.filename)
-            return (
-            <SortableContext key={col.filename} items={col.cards.map((c) => c.cid)} strategy={verticalListSortingStrategy}>
-              <KanbanColumnView
-                column={{ id: col.filename, label: col.title }}
-                cards={col.cards}
-                onCardClick={(card) => onCardClick(card, col.filename)}
-                onCardToggle={(card) => handleToggle(col.filename, card)}
-                onCardArchive={(card) => onCardArchive(card, col.filename)}
-                onCardSaved={refresh}
-                onColumnSaved={refresh}
-                color={cfg?.color}
-              />
-            </SortableContext>
-          );})}
+            return [
+              dropColIndex === idx && (
+                <div key={`indicator-${col.filename}`} className="w-0.5 shrink-0 bg-blue-500 rounded-full self-stretch" />
+              ),
+              <SortableContext key={col.filename} items={col.cards.map((c) => c.cid)} strategy={verticalListSortingStrategy}>
+                <KanbanColumnView
+                  column={{ id: col.filename, label: col.title }}
+                  cards={col.cards}
+                  onCardClick={(card) => onCardClick(card, col.filename)}
+                  onCardToggle={(card) => handleToggle(col.filename, card)}
+                  onCardArchive={(card) => onCardArchive(card, col.filename)}
+                  onCardSaved={refresh}
+                  onColumnSaved={refresh}
+                  color={cfg?.color}
+                />
+              </SortableContext>,
+            ];})}
+          {dropColIndex === visibleColumns.length && (
+            <div key="indicator-end" className="w-0.5 shrink-0 bg-blue-500 rounded-full self-stretch" />
+          )}
           {newColOpen ? (
             <div className="w-56 shrink-0 bg-gray-50 rounded-lg p-3 space-y-2 h-fit">
               <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)} autoFocus
