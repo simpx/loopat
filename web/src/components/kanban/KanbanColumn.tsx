@@ -70,10 +70,10 @@ export function KanbanColumn({
   }
 
   return (
-    <div ref={(node) => { setDropRef(node); setHeaderRef(node) }} {...hAttrs} style={colStyle}
+    <div ref={setHeaderRef} {...hAttrs} style={colStyle}
       onMouseEnter={() => setShowEdit(true)} onMouseLeave={() => setShowEdit(false)}
       onTouchStart={() => setShowEdit(true)}
-      className={`w-64 shrink-0 flex flex-col rounded-lg transition-colors ${isOver ? "bg-gray-100" : "bg-gray-50"}`}>
+      className={`w-64 shrink-0 h-full flex flex-col rounded-lg transition-colors ${isOver ? "bg-gray-100" : "bg-gray-50"}`}>
 
       {/* header */}
       <div className={`flex items-center gap-1.5 px-2 py-2 shrink-0 select-none rounded-t-lg ${headerDragging ? "opacity-30" : ""}`}>
@@ -94,8 +94,8 @@ export function KanbanColumn({
       {color && <div className="h-0.5 shrink-0 mx-2 rounded" style={{ backgroundColor: color }} />}
 
       {/* cards */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-1 pb-1 flex flex-col gap-1.5">
-        {cards.length === 0 && !isOver && !adding ? (
+      <div ref={setDropRef} className={`flex-1 min-h-[100px] overflow-y-auto px-1 pb-1 flex flex-col gap-1.5 ${isOver ? "bg-gray-200/50 rounded-b-lg" : ""}`}>
+        {cards.length === 0 && !adding ? (
           <div className="text-[11px] text-gray-300 italic px-2 py-4 text-center">drop here</div>
         ) : (
           cards.map((card) => (

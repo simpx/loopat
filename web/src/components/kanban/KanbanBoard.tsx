@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react"
 import {
   DndContext,
   DragOverlay,
-  closestCorners,
+  rectIntersection,
   PointerSensor,
   TouchSensor,
   useSensor,
@@ -14,6 +14,7 @@ import { SortableContext, arrayMove, verticalListSortingStrategy, horizontalList
 import { listKanbanColumns, getKanbanConfig, saveKanbanColumnOrder, toggleKanbanCard, moveKanbanCard, reorderKanbanCards, createKanbanColumn, type KanbanCard, type KanbanColumn } from "../../api"
 import { KanbanColumn as KanbanColumnView } from "./KanbanColumn"
 import { KanbanCardStatic } from "./KanbanCardView"
+import { useKanbanWebSocket } from "../../useKanbanWebSocket"
 
 export function KanbanBoard({
   onCardClick,
@@ -54,6 +55,8 @@ export function KanbanBoard({
       setLoading(false)
     })
   }, [])
+
+  const connected = useKanbanWebSocket(refresh)
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -202,7 +205,7 @@ export function KanbanBoard({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <SortableContext items={visibleColumns.map((c) => `col:${c.filename}`)} strategy={horizontalListSortingStrategy}>
         <div className="h-full flex gap-3 px-3 py-3 overflow-x-auto">
           {visibleColumns.map((col) => {

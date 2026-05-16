@@ -45,6 +45,22 @@ const execFileP = promisify(execFile)
 
 const { upgradeWebSocket, websocket } = createBunWebSocket()
 
+// ── Kanban real-time hub ──
+
+type KanbanSubscriber = { ws: any; userId: string }
+const kanbanSubscribers = new Set<KanbanSubscriber>()
+
+function kanbanBroadcast(msg: object) {
+  const payload = JSON.stringify(msg)
+  for (const sub of kanbanSubscribers) {
+    try { sub.ws.send(payload) } catch {}
+  }
+}
+
+function kanbanNotify() {
+  kanbanBroadcast({ type: "kanban_update" })
+}
+
 type Variables = { userId: string }
 const app = new Hono<{ Variables: Variables }>()
 
@@ -829,6 +845,7 @@ app.post("/api/kanban/:filename/cards", requireAuth, async (c) => {
   }
   const r = await addCard(filename, body)
   if (!r.ok) return c.json({ error: "add failed" }, 500)
+  kanbanNotify()
   return c.json({ cid: r.cid })
 })
 
@@ -837,6 +854,7 @@ app.patch("/api/kanban/:filename/cards/:cid/toggle", requireAuth, async (c) => {
   const cid = c.req.param("cid") ?? ""
   const ok = await toggleCard(filename, cid)
   if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -846,6 +864,7 @@ app.patch("/api/kanban/:filename/cards/:cid", requireAuth, async (c) => {
   const patch = await c.req.json().catch(() => ({}))
   const ok = await updateCardMeta(filename, cid, patch)
   if (!ok) return c.json({ error: "not found or patch failed" }, 404)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -856,6 +875,7 @@ app.put("/api/kanban/:filename/cards/:cid/block", requireAuth, async (c) => {
   if (typeof body.block !== "string") return c.json({ error: "block required" }, 400)
   const ok = await updateCardBlock(filename, cid, body.block)
   if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -864,6 +884,7 @@ app.delete("/api/kanban/:filename/cards/:cid", requireAuth, async (c) => {
   const cid = c.req.param("cid") ?? ""
   const ok = await deleteCard(filename, cid)
   if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -874,6 +895,7 @@ app.post("/api/kanban/:filename/cards/:cid/move", requireAuth, async (c) => {
   if (typeof body.toFile !== "string") return c.json({ error: "toFile required" }, 400)
   const ok = await moveCard(filename, cid, body.toFile, body.toIndex)
   if (!ok) return c.json({ error: "move failed" }, 500)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -884,6 +906,7 @@ app.post("/api/kanban/columns", requireAuth, async (c) => {
   }
   const ok = await createColumn(body.filename + (body.filename.endsWith(".md") ? "" : ".md"), body.title)
   if (!ok) return c.json({ error: "create failed" }, 500)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -896,6 +919,7 @@ app.put("/api/kanban/config", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   if (Array.isArray(body.columns)) {
     await saveColumnOrder(body.columns)
+    kanbanNotify()
   }
   return c.json({ ok: true })
 })
@@ -908,6 +932,7 @@ app.put("/api/kanban/:filename/rename", requireAuth, async (c) => {
   }
   const ok = await renameColumn(fromFile, body.toFile + (body.toFile.endsWith(".md") ? "" : ".md"))
   if (!ok) return c.json({ error: "rename failed" }, 500)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -915,6 +940,7 @@ app.delete("/api/kanban/:filename", requireAuth, async (c) => {
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const ok = await deleteColumn(filename)
   if (!ok) return c.json({ error: "delete failed" }, 500)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -923,6 +949,7 @@ app.put("/api/kanban/:filename/color", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.color !== "string") return c.json({ error: "color required" }, 400)
   await setColumnColor(filename, body.color)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -932,6 +959,7 @@ app.put("/api/kanban/:filename/reorder", requireAuth, async (c) => {
   if (!Array.isArray(body.cids)) return c.json({ error: "cids array required" }, 400)
   const ok = await reorderCards(filename, body.cids)
   if (!ok) return c.json({ error: "reorder failed" }, 500)
+  kanbanNotify()
   return c.json({ ok: true })
 })
 
@@ -971,6 +999,38 @@ app.get("/api/topics", requireAuth, async (c) => {
     .map((l) => ({ id: l.id, title: l.title }))
   return c.json({ topics: await listTopics(titles) })
 })
+
+// ── Kanban WebSocket (real-time updates) ──
+
+app.get(
+  "/ws/kanban",
+  upgradeWebSocket(async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) {
+      return {
+        onOpen(_e, ws) {
+          ws.send(JSON.stringify({ type: "error", message: "unauthorized" }))
+          ws.close()
+        },
+      }
+    }
+    return {
+      onOpen(_e, ws) {
+        const sub: KanbanSubscriber = { ws, userId }
+        kanbanSubscribers.add(sub)
+        ws.send(JSON.stringify({ type: "kanban_connected" }))
+      },
+      onMessage(_event, _ws) {
+        // No client-to-server messages needed for Kanban — it's broadcast-only
+      },
+      onClose(_e, ws) {
+        for (const sub of kanbanSubscribers) {
+          if (sub.ws === ws) { kanbanSubscribers.delete(sub); break }
+        }
+      },
+    }
+  })
+)
 
 app.get(
   "/ws/loop/:id/term",
