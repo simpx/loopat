@@ -9,7 +9,24 @@ Single-binary collaborative AI coding workspace. Loop = context + AI + workdir, 
 ```sh
 sudo apt install bubblewrap openssh-client  # bubblewrap: sandbox (Linux only) · openssh-client: deploy-key flow for personal/ import
 curl -fsSL https://bun.sh/install | bash
+curl -fsSL https://mise.run | sh           # mise: per-loop env activation
 ```
+
+`mise` is loopat's runtime/toolchain manager. When a loop selects an env
+(see `knowledge/.loopat/envs/<name>/`), the server runs `mise install` +
+`mise env --json` on the host and binds the tool installs into the sandbox.
+Without `mise` on PATH, loops that select an env fail at spawn; loops with
+no env still work normally.
+
+Alternatives if `https://mise.run` isn't reachable:
+
+- macOS: `brew install mise`
+- Rust users: `cargo install mise`
+- Manual: grab a release from <https://github.com/jdx/mise/releases> and drop it on PATH
+
+mise data lives at `~/.local/share/mise/installs/`. loopat binds that path
+read-only into each loop's sandbox, so tool installs are shared across loops
+(install once, every loop sees it).
 
 ### 2. clone + install
 
