@@ -15,9 +15,10 @@ import {
   userCanAccess,
   listConversationsForUser,
   listMessages,
+  listThread,
   postMessage,
   markRead,
-  snapshotConvToJsonl,
+  snapshotThreadToJsonl,
 } from "./chat"
 import { loopContextChatDir } from "./paths"
 import { join as pathJoin } from "node:path"
@@ -1354,16 +1355,32 @@ app.post("/api/chat/conversations/:id/messages", requireAuth, async (c) => {
   if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400)
+  const parentId = Number.isInteger(body.parentId) && body.parentId > 0 ? body.parentId : null
   let m
   try {
-    m = postMessage(id, userId, body.text)
+    m = postMessage(id, userId, body.text, parentId)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "post failed" }, 400)
   }
   const dmParties: [string, string] | null =
     conv.kind === "dm" ? [conv.dmUserA as string, conv.dmUserB as string] : null
+  // Broadcast carries parent_id implicitly via Message.parentId — clients
+  // route it to the main feed (null) or the open ThreadPanel (matching root).
   chatBroadcastToConv(id, { type: "message", message: m }, conv.kind === "dm", dmParties)
   return c.json({ message: m })
+})
+
+// Thread fetch: root message + all replies. Auth via the conversation the
+// root belongs to. Used by ThreadPanel on open.
+app.get("/api/chat/threads/:msgId", requireAuth, (c) => {
+  const userId = c.get("userId") as string
+  const rootId = parseInt(c.req.param("msgId") ?? "0", 10)
+  if (!rootId) return c.json({ error: "invalid msgId" }, 400)
+  const t = listThread(rootId)
+  if (!t) return c.json({ error: "not found" }, 404)
+  const conv = getConv(t.root.convId)
+  if (!conv || !userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  return c.json({ root: t.root, replies: t.replies })
 })
 
 app.post("/api/chat/conversations/:id/read", requireAuth, async (c) => {
@@ -1379,41 +1396,56 @@ app.post("/api/chat/conversations/:id/read", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-app.post("/api/chat/conversations/:id/spawn-loop", requireAuth, async (c) => {
-  const convId = c.req.param("id") ?? ""
+// Spawn a loop seeded from a thread. The thread (= root message + replies,
+// length ≥ 1) is the natural semantic unit — even a brand-new top-level
+// message with no replies works (snapshot of 1 line). Snapshot lives at
+// loops/<id>/context/chat/<rootId>.jsonl, mounted ro at /loopat/context/chat/
+// inside the sandbox.
+app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
+  const rootId = parseInt(c.req.param("msgId") ?? "0", 10)
+  if (!rootId) return c.json({ error: "invalid msgId" }, 400)
   const userId = c.get("userId") as string
-  const conv = getConv(convId)
-  if (!conv) return c.json({ error: "not found" }, 404)
-  if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  const t = listThread(rootId)
+  if (!t) return c.json({ error: "not found" }, 404)
+  const conv = getConv(t.root.convId)
+  if (!conv || !userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
   const body = await c.req.json().catch(() => ({}))
   const dmPeer = conv.kind === "dm"
     ? (conv.dmUserA === userId ? conv.dmUserB : conv.dmUserA)
     : null
+  // Title default: first ~40 chars of the thread root (the topic). Cleaner
+  // than "from #channel" — at thread granularity the root IS the topic.
+  const defaultTitle = t.root.text.replace(/\s+/g, " ").slice(0, 40).trim() || "from chat"
   const title = typeof body.title === "string" && body.title.trim()
     ? body.title.trim()
-    : conv.kind === "channel"
-      ? `from #${conv.name}`
-      : `from @${dmPeer}`
+    : defaultTitle
   let meta
   try {
     meta = await createLoop({ title, createdBy: userId })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "loop create failed" }, 400)
   }
-  const destPath = pathJoin(loopContextChatDir(meta.id), `${convId}.jsonl`)
+  const destPath = pathJoin(loopContextChatDir(meta.id), `${rootId}.jsonl`)
   let snapshot
   try {
-    snapshot = await snapshotConvToJsonl(convId, destPath, 1024)
+    snapshot = await snapshotThreadToJsonl(rootId, destPath)
   } catch (e: any) {
     return c.json({ error: `snapshot failed: ${e?.message ?? e}` }, 500)
   }
+  if (!snapshot) return c.json({ error: "thread vanished" }, 404)
   await patchLoopMeta(meta.id, {
-    seededFrom: { kind: "chat", convId, messageCount: snapshot.messageCount, snapshotAt: new Date().toISOString() },
+    seededFrom: {
+      kind: "chat",
+      convId: t.root.convId,
+      threadRootId: rootId,
+      messageCount: snapshot.messageCount,
+      snapshotAt: new Date().toISOString(),
+    },
   } as any)
   const convLabel = conv.kind === "channel" ? `#${conv.name}` : `@${dmPeer}`
   const seedPrompt =
-    `Spawned from ${convLabel}. Snapshot of the last ${snapshot.messageCount} messages is at ` +
-    `\`/loopat/context/chat/${convId}.jsonl\` — read it with the Read tool, then propose next steps.`
+    `Spawned from a ${convLabel} thread (${snapshot.messageCount} message${snapshot.messageCount === 1 ? "" : "s"}). ` +
+    `Snapshot at \`/loopat/context/chat/${rootId}.jsonl\` — read it with the Read tool, then propose next steps.`
   return c.json({ loopId: meta.id, seedPrompt, messageCount: snapshot.messageCount })
 })
 

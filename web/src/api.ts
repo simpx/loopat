@@ -876,6 +876,15 @@ export type ChatMessage = {
   author: string
   text: string
   ts: number
+  /** NULL = thread root; otherwise the root msg id this reply belongs to. */
+  parentId: number | null
+}
+
+/** Thread root with denormalized reply stats. Returned by listChatMessages
+ *  (main feed). UI uses replyCount to render the "💬 N replies" affordance. */
+export type ChatThreadRoot = ChatMessage & {
+  replyCount: number
+  lastReplyTs: number | null
 }
 
 export type ChatWorkspaceUser = {
@@ -929,24 +938,34 @@ export async function openChatDm(username: string): Promise<{ conv?: ChatConvers
 export async function listChatMessages(
   convId: string,
   opts: { before?: number; limit?: number } = {},
-): Promise<ChatMessage[]> {
+): Promise<ChatThreadRoot[]> {
   const q = new URLSearchParams()
   if (opts.before) q.set("before", String(opts.before))
   if (opts.limit) q.set("limit", String(opts.limit))
   const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/messages?${q.toString()}`)
   if (!r.ok) return []
   const j = await r.json()
-  return (j.messages as ChatMessage[]) ?? []
+  return (j.messages as ChatThreadRoot[]) ?? []
+}
+
+/** Fetch a thread (root + replies). Used when opening the ThreadPanel. */
+export async function getChatThread(
+  rootId: number,
+): Promise<{ root: ChatMessage; replies: ChatMessage[] } | null> {
+  const r = await apiFetch(`/api/chat/threads/${rootId}`)
+  if (!r.ok) return null
+  return (await r.json()) as { root: ChatMessage; replies: ChatMessage[] }
 }
 
 export async function sendChatMessage(
   convId: string,
   text: string,
+  parentId: number | null = null,
 ): Promise<{ message?: ChatMessage; error?: string }> {
   const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(parentId != null ? { text, parentId } : { text }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { error: j.error ?? `send failed (${r.status})` }
@@ -962,11 +981,14 @@ export async function markChatRead(convId: string, lastReadId: number): Promise<
   return r.ok
 }
 
-export async function spawnLoopFromChat(
-  convId: string,
+/** Spawn a loop seeded from a thread (root + replies). The thread is the
+ *  natural semantic unit for AI seeding — works even for a brand-new top-
+ *  level message with no replies (snapshot of 1 line). */
+export async function spawnLoopFromThread(
+  rootId: number,
   title?: string,
 ): Promise<{ loopId?: string; seedPrompt?: string; messageCount?: number; error?: string }> {
-  const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/spawn-loop`, {
+  const r = await apiFetch(`/api/chat/threads/${rootId}/spawn-loop`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(title ? { title } : {}),

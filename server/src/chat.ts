@@ -36,6 +36,17 @@ export type Message = {
   author: string
   text: string
   ts: number
+  /** NULL = thread root (a top-level message); otherwise the root msg id this
+   *  reply belongs to. Slack-style single-level threading — replies cannot be
+   *  replied to (we reject parent_id on a message that already has one). */
+  parentId: number | null
+}
+
+/** Thread root surfaced in the main feed. Carries denormalized reply stats
+ *  so the UI can render "💬 N replies" without a per-row roundtrip. */
+export type ThreadRoot = Message & {
+  replyCount: number
+  lastReplyTs: number | null
 }
 
 export type ConversationWithUnread = Conversation & {
@@ -76,11 +87,12 @@ function db(): Database {
       ON conversations(dm_user_a, dm_user_b) WHERE kind = 'dm';
 
     CREATE TABLE IF NOT EXISTS messages (
-      id       INTEGER PRIMARY KEY AUTOINCREMENT,
-      conv_id  TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      author   TEXT NOT NULL,
-      text     TEXT NOT NULL,
-      ts       INTEGER NOT NULL
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      conv_id   TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      author    TEXT NOT NULL,
+      text      TEXT NOT NULL,
+      ts        INTEGER NOT NULL,
+      parent_id INTEGER REFERENCES messages(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS msg_conv_id_idx ON messages(conv_id, id);
 
@@ -91,6 +103,16 @@ function db(): Database {
       PRIMARY KEY (user_id, conv_id)
     );
   `)
+  // Migrate DBs created before parent_id existed. SQLite has no
+  // IF NOT EXISTS on ADD COLUMN, so swallow the duplicate-column error.
+  // MUST run before the partial index below — `WHERE parent_id IS NOT NULL`
+  // fails to parse if the column isn't there yet.
+  try {
+    d.exec(`ALTER TABLE messages ADD COLUMN parent_id INTEGER REFERENCES messages(id) ON DELETE CASCADE`)
+  } catch (e: any) {
+    if (!/duplicate column/i.test(e?.message ?? "")) throw e
+  }
+  d.exec(`CREATE INDEX IF NOT EXISTS msg_parent_idx ON messages(parent_id, id) WHERE parent_id IS NOT NULL`)
   _db = d
   return d
 }
@@ -115,6 +137,7 @@ function rowToMessage(r: any): Message {
     author: r.author,
     text: r.text,
     ts: r.ts,
+    parentId: r.parent_id ?? null,
   }
 }
 
@@ -241,34 +264,66 @@ export function listConversationsForUser(userId: string): ConversationWithUnread
 
 // ── messages ──────────────────────────────────────────────────────────────
 
-export function listMessages(convId: string, opts: { before?: number; limit?: number } = {}): Message[] {
+/** Main-feed listing: thread roots only. Each row carries denormalized
+ *  reply_count + last_reply_ts via subqueries so the UI can render the
+ *  "💬 N replies" affordance without a second roundtrip. */
+export function listMessages(convId: string, opts: { before?: number; limit?: number } = {}): ThreadRoot[] {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500)
   const before = opts.before
+  const select = `
+    SELECT m.*,
+           (SELECT COUNT(*) FROM messages r WHERE r.parent_id = m.id) AS reply_count,
+           (SELECT MAX(ts) FROM messages r WHERE r.parent_id = m.id) AS last_reply_ts
+      FROM messages m
+     WHERE m.conv_id = ? AND m.parent_id IS NULL`
   let rows: any[]
   if (before && before > 0) {
     rows = db()
-      .query<any, [string, number, number]>(
-        `SELECT * FROM messages WHERE conv_id = ? AND id < ? ORDER BY id DESC LIMIT ?`,
-      )
+      .query<any, [string, number, number]>(`${select} AND m.id < ? ORDER BY m.id DESC LIMIT ?`)
       .all(convId, before, limit)
   } else {
     rows = db()
-      .query<any, [string, number]>(
-        `SELECT * FROM messages WHERE conv_id = ? ORDER BY id DESC LIMIT ?`,
-      )
+      .query<any, [string, number]>(`${select} ORDER BY m.id DESC LIMIT ?`)
       .all(convId, limit)
   }
   // Return chronological (oldest → newest) — convenient for UI append.
-  return rows.reverse().map(rowToMessage)
+  return rows.reverse().map((r) => ({
+    ...rowToMessage(r),
+    replyCount: r.reply_count ?? 0,
+    lastReplyTs: r.last_reply_ts ?? null,
+  }))
 }
 
-export function postMessage(convId: string, author: string, text: string): Message {
+/** Return a thread (root + all replies, chronological). null if the root id
+ *  doesn't exist or is itself a reply (we don't surface "half threads"). */
+export function listThread(rootId: number): { root: Message; replies: Message[] } | null {
+  const rootRow = db().query<any, [number]>(`SELECT * FROM messages WHERE id = ?`).get(rootId)
+  if (!rootRow || rootRow.parent_id != null) return null
+  const replyRows = db()
+    .query<any, [number]>(`SELECT * FROM messages WHERE parent_id = ? ORDER BY id ASC`)
+    .all(rootId)
+  return {
+    root: rowToMessage(rootRow),
+    replies: replyRows.map(rowToMessage),
+  }
+}
+
+/** Post a message. If parentId is set, it must reference a top-level message
+ *  in the same conv (no nested threads, no cross-conv replies). Returns the
+ *  new message. */
+export function postMessage(convId: string, author: string, text: string, parentId: number | null = null): Message {
   const trimmed = text.replace(/\r\n/g, "\n")
   if (!trimmed.trim()) throw new Error("empty message")
+  if (parentId != null) {
+    const parent = db().query<any, [number]>(`SELECT conv_id, parent_id FROM messages WHERE id = ?`).get(parentId)
+    if (!parent) throw new Error("parent message not found")
+    if (parent.conv_id !== convId) throw new Error("parent message belongs to another conversation")
+    if (parent.parent_id != null) throw new Error("cannot reply to a reply (threads are single-level)")
+  }
   const ts = Date.now()
   const r = db().run(
-    `INSERT INTO messages (conv_id, author, text, ts) VALUES (?, ?, ?, ?)`,
-    [convId, author, trimmed, ts],
+    `INSERT INTO messages (conv_id, author, text, ts, parent_id) VALUES (?, ?, ?, ?, ?)`,
+    [convId, author, trimmed, ts, parentId],
   )
   return {
     id: Number(r.lastInsertRowid),
@@ -276,6 +331,7 @@ export function postMessage(convId: string, author: string, text: string): Messa
     author,
     text: trimmed,
     ts,
+    parentId,
   }
 }
 
@@ -287,28 +343,25 @@ export function markRead(userId: string, convId: string, lastReadId: number): vo
   )
 }
 
-// ── jsonl snapshot (for spawn-loop-from-chat) ─────────────────────────────
+// ── jsonl snapshot (for spawn-loop-from-thread) ───────────────────────────
 
 /**
- * Dump the most-recent `limit` messages from a conversation to a jsonl file.
- * Output rows are chronological (oldest → newest), one JSON per line:
+ * Dump a thread (root + all replies) to a jsonl file, chronological order:
  *   {"ts":"2026-05-16T10:42:00.000Z","author":"simpx","text":"..."}
  *
- * This is a one-shot snapshot. The loop owns its own copy from this moment
- * on; subsequent channel activity does not propagate.
+ * A "thread" is the natural semantic unit for AI seeding — every top-level
+ * message is a thread of length ≥ 1, so this works whether or not anyone
+ * actually replied. Returns null if the root doesn't exist or is itself a
+ * reply.
  */
-export async function snapshotConvToJsonl(
-  convId: string,
+export async function snapshotThreadToJsonl(
+  rootId: number,
   destPath: string,
-  limit = 1024,
-): Promise<{ messageCount: number }> {
-  const rows = db()
-    .query<any, [string, number]>(
-      `SELECT * FROM messages WHERE conv_id = ? ORDER BY id DESC LIMIT ?`,
-    )
-    .all(convId, Math.min(Math.max(limit, 1), 10000))
-  const chronological = rows.reverse().map(rowToMessage)
-  const lines = chronological.map((m) =>
+): Promise<{ messageCount: number; convId: string } | null> {
+  const t = listThread(rootId)
+  if (!t) return null
+  const all = [t.root, ...t.replies]
+  const lines = all.map((m) =>
     JSON.stringify({
       ts: new Date(m.ts).toISOString(),
       author: m.author,
@@ -317,7 +370,7 @@ export async function snapshotConvToJsonl(
   )
   await mkdir(dirname(destPath), { recursive: true })
   await writeFile(destPath, lines.join("\n") + (lines.length ? "\n" : ""))
-  return { messageCount: chronological.length }
+  return { messageCount: all.length, convId: t.root.convId }
 }
 
 // ── bootstrap ─────────────────────────────────────────────────────────────

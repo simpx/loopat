@@ -22,13 +22,17 @@ import { KanbanPage } from "./pages/KanbanPage"
 import { ChatPage } from "./pages/ChatPage"
 import { AuthPage } from "./pages/AuthPage"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
+import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
   { id: "focus", label: "Focus", icon: "◉" },
   { id: "kanban", label: "Kanban", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
-  { id: "chat", label: "Chat", icon: "✉" },
+  // ✉︎ has U+FE0E text-variant selector — without it, many systems render
+  // the bare ✉ as a colored/oversized emoji, off-baseline vs. the other
+  // monochrome glyphs.
+  { id: "chat", label: "Chat", icon: "✉︎" },
 ] as const
 
 function Layout() {
@@ -62,10 +66,16 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     getServerWorkspace().then((name) => {
       if (name) {
         setWorkspaceName(name)
+        // Base title. When logged in, useChatUnreadTitle below re-fires on
+        // workspaceName change and either re-sets the same string (no unread)
+        // or prefixes "(N) ". The two effects don't fight — last write
+        // wins per state change, and the hook always runs after.
         document.title = `${name} · loopat`
       }
     })
   }, [shareMode])
+
+  useChatUnreadTitle(workspaceName, loggedIn && !shareMode)
 
   useEffect(() => {
     if (shareMode) return
