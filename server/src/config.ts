@@ -52,23 +52,23 @@ export type RepoSpec = {
 }
 
 /**
- * Host -> sandbox bind, docker -v style. `~` and `$VAR` expand in both fields.
- * `dst` defaults to expanded `src`. `rw` defaults to false (ro-bind). Missing
- * source is silently skipped (uses bwrap *-bind-try).
+ * Personal -> sandbox bind. `src` is relative to `personal/<user>/` (no `..`
+ * segments, no absolute path). To mount encrypted secrets, point at
+ * `.loopat/secrets/<...>` — that subtree is already covered by git-crypt, so
+ * no extra encryption layer outside `secrets/` is needed. `dst` is the
+ * sandbox-side path and must be rooted (`$HOME/...`, `~/...`, or `/...`).
+ * Always RO. Missing source is silently skipped (uses bwrap --ro-bind-try).
  */
 export type SandboxMount = {
   src: string
-  dst?: string
-  rw?: boolean
+  dst: string
 }
 
 export type SandboxConfig = {
   /** Shell for PTY sessions (e.g. /usr/bin/fish). Falls back to SHELL env var then /bin/bash. */
   shell?: string
-  /** Extra binds from host into sandbox. */
+  /** Personal -> sandbox binds. */
   mounts?: SandboxMount[]
-  /** Dirs prepended to PATH inside sandbox (after `~`/`$VAR` expansion). */
-  path?: string[]
 }
 
 /**
@@ -101,8 +101,6 @@ export type PersonalConfig = {
   default: string
   providers: Record<string, ProviderConfig>
   sandbox?: SandboxConfig
-  /** IM webhook URL for user notifications (e.g. WeCom, DingTalk, Feishu). */
-  webhookUrl?: string
 }
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
@@ -271,7 +269,6 @@ export async function addTokenUsage(user: string, model: string, inputTokens: nu
 export async function savePersonalConfig(user: string, cfg: {
   default?: string
   providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
-  webhookUrl?: string
 }): Promise<void> {
   // Load existing config to merge
   const existing = await loadPersonalConfig(user)
@@ -296,7 +293,6 @@ export async function savePersonalConfig(user: string, cfg: {
     default: cfg.default ?? existing.default,
     providers: cfg.providers !== undefined ? providers as any : existing.providers,
     ...(existing.sandbox ? { sandbox: existing.sandbox } : {}),
-    webhookUrl: cfg.webhookUrl !== undefined ? cfg.webhookUrl : existing.webhookUrl,
   }
   await mkdir(personalLoopatDir(user), { recursive: true })
   await writeFile(personalLoopatConfigPath(user), JSON.stringify(out, null, 2) + "\n")
