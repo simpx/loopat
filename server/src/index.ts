@@ -5,6 +5,22 @@ import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox } from "./loops"
+import {
+  initChat,
+  listChannels,
+  createChannel,
+  deleteChannel,
+  getOrCreateDm,
+  getConv,
+  userCanAccess,
+  listConversationsForUser,
+  listMessages,
+  postMessage,
+  markRead,
+  snapshotConvToJsonl,
+} from "./chat"
+import { loopContextChatDir } from "./paths"
+import { join as pathJoin } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
@@ -1232,6 +1248,220 @@ app.get("/api/topics", requireAuth, async (c) => {
   return c.json({ topics: await listTopics(titles) })
 })
 
+// ── Chat ──────────────────────────────────────────────────────────────────
+//
+// SQLite-backed channels + 1:1 DMs. Real-time fanout via /ws/chat with
+// per-conversation subscriber sets. When a loop is spawned from a chat
+// conversation, the last 1024 messages are snapshotted to a per-loop jsonl
+// at loops/<id>/context/chat/<convId>.jsonl so the AI inside the sandbox
+// can read it from /loopat/context/chat/.
+
+type ChatSubscriber = { ws: any; userId: string; convs: Set<string> }
+const chatSubscribers = new Set<ChatSubscriber>()
+
+function chatBroadcastToConv(convId: string, msg: object, isDm: boolean, dmParties: [string, string] | null) {
+  const payload = JSON.stringify(msg)
+  for (const sub of chatSubscribers) {
+    if (!sub.convs.has(convId)) continue
+    // DM: only the two parties receive even if a third party somehow subscribed.
+    if (isDm && dmParties && sub.userId !== dmParties[0] && sub.userId !== dmParties[1]) continue
+    try { sub.ws.send(payload) } catch {}
+  }
+}
+
+function chatBroadcastConvCreated(convCreatedPayload: any, isDm: boolean, dmParties: [string, string] | null) {
+  // For channel creation: broadcast to every connected client so rails refresh.
+  // For DM creation: only the two parties learn about it.
+  const payload = JSON.stringify(convCreatedPayload)
+  for (const sub of chatSubscribers) {
+    if (isDm && dmParties && sub.userId !== dmParties[0] && sub.userId !== dmParties[1]) continue
+    try { sub.ws.send(payload) } catch {}
+  }
+}
+
+app.get("/api/chat/users", requireAuth, async (c) => {
+  // Workspace member directory for the DM picker. Filter to active accounts —
+  // pending users can't log in so DMing them is pointless.
+  const users = await listUsers()
+  const me = c.get("userId") as string
+  return c.json({
+    users: users
+      .filter((u) => u.status === "active")
+      .map((u) => ({ id: u.id, role: u.role, isMe: u.id === me })),
+  })
+})
+
+app.get("/api/chat/conversations", requireAuth, (c) => {
+  const userId = c.get("userId") as string
+  const convs = listConversationsForUser(userId)
+  return c.json({ conversations: convs })
+})
+
+app.post("/api/chat/channels", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.name !== "string") return c.json({ error: "name required" }, 400)
+  const topic = typeof body.topic === "string" ? body.topic : undefined
+  const r = createChannel({ name: body.name, topic, createdBy: userId })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  chatBroadcastConvCreated({ type: "conv_created", conv: r.conv }, false, null)
+  return c.json({ conv: r.conv })
+})
+
+app.delete("/api/chat/channels/:id", requireAdmin, (c) => {
+  const id = c.req.param("id") ?? ""
+  const conv = getConv(id)
+  if (!conv || conv.kind !== "channel") return c.json({ error: "not found" }, 404)
+  const ok = deleteChannel(id)
+  if (!ok) return c.json({ error: "delete failed" }, 500)
+  chatBroadcastConvCreated({ type: "conv_deleted", convId: id }, false, null)
+  return c.json({ ok: true })
+})
+
+app.post("/api/chat/dm/:username", requireAuth, async (c) => {
+  const me = c.get("userId") as string
+  const peer = c.req.param("username") ?? ""
+  if (!peer) return c.json({ error: "username required" }, 400)
+  if (peer === me) return c.json({ error: "cannot DM yourself" }, 400)
+  const peerUser = await findUser(peer)
+  if (!peerUser || peerUser.status !== "active") return c.json({ error: "user not found" }, 404)
+  const conv = getOrCreateDm(me, peer, me)
+  // Broadcast so both parties' rails see the new DM (idempotent — no-op if already known).
+  chatBroadcastConvCreated(
+    { type: "conv_created", conv },
+    true,
+    [conv.dmUserA as string, conv.dmUserB as string],
+  )
+  return c.json({ conv })
+})
+
+app.get("/api/chat/conversations/:id/messages", requireAuth, (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const conv = getConv(id)
+  if (!conv) return c.json({ error: "not found" }, 404)
+  if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  const before = parseInt(c.req.query("before") ?? "0", 10) || 0
+  const limit = parseInt(c.req.query("limit") ?? "50", 10) || 50
+  return c.json({ messages: listMessages(id, { before, limit }) })
+})
+
+app.post("/api/chat/conversations/:id/messages", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const conv = getConv(id)
+  if (!conv) return c.json({ error: "not found" }, 404)
+  if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400)
+  let m
+  try {
+    m = postMessage(id, userId, body.text)
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "post failed" }, 400)
+  }
+  const dmParties: [string, string] | null =
+    conv.kind === "dm" ? [conv.dmUserA as string, conv.dmUserB as string] : null
+  chatBroadcastToConv(id, { type: "message", message: m }, conv.kind === "dm", dmParties)
+  return c.json({ message: m })
+})
+
+app.post("/api/chat/conversations/:id/read", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const conv = getConv(id)
+  if (!conv) return c.json({ error: "not found" }, 404)
+  if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  const body = await c.req.json().catch(() => ({}))
+  const lastReadId = parseInt(body.lastReadId ?? 0, 10) || 0
+  if (lastReadId <= 0) return c.json({ error: "lastReadId required" }, 400)
+  markRead(userId, id, lastReadId)
+  return c.json({ ok: true })
+})
+
+app.post("/api/chat/conversations/:id/spawn-loop", requireAuth, async (c) => {
+  const convId = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const conv = getConv(convId)
+  if (!conv) return c.json({ error: "not found" }, 404)
+  if (!userCanAccess(conv, userId)) return c.json({ error: "forbidden" }, 403)
+  const body = await c.req.json().catch(() => ({}))
+  const dmPeer = conv.kind === "dm"
+    ? (conv.dmUserA === userId ? conv.dmUserB : conv.dmUserA)
+    : null
+  const title = typeof body.title === "string" && body.title.trim()
+    ? body.title.trim()
+    : conv.kind === "channel"
+      ? `from #${conv.name}`
+      : `from @${dmPeer}`
+  let meta
+  try {
+    meta = await createLoop({ title, createdBy: userId })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "loop create failed" }, 400)
+  }
+  const destPath = pathJoin(loopContextChatDir(meta.id), `${convId}.jsonl`)
+  let snapshot
+  try {
+    snapshot = await snapshotConvToJsonl(convId, destPath, 1024)
+  } catch (e: any) {
+    return c.json({ error: `snapshot failed: ${e?.message ?? e}` }, 500)
+  }
+  await patchLoopMeta(meta.id, {
+    seededFrom: { kind: "chat", convId, messageCount: snapshot.messageCount, snapshotAt: new Date().toISOString() },
+  } as any)
+  const convLabel = conv.kind === "channel" ? `#${conv.name}` : `@${dmPeer}`
+  const seedPrompt =
+    `Spawned from ${convLabel}. Snapshot of the last ${snapshot.messageCount} messages is at ` +
+    `\`/loopat/context/chat/${convId}.jsonl\` — read it with the Read tool, then propose next steps.`
+  return c.json({ loopId: meta.id, seedPrompt, messageCount: snapshot.messageCount })
+})
+
+// ── Chat WebSocket ────────────────────────────────────────────────────────
+
+app.get(
+  "/ws/chat",
+  upgradeWebSocket(async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) {
+      return {
+        onOpen(_e, ws) {
+          ws.send(JSON.stringify({ type: "error", message: "unauthorized" }))
+          ws.close()
+        },
+      }
+    }
+    let sub: ChatSubscriber | null = null
+    return {
+      onOpen(_e, ws) {
+        sub = { ws, userId, convs: new Set() }
+        chatSubscribers.add(sub)
+        ws.send(JSON.stringify({ type: "chat_connected" }))
+      },
+      onMessage(event, ws) {
+        try {
+          const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
+          const msg = JSON.parse(data)
+          if (msg?.type === "subscribe" && typeof msg.convId === "string" && sub) {
+            const conv = getConv(msg.convId)
+            if (!conv) return
+            if (!userCanAccess(conv, userId)) return
+            sub.convs.add(msg.convId)
+          } else if (msg?.type === "unsubscribe" && typeof msg.convId === "string" && sub) {
+            sub.convs.delete(msg.convId)
+          }
+        } catch (e) {
+          try { ws.send(JSON.stringify({ type: "error", message: "bad message" })) } catch {}
+        }
+      },
+      onClose() {
+        if (sub) chatSubscribers.delete(sub)
+        sub = null
+      },
+    }
+  })
+)
+
 // ── Kanban WebSocket (real-time updates) ──
 
 app.get(
@@ -1537,6 +1767,15 @@ const hostname = process.env.HOST ?? "127.0.0.1"
 await ensureWorkspaceDirs()
 const backfilled = await backfillAllMounts()
 const cfg = await loadConfig()
+// Initialise chat DB. bootstrap user = first admin (if one exists) — only used
+// to seed the default #general channel on a fresh DB.
+let chatSeed = ""
+try {
+  const users = await listUsers()
+  const firstAdmin = users.find((u) => u.role === "admin")
+  chatSeed = firstAdmin?.id ?? users[0]?.id ?? ""
+} catch {}
+initChat(chatSeed)
 await printBootstrapBanner(cfg)
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
 

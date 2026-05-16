@@ -851,3 +851,127 @@ export async function checkAliasAvailable(alias: string, loopId?: string): Promi
   if (!r.ok) return { available: false, reason: "check failed" }
   return (await r.json()) as { available: boolean; reason?: string }
 }
+
+// ── chat ──
+
+export type ChatConvKind = "channel" | "dm"
+
+export type ChatConversation = {
+  id: string
+  kind: ChatConvKind
+  name: string | null
+  topic: string | null
+  createdBy: string
+  createdAt: number
+  dmUserA: string | null
+  dmUserB: string | null
+  unread: number
+  lastMessageTs: number | null
+  peerUserId: string | null
+}
+
+export type ChatMessage = {
+  id: number
+  convId: string
+  author: string
+  text: string
+  ts: number
+}
+
+export type ChatWorkspaceUser = {
+  id: string
+  role: "admin" | "member"
+  isMe: boolean
+}
+
+export async function listChatConversations(): Promise<ChatConversation[]> {
+  const r = await apiFetch("/api/chat/conversations")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.conversations as ChatConversation[]) ?? []
+}
+
+export async function listChatUsers(): Promise<ChatWorkspaceUser[]> {
+  const r = await apiFetch("/api/chat/users")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.users as ChatWorkspaceUser[]) ?? []
+}
+
+export async function createChatChannel(
+  name: string,
+  topic?: string,
+): Promise<{ conv?: ChatConversation; error?: string }> {
+  const r = await apiFetch("/api/chat/channels", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, topic }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? `create failed (${r.status})` }
+  return { conv: j.conv as ChatConversation }
+}
+
+export async function deleteChatChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/chat/channels/${encodeURIComponent(id)}`, { method: "DELETE" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `delete failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function openChatDm(username: string): Promise<{ conv?: ChatConversation; error?: string }> {
+  const r = await apiFetch(`/api/chat/dm/${encodeURIComponent(username)}`, { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? `open DM failed (${r.status})` }
+  return { conv: j.conv as ChatConversation }
+}
+
+export async function listChatMessages(
+  convId: string,
+  opts: { before?: number; limit?: number } = {},
+): Promise<ChatMessage[]> {
+  const q = new URLSearchParams()
+  if (opts.before) q.set("before", String(opts.before))
+  if (opts.limit) q.set("limit", String(opts.limit))
+  const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/messages?${q.toString()}`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.messages as ChatMessage[]) ?? []
+}
+
+export async function sendChatMessage(
+  convId: string,
+  text: string,
+): Promise<{ message?: ChatMessage; error?: string }> {
+  const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? `send failed (${r.status})` }
+  return { message: j.message as ChatMessage }
+}
+
+export async function markChatRead(convId: string, lastReadId: number): Promise<boolean> {
+  const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/read`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ lastReadId }),
+  })
+  return r.ok
+}
+
+export async function spawnLoopFromChat(
+  convId: string,
+  title?: string,
+): Promise<{ loopId?: string; seedPrompt?: string; messageCount?: number; error?: string }> {
+  const r = await apiFetch(`/api/chat/conversations/${encodeURIComponent(convId)}/spawn-loop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(title ? { title } : {}),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? `spawn failed (${r.status})` }
+  return { loopId: j.loopId, seedPrompt: j.seedPrompt, messageCount: j.messageCount }
+}

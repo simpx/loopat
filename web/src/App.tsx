@@ -19,6 +19,7 @@ import { FocusDetail } from "./pages/FocusDetail"
 import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
+import { ChatPage } from "./pages/ChatPage"
 import { AuthPage } from "./pages/AuthPage"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
 
@@ -27,6 +28,7 @@ const TABS = [
   { id: "focus", label: "Focus", icon: "◉" },
   { id: "kanban", label: "Kanban", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
+  { id: "chat", label: "Chat", icon: "✉" },
 ] as const
 
 function Layout() {
@@ -266,6 +268,8 @@ export function App() {
             <Route path="/topic/:name" element={<TopicView />} />
             <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
             <Route path="/context/:sub" element={<ContextPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+            <Route path="/chat/:convId" element={<ChatPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
