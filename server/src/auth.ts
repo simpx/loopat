@@ -2,7 +2,12 @@
  * Account system — single-workspace MVP.
  *
  * users.json (at LOOPAT_HOME/users.json):
- *   { users: [{ id, salt, hash, personalRepo?, createdAt }] }
+ *   { users: [{ id, salt, hash, role, status, personalRepo?, createdAt, activatedAt? }] }
+ *
+ * Open registration: anyone can register. New accounts default to
+ * role:"member", status:"pending" and must be activated by an admin before
+ * login is allowed. The first account ever to register bootstraps as
+ * role:"admin", status:"active" so the system isn't unreachable.
  *
  * Sessions persist to sessions.json so server restarts don't log everyone out.
  * Cookie is HttpOnly + SameSite=Lax + maxAge 30d.
@@ -27,20 +32,39 @@ const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 // 30 days
 const SCRYPT_KEYLEN = 64
 const USERNAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/
 
+export type UserRole = "admin" | "member"
+export type UserStatus = "active" | "pending"
+
 export type User = {
   id: string
-  /** Empty/missing on whitelist stubs that haven't been claimed yet. */
-  salt?: string
-  hash?: string
+  salt: string
+  hash: string
+  role: UserRole
+  status: UserStatus
   personalRepo?: string
   createdAt: string
+  activatedAt?: string
 }
 
-export function isUserClaimed(u: User): boolean {
-  return !!(u.salt && u.hash)
+export type PublicUser = {
+  id: string
+  role: UserRole
+  status: UserStatus
+  personalRepo?: string
+  createdAt: string
+  activatedAt?: string
 }
 
-export type PublicUser = { id: string }
+function toPublic(u: User): PublicUser {
+  return {
+    id: u.id,
+    role: u.role,
+    status: u.status,
+    personalRepo: u.personalRepo,
+    createdAt: u.createdAt,
+    activatedAt: u.activatedAt,
+  }
+}
 
 type UsersFile = { users: User[] }
 type SessionsFile = { sessions: Record<string, string> } // token → userId
@@ -69,7 +93,7 @@ async function writeUsersFile(data: UsersFile): Promise<void> {
 
 export async function listUsers(): Promise<PublicUser[]> {
   const f = await readUsersFile()
-  return f.users.map((u) => ({ id: u.id }))
+  return f.users.map(toPublic)
 }
 
 export async function findUser(id: string): Promise<User | null> {
@@ -83,8 +107,7 @@ export async function hashPassword(password: string, salt?: string): Promise<{ s
   return { salt: s, hash: buf.toString("hex") }
 }
 
-export async function verifyPassword(password: string, salt: string | undefined, hash: string | undefined): Promise<boolean> {
-  if (!salt || !hash) return false
+export async function verifyPassword(password: string, salt: string, hash: string): Promise<boolean> {
   const buf = await scrypt(password, salt, SCRYPT_KEYLEN)
   const expected = Buffer.from(hash, "hex")
   if (buf.length !== expected.length) return false
@@ -96,10 +119,11 @@ export function isValidUsername(id: string): boolean {
 }
 
 /**
- * Whitelist-based registration. The id must already exist in users.json as a
- * stub `{ id, createdAt }` (added by an admin) — anonymous "register a fresh
- * account" is not allowed. If the stub already has a password (salt+hash),
- * it's already claimed and we refuse.
+ * Open registration. Anyone with a valid username + password can create an
+ * account. New accounts default to status:"pending" — they cannot log in
+ * until an admin activates them. The very first account ever created
+ * bootstraps as role:"admin", status:"active" so the system is reachable
+ * without manual seeding.
  */
 export async function createUser(input: {
   id: string
@@ -109,22 +133,75 @@ export async function createUser(input: {
   if (!isValidUsername(input.id)) throw new Error("invalid username (lowercase a-z0-9_- , 1-32 chars, leading alnum)")
   if (!input.password || input.password.length < 1) throw new Error("password required")
   const f = await readUsersFile()
-  const idx = f.users.findIndex((u) => u.id === input.id)
-  if (idx < 0) throw new Error("registration not allowed — id is not in the user whitelist")
-  if (isUserClaimed(f.users[idx])) throw new Error("username taken")
+  if (f.users.some((u) => u.id === input.id)) throw new Error("username taken")
   const { salt, hash } = await hashPassword(input.password)
-  const stub = f.users[idx]
+  const isFirst = f.users.length === 0
+  const now = new Date().toISOString()
   const user: User = {
-    ...stub,
+    id: input.id,
     salt,
     hash,
-    personalRepo: input.personalRepo?.trim() || stub.personalRepo,
-    createdAt: stub.createdAt || new Date().toISOString(),
+    role: isFirst ? "admin" : "member",
+    status: isFirst ? "active" : "pending",
+    personalRepo: input.personalRepo?.trim() || undefined,
+    createdAt: now,
+    activatedAt: isFirst ? now : undefined,
   }
-  const users = f.users.slice()
-  users[idx] = user
-  await writeUsersFile({ users })
+  await writeUsersFile({ users: [...f.users, user] })
   return user
+}
+
+export async function activateUser(id: string): Promise<User | null> {
+  const f = await readUsersFile()
+  const idx = f.users.findIndex((u) => u.id === id)
+  if (idx < 0) return null
+  if (f.users[idx].status === "active") return f.users[idx]
+  const updated: User = { ...f.users[idx], status: "active", activatedAt: new Date().toISOString() }
+  const users = f.users.slice()
+  users[idx] = updated
+  await writeUsersFile({ users })
+  return updated
+}
+
+export async function setUserRole(id: string, role: UserRole): Promise<User | null> {
+  const f = await readUsersFile()
+  const idx = f.users.findIndex((u) => u.id === id)
+  if (idx < 0) return null
+  const target = f.users[idx]
+  if (target.role === role) return target
+  if (target.role === "admin" && role !== "admin") {
+    const adminCount = f.users.filter((u) => u.role === "admin").length
+    if (adminCount <= 1) throw new Error("cannot demote the last admin")
+  }
+  const updated: User = { ...target, role }
+  const users = f.users.slice()
+  users[idx] = updated
+  await writeUsersFile({ users })
+  return updated
+}
+
+/**
+ * Remove a user from users.json. Does NOT touch personal/<id>/ on disk —
+ * data is preserved for safety. Caller must guard against self-delete and
+ * last-admin removal at the route layer (see /api/admin/users/:id).
+ */
+export async function deleteUser(id: string): Promise<boolean> {
+  const f = await readUsersFile()
+  const idx = f.users.findIndex((u) => u.id === id)
+  if (idx < 0) return false
+  const target = f.users[idx]
+  if (target.role === "admin") {
+    const adminCount = f.users.filter((u) => u.role === "admin").length
+    if (adminCount <= 1) throw new Error("cannot delete the last admin")
+  }
+  const users = f.users.filter((u) => u.id !== id)
+  await writeUsersFile({ users })
+  // Drop any sessions belonging to this user so the deletion is immediate.
+  for (const [token, uid] of sessions.entries()) {
+    if (uid === id) sessions.delete(token)
+  }
+  await saveSessions()
+  return true
 }
 
 /**
@@ -214,6 +291,19 @@ export function getRequestUserId(c: Context): string | null {
 export const requireAuth: MiddlewareHandler = async (c, next) => {
   const userId = getRequestUserId(c)
   if (!userId) return c.json({ error: "unauthorized" }, 401)
+  c.set("userId", userId)
+  await next()
+}
+
+/**
+ * Hono middleware: requires the session user to be role:"admin".
+ * Layer this *after* requireAuth (or on its own — it re-checks the cookie).
+ */
+export const requireAdmin: MiddlewareHandler = async (c, next) => {
+  const userId = getRequestUserId(c)
+  if (!userId) return c.json({ error: "unauthorized" }, 401)
+  const user = await findUser(userId)
+  if (!user || user.role !== "admin") return c.json({ error: "forbidden" }, 403)
   c.set("userId", userId)
   await next()
 }

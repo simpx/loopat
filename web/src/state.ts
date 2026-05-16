@@ -33,6 +33,7 @@ export type WorkspaceState = {
   login: (username: string, password: string) => Promise<{ error?: string }>
   register: (input: { username: string; password: string; personalRepo?: string }) => Promise<{
     error?: string
+    user?: User
     publicKey?: string | null
     personalRepo?: string | null
     needsImport?: boolean
@@ -107,9 +108,13 @@ export function useWorkspaceState(): WorkspaceState {
   const register = useCallback(
     async (input: { username: string; password: string; personalRepo?: string }) => {
       const r = await apiRegister(input)
-      if (r.user) setCurrentUser(r.user)
+      // Only seed currentUser when registration actually established a session.
+      // Pending accounts (everyone except the very first user) must wait for
+      // an admin to activate before they can log in.
+      if (r.user && r.user.status === "active") setCurrentUser(r.user)
       return {
         error: r.error,
+        user: r.user,
         publicKey: r.publicKey,
         personalRepo: r.personalRepo,
         needsImport: r.needsImport,

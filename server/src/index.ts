@@ -36,8 +36,13 @@ import {
   clearSessionCookie,
   getRequestUserId,
   requireAuth,
+  requireAdmin,
   COOKIE_NAME,
   isValidUsername,
+  listUsers,
+  activateUser,
+  setUserRole,
+  deleteUser,
 } from "./auth"
 import { getCookie } from "hono/cookie"
 
@@ -117,15 +122,17 @@ app.post("/api/auth/register", async (c) => {
     // pull a private repo. The UI shows publicKey + asks user to register it
     // as a deploy key on `personalRepo`, then calls /api/personal/import.
     const { publicKey } = await provisionUserPersonal(user.id)
-    const token = createSession(user.id)
-    setSessionCookie(c, token)
-    // needsImport only if user wants a clone AND we have a key to give them.
-    // Otherwise UI skips straight to the workspace.
+    // Only auto-login active accounts (the first-ever user). Pending accounts
+    // must wait for an admin to activate before they can log in.
+    if (user.status === "active") {
+      const token = createSession(user.id)
+      setSessionCookie(c, token)
+    }
     return c.json({
-      user: { id: user.id },
+      user: { id: user.id, role: user.role, status: user.status },
       publicKey,
       personalRepo: user.personalRepo ?? null,
-      needsImport: !!user.personalRepo && !!publicKey,
+      needsImport: user.status === "active" && !!user.personalRepo && !!publicKey,
     })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "register failed" }, 400)
@@ -141,9 +148,12 @@ app.post("/api/auth/login", async (c) => {
   if (!user) return c.json({ error: "invalid credentials" }, 401)
   const ok = await verifyPassword(password, user.salt, user.hash)
   if (!ok) return c.json({ error: "invalid credentials" }, 401)
+  if (user.status !== "active") {
+    return c.json({ error: "account pending activation by an admin", status: user.status }, 403)
+  }
   const token = createSession(user.id)
   setSessionCookie(c, token)
-  return c.json({ user: { id: user.id } })
+  return c.json({ user: { id: user.id, role: user.role, status: user.status } })
 })
 
 app.post("/api/auth/logout", async (c) => {
@@ -156,7 +166,50 @@ app.post("/api/auth/logout", async (c) => {
 app.get("/api/auth/me", async (c) => {
   const userId = getRequestUserId(c)
   if (!userId) return c.json({ error: "unauthorized" }, 401)
-  return c.json({ user: { id: userId } })
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "unauthorized" }, 401)
+  return c.json({ user: { id: user.id, role: user.role, status: user.status } })
+})
+
+// ── admin (requireAdmin) ──
+
+app.get("/api/admin/users", requireAdmin, async (c) => {
+  const users = await listUsers()
+  return c.json({ users })
+})
+
+app.post("/api/admin/users/:id/activate", requireAdmin, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const updated = await activateUser(id)
+  if (!updated) return c.json({ error: "not found" }, 404)
+  return c.json({ user: { id: updated.id, role: updated.role, status: updated.status } })
+})
+
+app.post("/api/admin/users/:id/role", requireAdmin, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const body = await c.req.json().catch(() => ({}))
+  const role = body.role
+  if (role !== "admin" && role !== "member") return c.json({ error: "role must be admin or member" }, 400)
+  try {
+    const updated = await setUserRole(id, role)
+    if (!updated) return c.json({ error: "not found" }, 404)
+    return c.json({ user: { id: updated.id, role: updated.role, status: updated.status } })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "role change failed" }, 400)
+  }
+})
+
+app.delete("/api/admin/users/:id", requireAdmin, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const me = c.get("userId") as string
+  if (id === me) return c.json({ error: "cannot delete yourself" }, 400)
+  try {
+    const ok = await deleteUser(id)
+    if (!ok) return c.json({ error: "not found" }, 404)
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "delete failed" }, 400)
+  }
 })
 
 // ── settings (auth required) ──

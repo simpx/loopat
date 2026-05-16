@@ -12,7 +12,23 @@ export type LoopMeta = {
   publicAt?: string
 }
 
-export type User = { id: string }
+export type UserRole = "admin" | "member"
+export type UserStatus = "active" | "pending"
+
+export type User = {
+  id: string
+  role: UserRole
+  status: UserStatus
+}
+
+export type AdminUser = {
+  id: string
+  role: UserRole
+  status: UserStatus
+  personalRepo?: string
+  createdAt: string
+  activatedAt?: string
+}
 
 const apiFetch: typeof fetch = (input, init) =>
   fetch(input, { credentials: "include", ...init })
@@ -679,4 +695,38 @@ export async function getDailyTokenUsage(): Promise<DailyUsage> {
   const r = await apiFetch("/api/settings/token-usage/daily")
   if (!r.ok) return {}
   return (await r.json()) as DailyUsage
+}
+
+// ── admin ──
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  const r = await apiFetch("/api/admin/users")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.users as AdminUser[]) ?? []
+}
+
+export async function activateAdminUser(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/admin/users/${encodeURIComponent(id)}/activate`, { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `activate failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function setAdminUserRole(id: string, role: UserRole): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/admin/users/${encodeURIComponent(id)}/role`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ role }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `role change failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function deleteAdminUser(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/admin/users/${encodeURIComponent(id)}`, { method: "DELETE" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `delete failed (${r.status})` }
+  return { ok: true }
 }

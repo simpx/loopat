@@ -26,6 +26,7 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [importStage, setImportStage] = useState<ImportStage | null>(null)
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -46,6 +47,15 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
       })
       if (r.error) {
         setError(r.error)
+        return
+      }
+      // Pending account: no session was issued — show a notice and bounce
+      // back to the login tab. They can't proceed until an admin activates.
+      if (r.user && r.user.status === "pending") {
+        setPendingNotice(`账号 ${r.user.id} 已创建,等待管理员激活后即可登录。`)
+        setMode("login")
+        setPassword("")
+        setPersonalRepo("")
         return
       }
       if (r.needsImport && r.publicKey && r.personalRepo) {
@@ -127,6 +137,7 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
                   onClick={() => {
                     setMode(m)
                     setError(null)
+                    setPendingNotice(null)
                   }}
                   className={
                     mode === m
@@ -172,6 +183,11 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
                   />
                 </Field>
+              )}
+              {pendingNotice && !error && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                  {pendingNotice}
+                </div>
               )}
               {error && (
                 <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">
