@@ -13,6 +13,7 @@ import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
 import { PersonalImportDialog } from "./components/dialog/PersonalImportDialog"
 import { SettingsDialog } from "./components/dialog/SettingsDialog"
+import { AdminDialog } from "./components/dialog/AdminDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
 import { FocusDetail } from "./pages/FocusDetail"
@@ -45,7 +46,9 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [personalOpen, setPersonalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
+  const isAdmin = ws.currentUser?.role === "admin"
   const loggedIn = !!ws.currentUser
   const onLoopRoute = !!useMatch("/loop/:id")
   // Anonymous viewers on a loop URL get the "shared" experience: no header,
@@ -174,6 +177,18 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                 >
                   Settings
                 </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setAdminOpen(true)
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Admin
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -209,6 +224,13 @@ function Shell({ ws }: { ws: WorkspaceState }) {
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
       <PersonalImportDialog open={personalOpen} onClose={() => setPersonalOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {isAdmin && (
+        <AdminDialog
+          open={adminOpen}
+          onClose={() => setAdminOpen(false)}
+          currentUserId={me}
+        />
+      )}
     </div>
   )
 }

@@ -4,16 +4,12 @@ import { Button } from "@/components/ui/button"
 import {
   getPersonalSettings,
   updatePersonalSettings,
-  getWorkspaceSettings,
-  updateWorkspaceSettings,
   getDailyTokenUsage,
   type PersonalSettings,
-  type WorkspaceSettings,
   type TokenUsage,
   type DailyUsage,
 } from "@/api"
 
-type Category = "personal" | "workspace"
 type SidebarTab = "models" | "notifications"
 
 function formatTokens(n: number): string {
@@ -103,22 +99,15 @@ type ProviderForm = {
 }
 
 export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [category, setCategory] = useState<Category>("personal")
   const [sidebar, setSidebar] = useState<SidebarTab>("models")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  // Personal settings
   const [personal, setPersonal] = useState<PersonalSettings | null>(null)
   const [personalProviders, setPersonalProviders] = useState<Record<string, ProviderForm>>({})
   const [personalDefault, setPersonalDefault] = useState("")
   const [webhookUrl, setWebhookUrl] = useState("")
-
-  // Workspace settings
-  const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null)
-  const [workspaceProviders, setWorkspaceProviders] = useState<Record<string, ProviderForm>>({})
-  const [workspaceDefault, setWorkspaceDefault] = useState("")
 
   // New provider form
   const [newProviderName, setNewProviderName] = useState("")
@@ -133,9 +122,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setError("")
     Promise.all([
       getPersonalSettings().catch(() => null),
-      getWorkspaceSettings().catch(() => null),
       getDailyTokenUsage().catch(() => ({})),
-    ]).then(([p, w, daily]) => {
+    ]).then(([p, daily]) => {
       if (p) {
         setPersonal(p)
         const forms: Record<string, ProviderForm> = {}
@@ -152,34 +140,17 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         setPersonalDefault(p.default ?? "")
         setWebhookUrl(p.webhookUrl ?? "")
       }
-      if (w) {
-        setWorkspace(w)
-        const forms: Record<string, ProviderForm> = {}
-        for (const [name, prov] of Object.entries(w.providers)) {
-          forms[name] = {
-            model: prov.model ?? "",
-            baseUrl: prov.baseUrl ?? "",
-            apiKey: "",
-            maxContextTokens: "",
-            keyDirty: false,
-          }
-        }
-        setWorkspaceProviders(forms)
-        setWorkspaceDefault(w.default ?? "")
-      }
       if (daily) setDailyUsage(daily)
       setLoading(false)
     })
   }, [open])
 
   function handleProviderChange(
-    target: "personal" | "workspace",
     name: string,
     field: keyof ProviderForm,
     value: string,
   ) {
-    const setter = target === "personal" ? setPersonalProviders : setWorkspaceProviders
-    setter((prev) => {
+    setPersonalProviders((prev) => {
       const updated = { ...prev }
       if (!updated[name]) return prev
       const entry = { ...updated[name], [field]: value }
@@ -189,24 +160,20 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     })
   }
 
-  function handleRemoveProvider(target: "personal" | "workspace", name: string) {
-    const setForms = target === "personal" ? setPersonalProviders : setWorkspaceProviders
-    const setDef = target === "personal" ? setPersonalDefault : setWorkspaceDefault
-    setForms((prev) => {
+  function handleRemoveProvider(name: string) {
+    setPersonalProviders((prev) => {
       const updated = { ...prev }
       delete updated[name]
       return updated
     })
-    setDef((prev) => (prev === name ? "" : prev))
+    setPersonalDefault((prev) => (prev === name ? "" : prev))
   }
 
-  function handleAddProvider(target: "personal" | "workspace") {
+  function handleAddProvider() {
     const name = newProviderName.trim()
     if (!name) return
-    const setter = target === "personal" ? setPersonalProviders : setWorkspaceProviders
-    const existing = target === "personal" ? personalProviders : workspaceProviders
-    if (existing[name]) { setError("provider name already exists"); return }
-    setter((prev) => ({
+    if (personalProviders[name]) { setError("provider name already exists"); return }
+    setPersonalProviders((prev) => ({
       ...prev,
       [name]: { model: "", baseUrl: "", apiKey: "", maxContextTokens: "", keyDirty: false },
     }))
@@ -215,52 +182,31 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     setError("")
   }
 
-  async function handleSave(target: "personal" | "workspace") {
+  async function handleSave() {
     setSaving(true)
     setError("")
     try {
-      if (target === "personal") {
-        const providers: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }> = {}
-        for (const [name, f] of Object.entries(personalProviders)) {
-          providers[name] = {
-            model: f.model,
-            baseUrl: f.baseUrl,
-            ...(f.maxContextTokens ? { maxContextTokens: Number(f.maxContextTokens) } : {}),
+      const providers: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }> = {}
+      for (const [name, f] of Object.entries(personalProviders)) {
+        providers[name] = {
+          model: f.model,
+          baseUrl: f.baseUrl,
+          ...(f.maxContextTokens ? { maxContextTokens: Number(f.maxContextTokens) } : {}),
+        }
+        if (f.keyDirty && f.apiKey) {
+          providers[name].apiKey = f.apiKey
+        }
+      }
+      const ok = await updatePersonalSettings({ providers, default: personalDefault, webhookUrl })
+      if (!ok) setError("save failed")
+      else {
+        setPersonalProviders((prev) => {
+          const updated = { ...prev }
+          for (const k of Object.keys(updated)) {
+            updated[k] = { ...updated[k], keyDirty: false, apiKey: "" }
           }
-          if (f.keyDirty && f.apiKey) {
-            providers[name].apiKey = f.apiKey
-          }
-        }
-        const ok = await updatePersonalSettings({ providers, default: personalDefault, webhookUrl })
-        if (!ok) setError("save failed")
-        else {
-          setPersonalProviders((prev) => {
-            const updated = { ...prev }
-            for (const k of Object.keys(updated)) {
-              updated[k] = { ...updated[k], keyDirty: false, apiKey: "" }
-            }
-            return updated
-          })
-        }
-      } else {
-        const providers: Record<string, { model: string; baseUrl: string; apiKey?: string }> = {}
-        for (const [name, f] of Object.entries(workspaceProviders)) {
-          providers[name] = { model: f.model, baseUrl: f.baseUrl }
-          if (f.keyDirty && f.apiKey) {
-            providers[name].apiKey = f.apiKey
-          }
-        }
-        const ok = await updateWorkspaceSettings({ providers, default: workspaceDefault })
-        if (!ok) setError("save failed")
-        else {
-          setWorkspaceProviders((prev) => {
-            const updated = { ...prev }
-            for (const k of Object.keys(updated)) {
-              updated[k] = { ...updated[k], keyDirty: false, apiKey: "" }
-            }
-            return updated
-          })
-        }
+          return updated
+        })
       }
     } catch (e: any) {
       setError(e?.message ?? "save failed")
@@ -269,12 +215,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
     }
   }
 
-  const currentProviders = category === "personal" ? personalProviders : workspaceProviders
-  const currentDefault = category === "personal" ? personalDefault : workspaceDefault
-  const setCurrentDefault = category === "personal" ? setPersonalDefault : setWorkspaceDefault
-  const currentSettings = category === "personal" ? personal : workspace
-  const providerNames = Object.keys(currentProviders)
-  const tokenUsage = currentSettings?.tokenUsage ?? {}
+  const providerNames = Object.keys(personalProviders)
+  const tokenUsage = personal?.tokenUsage ?? {}
 
   if (!open) return null
 
@@ -291,32 +233,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           </DialogDescription>
         </DialogHeader>
 
-        {/* Top category tabs */}
-        <div className="flex gap-0 px-4 sm:px-6 pt-4 border-b border-gray-200 shrink-0">
-          <button
-            type="button"
-            onClick={() => { setCategory("personal"); setSidebar("models") }}
-            className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              category === "personal"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Personal
-          </button>
-          <button
-            type="button"
-            onClick={() => { setCategory("workspace"); setSidebar("models") }}
-            className={`px-3 sm:px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              category === "workspace"
-                ? "border-gray-900 text-gray-900"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            Workspace
-          </button>
-        </div>
-
         <div className="flex flex-col sm:flex-row min-h-0 flex-1 overflow-hidden">
           {/* Left sidebar - horizontal on mobile, vertical on desktop */}
           <div className="w-full sm:w-40 shrink-0 border-b sm:border-b-0 sm:border-r border-gray-200 p-2 sm:p-3 flex sm:flex-col gap-1 overflow-x-auto">
@@ -331,19 +247,17 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
             >
               Model Settings
             </button>
-            {category === "personal" && (
-              <button
-                type="button"
-                onClick={() => setSidebar("notifications")}
-                className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
-                  sidebar === "notifications"
-                    ? "bg-gray-100 text-gray-900 font-medium"
-                    : "text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                Notifications
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setSidebar("notifications")}
+              className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
+                sidebar === "notifications"
+                  ? "bg-gray-100 text-gray-900 font-medium"
+                  : "text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              Notifications
+            </button>
           </div>
 
           {/* Right content */}
@@ -368,7 +282,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                 </div>
                 <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
                   {error && <span className="text-xs text-red-500">{error}</span>}
-                  <Button onClick={() => handleSave("personal")} disabled={saving}>
+                  <Button onClick={handleSave} disabled={saving}>
                     {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
@@ -379,7 +293,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                 <div className="flex-1 flex flex-col gap-5">
                   {/* Provider cards */}
                   {providerNames.map((name) => {
-                    const f = currentProviders[name]!
+                    const f = personalProviders[name]!
 
                     return (
                       <div key={name} className="border border-gray-200 rounded-lg p-3 sm:p-4">
@@ -387,7 +301,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                           <span className="text-sm font-semibold text-gray-900">{name}</span>
                           <button
                             type="button"
-                            onClick={() => handleRemoveProvider(category, name)}
+                            onClick={() => handleRemoveProvider(name)}
                             className="text-xs text-gray-400 hover:text-red-500 transition-colors"
                           >
                             Remove
@@ -399,7 +313,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                             <input
                               type="text"
                               value={f.model}
-                              onChange={(e) => handleProviderChange(category, name, "model", e.target.value)}
+                              onChange={(e) => handleProviderChange(name, "model", e.target.value)}
                               placeholder="e.g. claude-sonnet-4-6"
                               className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                             />
@@ -409,7 +323,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                             <input
                               type="url"
                               value={f.baseUrl}
-                              onChange={(e) => handleProviderChange(category, name, "baseUrl", e.target.value)}
+                              onChange={(e) => handleProviderChange(name, "baseUrl", e.target.value)}
                               placeholder="https://api.example.com"
                               className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                             />
@@ -419,7 +333,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                             <input
                               type="password"
                               value={f.apiKey}
-                              onChange={(e) => handleProviderChange(category, name, "apiKey", e.target.value)}
+                              onChange={(e) => handleProviderChange(name, "apiKey", e.target.value)}
                               placeholder="API key"
                               className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                             />
@@ -429,7 +343,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                             <input
                               type="number"
                               value={f.maxContextTokens}
-                              onChange={(e) => handleProviderChange(category, name, "maxContextTokens", e.target.value)}
+                              onChange={(e) => handleProviderChange(name, "maxContextTokens", e.target.value)}
                               placeholder="auto"
                               className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                             />
@@ -451,14 +365,14 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                         value={newProviderName}
                         onChange={(e) => setNewProviderName(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") handleAddProvider(category)
+                          if (e.key === "Enter") handleAddProvider()
                           if (e.key === "Escape") { setAddingProvider(false); setNewProviderName("") }
                         }}
                         placeholder="provider name"
                         autoFocus
                         className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                       />
-                      <Button size="xs" onClick={() => handleAddProvider(category)}>Add</Button>
+                      <Button size="xs" onClick={handleAddProvider}>Add</Button>
                       <button
                         type="button"
                         onClick={() => { setAddingProvider(false); setNewProviderName("") }}
@@ -482,8 +396,8 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                     <div className="pt-2 border-t border-gray-200">
                       <label className="block text-sm font-medium text-gray-700 mb-1">Default Provider</label>
                       <select
-                        value={currentDefault}
-                        onChange={(e) => setCurrentDefault(e.target.value)}
+                        value={personalDefault}
+                        onChange={(e) => setPersonalDefault(e.target.value)}
                         className="px-3 py-1.5 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 bg-white"
                       >
                         <option value="">None</option>
@@ -498,7 +412,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
                 {/* Save footer */}
                 <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
                   {error && <span className="text-xs text-red-500">{error}</span>}
-                  <Button onClick={() => handleSave(category)} disabled={saving}>
+                  <Button onClick={handleSave} disabled={saving}>
                     {saving ? "Saving..." : "Save"}
                   </Button>
                 </div>
