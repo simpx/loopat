@@ -10,7 +10,7 @@ import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderC
 import { buildLoopatAppend } from "./system-prompt"
 import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { buildOuterBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./outer-sandbox"
+import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
@@ -299,7 +299,7 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.env)
+    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
