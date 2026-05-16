@@ -274,7 +274,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
         </div>
       ) : rightOpen && rightMode === "git" ? (
-        <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
+        <div className="w-64 shrink-0">
+          <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
+        </div>
       ) : rightOpen && (
         <RightPanel
           loopId={meta.id}
