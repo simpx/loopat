@@ -9,7 +9,7 @@ import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Glob
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, type ContextMount, type LoopMeta } from "../api"
+import { getContext, getLoopEnv, refreshLoopEnv, type ContextMount, type LoopEnvInfo, type LoopMeta } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { FileTree } from "../FileTree"
@@ -115,6 +115,9 @@ function LoopsList({ currentId }: { currentId: string }) {
         {filtered.map((loop) => {
           const sel = currentId === loop.id
           const archived = loop.archived === true
+          // Server rejects PATCH from non-owners with 403 — surface that
+          // upfront so users don't think the button is broken.
+          const isOwner = ws.currentUser?.id === loop.createdBy
           return (
             <div
               key={loop.id}
@@ -150,12 +153,22 @@ function LoopsList({ currentId }: { currentId: string }) {
               </button>
               <button
                 type="button"
+                disabled={!isOwner}
                 onClick={(e) => {
                   e.stopPropagation()
-                  ws.setLoopArchived(loop.id, !archived)
+                  if (isOwner) ws.setLoopArchived(loop.id, !archived)
                 }}
-                className="opacity-0 group-hover/row:opacity-100 transition-opacity w-7 flex items-center justify-center text-gray-400 hover:text-gray-700"
-                title={archived ? "unarchive" : "archive (hide + read-only)"}
+                className={
+                  "opacity-0 group-hover/row:opacity-100 transition-opacity w-7 flex items-center justify-center " +
+                  (isOwner
+                    ? "text-gray-400 hover:text-gray-700"
+                    : "text-gray-300 cursor-not-allowed")
+                }
+                title={
+                  isOwner
+                    ? (archived ? "unarchive" : "archive (hide + read-only)")
+                    : `only ${loop.createdBy} can ${archived ? "unarchive" : "archive"} this loop`
+                }
               >
                 {archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
               </button>
@@ -223,10 +236,25 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const [rightMode, setRightMode] = useState<RightMode>("workdir")
   const [pickedFile, setPickedFile] = useState<string | null>(null)
   const [mounts, setMounts] = useState<ContextMount[]>([])
+  const [envInfo, setEnvInfo] = useState<LoopEnvInfo | null>(null)
+  const [refreshingEnv, setRefreshingEnv] = useState(false)
 
   useEffect(() => {
     getContext(meta.id).then(setMounts)
+    getLoopEnv(meta.id).then(setEnvInfo)
   }, [meta.id])
+
+  const onRefreshEnv = async () => {
+    if (refreshingEnv) return
+    setRefreshingEnv(true)
+    const r = await refreshLoopEnv(meta.id)
+    if (r.ok) {
+      // Re-fetch so versions update; sandbox restart is handled server-side
+      // (next attach respawns with the new lock).
+      setEnvInfo(await getLoopEnv(meta.id))
+    }
+    setRefreshingEnv(false)
+  }
 
   const toggleMode = (m: RightMode) => {
     if (rightOpen && rightMode === m) setRightOpen(false)
@@ -248,6 +276,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         <LoopHeader
           meta={meta}
           mounts={mounts}
+          envInfo={envInfo}
+          onRefreshEnv={onRefreshEnv}
+          refreshingEnv={refreshingEnv}
           connected={connected}
           reconnecting={reconnecting}
           running={running}
@@ -299,6 +330,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
 function LoopHeader({
   meta,
   mounts,
+  envInfo,
+  onRefreshEnv,
+  refreshingEnv,
   connected,
   reconnecting,
   running,
@@ -311,6 +345,9 @@ function LoopHeader({
 }: {
   meta: LoopMeta
   mounts: ContextMount[]
+  envInfo: LoopEnvInfo | null
+  onRefreshEnv: () => Promise<void>
+  refreshingEnv: boolean
   connected: boolean
   reconnecting: boolean
   running: boolean
@@ -338,31 +375,14 @@ function LoopHeader({
     <header className="px-3 md:px-5 pt-3 pb-2 shrink-0 border-b border-gray-200">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[14px] md:text-[15px] font-medium text-gray-900">{meta.title}</span>
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         <span className="text-xs text-gray-500">
           driver: <span className="text-gray-900">{meta.createdBy}</span>
         </span>
-        <span
-          className={
-            "text-[11px] " +
-            (connected
-              ? "text-emerald-600"
-              : reconnecting
-                ? "text-amber-500"
-                : "text-red-500")
-          }
-          title={
-            connected
-              ? "ws connected"
-              : reconnecting
-                ? "reconnecting…"
-                : "disconnected"
-          }
-        >
-          ●
-        </span>
-        {!connected && reconnecting && (
-          <span className="text-[11px] text-amber-600">reconnecting…</span>
+        {/* Only surface WS state when something's wrong — green-when-fine is noise. */}
+        {!connected && (
+          <span className={"text-[11px] " + (reconnecting ? "text-amber-600" : "text-red-600")}>
+            {reconnecting ? "reconnecting…" : "disconnected"}
+          </span>
         )}
         {running && <span className="text-[11px] text-blue-600">running</span>}
         {viewers > 1 && (
@@ -415,6 +435,30 @@ function LoopHeader({
           <ContextChip key={m.path} label={m.name} value={m.name === "knowledge" ? "ro" : "rw"} />
         ))}
       </div>
+
+      {/* env row — name + version. When catalog is newer, a muted text link
+          offers refresh (intentionally low-key: pinning is the default, users
+          don't need to chase latest). */}
+      {envInfo && envInfo.name && (
+        <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
+          <span className="text-gray-400">env:</span>
+          <ContextChip
+            label={envInfo.name}
+            value={envInfo.loopVersion ?? "unversioned"}
+          />
+          {envInfo.catalogVersion && envInfo.catalogVersion !== envInfo.loopVersion && (
+            <button
+              type="button"
+              onClick={onRefreshEnv}
+              disabled={refreshingEnv}
+              className="text-gray-400 hover:text-gray-700 disabled:opacity-50 underline decoration-dotted underline-offset-2"
+              title={`catalog has ${envInfo.catalogVersion}; click to update + respawn sandbox`}
+            >
+              {refreshingEnv ? "refreshing…" : `→ ${envInfo.catalogVersion}`}
+            </button>
+          )}
+        </div>
+      )}
     </header>
   )
 }

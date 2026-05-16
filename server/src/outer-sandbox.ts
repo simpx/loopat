@@ -21,28 +21,102 @@
  *
  * See memory: project_loop_dir_is_sandbox.md
  */
+import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { promisify } from "node:util"
 import {
   loopWorkdir,
   loopClaudeDir,
+  loopEnvDir,
+  loopEnvPath,
   workspaceKnowledgeDir,
   workspaceLoopatSkillsDir,
+  workspaceLoopatEnvDir,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
+import { resolveEnvFile } from "./envs"
 import { resolvePersonalDeps } from "./personal-deps"
 import { loadPersonalConfig } from "./config"
 
-function expandHostPath(p: string, home: string): string {
-  let s = p
-  if (s === "~") s = home
-  else if (s.startsWith("~/")) s = home + s.slice(1)
-  return s.replace(/\$([A-Z_][A-Z0-9_]*)/gi, (_, name) => process.env[name] ?? "")
+const execFileP = promisify(execFile)
+
+/**
+ * Run `mise install` + `mise env --json` in the given env dir (which contains
+ * mise.toml and optionally mise.lock). Returns the env vars mise would
+ * activate (PATH + any [env] keys).
+ *
+ * Why cwd-based instead of MISE_OVERRIDE_CONFIG_FILENAMES: mise's lockfile
+ * generation requires the config to be discovered via cwd with the standard
+ * `mise.toml` name. Override silently disables lockfile writes. With cwd
+ * discovery + MISE_LOCKFILE=true, mise reads/writes `mise.lock` naturally.
+ *
+ * `mise install` is idempotent — already-installed versions are skipped.
+ * Failure is fatal: if the env was selected for a loop, we don't silently
+ * fall back to a barren PATH; surface the error to the caller.
+ */
+async function activateMiseEnv(envDirPath: string): Promise<Record<string, string>> {
+  const env = {
+    ...process.env,
+    // Trust this env dir so `mise install` doesn't prompt.
+    MISE_TRUSTED_CONFIG_PATHS: envDirPath,
+    MISE_LOCKFILE: "true",
+  }
+  try {
+    await execFileP("mise", ["install"], { env, cwd: envDirPath })
+  } catch (e: any) {
+    if (e?.code === "ENOENT") {
+      throw new Error(
+        `mise not found on host. Install from https://mise.jdx.dev to use env files.`,
+      )
+    }
+    throw new Error(`mise install failed for ${envDirPath}: ${e?.stderr ?? e?.message ?? e}`)
+  }
+  let stdout: string
+  try {
+    const r = await execFileP("mise", ["env", "--json"], { env, cwd: envDirPath })
+    stdout = r.stdout
+  } catch (e: any) {
+    throw new Error(`mise env failed for ${envDirPath}: ${e?.stderr ?? e?.message ?? e}`)
+  }
+  let parsed: Record<string, string>
+  try {
+    parsed = JSON.parse(stdout)
+  } catch (e: any) {
+    throw new Error(`mise env produced invalid JSON for ${envDirPath}: ${e?.message ?? e}`)
+  }
+  return parsed
+}
+
+/**
+ * Resolve a sandbox-side path. Only recognizes `~` and `$HOME` (sandbox's
+ * $HOME is the same path as host's homedir since tmpfs overlays it). Absolute
+ * paths pass through. No general `$VAR` expansion — sandbox-side env vars
+ * shouldn't resolve against host's env.
+ */
+function expandSandboxPath(p: string, home: string): string {
+  if (p === "~" || p === "$HOME") return home
+  if (p.startsWith("~/")) return home + p.slice(1)
+  if (p.startsWith("$HOME/")) return home + p.slice("$HOME".length)
+  return p
+}
+
+/** src: relative under personal/<user>/, no `..`, no absolute. */
+function isValidMountSrc(s: unknown): s is string {
+  if (typeof s !== "string" || !s) return false
+  if (s.startsWith("/")) return false
+  return !s.split("/").some((seg) => seg === ".." || seg === "")
+}
+
+/** dst: rooted in the sandbox — `$HOME/...`, `~/...`, `~`, or absolute `/...`. */
+function isValidMountDst(s: unknown): s is string {
+  if (typeof s !== "string" || !s) return false
+  return s === "~" || s === "$HOME" || s.startsWith("~/") || s.startsWith("$HOME/") || s.startsWith("/")
 }
 
 export const V_LOOP = (id: string) => `/loopat/loop/${id}`
@@ -60,14 +134,38 @@ export type SandboxExtraEnv = Record<string, string>
 
 /**
  * Build bwrap argv list. Caller appends `[, "--", cmd, ...args]` and spawns.
+ *
+ * `envName` (optional): a workspace env (knowledge/.loopat/envs/<name>.toml).
+ * When set, `mise install` + `mise env --json` run on the host; the env vars
+ * mise produces (PATH plus any [env] keys) are injected via --setenv, and
+ * `$HOME/.local/share/mise` is bound RO into the sandbox so the tool
+ * binaries those PATH entries point to are visible inside.
  */
 export async function buildOuterBwrapArgs(
   loopId: string,
   createdBy: string,
   extraSetenv: SandboxExtraEnv = {},
+  envName?: string,
 ): Promise<string[]> {
   const home = homedir()
   const personalDeps = await resolvePersonalDeps(createdBy)
+
+  // Resolve env up front so failures surface before we've built argv.
+  // Prefer the per-loop snapshot dir (loops/<id>/env/) over the workspace
+  // catalog so this loop is frozen at creation time — later catalog edits
+  // don't perturb running loops.
+  let miseEnv: Record<string, string> | null = null
+  if (envName) {
+    const snapshotDir = loopEnvDir(loopId)
+    const haveSnapshot = existsSync(loopEnvPath(loopId))
+    const envDirPath = haveSnapshot
+      ? snapshotDir
+      : (resolveEnvFile(envName) ? workspaceLoopatEnvDir(envName) : null)
+    if (!envDirPath) {
+      throw new Error(`env "${envName}" not found (no snapshot at ${snapshotDir}, no catalog entry)`)
+    }
+    miseEnv = await activateMiseEnv(envDirPath)
+  }
 
   // Per-component ro-binds (NOT `--ro-bind / /`) — RO root prevents bwrap from
   // mkdir'ing virtual paths like /loop. With selective binds, the sandbox
@@ -147,22 +245,38 @@ export async function buildOuterBwrapArgs(
     args.push("--bind", target, target)
   }
 
-  // user-declared host -> sandbox mounts (personal/<user>/.loopat/config.json sandbox.mounts)
+  // user-declared personal -> sandbox mounts. src is relative to
+  // personalDir(user); dst is rooted in the sandbox ($HOME/..., ~/, or abs).
+  // Always RO. Invalid entries (escape attempts, unrooted dst) are skipped
+  // with a warn — one bad mount shouldn't block the loop from starting.
   const personalCfg = await loadPersonalConfig(createdBy)
   const sandboxCfg = personalCfg.sandbox ?? {}
   for (const m of sandboxCfg.mounts ?? []) {
-    const src = expandHostPath(m.src, home)
-    const dst = expandHostPath(m.dst ?? m.src, home)
-    args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
+    if (!isValidMountSrc(m.src) || !isValidMountDst(m.dst)) {
+      console.warn(`[loopat] skipping invalid mount ${JSON.stringify(m)}`)
+      continue
+    }
+    const src = join(personalDir(createdBy), m.src)
+    const dst = expandSandboxPath(m.dst, home)
+    args.push("--ro-bind-try", src, dst)
   }
 
-  // PATH prepend (sandbox.path) — server's PATH is inherited by default; this
-  // adds dirs to the front so binaries in e.g. ~/.local/bin are found without
-  // sourcing a shell rc.
-  if (sandboxCfg.path?.length) {
-    const dirs = sandboxCfg.path.map((p) => expandHostPath(p, home)).join(":")
-    const cur = process.env.PATH ?? ""
-    args.push("--setenv", "PATH", cur ? `${dirs}:${cur}` : dirs)
+  // env (mise) data dir: tools mise installs live under $HOME/.local/share/mise
+  // on the host. $HOME inside the sandbox is tmpfs, so without re-binding, the
+  // tool binaries that mise's PATH points to are invisible. ro-bind-try so a
+  // host without mise installs yet doesn't error out.
+  if (miseEnv) {
+    const miseData = join(home, ".local", "share", "mise")
+    args.push("--ro-bind-try", miseData, miseData)
+  }
+
+  // If an env is selected, mise's PATH already includes both the tool install
+  // bins and the host PATH; pass it through wholesale. Without env, leave
+  // PATH alone (sandbox inherits process.env.PATH).
+  if (miseEnv) {
+    for (const [k, v] of Object.entries(miseEnv)) {
+      args.push("--setenv", k, v)
+    }
   }
 
   for (const [k, v] of Object.entries(extraSetenv)) {

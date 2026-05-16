@@ -160,7 +160,7 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; env?: string }): Promise<LoopMeta> {
   const r = await apiFetch("/api/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -294,6 +294,53 @@ export async function listRepos(): Promise<RepoEntry[]> {
   if (!r.ok) return []
   const j = await r.json()
   return (j.repos ?? []) as RepoEntry[]
+}
+
+export type EnvEntry = { name: string }
+export async function listEnvs(): Promise<EnvEntry[]> {
+  const r = await apiFetch(`/api/envs`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.envs ?? []) as EnvEntry[]
+}
+
+export async function readEnv(name: string): Promise<string | null> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`)
+  if (!r.ok) return null
+  const j = await r.json()
+  return typeof j.content === "string" ? j.content : null
+}
+
+export type LoopEnvInfo = {
+  name: string | null
+  loopVersion?: string | null
+  catalogVersion?: string | null
+}
+export async function getLoopEnv(id: string): Promise<LoopEnvInfo | null> {
+  const r = await apiFetch(`/api/loops/${id}/env`)
+  if (!r.ok) return null
+  return (await r.json()) as LoopEnvInfo
+}
+
+export async function refreshLoopEnv(id: string): Promise<{ ok: boolean; version?: string | null; error?: string }> {
+  const r = await apiFetch(`/api/loops/${id}/env/refresh`, { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
+  return { ok: true, version: j.version }
+}
+
+export async function writeEnv(name: string, content: string): Promise<{ ok: boolean; error?: string; locked?: boolean; lockError?: string }> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content }),
+  })
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}))
+    return { ok: false, error: j.error ?? `http ${r.status}` }
+  }
+  const j = await r.json().catch(() => ({}))
+  return { ok: true, locked: j.locked, lockError: j.lockError }
 }
 
 export type RepoDetail = RepoEntry & {
@@ -644,7 +691,6 @@ export type TokenUsage = Record<string, { inputTokens: number; outputTokens: num
 export type PersonalSettings = {
   providers: Record<string, SettingsProvider>
   default: string
-  webhookUrl: string
   tokenUsage: TokenUsage
 }
 
@@ -662,7 +708,6 @@ export async function getPersonalSettings(): Promise<PersonalSettings> {
 export async function updatePersonalSettings(patch: {
   providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
   default?: string
-  webhookUrl?: string
 }): Promise<boolean> {
   const r = await apiFetch("/api/settings/personal", {
     method: "PUT",

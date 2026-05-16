@@ -5,6 +5,8 @@ import { join } from "node:path"
 import { buildOuterBwrapArgs } from "./outer-sandbox"
 import { getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
+import { readEnvMeta, readEnvMetaFromPath } from "./envs"
+import { loopEnvMetaPath } from "./paths"
 
 type Term = {
   proc: IPty
@@ -29,6 +31,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
   const inflight = pending.get(loopId)
   if (inflight) return inflight
 
+  const tag = loopId.slice(0, 8)
   const p = (async () => {
     // Outer bwrap argv (same shape as Claude CLI's outer sandbox — virtual
     // /loopat/loop/<id>/, /loopat/context/*). Wrap inner shell with `script`
@@ -37,7 +40,18 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const personalCfg = await loadPersonalConfig(meta.createdBy)
-    const innerShell = personalCfg.sandbox?.shell ?? "/usr/bin/fish"
+    // Shell resolution (highest precedence first):
+    //   1. personal config sandbox.shell — user's per-user override
+    //   2. env.json `shell` — env writer's choice (prefer loop snapshot copy,
+    //      fall back to catalog if no snapshot)
+    //   3. /bin/bash — POSIX-guaranteed fallback (always present via /bin bind)
+    let innerShell = personalCfg.sandbox?.shell
+    if (!innerShell && meta.config?.env) {
+      const snapshotMeta = await readEnvMetaFromPath(loopEnvMetaPath(loopId))
+      const envMeta = snapshotMeta ?? await readEnvMeta(meta.config.env)
+      if (envMeta?.shell) innerShell = envMeta.shell
+    }
+    if (!innerShell) innerShell = "/bin/bash"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
 
     // Fish (and other interactive shells) want to write to XDG_DATA_HOME
@@ -58,8 +72,9 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
-    })
+    }, meta.config?.env)
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
+    console.error(`[term:${tag}] spawn bwrap argc=${fullArgs.length} env=${meta.config?.env ?? "<none>"}`)
     const proc = spawn("bwrap", fullArgs, {
       name: "xterm-256color",
       cols: 80,
@@ -83,6 +98,13 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       }
     })
     proc.onExit(({ exitCode }) => {
+      // bwrap nonzero exit usually means: argv malformed, bind src missing,
+      // inner cmd failed. Surface it in server log + scrollback so the user
+      // can debug without grepping. Zero exit = normal shell quit, silent.
+      if (exitCode !== 0) {
+        const trailing = t.scrollback.join("").slice(-400)
+        console.error(`[term:${tag}] bwrap exit=${exitCode}; last 400 bytes of pty output:\n${trailing}`)
+      }
       for (const ws of t.subscribers) {
         try {
           ws.send(JSON.stringify({ type: "exit", code: exitCode }))
@@ -98,6 +120,9 @@ async function getOrSpawn(loopId: string): Promise<Term> {
   pending.set(loopId, p)
   try {
     return await p
+  } catch (e: any) {
+    console.error(`[term:${tag}] spawn failed: ${e?.message ?? e}`)
+    throw e
   } finally {
     pending.delete(loopId)
   }

@@ -4,13 +4,14 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopEnv } from "./loops"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
+import { getEnvVersion, isValidEnvName, listEnvs, lockEnv, readEnv, writeEnv } from "./envs"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -231,7 +232,6 @@ app.get("/api/settings/personal", requireAuth, async (c) => {
   return c.json({
     providers,
     default: cfg.default,
-    webhookUrl: cfg.webhookUrl ?? "",
     tokenUsage,
   })
 })
@@ -243,7 +243,6 @@ app.put("/api/settings/personal", requireAuth, async (c) => {
     await savePersonalConfig(userId, {
       default: typeof body.default === "string" ? body.default : undefined,
       providers: body.providers,
-      webhookUrl: typeof body.webhookUrl === "string" ? body.webhookUrl : undefined,
     })
     return c.json({ ok: true })
   } catch (e: any) {
@@ -473,8 +472,9 @@ app.post("/api/loops", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
+  const env = typeof body.env === "string" && body.env.trim() ? body.env.trim() : undefined
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId })
+    const meta = await createLoop({ title, repo, createdBy: userId, env })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
@@ -543,6 +543,39 @@ app.get("/api/loops/:id/context", requireAuth, async (c) => {
   if (existsSync(loopContextPersonal(id))) mounts.push({ name: "personal", path: "context/personal" })
   if (existsSync(loopContextRepos(id))) mounts.push({ name: "repos", path: "context/repos" })
   return c.json({ mounts })
+})
+
+// Loop's active env + version comparison. UI uses catalogVersion vs
+// loopVersion to surface "update available". Null env = no env set.
+app.get("/api/loops/:id/env", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  const name = meta.config?.env
+  if (!name) return c.json({ name: null })
+  const loopVersion = meta.config?.env_version ?? null
+  const catalogVersion = await getEnvVersion(name)
+  return c.json({ name, loopVersion, catalogVersion })
+})
+
+// Refresh: re-copy catalog env into this loop, then tear down SDK session
+// and PTY so next reconnect picks up the new lockfile.
+app.post("/api/loops/:id/env/refresh", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived" }, 403)
+  if (!meta.config?.env) return c.json({ error: "loop has no env" }, 400)
+  try {
+    const version = await refreshLoopEnv(id)
+    // Existing bwrap argv (PATH, mise data dir bind) is baked at spawn time —
+    // forced respawn is how the new lockfile takes effect.
+    destroyLoopSession(id)
+    killTerm(id)
+    return c.json({ ok: true, version })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "refresh failed" }, 500)
+  }
 })
 
 app.get("/api/loops/:id/files", requireAuth, async (c) => {
@@ -852,6 +885,31 @@ app.get("/api/workspace/repos", requireAuth, async (c) => {
   return c.json({ repos: await listRepos() })
 })
 
+app.get("/api/envs", requireAuth, async (c) => {
+  return c.json({ envs: await listEnvs() })
+})
+
+app.get("/api/envs/:name", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  const content = await readEnv(name)
+  if (content === null) return c.json({ error: "not found" }, 404)
+  return c.json({ name, content })
+})
+
+app.put("/api/envs/:name", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
+  await writeEnv(name, body.content)
+  // After save, regenerate the lockfile (pin "latest" → exact versions). Save
+  // never fails on lock errors — surface them so the UI can show "saved but
+  // lock failed: <msg>" rather than silently leaving the env unpinned.
+  const lockRes = await lockEnv(name)
+  return c.json({ ok: true, name, locked: lockRes.ok, lockError: lockRes.error })
+})
+
 app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
   const detail = await readRepoDetail(name)
@@ -1112,7 +1170,18 @@ app.get(
     return {
       async onOpen(_e, ws) {
         attachedTerm = ws
-        await attachTerm(id, ws)
+        try {
+          await attachTerm(id, ws)
+        } catch (e: any) {
+          attachedTerm = null
+          const msg = e?.message ?? String(e)
+          console.error(`[term:${id.slice(0, 8)}] attach failed: ${msg}`)
+          try {
+            ws.send(JSON.stringify({ type: "error", message: msg }))
+            ws.send(JSON.stringify({ type: "exit", code: -1 }))
+          } catch {}
+          try { ws.close() } catch {}
+        }
       },
       async onMessage(event, ws) {
         try {
