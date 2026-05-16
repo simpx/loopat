@@ -173,6 +173,11 @@ export async function createLoop(opts: { title: string; repo?: string; env?: str
   return (await r.json()) as LoopMeta
 }
 
+export async function markLoopViewed(id: string): Promise<boolean> {
+  const r = await apiFetch(`/api/loops/${id}/viewed`, { method: "POST" })
+  return r.ok
+}
+
 export async function setLoopArchived(id: string, archived: boolean): Promise<LoopMeta | null> {
   const r = await apiFetch(`/api/loops/${id}`, {
     method: "PATCH",

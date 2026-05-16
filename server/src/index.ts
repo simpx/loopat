@@ -537,6 +537,22 @@ app.post("/api/loops", requireAuth, async (c) => {
   }
 })
 
+app.post("/api/loops/:id/viewed", requireAuth, async (c) => {
+  const id = c.req.param("id")
+  markLoopViewed(id)
+  // Broadcast immediately so UI updates without refresh
+  const entry = getLoopStatus()[id]
+  if (entry) {
+    const update = { [id]: entry }
+    for (const [ws, ids] of statusWatchers) {
+      if (ids.has(id)) {
+        try { ws.send(JSON.stringify({ type: "update", data: update })) } catch {}
+      }
+    }
+  }
+  return c.json({ ok: true })
+})
+
 // Public-or-auth: anonymous visitors get meta only when the loop is public.
 app.get("/api/loops/:id", async (c) => {
   const id = c.req.param("id") ?? ""
@@ -1444,6 +1460,56 @@ app.get(
 )
 
 // ── static assets (production) ──
+import { getLoopStatus, watchStatusFile, markLoopViewed, type LoopStatusMap } from "./loop-status"
+
+// ── Loop status real-time hub ──
+
+let lastSnapshot: LoopStatusMap = getLoopStatus()
+const statusWatchers = new Map<any, Set<string>>()
+
+watchStatusFile((curr, prev) => {
+  lastSnapshot = curr
+  for (const [ws, ids] of statusWatchers) {
+    const updates: LoopStatusMap = {}
+    for (const id of ids) {
+      if (curr[id]?.updated !== prev[id]?.updated) {
+        updates[id] = curr[id]
+      }
+    }
+    if (Object.keys(updates).length) {
+      try { ws.send(JSON.stringify({ type: "update", data: updates })) } catch {}
+    }
+  }
+})
+
+app.get("/ws/loop-status", upgradeWebSocket((c) => {
+  return {
+    onOpen: (_ev, ws) => {
+      statusWatchers.set(ws, new Set())
+    },
+    onMessage: (ev, ws) => {
+      try {
+        const text = typeof ev.data === "string" ? ev.data : new TextDecoder().decode(ev.data as ArrayBuffer)
+        const msg = JSON.parse(text)
+        if (msg.type === "subscribe") {
+          const ids = new Set(msg.ids as string[])
+          statusWatchers.set(ws, ids)
+          const init: LoopStatusMap = {}
+          for (const id of ids) {
+            if (lastSnapshot[id]) init[id] = lastSnapshot[id]
+          }
+          ws.send(JSON.stringify({ type: "init", data: init }))
+        }
+      } catch (e) {
+        console.error("[ws/loop-status] error:", e)
+      }
+    },
+    onClose: (_ev, ws) => {
+      statusWatchers.delete(ws)
+    }
+  }
+}))
+
 import { join } from "node:path"
 import { networkInterfaces } from "node:os"
 const webDist = join(import.meta.dir, "..", "..", "web", "dist")

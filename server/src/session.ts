@@ -11,6 +11,7 @@ import { buildLoopatAppend } from "./system-prompt"
 import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildOuterBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./outer-sandbox"
+import { updateLoopStatus } from "./loop-status"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
@@ -539,6 +540,7 @@ class LoopSession {
           this.persist(msg)
         }
         this.broadcast(msg)
+        this.updateStatus(msg)
       }
     } catch (e: any) {
       console.error(`[sdk:${tag}] consume error:`, e?.message ?? e)
@@ -593,6 +595,96 @@ class LoopSession {
       try {
         ws.send(data)
       } catch {}
+    }
+  }
+
+  private updateStatus(msg: any) {
+    console.log(`[session:${this.id.slice(0,8)}] updateStatus msg.type:`, msg.type)
+    // 1. 用户输入状态
+    if (msg.type === "user") {
+      const text = typeof msg.content === "string" ? msg.content : msg.content?.[0]?.text || ""
+      if (text) {
+        updateLoopStatus(this.id, `User: ${text.slice(0, 50)}${text.length > 50 ? "..." : ""}`)
+      }
+      return
+    }
+
+    // 2. AI 响应状态 (assistant 消息)
+    if (msg.type === "assistant") {
+      const content = Array.isArray(msg.content) ? msg.content : []
+      // 优先捕获 tool_use 或 thinking
+      for (const block of content) {
+        if (block.type === "tool_use") {
+          updateLoopStatus(this.id, `Using ${block.name || "tool"}...`)
+          return
+        }
+        if (block.type === "thinking" || block.type === "reasoning") {
+          updateLoopStatus(this.id, "Thinking...")
+          return
+        }
+      }
+      // 其次捕获文本输出
+      const textBlock = content.find((b: any) => b.type === "text")
+      if (textBlock?.text) {
+        const text = textBlock.text
+        const preview = text.trim().slice(-60).replace(/\n/g, " ")
+        updateLoopStatus(this.id, preview || "Generating...")
+      }
+      return
+    }
+
+    // 3. Stream events (Real-time updates)
+    if (msg.type === "stream_event") {
+      const evt = msg.event || msg.data
+      if (evt?.type === "content_block_start") {
+        const block = evt.content_block || evt.data
+        if (block?.type === "tool_use") {
+          updateLoopStatus(this.id, `Using ${block.name || "tool"}...`)
+          return
+        }
+        if (block?.type === "thinking") {
+          updateLoopStatus(this.id, "Thinking...")
+          return
+        }
+      }
+      if (evt?.type === "content_block_delta") {
+        const delta = evt.delta || evt.data
+        if (delta?.type === "text" && delta.text) {
+          updateLoopStatus(this.id, delta.text.slice(-60).replace(/\n/g, " "))
+          return
+        }
+      }
+      // Debug: log unknown structure
+      if (!evt) {
+        console.log("[session] stream_event structure:", JSON.stringify(msg).slice(0, 150))
+      }
+      return
+    }
+
+    // 4. 兼容独立事件类型
+    if (msg.type === "tool_use" || msg.type === "tool_call") {
+      updateLoopStatus(this.id, `Using ${msg.name || msg.tool_name || "tool"}...`)
+      return
+    }
+    if (msg.type === "thinking" || msg.type === "reasoning") {
+      updateLoopStatus(this.id, "Thinking...")
+      return
+    }
+    if (msg.type === "content_block_start" || msg.type === "content_block_delta") {
+      const delta = msg.delta || msg.content_block
+      if (delta?.type === "tool_use") {
+        updateLoopStatus(this.id, `Using ${delta.name || "tool"}...`)
+      } else if (delta?.type === "thinking" || delta?.type === "reasoning") {
+        updateLoopStatus(this.id, "Thinking...")
+      } else if (delta?.type === "text" && delta.text) {
+        updateLoopStatus(this.id, delta.text.slice(-60).replace(/\n/g, " "))
+      }
+      return
+    }
+
+    // 5. 结束状态
+    if (msg.type === "result" || msg.stop_reason || msg.type === "message_stop") {
+      updateLoopStatus(this.id, "Done")
     }
   }
 
@@ -695,6 +787,7 @@ class LoopSession {
   }
 
   async sendUserText(text: string, permissionMode?: SdkPermissionMode) {
+    updateLoopStatus(this.id, `User: ${text.slice(0, 50)}${text.length > 50 ? "..." : ""}`)
     if (this.generating || this.messageQueue.length > 0 || this.queueProcessing) {
       this.messageQueue.push({ text, permissionMode })
       this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
