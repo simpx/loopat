@@ -215,6 +215,18 @@ export async function writeFile(loopId: string, path: string, content: string): 
   return r.ok
 }
 
+export async function uploadFile(loopId: string, file: File): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const formData = new FormData()
+  formData.append("file", file)
+  const r = await apiFetch(`/api/loops/${loopId}/upload`, {
+    method: "POST",
+    body: formData,
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? "upload failed" }
+  return { ok: true, path: j.path }
+}
+
 export type ContextMount = { name: string; path: string }
 export async function getContext(loopId: string): Promise<ContextMount[]> {
   const r = await apiFetch(`/api/loops/${loopId}/context`)

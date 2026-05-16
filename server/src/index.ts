@@ -523,6 +523,25 @@ app.put("/api/loops/:id/file", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
+app.post("/api/loops/:id/upload", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const formData = await c.req.formData()
+  const file = formData.get("file")
+  if (!(file instanceof File)) return c.json({ error: "file required" }, 400)
+  const dir = loopWorkdir(id)
+  const filePath = join(dir, file.name)
+  try {
+    const buf = await file.arrayBuffer()
+    await Bun.write(filePath, new Uint8Array(buf))
+    return c.json({ ok: true, path: file.name })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "upload failed" }, 500)
+  }
+})
+
 // ── git operations (workdir) ──
 
 type GitFileInfo = {
