@@ -6,6 +6,7 @@ import { useEffect, useState } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check } from "lucide-react"
+import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
@@ -220,47 +221,113 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const ws = useWorkspace()
   const isMobile = useIsMobile()
   const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
-  const [rightOpen, setRightOpen] = useState(false)
-  const [rightMode, setRightMode] = useState<RightMode>("workdir")
+  const [openPanels, setOpenPanels] = useState<RightMode[]>([])
   const [pickedFile, setPickedFile] = useState<string | null>(null)
   const [mounts, setMounts] = useState<ContextMount[]>([])
   const [shareOpen, setShareOpen] = useState(false)
+  const [chatSize, setChatSize] = useState(() => {
+    const saved = localStorage.getItem("loopat:chatSize")
+    return saved ? parseInt(saved, 10) : 60
+  })
+  const [sideSplit, setSideSplit] = useState(() => {
+    const saved = localStorage.getItem("loopat:sideSplit")
+    return saved ? parseInt(saved, 10) : 50
+  })
 
   useEffect(() => {
     getContext(meta.id).then(setMounts)
   }, [meta.id])
 
   const toggleMode = (m: RightMode) => {
-    if (rightOpen && rightMode === m) setRightOpen(false)
-    else {
-      setRightOpen(true)
-      setRightMode(m)
-    }
+    setOpenPanels((prev) => {
+      if (prev.includes(m)) return prev.filter((p) => p !== m)
+      return [...prev, m]
+    })
   }
 
   const openFile = (path: string) => {
     setPickedFile(path)
-    setRightOpen(true)
-    setRightMode("editor")
+    setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
+  }
+
+  const closePanel = (m: RightMode) => {
+    setOpenPanels((prev) => prev.filter((p) => p !== m))
+  }
+
+  const onChatResize = (layout: Record<string, number>) => {
+    const cSize = layout["chat"] ?? chatSize
+    setChatSize(cSize)
+    localStorage.setItem("loopat:chatSize", String(cSize))
+  }
+
+  const onSideSplitResize = (layout: Record<string, number>) => {
+    const sSize = layout["editorCol"] ?? sideSplit
+    setSideSplit(sSize)
+    localStorage.setItem("loopat:sideSplit", String(sSize))
+  }
+
+  const hasPanels = openPanels.length > 0
+  const editorPanels = openPanels.filter((m) => m === "editor" || m === "terminal")
+  const otherPanels = openPanels.filter((m) => m !== "editor" && m !== "terminal")
+  const hasEditorCol = editorPanels.length > 0
+  const hasOtherCol = otherPanels.length > 0
+
+  const renderPanel = (mode: RightMode) => {
+    if (mode === "git") {
+      return <GitDiffSidebar key={mode} loopId={meta.id} onClose={() => closePanel("git")} onPickFile={openFile} />
+    }
+    return (
+      <RightPanel
+        key={mode}
+        loopId={meta.id}
+        meta={meta}
+        mode={mode}
+        onClose={() => closePanel(mode)}
+        pickedFile={pickedFile}
+        onPickFile={openFile}
+        currentUserId={ws.currentUser?.id ?? ""}
+      />
+    )
+  }
+
+  const renderVerticalGroup = (panels: RightMode[]) => {
+    if (panels.length === 0) return null
+    if (panels.length === 1) return <>{renderPanel(panels[0])}</>
+    return (
+      <Group orientation="vertical" className="flex-1 min-w-0 min-h-0">
+        {panels.map((mode) => (
+          <Panel key={mode} id={mode} minSize={10} className="flex flex-col min-h-0 min-w-0">
+            {renderPanel(mode)}
+          </Panel>
+        ))}
+        {panels.slice(0, -1).map((_, i) => (
+          <Separator
+            key={`sep-${panels[i]}`}
+            className="relative h-1.5 cursor-row-resize group flex items-center justify-center after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400"
+          >
+            <div className="absolute left-1/2 -translate-x-1/2 w-8 h-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+          </Separator>
+        ))}
+      </Group>
+    )
   }
 
   return (
-    <div className="flex-1 min-w-0 min-h-0 flex">
-      <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
-        <LoopHeader
-          meta={meta}
-          mounts={mounts}
-          connected={connected}
-          reconnecting={reconnecting}
-          running={running}
-          viewers={viewers}
-          queue={queue}
-          onClearQueue={onClearQueue}
-          rightOpen={rightOpen}
-          rightMode={rightMode}
-          toggleMode={toggleMode}
-          onShareWork={() => setShareOpen(true)}
-        />
+    <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+      <LoopHeader
+        meta={meta}
+        mounts={mounts}
+        connected={connected}
+        reconnecting={reconnecting}
+        running={running}
+        viewers={viewers}
+        queue={queue}
+        onClearQueue={onClearQueue}
+        openPanels={openPanels}
+        toggleMode={toggleMode}
+        onShareWork={() => setShareOpen(true)}
+      />
+      {isMobile ? (
         <div className="flex-1 min-h-0">
           <LoopRuntimeProvider extra={extra}>
             <AssistantRuntimeProvider runtime={runtime}>
@@ -271,26 +338,77 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
         </div>
-      </main>
-      {rightOpen && rightMode === "git" && isMobile ? (
-        <div className="fixed inset-0 z-40">
-          <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
+      ) : hasPanels ? (
+        <Group
+          orientation="horizontal"
+          className="flex-1 min-w-0 min-h-0"
+          onLayoutChange={onChatResize}
+        >
+          <Panel
+            id="chat"
+            minSize={20}
+            defaultSize={chatSize}
+            className="flex flex-col min-h-0 min-w-0"
+          >
+            <LoopRuntimeProvider extra={extra}>
+              <AssistantRuntimeProvider runtime={runtime}>
+                <ChatInterface
+                  archived={meta.archived === true}
+                  onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+                />
+              </AssistantRuntimeProvider>
+            </LoopRuntimeProvider>
+          </Panel>
+          <Separator className="relative w-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+            <div className="absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+          </Separator>
+          <Panel
+            id="side"
+            minSize={15}
+            defaultSize={100 - chatSize}
+            className="flex flex-col min-h-0 min-w-0"
+          >
+            {hasEditorCol && hasOtherCol ? (
+              <Group
+                orientation="horizontal"
+                className="flex-1 min-w-0 min-h-0"
+                onLayoutChange={onSideSplitResize}
+              >
+                <Panel id="editorCol" minSize={15} defaultSize={sideSplit} className="flex flex-col min-h-0 min-w-0">
+                  {renderVerticalGroup(editorPanels)}
+                </Panel>
+                <Separator className="relative w-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+                  <div className="absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                </Separator>
+                <Panel id="otherCol" minSize={15} defaultSize={100 - sideSplit} className="flex flex-col min-h-0 min-w-0">
+                  {renderVerticalGroup(otherPanels)}
+                </Panel>
+              </Group>
+            ) : (
+              <>
+                {hasEditorCol && renderVerticalGroup(editorPanels)}
+                {hasOtherCol && renderVerticalGroup(otherPanels)}
+              </>
+            )}
+          </Panel>
+        </Group>
+      ) : (
+        <div className="flex-1 min-h-0">
+          <LoopRuntimeProvider extra={extra}>
+            <AssistantRuntimeProvider runtime={runtime}>
+              <ChatInterface
+                archived={meta.archived === true}
+                onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+              />
+            </AssistantRuntimeProvider>
+          </LoopRuntimeProvider>
         </div>
-      ) : rightOpen && rightMode === "git" ? (
-        <div className="w-64 shrink-0">
-          <GitDiffSidebar loopId={meta.id} onClose={() => setRightOpen(false)} onPickFile={openFile} />
-        </div>
-      ) : rightOpen && (
-        <RightPanel
-          loopId={meta.id}
-          meta={meta}
-          mode={rightMode}
-          onClose={() => setRightOpen(false)}
-          pickedFile={pickedFile}
-          onPickFile={openFile}
-          currentUserId={ws.currentUser?.id ?? ""}
-        />
       )}
+      {hasPanels && isMobile && openPanels.map((mode) => (
+        <div key={mode} className="fixed inset-0 z-40">
+          {renderPanel(mode)}
+        </div>
+      ))}
       <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>
   )
@@ -309,8 +427,7 @@ function LoopHeader({
   viewers,
   queue,
   onClearQueue,
-  rightOpen,
-  rightMode,
+  openPanels,
   toggleMode,
   onShareWork,
 }: {
@@ -322,8 +439,7 @@ function LoopHeader({
   viewers: number
   queue: string[]
   onClearQueue: () => void
-  rightOpen: boolean
-  rightMode: RightMode
+  openPanels: RightMode[]
   toggleMode: (m: RightMode) => void
   onShareWork: () => void
 }) {
@@ -331,7 +447,7 @@ function LoopHeader({
     <button
       key={m}
       className={
-        rightOpen && rightMode === m
+        openPanels.includes(m)
           ? "px-2 py-0.5 rounded bg-gray-100 text-gray-900"
           : "px-2 py-0.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-50"
       }
@@ -410,7 +526,7 @@ function LoopHeader({
           {modeBtn("▷ terminal", "terminal")}
           <button
             className={
-              rightOpen && rightMode === "git"
+              openPanels.includes("git")
                 ? "px-2 py-0.5 rounded bg-gray-100 text-gray-900"
                 : "px-2 py-0.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-50"
             }
@@ -550,7 +666,7 @@ function RightPanel({
   const isMobile = useIsMobile()
 
   const panel = (
-    <aside className={`${isMobile ? "h-full w-full" : "flex-1"} min-w-0 border-l border-gray-200 bg-white flex flex-col`}>
+    <aside className="flex-1 min-w-0 bg-white flex flex-col">
       <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
         <span className="capitalize">{mode}</span>
         {mode === "editor" && (
