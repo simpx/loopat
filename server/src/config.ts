@@ -52,23 +52,24 @@ export type RepoSpec = {
 }
 
 /**
- * Personal -> sandbox bind. `src` is relative to `personal/<user>/` (no `..`
- * segments, no absolute path). To mount encrypted secrets, point at
- * `.loopat/secrets/<...>` — that subtree is already covered by git-crypt, so
- * no extra encryption layer outside `secrets/` is needed. `dst` is the
- * sandbox-side path and must be rooted (`$HOME/...`, `~/...`, or `/...`).
- * Always RO. Missing source is silently skipped (uses bwrap --ro-bind-try).
+ * Sandbox bind. `dst` is the sandbox-side path; must be rooted
+ * (`$HOME/...`, `~/...`, or absolute `/...`). `src` semantics depend on
+ * which config holds it:
+ *
+ * - **Operator** (`~/.dashscope/config.json` `mounts`): `src` is any host
+ *   path (`~/...`, `$HOME/...`, or absolute `/...`). Operator owns the
+ *   host, so we don't restrict scope.
+ * - **Member** (`personal/<user>/.loopat/config.json` `mounts`): `src` MUST
+ *   be relative under `personal/<user>/` (no `..`, no absolute). Encrypted
+ *   dotfiles live at `.loopat/secrets/<...>` (git-crypt covers that
+ *   subtree); reference them via mounts.
+ *
+ * `rw` defaults to false (RO bind). Missing source is silently skipped.
  */
-export type SandboxMount = {
+export type Mount = {
   src: string
   dst: string
-}
-
-export type SandboxConfig = {
-  /** Shell for PTY sessions (e.g. /usr/bin/fish). Falls back to SHELL env var then /bin/bash. */
-  shell?: string
-  /** Personal -> sandbox binds. */
-  mounts?: SandboxMount[]
+  rw?: boolean
 }
 
 /**
@@ -85,6 +86,9 @@ export type WorkspaceConfig = {
   repos?: RepoSpec[]
   providers?: Record<string, ProviderConfig>
   default?: string
+  /** Operator-level mounts — any host path. Shared across all loops on this
+   *  workspace. Only the operator (the host shell user) can edit. */
+  mounts?: Mount[]
   /** Domain suffix for workspace serve (e.g. "nip.io"). Defaults to "nip.io". */
   serveDomain?: string
   /** Whether to include port in the share URL. */
@@ -97,8 +101,9 @@ export type WorkspaceConfig = {
 
 /**
  * Personal config (personal/<user>/.loopat/config.json): per-user, kept in
- * each driver's personal/ tree. Carries sandbox mounts (what host paths the
- * loop sandbox can see) + model providers + default provider choice.
+ * each driver's personal/ tree. Carries member-level mounts (personal-
+ * relative bind specs) + shell override + model providers + default
+ * provider choice.
  *
  * apiKey is NOT stored here — for each provider, loadPersonalConfig reads
  * personal/<user>/.loopat/secrets/provider-keys/<name> and fills the
@@ -108,7 +113,10 @@ export type WorkspaceConfig = {
 export type PersonalConfig = {
   default: string
   providers: Record<string, ProviderConfig>
-  sandbox?: SandboxConfig
+  /** Member-level mounts — src must be personal-relative. See Mount JSDoc. */
+  mounts?: Mount[]
+  /** PTY shell override (highest precedence; beats sandbox.json's shell). */
+  shell?: string
 }
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
@@ -300,7 +308,8 @@ export async function savePersonalConfig(user: string, cfg: {
   const out: PersonalConfig = {
     default: cfg.default ?? existing.default,
     providers: cfg.providers !== undefined ? providers as any : existing.providers,
-    ...(existing.sandbox ? { sandbox: existing.sandbox } : {}),
+    ...(existing.mounts ? { mounts: existing.mounts } : {}),
+    ...(existing.shell ? { shell: existing.shell } : {}),
   }
   await mkdir(personalLoopatDir(user), { recursive: true })
   await writeFile(personalLoopatConfigPath(user), JSON.stringify(out, null, 2) + "\n")

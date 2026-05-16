@@ -2,11 +2,11 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { buildOuterBwrapArgs } from "./outer-sandbox"
+import { buildBwrapArgs } from "./bwrap"
 import { getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
-import { readEnvMeta, readEnvMetaFromPath } from "./envs"
-import { loopEnvMetaPath } from "./paths"
+import { readSandboxMeta, readSandboxMetaFromPath } from "./sandboxes"
+import { loopSandboxMetaPath } from "./paths"
 
 type Term = {
   proc: IPty
@@ -41,15 +41,15 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const personalCfg = await loadPersonalConfig(meta.createdBy)
     // Shell resolution (highest precedence first):
-    //   1. personal config sandbox.shell — user's per-user override
-    //   2. env.json `shell` — env writer's choice (prefer loop snapshot copy,
-    //      fall back to catalog if no snapshot)
+    //   1. personal config `shell` — user's per-user override
+    //   2. sandbox.json `shell` — sandbox author's choice (prefer loop snapshot
+    //      copy, fall back to catalog if no snapshot)
     //   3. /bin/bash — POSIX-guaranteed fallback (always present via /bin bind)
-    let innerShell = personalCfg.sandbox?.shell
-    if (!innerShell && meta.config?.env) {
-      const snapshotMeta = await readEnvMetaFromPath(loopEnvMetaPath(loopId))
-      const envMeta = snapshotMeta ?? await readEnvMeta(meta.config.env)
-      if (envMeta?.shell) innerShell = envMeta.shell
+    let innerShell = personalCfg.shell
+    if (!innerShell && meta.config?.sandbox) {
+      const snapshotMeta = await readSandboxMetaFromPath(loopSandboxMetaPath(loopId))
+      const sandboxMeta = snapshotMeta ?? await readSandboxMeta(meta.config.sandbox)
+      if (sandboxMeta?.shell) innerShell = sandboxMeta.shell
     }
     if (!innerShell) innerShell = "/bin/bash"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
@@ -68,13 +68,13 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     await mkdir(fishRuntime, { recursive: true })
     await chmod(fishRuntime, 0o700).catch(() => {})
 
-    const bwrapArgs = await buildOuterBwrapArgs(loopId, meta.createdBy, {
+    const bwrapArgs = await buildBwrapArgs(loopId, meta.createdBy, {
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
-    }, meta.config?.env)
+    }, meta.config?.sandbox)
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
-    console.error(`[term:${tag}] spawn bwrap argc=${fullArgs.length} env=${meta.config?.env ?? "<none>"}`)
+    console.error(`[term:${tag}] spawn bwrap argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"}`)
     const proc = spawn("bwrap", fullArgs, {
       name: "xterm-256color",
       cols: 80,

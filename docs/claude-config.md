@@ -18,7 +18,7 @@ All team-shared Claude Code config lives under the reserved namespace
 LOOPAT_HOME/
 ├── config.json                                       # workspace runtime config (knowledge/notes/repos)
 ├── personal/<user>/.loopat/
-│   ├── config.json                                   # per-user config (providers, default, sandbox.mounts)
+│   ├── config.json                                   # per-user config (providers, default, mounts, shell)
 │   └── secrets/
 │       ├── provider-keys/<provider-name>             # loopat reads → provider.apiKey
 │       └── <service>/<VAR>                           # user-owned tokens (filename = env-var name)
@@ -38,11 +38,13 @@ Rules:
 - Everything else under `knowledge/` is plain team docs; everything else under
   `personal/<user>/` is user-owned freeform space.
 - Workspace `config.json` is **team-shared** (knowledge/notes/repos URLs only).
-  Per-user fields (providers, default, sandbox.mounts) live in
-  `personal/<user>/.loopat/config.json`. `sandbox.mounts` `src` is relative
+  Per-user fields (providers, default, mounts, shell) live in
+  `personal/<user>/.loopat/config.json`. Member `mounts` have `src` relative
   to `personal/<user>/` (RO); `dst` must be sandbox-rooted (`$HOME/...`,
   `~/...`, or `/...`). Encrypted dotfiles live under `.loopat/secrets/...`
-  and get bind-mounted via mounts pointing at that path.
+  and get bind-mounted via mounts pointing at that path. Operator `mounts`
+  live in `~/.dashscope/config.json` (workspace config) and can name any
+  host path.
 - `personal/<user>/.loopat/secrets/<service>/<VAR>` follows the ccx convention:
   filename = env-var name, file body = value.
 

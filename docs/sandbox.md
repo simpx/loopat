@@ -44,7 +44,7 @@ host
 **沙箱里的**：claude CLI driver + 它 spawn 的 bash + PTY 的交互式 bash。
 **沙箱外的**：loopat server（含 ws server、REST handlers、文件系统 helpers、SDK 驱动调用方）。
 
-PTY 和 Claude SDK 走**同一个** `buildOuterBwrapArgs(loopId)`，所以两者**视野完全一致**：terminal 里 `cd /loop` `ls /context` 跟 Claude 的 `Read /personal/memory/...` 看到的是同一个虚拟世界。
+PTY 和 Claude SDK 走**同一个** `buildBwrapArgs(loopId)`，所以两者**视野完全一致**：terminal 里 `cd /loop` `ls /context` 跟 Claude 的 `Read /personal/memory/...` 看到的是同一个虚拟世界。
 
 ### 共用 / 独占矩阵
 
@@ -155,19 +155,48 @@ Claude 在 sandbox 里看到的：
 
 **关键**：用 per-component `--ro-bind-try` 而**不是** `--ro-bind / /`。后者会让 / 整个 RO，bwrap 之后 mkdir `/loop` `/context` 这种新路径会失败（"Read-only file system"）。前者让 sandbox root 是 fresh tmpfs，bwrap 自由创建虚拟挂载点。
 
-## personal-deps（外部依赖通过 symlink 入沙箱）
+## 三层 mount 权责
 
-约定：用户在 `personal/<user>/` 下放 symlink 指向 host 文件，`buildOuterBwrapArgs` 启动时**递归扫**找所有 symlink，把目标的真路径 `--bind` 回 host 原位置。
+> 早期版本有个 personal-deps walker，扫 `personal/<user>/` 的 symlink 把
+> target 真路径 bind 进 sandbox。在多 user 场景下 member 可以 symlink 到
+> operator 任意 host 路径越权，已删除。现在 mount 入口收敛到三层。
 
-例：
-```sh
-ln -s ~/.ssh ~/.loopat/personal/simpx/.loopat/secrets/.ssh
+| 层 | 文件 | 谁写 | `src` 范围 | 例 |
+|---|---|---|---|---|
+| **operator** | `~/.dashscope/config.json` `mounts` | host shell 用户 | 任意 host 路径（`~/...`、`$HOME/...`、绝对 `/...`） | `$HOME/.cache`、`/etc/pki/ca-trust` |
+| **admin** | `knowledge/.loopat/sandboxes/<name>/sandbox.json` | 团队管理员（push knowledge git） | 无 mount 字段 | — |
+| **member** | `personal/<user>/.loopat/config.json` `mounts` | 团队个人 | `personal/<user>/` subtree 内（禁 `..` / 绝对路径） | `.loopat/secrets/.ssh`、`.cache/uv` |
+
+权责跟文件系统所有权自然对齐 —— 谁能写哪个目录，谁就拥有那层 mount 决策权。
+
+`dst` 三层通用：必须 sandbox-rooted（`$HOME/...` / `~/...` / 绝对 `/...`）。`rw` 默认 false。
+
+**operator 例**（host cache 跨所有 loop 共享）：
+
+```jsonc
+// ~/.dashscope/config.json
+{
+  "mounts": [
+    { "src": "$HOME/.cache", "dst": "$HOME/.cache", "rw": true }
+  ]
+}
 ```
-之后沙箱里：
-- `/personal/.loopat/secrets/.ssh` 可见（因为 `/personal` 已 bind）
-- `/home/simpx/.ssh` 也可见（因为 `--bind /home/simpx/.ssh /home/simpx/.ssh`）—— 让 ssh 客户端读 `$HOME/.ssh` 拿到密钥
 
-Sandbox 默认看不到 `~/.ssh` `~/.aws` `~/.config/gh` 这些敏感路径。要 opt-in 必须在 `personal/<user>/` 下显式 ln -s。**目录就是 ACL** 这条原则的体现。
+**member 例**（自己的 ssh + cache）：
+
+```jsonc
+// personal/<user>/.loopat/config.json
+{
+  "mounts": [
+    { "src": ".loopat/secrets/.ssh", "dst": "$HOME/.ssh" },
+    { "src": ".cache/uv", "dst": "$HOME/.cache/uv", "rw": true }
+  ]
+}
+```
+
+member 的 cache 落在 `personal/<user>/.cache/uv` —— 跨自己 loop 共享，跟别的 member 完全隔离。
+
+Sandbox 默认看不到 host 任意路径（`~/.ssh`、`~/.aws` 等）。opt-in 由 operator 或 member 显式声明。**目录所有权 = ACL**。
 
 ## 网络
 
@@ -274,9 +303,9 @@ Ubuntu 24.04+ 必须关 apparmor 那一项，不然 unprivileged user namespace 
 
 ## 文件位置（实现）
 
-- `server/src/outer-sandbox.ts` —— `buildOuterBwrapArgs(loopId, extraSetenv)` 构造 argv
-- `server/src/personal-deps.ts` —— 递归 walk personal/ 找 symlink，返回真路径列表
+- `server/src/bwrap.ts` —— `buildBwrapArgs(loopId, createdBy, extraSetenv, sandboxName)` 构造 argv
+- `server/src/sandboxes.ts` —— sandbox catalog (list/read/write/lock/commit)
 - `server/src/session.ts` —— SDK options 里 `spawnClaudeCodeProcess` callback 包 CLI；`sandbox: { enabled: false }` 关 SDK 内置 sandbox-runtime
-- `server/src/term.ts` —— PTY 同样走 `buildOuterBwrapArgs`，bash 进沙箱
+- `server/src/term.ts` —— PTY 同样走 `buildBwrapArgs`，bash 进沙箱
 - `~/.loopat/<ws>/CLAUDE.md` —— L2 doctrine
 - `<loopDir>/.claude/settings.json` —— `autoMemoryDirectory: /personal/memory`

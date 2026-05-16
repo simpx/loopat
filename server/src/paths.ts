@@ -52,29 +52,29 @@ export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "
 // Workspace-shared Claude Code config (mcpServers, future: hooks, ...).
 // Shape mirrors `.claude.json`. Workspace-versioned in knowledge repo.
 export const workspaceClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
-// Workspace env catalog: each env is a SUBDIRECTORY containing a `mise.toml`
-// (the runtime declaration mise reads) and optional `mise.lock` (version
-// pinning). mise's lockfile generation requires cwd-based config discovery +
-// `mise.toml` naming, which is why each env is its own dir rather than a flat
-// `<name>.toml` file. The dir also leaves room for future siblings like
-// `mcp.json` / `AGENTS.md`. Personal envs come in a later phase.
-export const workspaceLoopatEnvsDir = () => join(workspaceLoopatReservedDir(), "envs")
-export const workspaceLoopatEnvDir = (name: string) =>
-  join(workspaceLoopatEnvsDir(), name)
-export const workspaceLoopatEnvPath = (name: string) =>
-  join(workspaceLoopatEnvDir(name), "mise.toml")
-export const workspaceLoopatEnvLockPath = (name: string) =>
-  join(workspaceLoopatEnvDir(name), "mise.lock")
-// env.json holds loopat-side env metadata (shell etc.) — kept separate from
+// Workspace sandbox catalog: each sandbox is a SUBDIRECTORY containing a
+// `mise.toml` (the runtime declaration mise reads) and optional `mise.lock`
+// (version pinning). mise's lockfile generation requires cwd-based config
+// discovery + `mise.toml` naming, which is why each sandbox is its own dir
+// rather than a flat `<name>.toml` file. The dir also leaves room for future
+// siblings like `mcp.json` / `AGENTS.md`. Personal sandboxes come later.
+export const workspaceLoopatSandboxesDir = () => join(workspaceLoopatReservedDir(), "sandboxes")
+export const workspaceLoopatSandboxDir = (name: string) =>
+  join(workspaceLoopatSandboxesDir(), name)
+export const workspaceLoopatSandboxPath = (name: string) =>
+  join(workspaceLoopatSandboxDir(name), "mise.toml")
+export const workspaceLoopatSandboxLockPath = (name: string) =>
+  join(workspaceLoopatSandboxDir(name), "mise.lock")
+// sandbox.json holds loopat-side metadata (shell etc.) — kept separate from
 // mise.toml so neither tool's file mixes concepts from the other.
-export const workspaceLoopatEnvMetaPath = (name: string) =>
-  join(workspaceLoopatEnvDir(name), "env.json")
+export const workspaceLoopatSandboxMetaPath = (name: string) =>
+  join(workspaceLoopatSandboxDir(name), "sandbox.json")
 
-// Per-loop env snapshot: copy of catalog env dir. cwd-discovered by mise.
-export const loopEnvDir = (id: string) => join(loopDir(id), "env")
-export const loopEnvPath = (id: string) => join(loopEnvDir(id), "mise.toml")
-export const loopEnvLockPath = (id: string) => join(loopEnvDir(id), "mise.lock")
-export const loopEnvMetaPath = (id: string) => join(loopEnvDir(id), "env.json")
+// Per-loop sandbox snapshot: copy of catalog sandbox dir. cwd-discovered by mise.
+export const loopSandboxDir = (id: string) => join(loopDir(id), "sandbox")
+export const loopSandboxPath = (id: string) => join(loopSandboxDir(id), "mise.toml")
+export const loopSandboxLockPath = (id: string) => join(loopSandboxDir(id), "mise.lock")
+export const loopSandboxMetaPath = (id: string) => join(loopSandboxDir(id), "sandbox.json")
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 

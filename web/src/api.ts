@@ -164,7 +164,7 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string; env?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; sandbox?: string }): Promise<LoopMeta> {
   const r = await apiFetch("/api/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -317,44 +317,44 @@ export async function listRepos(): Promise<RepoEntry[]> {
   return (j.repos ?? []) as RepoEntry[]
 }
 
-export type EnvEntry = { name: string }
-export async function listEnvs(): Promise<EnvEntry[]> {
-  const r = await apiFetch(`/api/envs`)
+export type SandboxEntry = { name: string }
+export async function listSandboxes(): Promise<SandboxEntry[]> {
+  const r = await apiFetch(`/api/sandboxes`)
   if (!r.ok) return []
   const j = await r.json()
-  return (j.envs ?? []) as EnvEntry[]
+  return (j.sandboxes ?? []) as SandboxEntry[]
 }
 
-/** Files inside an env dir that the editor can address. Mirrors server EnvFile. */
-export type EnvFile = "mise.toml" | "env.json"
+/** Files inside a sandbox dir that the editor can address. Mirrors server SandboxFile. */
+export type SandboxFile = "mise.toml" | "sandbox.json"
 
-export async function readEnv(name: string, file: EnvFile = "mise.toml"): Promise<string | null> {
-  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`)
+export async function readSandbox(name: string, file: SandboxFile = "mise.toml"): Promise<string | null> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`)
   if (!r.ok) return null
   const j = await r.json()
   return typeof j.content === "string" ? j.content : null
 }
 
-export type LoopEnvInfo = {
+export type LoopSandboxInfo = {
   name: string | null
   loopVersion?: string | null
   catalogVersion?: string | null
 }
-export async function getLoopEnv(id: string): Promise<LoopEnvInfo | null> {
-  const r = await apiFetch(`/api/loops/${id}/env`)
+export async function getLoopSandbox(id: string): Promise<LoopSandboxInfo | null> {
+  const r = await apiFetch(`/api/loops/${id}/sandbox`)
   if (!r.ok) return null
-  return (await r.json()) as LoopEnvInfo
+  return (await r.json()) as LoopSandboxInfo
 }
 
-export async function refreshLoopEnv(id: string): Promise<{ ok: boolean; version?: string | null; error?: string }> {
-  const r = await apiFetch(`/api/loops/${id}/env/refresh`, { method: "POST" })
+export async function refreshLoopSandbox(id: string): Promise<{ ok: boolean; version?: string | null; error?: string }> {
+  const r = await apiFetch(`/api/loops/${id}/sandbox/refresh`, { method: "POST" })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
   return { ok: true, version: j.version }
 }
 
-export async function deleteEnv(name: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`, { method: "DELETE" })
+export async function deleteSandbox(name: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}`, { method: "DELETE" })
   if (!r.ok) {
     const j = await r.json().catch(() => ({}))
     return { ok: false, error: j.error ?? `http ${r.status}` }
@@ -362,7 +362,7 @@ export async function deleteEnv(name: string): Promise<{ ok: boolean; error?: st
   return { ok: true }
 }
 
-export type WriteEnvResult = {
+export type WriteSandboxResult = {
   ok: boolean
   error?: string
   locked?: boolean
@@ -371,8 +371,8 @@ export type WriteEnvResult = {
   commitSha?: string
   commitError?: string
 }
-export async function writeEnv(name: string, content: string, file: EnvFile = "mise.toml"): Promise<WriteEnvResult> {
-  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`, {
+export async function writeSandbox(name: string, content: string, file: SandboxFile = "mise.toml"): Promise<WriteSandboxResult> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ content }),

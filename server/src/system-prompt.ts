@@ -7,7 +7,7 @@
  *   L2+ (workspace) optional workspace supplement at knowledge/.loopat/claude/CLAUDE.md.
  *                   Bound into CLAUDE_CONFIG_DIR/CLAUDE.md and auto-loaded by
  *                   Claude Code as user-tier (settingSources: ["user", ...]).
- *                   See outer-sandbox.ts for the bind.
+ *                   See bwrap.ts for the bind.
  *   L2++ (project)  optional <workdir>/CLAUDE.md auto-loaded by Claude Code
  *                   itself (enabled via `settingSources: [..., "project"]`).
  *   L3 (runtime)    per-loop dynamic info (title/id/branch/repo).

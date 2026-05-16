@@ -16,15 +16,15 @@ import {
   loopContextPersonal,
   loopContextRepos,
   loopMetaPath,
-  loopEnvDir,
-  loopEnvPath,
-  loopEnvLockPath,
-  loopEnvMetaPath,
+  loopSandboxDir,
+  loopSandboxPath,
+  loopSandboxLockPath,
+  loopSandboxMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
-  workspaceLoopatEnvPath,
-  workspaceLoopatEnvLockPath,
-  workspaceLoopatEnvMetaPath,
+  workspaceLoopatSandboxPath,
+  workspaceLoopatSandboxLockPath,
+  workspaceLoopatSandboxMetaPath,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
@@ -54,19 +54,19 @@ export type LoopMeta = {
     default_model_source?: "personal" | "workspace"
     permission_mode?: string
     /**
-     * Workspace env (knowledge/.loopat/envs/<env>/) activated for this
-     * loop's sandbox. The dir's mise.toml + mise.lock get snapshotted into
-     * loops/<id>/env/ at create time; `mise install` runs in that dir on
-     * spawn. Unset = host PATH inherited (no env).
+     * Workspace sandbox (knowledge/.loopat/sandboxes/<sandbox>/) activated
+     * for this loop. The dir's mise.toml + mise.lock get snapshotted into
+     * loops/<id>/sandbox/ at create time; `mise install` runs in that dir
+     * on spawn. Unset = host PATH inherited (no sandbox).
      */
-    env?: string
+    sandbox?: string
     /**
-     * Catalog commit id (short sha) of the env at the time it was snapshotted
-     * into this loop. UI compares against the catalog's current commit to
-     * surface "update available". Null if knowledge isn't a git repo or the
-     * env wasn't committed.
+     * Catalog commit id (short sha) of the sandbox at the time it was
+     * snapshotted into this loop. UI compares against the catalog's current
+     * commit to surface "update available". Null if knowledge isn't a git
+     * repo or the sandbox wasn't committed.
      */
-    env_version?: string | null
+    sandbox_version?: string | null
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes
@@ -461,52 +461,53 @@ export async function listLoops(): Promise<LoopMeta[]> {
 }
 
 /**
- * Copy env catalog (mise.toml + optional mise.lock) into loop's env dir.
- * Returns the catalog's git commit id at copy time (the loop's "env version"),
- * or null if unavailable. Used by createLoop and refreshLoopEnv.
+ * Copy sandbox catalog (mise.toml + optional mise.lock + sandbox.json) into
+ * loop's sandbox dir. Returns the catalog's git commit id at copy time (the
+ * loop's "sandbox version"), or null if unavailable. Used by createLoop and
+ * refreshLoopSandbox.
  */
-async function snapshotEnvIntoLoop(id: string, envName: string): Promise<string | null> {
-  const { getEnvVersion } = await import("./envs")
-  const srcToml = workspaceLoopatEnvPath(envName)
-  const srcLock = workspaceLoopatEnvLockPath(envName)
-  const srcMeta = workspaceLoopatEnvMetaPath(envName)
+async function snapshotSandboxIntoLoop(id: string, sandboxName: string): Promise<string | null> {
+  const { getSandboxVersion } = await import("./sandboxes")
+  const srcToml = workspaceLoopatSandboxPath(sandboxName)
+  const srcLock = workspaceLoopatSandboxLockPath(sandboxName)
+  const srcMeta = workspaceLoopatSandboxMetaPath(sandboxName)
   if (!existsSyncBase(srcToml)) {
-    throw new Error(`env "${envName}" not found in catalog`)
+    throw new Error(`sandbox "${sandboxName}" not found in catalog`)
   }
-  await mkdir(loopEnvDir(id), { recursive: true })
-  await copyFile(srcToml, loopEnvPath(id))
-  // Lockfile + env.json are optional in catalog. If missing, also remove the
-  // loop's stale copies (which would lie about state).
+  await mkdir(loopSandboxDir(id), { recursive: true })
+  await copyFile(srcToml, loopSandboxPath(id))
+  // Lockfile + sandbox.json are optional in catalog. If missing, also remove
+  // the loop's stale copies (which would lie about state).
   if (existsSyncBase(srcLock)) {
-    await copyFile(srcLock, loopEnvLockPath(id))
+    await copyFile(srcLock, loopSandboxLockPath(id))
   } else {
-    await rm(loopEnvLockPath(id), { force: true })
+    await rm(loopSandboxLockPath(id), { force: true })
   }
   if (existsSyncBase(srcMeta)) {
-    await copyFile(srcMeta, loopEnvMetaPath(id))
+    await copyFile(srcMeta, loopSandboxMetaPath(id))
   } else {
-    await rm(loopEnvMetaPath(id), { force: true })
+    await rm(loopSandboxMetaPath(id), { force: true })
   }
-  return await getEnvVersion(envName)
+  return await getSandboxVersion(sandboxName)
 }
 
 /**
- * Refresh a loop's env snapshot to the catalog's current state. Caller is
- * responsible for tearing down the loop's PTY + SDK session so the next
+ * Refresh a loop's sandbox snapshot to the catalog's current state. Caller
+ * is responsible for tearing down the loop's PTY + SDK session so the next
  * spawn picks up the new lockfile (existing bwrap argv has the old PATH
- * baked in). Updates meta.config.env_version to the new catalog commit.
+ * baked in). Updates meta.config.sandbox_version to the new catalog commit.
  *
  * Returns the new version (or null) for the API response. Throws if the
- * loop has no env or the catalog entry is missing.
+ * loop has no sandbox or the catalog entry is missing.
  */
-export async function refreshLoopEnv(id: string): Promise<string | null> {
+export async function refreshLoopSandbox(id: string): Promise<string | null> {
   const meta = await getLoop(id)
   if (!meta) throw new Error(`loop ${id} not found`)
-  const envName = meta.config?.env
-  if (!envName) throw new Error(`loop ${id} has no env`)
-  const version = await snapshotEnvIntoLoop(id, envName)
+  const sandboxName = meta.config?.sandbox
+  if (!sandboxName) throw new Error(`loop ${id} has no sandbox`)
+  const version = await snapshotSandboxIntoLoop(id, sandboxName)
   await patchLoopMeta(id, {
-    config: { ...(meta.config ?? {}), env: envName, env_version: version },
+    config: { ...(meta.config ?? {}), sandbox: sandboxName, sandbox_version: version },
   })
   return version
 }
@@ -520,7 +521,7 @@ async function shortBranchSlug(title: string): Promise<string> {
   return base || "loop"
 }
 
-export async function createLoop(opts: { title: string; repo?: string; createdBy: string; env?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; createdBy: string; sandbox?: string }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
   const meta: LoopMeta = {
@@ -529,9 +530,9 @@ export async function createLoop(opts: { title: string; repo?: string; createdBy
     createdAt: new Date().toISOString(),
     createdBy: opts.createdBy,
   }
-  if (opts.env) {
-    const version = await snapshotEnvIntoLoop(id, opts.env)
-    meta.config = { ...(meta.config ?? {}), env: opts.env, env_version: version }
+  if (opts.sandbox) {
+    const version = await snapshotSandboxIntoLoop(id, opts.sandbox)
+    meta.config = { ...(meta.config ?? {}), sandbox: opts.sandbox, sandbox_version: version }
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })

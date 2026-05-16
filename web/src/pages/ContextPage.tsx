@@ -18,17 +18,17 @@ import {
   vaultBacklinks,
   listRepos,
   getRepo,
-  listEnvs,
-  readEnv,
-  writeEnv,
-  deleteEnv,
+  listSandboxes,
+  readSandbox,
+  writeSandbox,
+  deleteSandbox,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
   type RepoDetail,
   type Backlink,
-  type EnvEntry,
-  type EnvFile,
+  type SandboxEntry,
+  type SandboxFile,
 } from "../api"
 import { useEffect, useState, useCallback, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
@@ -38,17 +38,17 @@ const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
 import { PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react"
 
-type SubId = VaultId | "envs"
+type SubId = VaultId | "sandboxes"
 
 const SUBS: { id: SubId; label: string }[] = [
   { id: "knowledge", label: "Knowledge" },
   { id: "notes", label: "Notes" },
   { id: "personal", label: "Personal" },
   { id: "repos", label: "Repos" },
-  { id: "envs", label: "Envs" },
+  { id: "sandboxes", label: "Sandboxes" },
 ]
 
-const VALID = new Set<SubId>(["knowledge", "notes", "personal", "repos", "envs"])
+const VALID = new Set<SubId>(["knowledge", "notes", "personal", "repos", "sandboxes"])
 
 export function ContextPage() {
   const { sub } = useParams<{ sub: string }>()
@@ -73,7 +73,7 @@ export function ContextPage() {
       </nav>
       <div className="flex-1 min-h-0 min-w-0">
         {active === "repos" ? <ReposPane />
-          : active === "envs" ? <EnvsPane />
+          : active === "sandboxes" ? <SandboxesPane />
           : <VaultPane key={active} vault={active as VaultId} />}
       </div>
     </div>
@@ -965,16 +965,16 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
 }
 
 // ============================================================================
-// EnvsPane: list of runtime envs (mise.toml files) with simple editor
+// SandboxesPane: list of sandboxes (mise.toml + sandbox.json) with simple editor
 // ============================================================================
 
-const ENV_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+const SANDBOX_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 
-const ENV_FILES: EnvFile[] = ["mise.toml", "env.json"]
+const SANDBOX_FILES: SandboxFile[] = ["mise.toml", "sandbox.json"]
 
-// Seeded into new envs. Picks a small useful set so terminals work out of
+// Seeded into new sandboxes. Picks a small useful set so terminals work out of
 // the box; users can edit / delete any line they don't want.
-const NEW_ENV_MISE_TOML = `# mise.toml — runtime toolchain for this env. Docs: https://mise.jdx.dev
+const NEW_SANDBOX_MISE_TOML = `# mise.toml — runtime toolchain for this sandbox. Docs: https://mise.jdx.dev
 [tools]
 # Use \`ubi:owner/repo\` for any GitHub release; bare names hit mise's registry.
 "ubi:fish-shell/fish-shell" = { version = "latest", exe = "fish" }
@@ -984,21 +984,21 @@ gh = "latest"
 jq = "latest"
 `
 
-// env.json — loopat-side metadata. `shell` decides which binary the terminal
+// sandbox.json — loopat-side metadata. `shell` decides which binary the terminal
 // PTY runs (resolved against sandbox PATH; the mise tools above provide fish).
-const NEW_ENV_META_JSON = `{
+const NEW_SANDBOX_META_JSON = `{
   "shell": "fish"
 }
 `
 
-function EnvsPane() {
-  const [envs, setEnvs] = useState<EnvEntry[]>([])
+function SandboxesPane() {
+  const [sandboxes, setSandboxes] = useState<SandboxEntry[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   // Per-file state — switching tabs doesn't lose unsaved edits in the other.
-  // null = file doesn't exist yet (e.g. env created before env.json was a thing)
-  const [contents, setContents] = useState<Record<EnvFile, string>>({ "mise.toml": "", "env.json": "" })
-  const [originals, setOriginals] = useState<Record<EnvFile, string | null>>({ "mise.toml": null, "env.json": null })
-  const [activeFile, setActiveFile] = useState<EnvFile>("mise.toml")
+  // null = file doesn't exist yet (e.g. sandbox created before sandbox.json was a thing)
+  const [contents, setContents] = useState<Record<SandboxFile, string>>({ "mise.toml": "", "sandbox.json": "" })
+  const [originals, setOriginals] = useState<Record<SandboxFile, string | null>>({ "mise.toml": null, "sandbox.json": null })
+  const [activeFile, setActiveFile] = useState<SandboxFile>("mise.toml")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1009,8 +1009,8 @@ function EnvsPane() {
   const isMobile = useIsMobile()
 
   const refreshList = useCallback(async () => {
-    const xs = await listEnvs()
-    setEnvs(xs)
+    const xs = await listSandboxes()
+    setSandboxes(xs)
     return xs
   }, [])
 
@@ -1022,8 +1022,8 @@ function EnvsPane() {
 
   useEffect(() => {
     if (!selected) {
-      setContents({ "mise.toml": "", "env.json": "" })
-      setOriginals({ "mise.toml": null, "env.json": null })
+      setContents({ "mise.toml": "", "sandbox.json": "" })
+      setOriginals({ "mise.toml": null, "sandbox.json": null })
       return
     }
     setLoading(true)
@@ -1031,10 +1031,10 @@ function EnvsPane() {
     setActiveFile("mise.toml")
     // Load both files in parallel; null original means "file doesn't exist
     // on disk yet" — first save will create it.
-    Promise.all(ENV_FILES.map((f) => readEnv(selected, f))).then((vals) => {
-      const newContents: Record<EnvFile, string> = { "mise.toml": "", "env.json": "" }
-      const newOriginals: Record<EnvFile, string | null> = { "mise.toml": null, "env.json": null }
-      ENV_FILES.forEach((f, i) => {
+    Promise.all(SANDBOX_FILES.map((f) => readSandbox(selected, f))).then((vals) => {
+      const newContents: Record<SandboxFile, string> = { "mise.toml": "", "sandbox.json": "" }
+      const newOriginals: Record<SandboxFile, string | null> = { "mise.toml": null, "sandbox.json": null }
+      SANDBOX_FILES.forEach((f, i) => {
         const text = vals[i] ?? ""
         newContents[f] = text
         newOriginals[f] = vals[i]
@@ -1045,14 +1045,14 @@ function EnvsPane() {
     })
   }, [selected])
 
-  const isDirty = (f: EnvFile) => contents[f] !== (originals[f] ?? "")
+  const isDirty = (f: SandboxFile) => contents[f] !== (originals[f] ?? "")
   const activeDirty = isDirty(activeFile)
 
   const onSave = async () => {
     if (!selected || saving) return
     setSaving(true)
     setErr(null)
-    const r = await writeEnv(selected, contents[activeFile], activeFile)
+    const r = await writeSandbox(selected, contents[activeFile], activeFile)
     setSaving(false)
     if (!r.ok) {
       setErr(r.error ?? "save failed")
@@ -1072,8 +1072,8 @@ function EnvsPane() {
   }
 
   const onDelete = async (name: string) => {
-    if (!confirm(`delete env "${name}"? per-loop snapshots already created stay intact.`)) return
-    const r = await deleteEnv(name)
+    if (!confirm(`delete sandbox "${name}"? per-loop snapshots already created stay intact.`)) return
+    const r = await deleteSandbox(name)
     if (!r.ok) {
       setErr(r.error ?? "delete failed")
       return
@@ -1085,25 +1085,25 @@ function EnvsPane() {
   const onSubmitNew = async (e: FormEvent) => {
     e.preventDefault()
     const trimmed = newName.trim()
-    if (!ENV_NAME_RE.test(trimmed)) {
+    if (!SANDBOX_NAME_RE.test(trimmed)) {
       setNewErr("invalid name (letters/digits/_.-, max 64, must start with alnum)")
       return
     }
-    if (envs.some((x) => x.name === trimmed)) {
+    if (sandboxes.some((x) => x.name === trimmed)) {
       setNewErr("name already exists")
       return
     }
     setNewErr(null)
     // Seed both files. Write mise.toml first (which also generates the
-    // initial lockfile); env.json second.
-    const r1 = await writeEnv(trimmed, NEW_ENV_MISE_TOML, "mise.toml")
+    // initial lockfile); sandbox.json second.
+    const r1 = await writeSandbox(trimmed, NEW_SANDBOX_MISE_TOML, "mise.toml")
     if (!r1.ok) {
       setNewErr(r1.error ?? "create failed (mise.toml)")
       return
     }
-    const r2 = await writeEnv(trimmed, NEW_ENV_META_JSON, "env.json")
+    const r2 = await writeSandbox(trimmed, NEW_SANDBOX_META_JSON, "sandbox.json")
     if (!r2.ok) {
-      setNewErr(r2.error ?? "create failed (env.json)")
+      setNewErr(r2.error ?? "create failed (sandbox.json)")
       return
     }
     await refreshList()
@@ -1112,30 +1112,30 @@ function EnvsPane() {
     setSelected(trimmed)
   }
 
-  const envList = (
+  const sandboxList = (
     <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
       <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
         {isMobile ? (
           <button
             onClick={() => setSidebarOpen(false)}
             className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
-            title="close envs"
+            title="close sandboxes"
           >
             <PanelLeftClose size={14} />
           </button>
         ) : (
-          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">envs</span>
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">sandboxes</span>
         )}
-        <span className="text-[11px] text-gray-400 ml-auto">{envs.length}</span>
+        <span className="text-[11px] text-gray-400 ml-auto">{sandboxes.length}</span>
       </div>
       <div className="flex-1 min-h-0 overflow-auto py-2">
-        {envs.map((e) => {
+        {sandboxes.map((e) => {
           const sel = selected === e.name
           return (
             <div
               key={e.name}
               className={
-                "group/envrow relative flex items-stretch " +
+                "group/sandboxrow relative flex items-stretch " +
                 (sel ? "bg-gray-100" : "hover:bg-gray-50")
               }
             >
@@ -1152,17 +1152,17 @@ function EnvsPane() {
               <button
                 type="button"
                 onClick={(ev) => { ev.stopPropagation(); onDelete(e.name) }}
-                className="opacity-0 group-hover/envrow:opacity-100 transition-opacity w-7 flex items-center justify-center text-gray-400 hover:text-red-600"
-                title={`delete env "${e.name}"`}
+                className="opacity-0 group-hover/sandboxrow:opacity-100 transition-opacity w-7 flex items-center justify-center text-gray-400 hover:text-red-600"
+                title={`delete sandbox "${e.name}"`}
               >
                 <Trash2 size={13} />
               </button>
             </div>
           )
         })}
-        {envs.length === 0 && (
+        {sandboxes.length === 0 && (
           <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-            no envs yet · click "new env" below
+            no sandboxes yet · click "new sandbox" below
           </div>
         )}
       </div>
@@ -1172,7 +1172,7 @@ function EnvsPane() {
         className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
       >
         <span>+</span>
-        <span>new env</span>
+        <span>new sandbox</span>
       </button>
     </aside>
   )
@@ -1185,7 +1185,7 @@ function EnvsPane() {
             <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
               <div className="absolute inset-0 bg-black/30" />
               <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
-                {envList}
+                {sandboxList}
               </div>
             </div>
           ) : (
@@ -1194,7 +1194,7 @@ function EnvsPane() {
                 type="button"
                 onClick={() => setSidebarOpen(true)}
                 className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
-                title="open envs list"
+                title="open sandboxes list"
               >
                 <PanelLeftOpen size={16} />
               </button>
@@ -1202,14 +1202,14 @@ function EnvsPane() {
           )}
         </>
       ) : (
-        envList
+        sandboxList
       )}
       <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {selected ? (
           <>
             <header className="h-9 shrink-0 border-b border-gray-200 px-3 flex items-center gap-1">
               <span className="text-[11px] text-gray-400 mr-2 font-mono">{selected}/</span>
-              {ENV_FILES.map((f) => {
+              {SANDBOX_FILES.map((f) => {
                 const isActive = activeFile === f
                 const dirty = isDirty(f)
                 return (
@@ -1245,7 +1245,7 @@ function EnvsPane() {
                 <div className="p-3 text-[13px] text-gray-400 italic">loading…</div>
               ) : (
                 // path drives language detection (.toml / .json). key includes
-                // both env + file so CodeMirror remounts when switching either,
+                // both sandbox + file so CodeMirror remounts when switching either,
                 // keeping per-file undo history clean.
                 <Suspense fallback={<div className="p-3 text-[13px] text-gray-400 italic">loading editor…</div>}>
                   <CodeEditor
@@ -1260,7 +1260,7 @@ function EnvsPane() {
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
-            {envs.length === 0 ? "create a new env to get started" : "select an env"}
+            {sandboxes.length === 0 ? "create a new sandbox to get started" : "select a sandbox"}
           </div>
         )}
       </main>
@@ -1274,7 +1274,7 @@ function EnvsPane() {
             className="w-full max-w-[420px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="text-base font-semibold text-gray-900 mb-4">New env</div>
+            <div className="text-base font-semibold text-gray-900 mb-4">New sandbox</div>
             <form onSubmit={onSubmitNew} className="flex flex-col gap-4">
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-gray-700 font-medium">Name</span>

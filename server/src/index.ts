@@ -4,14 +4,14 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopEnv } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox } from "./loops"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
-import { commitEnvChange, deleteEnv, getEnvVersion, isValidEnvFile, isValidEnvName, listEnvs, lockEnv, readEnvFile, writeEnvFile } from "./envs"
+import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -528,9 +528,9 @@ app.post("/api/loops", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
-  const env = typeof body.env === "string" && body.env.trim() ? body.env.trim() : undefined
+  const sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, env })
+    const meta = await createLoop({ title, repo, createdBy: userId, sandbox })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
@@ -622,29 +622,29 @@ app.get("/api/loops/:id/context", requireAuth, async (c) => {
   return c.json({ mounts })
 })
 
-// Loop's active env + version comparison. UI uses catalogVersion vs
-// loopVersion to surface "update available". Null env = no env set.
-app.get("/api/loops/:id/env", requireAuth, async (c) => {
+// Loop's active sandbox + version comparison. UI uses catalogVersion vs
+// loopVersion to surface "update available". Null sandbox = no sandbox set.
+app.get("/api/loops/:id/sandbox", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
-  const name = meta.config?.env
+  const name = meta.config?.sandbox
   if (!name) return c.json({ name: null })
-  const loopVersion = meta.config?.env_version ?? null
-  const catalogVersion = await getEnvVersion(name)
+  const loopVersion = meta.config?.sandbox_version ?? null
+  const catalogVersion = await getSandboxVersion(name)
   return c.json({ name, loopVersion, catalogVersion })
 })
 
-// Refresh: re-copy catalog env into this loop, then tear down SDK session
+// Refresh: re-copy catalog sandbox into this loop, then tear down SDK session
 // and PTY so next reconnect picks up the new lockfile.
-app.post("/api/loops/:id/env/refresh", requireAuth, async (c) => {
+app.post("/api/loops/:id/sandbox/refresh", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived" }, 403)
-  if (!meta.config?.env) return c.json({ error: "loop has no env" }, 400)
+  if (!meta.config?.sandbox) return c.json({ error: "loop has no sandbox" }, 400)
   try {
-    const version = await refreshLoopEnv(id)
+    const version = await refreshLoopSandbox(id)
     // Existing bwrap argv (PATH, mise data dir bind) is baked at spawn time —
     // forced respawn is how the new lockfile takes effect.
     destroyLoopSession(id)
@@ -981,38 +981,38 @@ app.get("/api/workspace/repos", requireAuth, async (c) => {
   return c.json({ repos: await listRepos() })
 })
 
-app.get("/api/envs", requireAuth, async (c) => {
-  return c.json({ envs: await listEnvs() })
+app.get("/api/sandboxes", requireAuth, async (c) => {
+  return c.json({ sandboxes: await listSandboxes() })
 })
 
-// Per-file read/write inside an env dir. `file` defaults to mise.toml (the
+// Per-file read/write inside a sandbox dir. `file` defaults to mise.toml (the
 // "main" file). Whitelist guards path traversal — only known basenames map
-// to actual files inside the env dir.
-app.get("/api/envs/:name", requireAuth, async (c) => {
+// to actual files inside the sandbox dir.
+app.get("/api/sandboxes/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
-  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
   const file = c.req.query("file") ?? "mise.toml"
-  if (!isValidEnvFile(file)) return c.json({ error: "invalid file" }, 400)
-  const content = await readEnvFile(name, file)
+  if (!isValidSandboxFile(file)) return c.json({ error: "invalid file" }, 400)
+  const content = await readSandboxFile(name, file)
   if (content === null) return c.json({ error: "not found" }, 404)
   return c.json({ name, file, content })
 })
 
-app.put("/api/envs/:name", requireAuth, async (c) => {
+app.put("/api/sandboxes/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
-  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
   const file = c.req.query("file") ?? "mise.toml"
-  if (!isValidEnvFile(file)) return c.json({ error: "invalid file" }, 400)
+  if (!isValidSandboxFile(file)) return c.json({ error: "invalid file" }, 400)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
-  await writeEnvFile(name, file, body.content)
+  await writeSandboxFile(name, file, body.content)
   // Order: write → lock (mise.toml only) → commit. Lock comes before commit
   // so the commit captures both toml and the regenerated lockfile atomically.
   let lockRes: { ok: boolean; error?: string } | null = null
   if (file === "mise.toml") {
-    lockRes = await lockEnv(name)
+    lockRes = await lockSandbox(name)
   }
-  const commitRes = await commitEnvChange(name, { kind: "update", file })
+  const commitRes = await commitSandboxChange(name, { kind: "update", file })
   return c.json({
     ok: true, name, file,
     ...(lockRes ? { locked: lockRes.ok, lockError: lockRes.error } : {}),
@@ -1020,14 +1020,14 @@ app.put("/api/envs/:name", requireAuth, async (c) => {
   })
 })
 
-// Remove an env from the catalog. Per-loop snapshots already copied stay
+// Remove a sandbox from the catalog. Per-loop snapshots already copied stay
 // intact (they're standalone), so deleting "default" doesn't break loops
-// that already use it — they keep running off their own env/ dir.
-app.delete("/api/envs/:name", requireAuth, async (c) => {
+// that already use it — they keep running off their own sandbox/ dir.
+app.delete("/api/sandboxes/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
-  if (!isValidEnvName(name)) return c.json({ error: "invalid env name" }, 400)
-  await deleteEnv(name)
-  const commitRes = await commitEnvChange(name, { kind: "delete" })
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  await deleteSandbox(name)
+  const commitRes = await commitSandboxChange(name, { kind: "delete" })
   return c.json({ ok: true, name, committed: commitRes.ok, commitSha: commitRes.sha, commitError: commitRes.error })
 })
 
