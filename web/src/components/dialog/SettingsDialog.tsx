@@ -11,7 +11,7 @@ import {
 } from "@/api"
 import { PersonalRepoPanel } from "./PersonalRepoPanel"
 
-type SidebarTab = "models" | "notifications" | "personal-repo"
+type SidebarTab = "models" | "personal-repo"
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -108,7 +108,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
   const [personal, setPersonal] = useState<PersonalSettings | null>(null)
   const [personalProviders, setPersonalProviders] = useState<Record<string, ProviderForm>>({})
   const [personalDefault, setPersonalDefault] = useState("")
-  const [webhookUrl, setWebhookUrl] = useState("")
 
   // New provider form
   const [newProviderName, setNewProviderName] = useState("")
@@ -139,7 +138,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         }
         setPersonalProviders(forms)
         setPersonalDefault(p.default ?? "")
-        setWebhookUrl(p.webhookUrl ?? "")
       }
       if (daily) setDailyUsage(daily)
       setLoading(false)
@@ -198,7 +196,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
           providers[name].apiKey = f.apiKey
         }
       }
-      const ok = await updatePersonalSettings({ providers, default: personalDefault, webhookUrl })
+      const ok = await updatePersonalSettings({ providers, default: personalDefault })
       if (!ok) setError("save failed")
       else {
         setPersonalProviders((prev) => {
@@ -230,7 +228,7 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
         <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-5 pb-0 shrink-0">
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="sr-only">
-            Configure model providers, API keys, and notification webhooks.
+            Configure model providers, API keys, and personal repository.
           </DialogDescription>
         </DialogHeader>
 
@@ -247,17 +245,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
               }`}
             >
               Model Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => setSidebar("notifications")}
-              className={`text-left px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap ${
-                sidebar === "notifications"
-                  ? "bg-gray-100 text-gray-900 font-medium"
-                  : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              Notifications
             </button>
             <button
               type="button"
@@ -278,29 +265,6 @@ export function SettingsDialog({ open, onClose }: { open: boolean; onClose: () =
               <div className="text-sm text-gray-400 py-8 text-center">Loading...</div>
             ) : sidebar === "personal-repo" ? (
               <PersonalRepoPanel onDone={onClose} />
-            ) : sidebar === "notifications" ? (
-              /* ── Notification Settings ── */
-              <div className="flex flex-col gap-4 min-h-full">
-                <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">IM Webhook URL</label>
-                  <input
-                    type="url"
-                    value={webhookUrl}
-                    onChange={(e) => setWebhookUrl(e.target.value)}
-                    placeholder="https://..."
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">
-                    Receive notifications via webhook when messages arrive.
-                  </p>
-                </div>
-                <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
-                  {error && <span className="text-xs text-red-500">{error}</span>}
-                  <Button onClick={handleSave} disabled={saving}>
-                    {saving ? "Saving..." : "Save"}
-                  </Button>
-                </div>
-              </div>
             ) : (
               /* ── Model Settings ── */
               <div className="flex flex-col gap-5 min-h-full">

@@ -298,7 +298,7 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, extraEnv)
+    const bwrapBase = await buildOuterBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.env)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
@@ -958,3 +958,4 @@ export function destroySession(id: string): boolean {
   s.destroy()
   return true
 }
+

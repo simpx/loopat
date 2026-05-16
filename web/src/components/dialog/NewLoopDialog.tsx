@@ -4,7 +4,7 @@
  * the repo picker (5.3); personal-context picker comes later.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { listRepos, type RepoEntry } from "../../api"
+import { listEnvs, listRepos, type EnvEntry, type RepoEntry } from "../../api"
 
 export function NewLoopDialog({
   onClose,
@@ -12,17 +12,29 @@ export function NewLoopDialog({
   initialTitle,
 }: {
   onClose: () => void
-  onCreate: (opts: { title: string; repo?: string }) => Promise<string> | string
+  onCreate: (opts: { title: string; repo?: string; env?: string }) => Promise<string> | string
   initialTitle?: string
 }) {
   const [title, setTitle] = useState(initialTitle ?? "")
   const [repo, setRepo] = useState("")
+  const [env, setEnv] = useState("")
   const [repos, setRepos] = useState<RepoEntry[]>([])
+  const [envs, setEnvs] = useState<EnvEntry[]>([])
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     listRepos().then(setRepos)
+    listEnvs().then((xs) => {
+      setEnvs(xs)
+      // Auto-pick a default when envs exist. Preference: explicit "default"
+      // (the conventional name), else the alphabetical first (server already
+      // sorts). User can still pick "(none)" to opt out.
+      if (xs.length > 0) {
+        const preferred = xs.find((e) => e.name === "default") ?? xs[0]
+        setEnv(preferred.name)
+      }
+    })
     inputRef.current?.focus()
   }, [])
 
@@ -34,6 +46,7 @@ export function NewLoopDialog({
       await onCreate({
         title: title.trim() || "untitled",
         repo: repo || undefined,
+        env: env || undefined,
       })
     } finally {
       setBusy(false)
@@ -68,6 +81,26 @@ export function NewLoopDialog({
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
                 还没注册的 repo。在 ~/.loopat/context/repos/ 下 git clone 一个进来。
+              </div>
+            )}
+          </DialogField>
+
+          <DialogField label="Env" hint="runtime toolchain (mise.toml)。不选 = 继承宿主 PATH。">
+            <select
+              value={env}
+              onChange={(e) => setEnv(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
+            >
+              <option value="">(none)</option>
+              {envs.map((e) => (
+                <option key={e.name} value={e.name}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+            {envs.length === 0 && (
+              <div className="text-[11px] text-gray-400 mt-1">
+                没有 env。在 knowledge/.loopat/envs/ 下放一个 &lt;name&gt;.toml (mise format)。
               </div>
             )}
           </DialogField>

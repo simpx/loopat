@@ -39,7 +39,10 @@ Rules:
   `personal/<user>/` is user-owned freeform space.
 - Workspace `config.json` is **team-shared** (knowledge/notes/repos URLs only).
   Per-user fields (providers, default, sandbox.mounts) live in
-  `personal/<user>/.loopat/config.json`.
+  `personal/<user>/.loopat/config.json`. `sandbox.mounts` `src` is relative
+  to `personal/<user>/` (RO); `dst` must be sandbox-rooted (`$HOME/...`,
+  `~/...`, or `/...`). Encrypted dotfiles live under `.loopat/secrets/...`
+  and get bind-mounted via mounts pointing at that path.
 - `personal/<user>/.loopat/secrets/<service>/<VAR>` follows the ccx convention:
   filename = env-var name, file body = value.
 

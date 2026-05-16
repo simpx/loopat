@@ -18,13 +18,17 @@ import {
   vaultBacklinks,
   listRepos,
   getRepo,
+  listEnvs,
+  readEnv,
+  writeEnv,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
   type RepoDetail,
   type Backlink,
+  type EnvEntry,
 } from "../api"
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
 import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
@@ -32,18 +36,21 @@ const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
-const SUBS: { id: VaultId; label: string }[] = [
+type SubId = VaultId | "envs"
+
+const SUBS: { id: SubId; label: string }[] = [
   { id: "knowledge", label: "Knowledge" },
   { id: "notes", label: "Notes" },
   { id: "personal", label: "Personal" },
   { id: "repos", label: "Repos" },
+  { id: "envs", label: "Envs" },
 ]
 
-const VALID = new Set<VaultId>(["knowledge", "notes", "personal", "repos"])
+const VALID = new Set<SubId>(["knowledge", "notes", "personal", "repos", "envs"])
 
 export function ContextPage() {
   const { sub } = useParams<{ sub: string }>()
-  const active = (VALID.has(sub as VaultId) ? sub : "knowledge") as VaultId
+  const active = (VALID.has(sub as SubId) ? sub : "knowledge") as SubId
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -63,7 +70,9 @@ export function ContextPage() {
         ))}
       </nav>
       <div className="flex-1 min-h-0 min-w-0">
-        {active === "repos" ? <ReposPane /> : <VaultPane key={active} vault={active} />}
+        {active === "repos" ? <ReposPane />
+          : active === "envs" ? <EnvsPane />
+          : <VaultPane key={active} vault={active as VaultId} />}
       </div>
     </div>
   )
@@ -950,5 +959,277 @@ function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => 
         </div>
       </article>
     </>
+  )
+}
+
+// ============================================================================
+// EnvsPane: list of runtime envs (mise.toml files) with simple editor
+// ============================================================================
+
+const ENV_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+
+const ENV_TEMPLATE = `# mise.toml — declares the runtime toolchain for this env.
+# Docs: https://mise.jdx.dev/configuration.html
+
+[tools]
+# node = "22"
+# python = "3.12"
+# "ubi:oven-sh/bun" = "latest"
+`
+
+function EnvsPane() {
+  const [envs, setEnvs] = useState<EnvEntry[]>([])
+  const [selected, setSelected] = useState<string | null>(null)
+  const [content, setContent] = useState("")
+  const [original, setOriginal] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [showNew, setShowNew] = useState(false)
+  const [newName, setNewName] = useState("")
+  const [newErr, setNewErr] = useState<string | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const isMobile = useIsMobile()
+
+  const refreshList = useCallback(async () => {
+    const xs = await listEnvs()
+    setEnvs(xs)
+    return xs
+  }, [])
+
+  useEffect(() => {
+    refreshList().then((xs) => {
+      if (xs.length > 0 && !selected) setSelected(xs[0].name)
+    })
+  }, [refreshList])
+
+  useEffect(() => {
+    if (!selected) {
+      setContent("")
+      setOriginal("")
+      return
+    }
+    setLoading(true)
+    setErr(null)
+    readEnv(selected).then((c) => {
+      const text = c ?? ""
+      setContent(text)
+      setOriginal(text)
+      setLoading(false)
+    })
+  }, [selected])
+
+  const dirty = content !== original
+  const onSave = async () => {
+    if (!selected || saving) return
+    setSaving(true)
+    setErr(null)
+    const r = await writeEnv(selected, content)
+    setSaving(false)
+    if (!r.ok) {
+      setErr(r.error ?? "save failed")
+      return
+    }
+    setOriginal(content)
+    // Lock generation runs server-side after write; surface its result so the
+    // user knows the env is reproducibly pinned (or why it isn't).
+    if (r.locked === false) {
+      setErr(`saved, but lock failed: ${r.lockError ?? "unknown"}`)
+    }
+  }
+
+  const onSubmitNew = async (e: FormEvent) => {
+    e.preventDefault()
+    const trimmed = newName.trim()
+    if (!ENV_NAME_RE.test(trimmed)) {
+      setNewErr("invalid name (letters/digits/_.-, max 64, must start with alnum)")
+      return
+    }
+    if (envs.some((x) => x.name === trimmed)) {
+      setNewErr("name already exists")
+      return
+    }
+    setNewErr(null)
+    const r = await writeEnv(trimmed, ENV_TEMPLATE)
+    if (!r.ok) {
+      setNewErr(r.error ?? "create failed")
+      return
+    }
+    await refreshList()
+    setShowNew(false)
+    setNewName("")
+    setSelected(trimmed)
+  }
+
+  const envList = (
+    <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
+      <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
+        {isMobile ? (
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
+            title="close envs"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        ) : (
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">envs</span>
+        )}
+        <span className="text-[11px] text-gray-400 ml-auto">{envs.length}</span>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto py-2">
+        {envs.map((e) => {
+          const sel = selected === e.name
+          return (
+            <button
+              key={e.name}
+              type="button"
+              onClick={() => {
+                setSelected(e.name)
+                if (isMobile) setSidebarOpen(false)
+              }}
+              className={
+                sel
+                  ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
+                  : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
+              }
+            >
+              <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{e.name}</span>
+              <span className="text-[10px] text-gray-400">.toml</span>
+            </button>
+          )
+        })}
+        {envs.length === 0 && (
+          <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+            no envs yet · click "new env" below
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => { setShowNew(true); setNewName(""); setNewErr(null) }}
+        className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+      >
+        <span>+</span>
+        <span>new env</span>
+      </button>
+    </aside>
+  )
+
+  return (
+    <div className="flex h-full w-full">
+      {isMobile ? (
+        <>
+          {sidebarOpen ? (
+            <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+                {envList}
+              </div>
+            </div>
+          ) : (
+            <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+                title="open envs list"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </aside>
+          )}
+        </>
+      ) : (
+        envList
+      )}
+      <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
+        {selected ? (
+          <>
+            <header className="h-9 shrink-0 border-b border-gray-200 px-3 flex items-center gap-3">
+              <span className="text-[13px] font-medium text-gray-900">{selected}.toml</span>
+              <span className="text-[11px] text-gray-400">workspace · mise format</span>
+              <div className="flex-1" />
+              {err && <span className="text-[11px] text-red-600">{err}</span>}
+              <button
+                type="button"
+                onClick={onSave}
+                disabled={!dirty || saving || loading}
+                className="px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {saving ? "saving…" : dirty ? "save" : "saved"}
+              </button>
+            </header>
+            <div className="flex-1 min-h-0">
+              {loading ? (
+                <div className="p-3 text-[13px] text-gray-400 italic">loading…</div>
+              ) : (
+                // path passed for language detection (.toml → TOML highlighting).
+                // key on selected forces a fresh editor when switching envs so
+                // CodeMirror state (history, cursor) doesn't bleed across files.
+                <Suspense fallback={<div className="p-3 text-[13px] text-gray-400 italic">loading editor…</div>}>
+                  <CodeEditor
+                    key={selected}
+                    path={`${selected}.toml`}
+                    value={content}
+                    onChange={setContent}
+                  />
+                </Suspense>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
+            {envs.length === 0 ? "create a new env to get started" : "select an env"}
+          </div>
+        )}
+      </main>
+
+      {showNew && (
+        <div
+          className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
+          onClick={() => setShowNew(false)}
+        >
+          <div
+            className="w-full max-w-[420px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-base font-semibold text-gray-900 mb-4">New env</div>
+            <form onSubmit={onSubmitNew} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-gray-700 font-medium">Name</span>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="coding-agent"
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+                />
+                <span className="text-[11px] text-gray-400">
+                  filename will be {newName.trim() ? `${newName.trim()}.toml` : "<name>.toml"}
+                </span>
+                {newErr && <span className="text-[11px] text-red-600">{newErr}</span>}
+              </label>
+              <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowNew(false)}
+                  className="px-3 h-8 text-sm rounded text-gray-700 hover:bg-gray-100"
+                >
+                  cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-3 h-8 text-sm rounded bg-gray-900 text-white hover:bg-gray-700"
+                >
+                  create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
