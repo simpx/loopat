@@ -72,7 +72,11 @@ async function activateMiseEnv(envDirPath: string): Promise<Record<string, strin
   } catch (e: any) {
     if (e?.code === "ENOENT") {
       throw new Error(
-        `mise not found on host. Install from https://mise.jdx.dev to use env files.`,
+        `mise not found on host. Install with one of:\n` +
+          `  curl -fsSL https://mise.run | sh   (official)\n` +
+          `  brew install mise                  (macOS)\n` +
+          `  cargo install mise                 (rust)\n` +
+          `Then ensure 'mise' is on the server process's PATH and restart loopat.`,
       )
     }
     throw new Error(`mise install failed for ${envDirPath}: ${e?.stderr ?? e?.message ?? e}`)
