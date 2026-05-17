@@ -1,4 +1,4 @@
-# loopat
+# 🧶 loopat
 
 > **Self-hosted AI workspace built around context management — works solo, scales to teams**
 
