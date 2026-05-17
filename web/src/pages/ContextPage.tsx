@@ -40,6 +40,7 @@ import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
+const MilkdownEditor = lazy(() => import("../components/markdown/MilkdownEditor").then(m => ({ default: m.MilkdownEditor })))
 import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload, RefreshCw } from "lucide-react"
 import { Tree, type TreeNodeData, type TreeContextAction } from "../components/Tree"
 
@@ -519,6 +520,7 @@ function DocView({
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [lastCommit, setLastCommit] = useState<string | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(false)
+  const [milkdown, setMilkdown] = useState(false)
   // Server flags secret files; the response never carries plaintext, so
   // `original` stays empty and the only way to mutate is to type a new value.
   const [secretFromServer, setSecretFromServer] = useState(false)
@@ -526,6 +528,7 @@ function DocView({
 
   useEffect(() => {
     setEditing(false)
+    setMilkdown(false)
     setLastCommit(null)
     setSecretFromServer(false)
     vaultRead(vault, path).then((r) => {
@@ -697,12 +700,20 @@ function DocView({
               </Suspense>
             </div>
           </div>
-        ) : isMd ? (
+        ) : isMd && !milkdown ? (
           // edit mode for markdown: split source / preview
           <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
             <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
-              <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
-                source · markdown
+              <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
+                <span>source · markdown</span>
+                <button
+                  type="button"
+                  onClick={() => setMilkdown(true)}
+                  className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                  title="Switch to WYSIWYG editor"
+                >
+                  wysiwyg
+                </button>
               </div>
               <div className="flex-1 min-h-0">
                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
@@ -717,6 +728,26 @@ function DocView({
                   <Suspense fallback={<div className="text-gray-400 text-sm">Loading preview...</div>}><Markdown text={draft} onWikilink={onWikilink} /></Suspense>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : isMd ? (
+          // edit mode for markdown: WYSIWYG (Milkdown), no preview needed
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
+              <span>wysiwyg · milkdown</span>
+              <button
+                type="button"
+                onClick={() => setMilkdown(false)}
+                className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                title="Switch to source editor"
+              >
+                source
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}>
+                <MilkdownEditor value={draft} onChange={setDraft} />
+              </Suspense>
             </div>
           </div>
         ) : (
