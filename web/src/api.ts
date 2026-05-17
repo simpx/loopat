@@ -933,6 +933,73 @@ export async function updatePersonalSettings(patch: {
   return r.ok
 }
 
+// ── disk-shape settings (rich Settings page) ──
+
+/** `ConfigValue` mirror — used by both apiKey and envs values. */
+export type ConfigValue = string | { vault: string } | { file: string }
+
+/** `PathRef` mirror — used by mount.src. */
+export type PathRef = string | { vault: string }
+
+export type ProviderDisk = {
+  model: string
+  baseUrl: string
+  apiKey?: ConfigValue
+  maxContextTokens?: number
+}
+
+export type MountDisk = {
+  src: PathRef
+  dst: string
+  rw?: boolean
+}
+
+export type PersonalConfigDisk = {
+  /** Mixed map: "default" key carries a string; other keys carry ProviderDisk. */
+  providers: Record<string, ProviderDisk | string>
+  envs?: Record<string, ConfigValue>
+  mounts?: MountDisk[]
+  shell?: string
+}
+
+export type RefExistsMap = Record<string, { kind: string; exists: boolean }>
+
+export async function getPersonalDisk(): Promise<{ disk: PersonalConfigDisk; refExists: RefExistsMap } | null> {
+  const r = await apiFetch("/api/settings/personal/disk")
+  if (!r.ok) return null
+  return (await r.json()) as { disk: PersonalConfigDisk; refExists: RefExistsMap }
+}
+
+export async function savePersonalDisk(patch: Partial<PersonalConfigDisk>): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/settings/personal/disk", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `save failed (${r.status})` }
+  return { ok: true }
+}
+
+export type PersonalEntry = { path: string; type: "file" | "dir" }
+export async function listPersonalEntries(root: "personal" | "vault"): Promise<PersonalEntry[]> {
+  const r = await apiFetch(`/api/settings/personal/entries?root=${root}`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.entries as PersonalEntry[]) ?? []
+}
+
+export async function writePersonalValue(ref: ConfigValue, value: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/settings/personal/value", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ref, value }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `write failed (${r.status})` }
+  return { ok: true }
+}
+
 export async function getWorkspaceSettings(): Promise<WorkspaceSettings> {
   const r = await apiFetch("/api/settings/workspace")
   return (await r.json()) as WorkspaceSettings
