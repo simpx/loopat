@@ -20,10 +20,12 @@ COPY . .
 RUN bun --cwd web run build
 
 FROM base AS release
-COPY --from=deps /app/node_modules node_modules
-COPY --from=build /app/web/dist web/dist
+COPY package.json bun.lock* ./
+COPY server/package.json server/
+COPY web/package.json web/
+RUN bun install --frozen-lockfile --production
 COPY server server
-COPY package.json .
+COPY --from=build /app/web/dist web/dist
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0

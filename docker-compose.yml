@@ -1,6 +1,7 @@
 services:
   loopat:
     build: .
+    image: loopat:latest
     ports:
       - "17787:7787"
       - "17788:7788"
