@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 TARGET="${NGINX_ROOT:-/var/www/loopat}"
 
 echo "==> Building web frontend..."
-cd web && bun run build && cd ..
+bun --cwd web run build
 
 echo "==> Copying to $TARGET ..."
 sudo mkdir -p "$TARGET"
