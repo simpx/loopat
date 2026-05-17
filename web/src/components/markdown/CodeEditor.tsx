@@ -9,14 +9,15 @@ import { StreamLanguage } from "@codemirror/language"
 import { python } from "@codemirror/lang-python"
 import { markdown } from "@codemirror/lang-markdown"
 import { javascript } from "@codemirror/lang-javascript"
-import { json } from "@codemirror/lang-json"
+import { json, jsonParseLinter } from "@codemirror/lang-json"
 import { toml } from "@codemirror/legacy-modes/mode/toml"
+import { linter } from "@codemirror/lint"
 
 const langExt = (path: string) => {
   if (path.endsWith(".py")) return python()
   if (path.endsWith(".md")) return markdown()
   if (path.endsWith(".toml")) return StreamLanguage.define(toml)
-  if (path.endsWith(".json")) return json()
+  if (path.endsWith(".json")) return [json(), linter(jsonParseLinter())]
   if (path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".js") || path.endsWith(".jsx"))
     return javascript({ typescript: path.endsWith(".ts") || path.endsWith(".tsx") })
   return []

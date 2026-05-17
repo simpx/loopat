@@ -697,8 +697,8 @@ function DocView({
               </Suspense>
             </div>
           </div>
-        ) : (
-          // edit mode: split source / preview
+        ) : isMd ? (
+          // edit mode for markdown: split source / preview
           <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
             <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
               <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
@@ -717,6 +717,33 @@ function DocView({
                   <Suspense fallback={<div className="text-gray-400 text-sm">Loading preview...</div>}><Markdown text={draft} onWikilink={onWikilink} /></Suspense>
                 </div>
               </div>
+            </div>
+          </div>
+        ) : (
+          // edit mode for non-markdown: full-width editor
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
+              <span>source · {path.includes(".") ? path.split(".").pop() : "text"}</span>
+              {path.endsWith(".json") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      const formatted = JSON.stringify(JSON.parse(draft), null, 2)
+                      setDraft(formatted)
+                    } catch (e: any) {
+                      alert("Invalid JSON: " + (e?.message ?? "parse error"))
+                    }
+                  }}
+                  className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                  title="Format JSON"
+                >
+                  format
+                </button>
+              )}
+            </div>
+            <div className="flex-1 min-h-0">
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
             </div>
           </div>
         )
