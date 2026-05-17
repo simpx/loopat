@@ -28,7 +28,7 @@ import { useChatUnreadTitle } from "./useChatUnreadTitle"
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
 
-  { id: "kanban", label: "Focus", icon: "☰" },
+  { id: "kanban", label: "Focus", icon: "◎" },
   { id: "context", label: "Context", icon: "⌘" },
   { id: "chat", label: "Chat", icon: <MessageCircle size={14} /> },
 ] as const
