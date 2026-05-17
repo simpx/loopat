@@ -16,6 +16,7 @@
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/language": "^6.12.3",
     "@codemirror/legacy-modes": "^6.5.3",
+    "@codemirror/lint": "^6.9.6",
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.42.1",
     "@dnd-kit/core": "^6.3.1",
