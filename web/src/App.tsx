@@ -5,6 +5,7 @@
  * LOOPAT_HOME, server-side).
  */
 import { useEffect, useState } from "react"
+import { MessageCircle } from "lucide-react"
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
@@ -29,10 +30,7 @@ const TABS = [
   { id: "focus", label: "Focus", icon: "◉" },
   { id: "kanban", label: "Kanban", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
-  // ✉︎ has U+FE0E text-variant selector — without it, many systems render
-  // the bare ✉ as a colored/oversized emoji, off-baseline vs. the other
-  // monochrome glyphs.
-  { id: "chat", label: "Chat", icon: "✉︎" },
+  { id: "chat", label: "Chat", icon: <MessageCircle size={14} /> },
 ] as const
 
 function Layout() {
