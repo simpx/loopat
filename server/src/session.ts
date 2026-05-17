@@ -287,7 +287,13 @@ class LoopSession {
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
+    //
+    // User-defined envs from personal config go in first so the platform-
+    // controlled vars below (provider creds, CLAUDE_CONFIG_DIR) can't be
+    // accidentally clobbered by a stray `ANTHROPIC_API_KEY` in envs.
+    const personalCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
     const extraEnv: Record<string, string> = {
+      ...(personalCfg.envs ?? {}),
       ANTHROPIC_API_KEY: provider.apiKey,
       ANTHROPIC_BASE_URL: provider.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
