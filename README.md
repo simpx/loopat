@@ -5,16 +5,26 @@
 >
 > *loop at context, distill into knowledge.*
 
+When humans collaborate with AI, three things only humans can bring:
+
+- **Drive** — what work to start, what's worth doing next
+- **Attention** — what matters right now, what to ignore
+- **Entropy reduction** — turning noise into structured knowledge
+
+loopat is built around managing these three as first-class concepts:
+**Loop** (drive) · **Focus** (attention) · **Context** (entropy
+reduction). A fourth concept — **Chat** — coordinates the team on the
+sync axis.
+
 <p align="center">
   <img src="docs/overview.svg" alt="loopat architecture" width="100%">
 </p>
 
-loopat treats every AI chat as a **loop** — a persistent, sandboxed
-session with its own credential vault and a slice of shared team
-knowledge. Teams share tools and knowledge; members keep their own
-credentials and identity. The agent itself is the
-[Claude Agent SDK][sdk] — what makes loopat distinct is the **context
-architecture around it**.
+The agent itself is the [Claude Agent SDK][sdk] — what makes loopat
+distinct is the **context architecture around it**. Every loop is a
+persistent, sandboxed session with its own credential vault and a
+slice of shared team knowledge. Teams share tools and knowledge;
+members keep their own credentials and identity.
 
 [sdk]: https://github.com/anthropics/claude-agent-sdk
 
