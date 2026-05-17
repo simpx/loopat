@@ -78,21 +78,37 @@ export type RepoSpec = {
 }
 
 /**
+ * Reference to a host path. Sister to `ConfigValue` but for paths:
+ *   - string             → personal-relative (existing behavior)
+ *   - { vault: "x/y" }   → active-vault-relative (rebinds per loop)
+ *
+ * Asymmetric with ConfigValue on purpose: a path's bare-string form has
+ * always meant "personal-relative", so there's no `{file}` variant.
+ */
+export type PathRef = string | { vault: string }
+
+/**
  * Sandbox bind. `dst` is the sandbox-side path; must be rooted
  * (`$HOME/...`, `~/...`, or absolute `/...`). `src` semantics depend on
  * which config holds it:
  *
- * - **Operator** (`~/.dashscope/config.json` `mounts`): `src` is any host
+ * - **Operator** (`~/.loopat/config.json` `mounts`): `src` is any host
  *   path (`~/...`, `$HOME/...`, or absolute `/...`). Operator owns the
- *   host, so we don't restrict scope.
- * - **Member** (`personal/<user>/.loopat/config.json` `mounts`): `src` MUST
- *   be relative under `personal/<user>/` (no `..`, no absolute). Encrypted
- *   dotfiles live at `.loopat/vaults/<vault>/<...>` (git-crypt covers that
- *   subtree); reference them via mounts.
+ *   host, so we don't restrict scope. (Always a string — no PathRef.)
+ * - **Member** (`personal/<user>/.loopat/config.json` `mounts`): `src` is
+ *   a `PathRef`. Bare string → relative under `personal/<user>/`.
+ *   `{ vault: "..." }` → relative under the loop's active vault root.
  *
  * `rw` defaults to false (RO bind). Missing source is silently skipped.
  */
 export type Mount = {
+  src: PathRef
+  dst: string
+  rw?: boolean
+}
+
+/** Operator-side mount (workspace config). src is always a literal host path. */
+export type OperatorMount = {
   src: string
   dst: string
   rw?: boolean
@@ -114,7 +130,7 @@ export type WorkspaceConfig = {
   default?: string
   /** Operator-level mounts — any host path. Shared across all loops on this
    *  workspace. Only the operator (the host shell user) can edit. */
-  mounts?: Mount[]
+  mounts?: OperatorMount[]
   /** Domain suffix for workspace serve (e.g. "nip.io"). Defaults to "nip.io". */
   serveDomain?: string
   /** Whether to include port in the share URL. */
@@ -129,24 +145,31 @@ export type WorkspaceConfig = {
  * Personal config (personal/<user>/.loopat/config.json): per-user, kept in
  * each driver's personal/ tree.
  *
- * The on-disk shape stores explicit `ConfigValue` references for apiKey and
- * envs (no name-based magic). Plain string = literal, `{vault}` = vault-
- * relative (rebinds per loop's active vault), `{file}` = personal-relative
- * (vault-agnostic). At load time, references are resolved against disk and
- * exposed as plain strings (`providers[].apiKey`, `envs[K]`).
+ * On-disk layout:
+ *   - `providers` is a heterogeneous map: a special key `"default"` carries
+ *     a string (the active provider name); all other keys map to
+ *     `ProviderConfigDisk`. We accept the slight type wobble in exchange
+ *     for keeping every provider-related field under one section, which
+ *     matches how the Settings UI groups them. No provider is allowed to
+ *     be literally named "default".
+ *   - `apiKey` / `envs` values are `ConfigValue` references; resolved on
+ *     load and exposed as plain strings via the runtime `PersonalConfig`.
+ *   - `mounts[].src` is `PathRef` (string = personal-relative,
+ *     `{vault}` = active-vault-relative).
  */
 export type PersonalConfigDisk = {
-  default: string
-  providers: Record<string, ProviderConfigDisk>
+  /** Mixed: "default" key is a string, all other keys are providers. */
+  providers: Record<string, ProviderConfigDisk | string>
   /** Environment variables to inject into the sandbox / process env. */
   envs?: Record<string, ConfigValue>
-  /** Member-level mounts — src must be personal-relative. See Mount JSDoc. */
+  /** Member-level mounts — src is `PathRef`. See Mount JSDoc. */
   mounts?: Mount[]
   /** PTY shell override (highest precedence; beats sandbox.json's shell). */
   shell?: string
 }
 
 export type PersonalConfig = {
+  /** Active provider name. On disk this lives at `providers.default`. */
   default: string
   providers: Record<string, ProviderConfig>
   /** Resolved envs (ConfigValue → string). Missing files drop the entry. */
@@ -165,6 +188,11 @@ const WORKSPACE_TEMPLATE: WorkspaceConfig = {
 
 const PERSONAL_TEMPLATE: PersonalConfig = {
   default: "",
+  providers: {},
+}
+
+/** Empty on-disk shape — used when no config.json exists yet. */
+const PERSONAL_DISK_TEMPLATE: PersonalConfigDisk = {
   providers: {},
 }
 
@@ -294,18 +322,27 @@ export async function loadPersonalConfig(
     if (!disk.providers || typeof disk.providers !== "object") {
       throw new Error(`missing providers`)
     }
-    if (disk.default && !disk.providers[disk.default]) {
-      throw new Error(`default "${disk.default}" not in providers`)
-    }
   } catch (e: any) {
     console.warn(`[loopat] personal config: ${path} is malformed (${e?.message ?? e}), rewriting template`)
-    await writeFile(path, JSON.stringify(PERSONAL_TEMPLATE, null, 2) + "\n")
-    disk = JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
+    await writeFile(path, JSON.stringify(PERSONAL_DISK_TEMPLATE, null, 2) + "\n")
+    disk = JSON.parse(JSON.stringify(PERSONAL_DISK_TEMPLATE)) as PersonalConfigDisk
+  }
+
+  // Split the heterogeneous providers map: pull out the special "default"
+  // string key, leave the rest as provider entries.
+  const defaultName = typeof disk.providers.default === "string" ? disk.providers.default : ""
+  const providerEntries: Array<[string, ProviderConfigDisk]> = []
+  for (const [name, val] of Object.entries(disk.providers)) {
+    if (name === "default") continue
+    if (val && typeof val === "object") providerEntries.push([name, val as ProviderConfigDisk])
+  }
+  if (defaultName && !providerEntries.some(([n]) => n === defaultName)) {
+    console.warn(`[loopat] personal config: default "${defaultName}" not in providers (ignored)`)
   }
 
   const refMtimes: Record<string, number> = {}
   const providers: Record<string, ProviderConfig> = {}
-  for (const [name, p] of Object.entries(disk.providers)) {
+  for (const [name, p] of providerEntries) {
     let apiKey = ""
     if (p.apiKey !== undefined) {
       const r = await resolveConfigValue(p.apiKey, user, vault)
@@ -334,7 +371,7 @@ export async function loadPersonalConfig(
   }
 
   const cfg: PersonalConfig = {
-    default: disk.default ?? "",
+    default: defaultName && providers[defaultName] ? defaultName : "",
     providers,
     ...(envs ? { envs } : {}),
     ...(disk.mounts ? { mounts: disk.mounts } : {}),
@@ -401,15 +438,160 @@ export async function addTokenUsage(user: string, model: string, inputTokens: nu
  * Read the raw on-disk shape (without resolving any references). Used by
  * savers that need to preserve existing apiKey/env reference structure.
  */
+export async function readPersonalDiskRaw(user: string): Promise<PersonalConfigDisk> {
+  return readPersonalDisk(user)
+}
+
+/**
+ * For a ConfigValue ref, return the absolute path it points to (or null for
+ * literals) plus whether that path exists on disk. Used by the Settings API
+ * to surface "ref ✓ exists / ✗ missing" indicators WITHOUT leaking the
+ * resolved value to the client.
+ */
+export function describeConfigValue(v: ConfigValue, user: string, vault: string = DEFAULT_VAULT): { kind: "literal" | "vault" | "file" | "invalid"; path: string | null; exists: boolean } {
+  if (typeof v === "string") return { kind: "literal", path: null, exists: true }
+  if (v && typeof v === "object" && "vault" in v && typeof v.vault === "string") {
+    const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
+    const abs = safeUnder(root, v.vault)
+    if (!abs) return { kind: "invalid", path: null, exists: false }
+    return { kind: "vault", path: abs, exists: existsSync(abs) }
+  }
+  if (v && typeof v === "object" && "file" in v && typeof v.file === "string") {
+    const abs = safeUnder(personalDir(user), v.file)
+    if (!abs) return { kind: "invalid", path: null, exists: false }
+    return { kind: "file", path: abs, exists: existsSync(abs) }
+  }
+  return { kind: "invalid", path: null, exists: false }
+}
+
+/**
+ * Apply a structural patch to personal/<user>/.loopat/config.json. Accepts
+ * partial fields from `PersonalConfigDisk`; only fields present on the
+ * patch are touched. Does NOT write any secret values — apiKey/env file
+ * contents are managed through separate value-write endpoints.
+ *
+ * Validation:
+ *   - No provider entry may be named "default" (reserved selector key).
+ *   - If `providers.default` is set, it must point to an existing provider.
+ *   - Each mount's `dst` and `src` (PathRef) must validate.
+ *   - Each env value must be a valid ConfigValue shape.
+ */
+export async function savePersonalDisk(
+  user: string,
+  patch: Partial<PersonalConfigDisk>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const disk = await readPersonalDisk(user)
+  if (patch.providers !== undefined) {
+    // Validate providers map shape: "default" → string, others → object with model/baseUrl.
+    for (const [name, val] of Object.entries(patch.providers)) {
+      if (name === "default") {
+        if (typeof val !== "string") return { ok: false, error: `providers.default must be a string` }
+        continue
+      }
+      if (!val || typeof val !== "object" || Array.isArray(val)) {
+        return { ok: false, error: `provider "${name}" must be an object` }
+      }
+      const p = val as ProviderConfigDisk
+      if (typeof p.model !== "string" || typeof p.baseUrl !== "string") {
+        return { ok: false, error: `provider "${name}" missing model/baseUrl` }
+      }
+      if (p.apiKey !== undefined && !isValidConfigValueShape(p.apiKey)) {
+        return { ok: false, error: `provider "${name}" apiKey has invalid shape` }
+      }
+    }
+    // Default must point to a real provider (if set).
+    const defName = patch.providers.default
+    if (typeof defName === "string" && defName) {
+      const exists = Object.entries(patch.providers).some(([n, v]) => n !== "default" && n === defName && typeof v === "object")
+      if (!exists) return { ok: false, error: `default "${defName}" not in providers` }
+    }
+    disk.providers = patch.providers
+  }
+  if (patch.envs !== undefined) {
+    if (patch.envs && typeof patch.envs === "object") {
+      for (const [k, v] of Object.entries(patch.envs)) {
+        if (!isValidEnvKey(k)) return { ok: false, error: `invalid env key "${k}"` }
+        if (!isValidConfigValueShape(v)) return { ok: false, error: `env "${k}" has invalid value shape` }
+      }
+    }
+    disk.envs = patch.envs
+  }
+  if (patch.mounts !== undefined) {
+    if (!Array.isArray(patch.mounts)) return { ok: false, error: `mounts must be an array` }
+    for (const m of patch.mounts) {
+      if (!m || typeof m !== "object") return { ok: false, error: `mounts entry must be an object` }
+      if (typeof m.dst !== "string" || !isValidMountDstShape(m.dst)) return { ok: false, error: `invalid mount dst: ${JSON.stringify(m.dst)}` }
+      if (!isValidPathRefShape(m.src)) return { ok: false, error: `invalid mount src: ${JSON.stringify(m.src)}` }
+    }
+    disk.mounts = patch.mounts
+  }
+  if (patch.shell !== undefined) {
+    if (typeof patch.shell !== "string") return { ok: false, error: `shell must be a string` }
+    disk.shell = patch.shell || undefined
+  }
+
+  await mkdir(personalLoopatDir(user), { recursive: true })
+  await writeFile(personalLoopatConfigPath(user), JSON.stringify(disk, null, 2) + "\n")
+  clearPersonalCache(user)
+  return { ok: true }
+}
+
+/**
+ * Write a literal value to the target a ConfigValue ref points to. Useful
+ * for "user typed a new apiKey/env value, route it to wherever the ref
+ * says". Literal-string refs aren't writable (the value IS the ref); the
+ * caller is expected to update config.json directly via savePersonalDisk.
+ */
+export async function writeConfigValueTarget(
+  ref: ConfigValue,
+  user: string,
+  value: string,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  if (typeof ref === "string") return { ok: false, error: "literal ref has no writable target" }
+  const writeAt = resolveWritablePath(ref, user)
+  if (!writeAt) return { ok: false, error: "invalid ref path" }
+  await mkdir(dirname(writeAt), { recursive: true })
+  // Match the file-final newline convention so the trim-only-trailing-newline
+  // read path produces the value verbatim.
+  await writeFile(writeAt, value.replace(/\r?\n+$/, "") + "\n")
+  clearPersonalCache(user)
+  return { ok: true, path: writeAt }
+}
+
+function isValidConfigValueShape(v: unknown): v is ConfigValue {
+  if (typeof v === "string") return true
+  if (!v || typeof v !== "object") return false
+  if ("vault" in v && typeof (v as any).vault === "string") return true
+  if ("file"  in v && typeof (v as any).file  === "string") return true
+  return false
+}
+
+function isValidPathRefShape(v: unknown): v is PathRef {
+  if (typeof v === "string") return v.length > 0 && !v.startsWith("/")
+  if (!v || typeof v !== "object") return false
+  if ("vault" in v && typeof (v as any).vault === "string") return (v as any).vault.length > 0
+  return false
+}
+
+function isValidMountDstShape(s: string): boolean {
+  if (!s) return false
+  return s === "~" || s === "$HOME" || s.startsWith("~/") || s.startsWith("$HOME/") || s.startsWith("/")
+}
+
+const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+function isValidEnvKey(k: string): boolean { return typeof k === "string" && ENV_KEY_RE.test(k) }
+
 async function readPersonalDisk(user: string): Promise<PersonalConfigDisk> {
   const path = personalLoopatConfigPath(user)
   if (!existsSync(path)) {
-    return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
+    return JSON.parse(JSON.stringify(PERSONAL_DISK_TEMPLATE)) as PersonalConfigDisk
   }
   try {
-    return JSON.parse(await readFile(path, "utf8")) as PersonalConfigDisk
+    const parsed = JSON.parse(await readFile(path, "utf8")) as PersonalConfigDisk
+    if (!parsed.providers || typeof parsed.providers !== "object") parsed.providers = {}
+    return parsed
   } catch {
-    return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
+    return JSON.parse(JSON.stringify(PERSONAL_DISK_TEMPLATE)) as PersonalConfigDisk
   }
 }
 
@@ -433,7 +615,8 @@ function resolveWritablePath(ref: ConfigValue, user: string): string | null {
  * Save personal config to disk. Provider apiKey values are written into
  * whatever path each provider's `apiKey` reference points to (with default
  * `{ vault: "provider-keys/<name>" }` if no ref exists yet). String-literal
- * refs are updated in-place in config.json.
+ * refs are updated in-place in config.json. `default` is now stored at
+ * `providers.default` inside the providers map.
  */
 export async function savePersonalConfig(user: string, cfg: {
   default?: string
@@ -441,16 +624,28 @@ export async function savePersonalConfig(user: string, cfg: {
 }): Promise<void> {
   const disk = await readPersonalDisk(user)
 
+  // Read existing default (string at providers.default) and existing provider
+  // entries (everything else under providers) — they round-trip when only one
+  // of {default, providers} is being updated.
+  const existingDefault = typeof disk.providers.default === "string" ? disk.providers.default : ""
+
   if (cfg.providers !== undefined) {
-    const newProviders: Record<string, ProviderConfigDisk> = {}
+    const rebuilt: Record<string, ProviderConfigDisk | string> = {}
+    const nextDefault = cfg.default !== undefined ? cfg.default : existingDefault
+    if (nextDefault) rebuilt.default = nextDefault   // emit FIRST for readability
     for (const [name, p] of Object.entries(cfg.providers)) {
-      const existingRef = disk.providers?.[name]?.apiKey
-      // Preserve existing reference shape; default to vault-relative if absent.
+      if (name === "default") {
+        // Defensive: a literal provider named "default" collides with the
+        // selector key. Refuse and warn — UI should already prevent this.
+        console.warn(`[loopat] savePersonalConfig: ignored provider named "default" (reserved key)`)
+        continue
+      }
+      const existingEntry = disk.providers[name]
+      const existingRef = (existingEntry && typeof existingEntry === "object") ? existingEntry.apiKey : undefined
       let ref: ConfigValue = existingRef ?? { vault: `provider-keys/${name}` }
       const hasNewKey = p.apiKey !== undefined && p.apiKey.trim() !== ""
       if (hasNewKey) {
         if (typeof ref === "string") {
-          // Literal: store the new value directly in config.json.
           ref = p.apiKey!.trim()
         } else {
           const writeAt = resolveWritablePath(ref, user)
@@ -460,16 +655,25 @@ export async function savePersonalConfig(user: string, cfg: {
           }
         }
       }
-      newProviders[name] = {
+      rebuilt[name] = {
         model: p.model,
         baseUrl: p.baseUrl,
         apiKey: ref,
         ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
       }
     }
-    disk.providers = newProviders
+    disk.providers = rebuilt
+  } else if (cfg.default !== undefined) {
+    // Only updating the default selector — leave provider entries untouched
+    // but rebuild the map so "default" stays first for readability.
+    const rebuilt: Record<string, ProviderConfigDisk | string> = {}
+    if (cfg.default) rebuilt.default = cfg.default
+    for (const [name, val] of Object.entries(disk.providers)) {
+      if (name === "default") continue
+      rebuilt[name] = val
+    }
+    disk.providers = rebuilt
   }
-  if (cfg.default !== undefined) disk.default = cfg.default
 
   await mkdir(personalLoopatDir(user), { recursive: true })
   await writeFile(personalLoopatConfigPath(user), JSON.stringify(disk, null, 2) + "\n")

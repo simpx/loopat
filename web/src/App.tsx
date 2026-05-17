@@ -12,7 +12,6 @@ import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
-import { SettingsDialog } from "./components/dialog/SettingsDialog"
 import { AdminDialog } from "./components/dialog/AdminDialog"
 import { LoopPage } from "./pages/LoopPage"
 import { FocusPage } from "./pages/FocusPage"
@@ -21,6 +20,7 @@ import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
 import { ChatPage } from "./pages/ChatPage"
+import { SettingsPage } from "./pages/SettingsPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
@@ -49,7 +49,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const me = ws.currentUser?.id ?? ""
   const isAdmin = ws.currentUser?.role === "admin"
@@ -172,7 +171,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false)
-                    setSettingsOpen(true)
+                    navigate("/settings")
                   }}
                   className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
                 >
@@ -223,7 +222,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
       )}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       {isAdmin && (
         <AdminDialog
           open={adminOpen}
@@ -283,6 +281,8 @@ export function App() {
             <Route path="/context/:sub" element={<ContextPage />} />
             <Route path="/chat" element={<ChatPage />} />
             <Route path="/chat/:convId" element={<ChatPage />} />
+            <Route path="/settings" element={<Navigate to="/settings/personal-repo" replace />} />
+            <Route path="/settings/:tab" element={<SettingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

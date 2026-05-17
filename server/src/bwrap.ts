@@ -119,8 +119,9 @@ function expandSandboxPath(p: string, home: string): string {
   return p
 }
 
-/** Member-config src: relative under personal/<user>/, no `..`, no absolute. */
-function isValidMemberMountSrc(s: unknown): s is string {
+/** Validate a member-side relative path (used for both PathRef variants).
+ *  No `..`, no absolute, no empty segments. */
+function isValidRelPath(s: unknown): s is string {
   if (typeof s !== "string" || !s) return false
   if (s.startsWith("/")) return false
   return !s.split("/").some((seg) => seg === ".." || seg === "")
@@ -318,11 +319,29 @@ export async function buildBwrapArgs(
   const personalCfg = await loadPersonalConfig(createdBy, vault)
   const personalRoot = personalDir(createdBy)
   for (const m of personalCfg.mounts ?? []) {
-    if (!isValidMemberMountSrc(m.src) || !isValidMountDst(m.dst)) {
+    if (!isValidMountDst(m.dst)) {
       console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
       continue
     }
-    const src = join(personalRoot, m.src)
+    // PathRef: bare string → personal-relative; { vault } → active-vault-relative.
+    let src: string | null = null
+    if (typeof m.src === "string") {
+      if (!isValidRelPath(m.src)) {
+        console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
+        continue
+      }
+      src = join(personalRoot, m.src)
+    } else if (m.src && typeof m.src === "object" && "vault" in m.src && isValidRelPath((m.src as any).vault)) {
+      if (!vaultRoot) {
+        // No active vault → silently skip vault-relative mounts. Matches the
+        // "missing source is skipped" policy in the Mount JSDoc.
+        continue
+      }
+      src = join(vaultRoot, (m.src as { vault: string }).vault)
+    } else {
+      console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
+      continue
+    }
     const dst = expandSandboxPath(m.dst, home)
     args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
   }
