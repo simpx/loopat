@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault } from "./loops"
 import {
   initChat,
   listChannels,
@@ -496,6 +496,31 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   })
 })
 
+// Export the user's git-crypt key (base64). Behind a fresh password check
+// to prevent walk-up attacks on an unattended browser. The key decrypts
+// .loopat/secrets/** on any host that holds it, so we don't want a stolen
+// session cookie to be enough to lift it.
+app.post("/api/personal/crypt-key", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const password = typeof body.password === "string" ? body.password : ""
+  if (!password) return c.json({ error: "password required" }, 400)
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "user missing" }, 500)
+  const ok = await verifyPassword(password, user.salt, user.hash)
+  if (!ok) return c.json({ error: "wrong password" }, 403)
+  const { gitCryptKeyExists, getGitCryptKey } = await import("./git-crypt-key")
+  if (!(await gitCryptKeyExists(userId))) {
+    return c.json({ error: "no crypt key on this host" }, 404)
+  }
+  try {
+    const buf = await getGitCryptKey(userId)
+    return c.json({ cryptKey: buf.toString("base64") })
+  } catch (e: any) {
+    return c.json({ error: `failed to read key: ${e?.message ?? e}` }, 500)
+  }
+})
+
 app.post("/api/personal/import", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const user = await findUser(userId)
@@ -517,11 +542,63 @@ app.post("/api/personal/import", requireAuth, async (c) => {
     if (r.secretsExposed) {
       return c.json({ error: r.error, secretsExposed: true, exposedFiles: r.exposedFiles ?? [] }, 422)
     }
-    // 409 when the only thing missing is the git-crypt key — UI re-prompts.
+    // 422 = repo isn't a clean slate; user must point at a fresh repo or use
+    // Recovery (BYOK). UI surfaces the Recovery hint in this case.
+    if (r.notClean) {
+      return c.json({ error: r.error, notClean: true }, 422)
+    }
     if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
     return c.json({ error: r.error }, 400)
   }
-  return c.json({ ok: true })
+  // On auto-init, `cryptKey` is returned exactly once for the user to back
+  // up. Subsequent /api/personal/status calls do NOT expose it.
+  return c.json({ ok: true, autoInitialized: !!r.autoInitialized, cryptKey: r.cryptKey ?? null })
+})
+
+// Destroy personal/<user>/ AND the saved git-crypt key. Two-step from the
+// client's POV: first call (no `force`) verifies the password, inspects the
+// repo, attempts a sync if dirty, and either deletes (clean / sync ok) or
+// returns 409 with a data-loss preview. Second call (force=true, same
+// password) skips the sync and just deletes.
+app.post("/api/personal/delete", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const password = typeof body.password === "string" ? body.password : ""
+  const force = body.force === true
+  if (!password) return c.json({ error: "password required" }, 400)
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "user missing" }, 500)
+  const ok = await verifyPassword(password, user.salt, user.hash)
+  if (!ok) return c.json({ error: "wrong password" }, 403)
+
+  const status = await inspectPersonalDirty(userId)
+  const dirty = status.uncommitted > 0 || status.unpushed > 0
+
+  if (!force && dirty) {
+    // Try to sync first. If it works, we can delete with no data loss.
+    const sync = await syncPersonalToRemote(userId)
+    if (!sync.ok) {
+      return c.json(
+        {
+          error: "personal/ has unsynced changes and sync failed",
+          syncFailed: true,
+          syncError: sync.error,
+          uncommitted: status.uncommitted,
+          unpushed: status.unpushed,
+          hasRemote: status.hasRemote,
+        },
+        409,
+      )
+    }
+  }
+
+  const del = await deletePersonalVault(userId)
+  if (!del.ok) return c.json({ error: del.error }, 500)
+  return c.json({
+    ok: true,
+    synced: !force && dirty,
+    dataLost: force && dirty,
+  })
 })
 
 // All /api/* routes below require auth, EXCEPT the two endpoints used by the

@@ -175,16 +175,17 @@ async function readApiKey(user: string, providerName: string): Promise<{ key: st
  * Load personal config from personal/<user>/.loopat/config.json. Fills each
  * provider's apiKey from personal/<user>/.loopat/secrets/provider-keys/<name>.
  *
- * Creates a stub config + .loopat dir on first call for a user that has none
- * yet (so the file exists for the user to edit). Stub has empty providers map
- * — caller decides how to surface "not configured" to the UI / banner.
+ * If the file is missing (user hasn't imported, or just deleted the vault),
+ * return an in-memory empty template — DO NOT lazy-write it to disk. Writes
+ * are restricted to explicit save paths (savePersonalConfig, register, import)
+ * so "delete vault" really means deleted and the directory doesn't grow back
+ * on the next request that happens to touch personal config.
  */
 export async function loadPersonalConfig(user: string): Promise<PersonalConfig> {
   const path = personalLoopatConfigPath(user)
   if (!existsSync(path)) {
-    await mkdir(personalLoopatDir(user), { recursive: true })
-    await writeFile(path, JSON.stringify(PERSONAL_TEMPLATE, null, 2) + "\n")
-    console.warn(`[loopat] personal config: created template at ${path}`)
+    // Synthetic empty config; caller sees no providers configured.
+    return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
   }
   const mtimeMs = statSync(path).mtimeMs
   const cached = personalCache.get(user)

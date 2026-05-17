@@ -8,9 +8,11 @@ type Mode = "login" | "register"
  * Post-register import stage. Server has provisioned an empty personal/<user>/
  * + generated an ed25519 deploy keypair. User has to:
  *   1. Copy the public key.
- *   2. Add it as a deploy key (with write access) on their personal repo on
- *      GitHub / GitLab.
- *   3. Click Continue → server clones the repo using the managed private key.
+ *   2. Add it as a deploy key (with write access) on their (empty) personal
+ *      repo on GitHub / GitLab.
+ *   3. Click Continue → server clones the repo, runs `git-crypt init`,
+ *      pushes the encrypted scaffold, and returns the freshly-generated
+ *      git-crypt key for the user to back up.
  */
 type ImportStage = {
   publicKey: string
@@ -26,6 +28,7 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [importStage, setImportStage] = useState<ImportStage | null>(null)
+  const [backupKey, setBackupKey] = useState<string | null>(null)
   const [pendingNotice, setPendingNotice] = useState<string | null>(null)
 
   const submit = async (e: FormEvent) => {
@@ -81,6 +84,13 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
         setError(r.error ?? "import failed")
         return
       }
+      // Auto-init returned a one-time crypt key — force the user through a
+      // backup acknowledgement before closing. Recovery / no-init paths
+      // don't return a key, so we can close right away.
+      if (r.autoInitialized && r.cryptKey) {
+        setBackupKey(r.cryptKey)
+        return
+      }
       if (onClose) onClose()
     } finally {
       setBusy(false)
@@ -88,6 +98,11 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
   }
 
   const skipImport = () => {
+    if (onClose) onClose()
+  }
+
+  const finishBackup = () => {
+    setBackupKey(null)
     if (onClose) onClose()
   }
 
@@ -119,7 +134,9 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
           )}
         </div>
 
-        {importStage ? (
+        {backupKey ? (
+          <BackupKeyPanel cryptKey={backupKey} onDone={finishBackup} />
+        ) : importStage ? (
           <ImportPanel
             stage={importStage}
             busy={busy}
@@ -173,7 +190,7 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
               {mode === "register" && (
                 <Field
                   label="Personal repo"
-                  hint="optional · 注册后系统会生成 deploy key,你贴到 GitHub 后再导入"
+                  hint="optional · a fresh, empty private GitHub repo. Loopat will set up git-crypt for you on first import — you don't need git-crypt installed."
                 >
                   <input
                     type="text"
@@ -234,13 +251,15 @@ function ImportPanel({
     <div className="flex flex-col gap-3">
       <div className="text-sm font-semibold text-gray-900">Add deploy key</div>
       <div className="text-xs text-gray-600 leading-relaxed">
-        要把 <code className="text-[11px] bg-gray-100 px-1 py-0.5 rounded">{stage.personalRepo}</code>{" "}
-        clone 进你的 personal/,需要先把下面这把公钥贴到 GitHub repo 的 deploy keys。
+        Loopat is about to clone{" "}
+        <code className="text-[11px] bg-gray-100 px-1 py-0.5 rounded">{stage.personalRepo}</code>{" "}
+        and bootstrap it with git-crypt. The repo must be a <b>fresh, empty</b>{" "}
+        private GitHub repo — no README, no <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/</code>.
         <ul className="list-disc pl-5 mt-2 space-y-1 text-gray-500">
-          <li>GitHub → 你的 repo → Settings → Deploy keys → Add deploy key</li>
-          <li>勾上 <b>Allow write access</b>(loopat 要 push memory 更新)</li>
-          <li>粘贴下面这段公钥,Save</li>
-          <li>回到这里点 Continue</li>
+          <li>GitHub → your repo → Settings → Deploy keys → Add deploy key</li>
+          <li>Tick <b>Allow write access</b> (loopat will push the encrypted scaffold)</li>
+          <li>Paste the public key below, Save</li>
+          <li>Come back and click Continue</li>
         </ul>
       </div>
       <div className="relative">
@@ -271,7 +290,7 @@ function ImportPanel({
           disabled={busy}
           className="flex-1 px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {busy ? "cloning…" : "Continue"}
+          {busy ? "initializing…" : "Continue"}
         </button>
         <button
           type="button"
@@ -283,8 +302,75 @@ function ImportPanel({
         </button>
       </div>
       <div className="text-[11px] text-gray-400 leading-relaxed">
-        Skip 也没关系 — personal/ 已经初始化为空 git repo,你随时可以稍后在设置里触发 import。
+        Skip is fine — personal/ is already an empty local git repo. You can
+        finish this later in Settings → Personal repo.
       </div>
+    </div>
+  )
+}
+
+function BackupKeyPanel({
+  cryptKey,
+  onDone,
+}: {
+  cryptKey: string
+  onDone: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const [ack, setAck] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(cryptKey)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-sm font-semibold text-gray-900">Back up your git-crypt key</div>
+      <div className="text-xs text-gray-600 leading-relaxed">
+        Loopat just initialized your repo with git-crypt. The symmetric key below
+        decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/secrets/</code>.
+        It's saved on this host, but if this host dies and you don't have your
+        own copy, all secrets are unrecoverable.
+      </div>
+      <div className="relative">
+        <textarea
+          readOnly
+          value={cryptKey}
+          rows={4}
+          className="w-full text-[11px] font-mono text-gray-800 bg-gray-50 border border-gray-200 rounded p-2 outline-none resize-none break-all"
+          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+        />
+        <button
+          type="button"
+          onClick={copy}
+          className="absolute top-1.5 right-1.5 px-2 py-0.5 text-[11px] rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      <div className="text-[11px] text-gray-500 leading-relaxed bg-gray-50 border border-gray-200 rounded p-2">
+        <b>Suggested:</b> stash this in your password manager. To restore on a new
+        host later, paste this value into the Recovery field on the new host.
+      </div>
+      <label className="flex items-center gap-2 text-xs text-gray-700">
+        <input
+          type="checkbox"
+          checked={ack}
+          onChange={(e) => setAck(e.target.checked)}
+          className="accent-gray-900"
+        />
+        I've saved this key somewhere safe.
+      </label>
+      <button
+        type="button"
+        onClick={onDone}
+        disabled={!ack}
+        className="self-end px-3 h-8 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40"
+      >
+        Done
+      </button>
     </div>
   )
 }
