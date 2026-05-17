@@ -1,15 +1,15 @@
 # loopat
 
-> **Self-hosted AI collaboration workspace built around context management**
-> — your data, your keys, git-based, multi-user.
->
-> *loop at context, distill into knowledge.*
+> **Self-hosted AI workspace for teams — built around context management**
 
 When humans collaborate with AI, three things only humans can bring:
 
-- **Drive** — what work to start, what's worth doing next
-- **Attention** — what matters right now, what to ignore
-- **Entropy reduction** — turning noise into structured knowledge
+- **Drive** — pushing the work forward. AI has no desires, no
+  ambition of its own; momentum has to come from a human.
+- **Attention** — what matters now, what to ignore. AI doesn't know
+  what's worth your time.
+- **Entropy reduction** — turning noise into structured knowledge.
+  AI generates tokens but won't spontaneously simplify.
 
 loopat is built around managing these three as first-class concepts:
 **Loop** (drive) · **Focus** (attention) · **Context** (entropy
