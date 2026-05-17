@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import {
   ComposerPrimitive,
   AuiIf,
@@ -18,8 +19,10 @@ import ModelSelector from "./ModelSelector";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { getChatHistory, appendChatHistory } from "@/api";
 
 const FALLBACK_CONTEXT_WINDOW = 200_000;
+const MAX_HISTORY = 500;
 
 function estimateTokens(messages: readonly unknown[]): number {
   let chars = 0;
@@ -40,20 +43,89 @@ export default function Composer() {
 
   const messagesArray = useAuiState((s) => s.thread.messages);
   const usedTokens = estimateTokens(messagesArray);
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
 
+  // ── chat history ──
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(-1);
+  const pendingDraftRef = useRef("");
+  const textRef = useRef("");
+  textRef.current = typeof composerText === "string" ? composerText : "";
+
+  useEffect(() => {
+    if (!loopId) return;
+    getChatHistory(loopId).then((entries) => {
+      setHistory(entries);
+      setHistoryIdx(-1);
+    });
+  }, [loopId]);
+
+  const saveToHistory = (text: string) => {
+    if (!text.trim() || !loopId) return;
+    const trimmed = text.trim();
+    setHistory((prev) => {
+      if (prev[prev.length - 1] === trimmed) return prev;
+      const next = [...prev, trimmed];
+      if (next.length > MAX_HISTORY) next.splice(0, next.length - MAX_HISTORY);
+      return next;
+    });
+    setHistoryIdx(-1);
+    appendChatHistory(loopId, trimmed).catch(() => {});
+  };
+
   const handleEnqueue = () => {
     const text = typeof composerText === "string" ? composerText.trim() : "";
     if (!text) return;
+    saveToHistory(text);
     enqueueMessage(text);
     aui.composer().setText("");
   };
 
+  const handleSubmit = () => {
+    const text = textRef.current.trim();
+    if (text) saveToHistory(text);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey && isRunning) {
+      e.preventDefault();
+      handleEnqueue();
+      return;
+    }
+    if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (history.length === 0) return;
+      e.preventDefault();
+      if (historyIdx === -1) {
+        pendingDraftRef.current = textRef.current;
+        setHistoryIdx(history.length - 1);
+        aui.composer().setText(history[history.length - 1]);
+      } else if (historyIdx > 0) {
+        const nextIdx = historyIdx - 1;
+        setHistoryIdx(nextIdx);
+        aui.composer().setText(history[nextIdx]);
+      }
+      return;
+    }
+    if (e.key === "ArrowDown" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      if (historyIdx === -1) return;
+      e.preventDefault();
+      if (historyIdx < history.length - 1) {
+        const nextIdx = historyIdx + 1;
+        setHistoryIdx(nextIdx);
+        aui.composer().setText(history[nextIdx]);
+      } else {
+        setHistoryIdx(-1);
+        aui.composer().setText(pendingDraftRef.current);
+      }
+      return;
+    }
+  };
+
   return (
-    <ComposerPrimitive.Root className="relative flex w-full flex-col">
+    <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
       {/* Claude Status bar */}
       <ClaudeStatus isLoading={isRunning} tokenCount={usedTokens} />
 
@@ -93,12 +165,7 @@ export default function Composer() {
             rows={1}
             autoFocus
             aria-label="Message input"
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && isRunning) {
-                e.preventDefault();
-                handleEnqueue();
-              }
-            }}
+            onKeyDown={handleKeyDown}
           />
 
           {/* Toolbar */}

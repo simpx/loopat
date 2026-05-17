@@ -495,6 +495,21 @@ export async function getLoopSandbox(id: string): Promise<LoopSandboxInfo | null
   return (await r.json()) as LoopSandboxInfo
 }
 
+export async function getChatHistory(loopId: string): Promise<string[]> {
+  const r = await apiFetch(`/api/loops/${loopId}/chat-history`)
+  if (!r.ok) return []
+  const entries = await r.json()
+  return entries.map((e: any) => e.text)
+}
+
+export async function appendChatHistory(loopId: string, text: string): Promise<void> {
+  await apiFetch(`/api/loops/${loopId}/chat-history`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  })
+}
+
 export async function refreshLoopSandbox(id: string): Promise<{ ok: boolean; version?: string | null; error?: string }> {
   const r = await apiFetch(`/api/loops/${id}/sandbox/refresh`, { method: "POST" })
   const j = await r.json().catch(() => ({}))

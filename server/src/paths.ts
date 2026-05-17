@@ -39,6 +39,7 @@ export const loopContextRepos = (id: string) => join(loopContextDir(id), "repos"
 export const loopContextChatDir = (id: string) => join(loopContextDir(id), "chat")
 export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
+export const loopChatHistoryPath = (id: string) => join(loopDir(id), "chat_history.jsonl")
 
 export const chatDbPath = () => join(LOOPAT_HOME, "chat.db")
 

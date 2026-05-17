@@ -21,7 +21,7 @@ import {
   snapshotThreadToJsonl,
 } from "./chat"
 import { loopContextChatDir } from "./paths"
-import { join as pathJoin } from "node:path"
+import { join as pathJoin, dirname } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
@@ -39,6 +39,7 @@ import {
   loopContextRepos,
   loopWorkdir,
   loopHistoryPath,
+  loopChatHistoryPath,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, type ProviderConfig, type ConfigValue } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
@@ -458,7 +459,7 @@ app.get("/api/settings/token-usage/daily", requireAuth, async (c) => {
 
 // ── token usage recompute helpers ──
 
-import { readFile } from "node:fs/promises"
+import { readFile, appendFile, mkdir } from "node:fs/promises"
 
 async function recomputeTokenUsage(userId: string): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
   const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
@@ -952,6 +953,34 @@ app.post("/api/loops/:id/folder", requireAuth, async (c) => {
   if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
   const ok = await createWorkdirFolder(id, body.path)
   if (!ok) return c.json({ error: "mkdir failed" }, 500)
+  return c.json({ ok: true })
+})
+
+// ── chat history ──
+app.get("/api/loops/:id/chat-history", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  const path = loopChatHistoryPath(id)
+  if (!existsSync(path)) return c.json([])
+  const raw = await Bun.file(path).text()
+  const lines = raw.split("\n").filter(Boolean)
+  const entries = lines.map((l) => {
+    try { return JSON.parse(l) } catch { return null }
+  }).filter((e): e => e !== null)
+  return c.json(entries)
+})
+
+app.post("/api/loops/:id/chat-history", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400)
+  const path = loopChatHistoryPath(id)
+  await mkdir(dirname(path), { recursive: true })
+  await appendFile(path, JSON.stringify({ text: body.text.trim(), ts: Date.now() }) + "\n")
   return c.json({ ok: true })
 })
 
