@@ -27,7 +27,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
@@ -1213,6 +1213,15 @@ app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
   const loops = await listLoops()
   const recent = loops.filter((l) => (l as any).repo === name).slice(0, 8)
   return c.json({ ...detail, recentLoops: recent })
+})
+
+// `git pull --ff-only` in the repo. Fast-forward only — diverged branches
+// surface as an error so the user resolves them in their own checkout.
+app.post("/api/workspace/repo/:name/pull", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  const r = await pullRepo(name)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true, output: r.output })
 })
 
 // ── focus + topics ──

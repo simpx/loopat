@@ -559,6 +559,24 @@ export async function readRepoDetail(name: string): Promise<RepoDetail | null> {
   return { name, path, remote, branch, status: online, readme }
 }
 
+export async function pullRepo(name: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const path = join(workspaceReposDir(), name)
+  try {
+    const s = await stat(path)
+    if (!s.isDirectory()) return { ok: false, error: "not found" }
+  } catch {
+    return { ok: false, error: "not found" }
+  }
+  if (!existsSync(join(path, ".git"))) return { ok: false, error: "not a git repo" }
+  try {
+    const { stdout, stderr } = await execFileP("git", ["-C", path, "pull", "--ff-only"], { timeout: 60_000 })
+    return { ok: true, output: `${stdout}${stderr}`.trim() }
+  } catch (e: any) {
+    const msg = (e?.stderr || e?.stdout || e?.message || "pull failed").toString().trim()
+    return { ok: false, error: msg }
+  }
+}
+
 export async function listRepos(): Promise<RepoEntry[]> {
   const root = workspaceReposDir()
   let names: string[] = []
