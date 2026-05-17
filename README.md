@@ -9,9 +9,9 @@
   <img src="docs/overview.svg" alt="loopat architecture" width="100%">
 </p>
 
-A web app on `localhost:7787`. Every chat is a **loop** — a persistent,
-sandboxed session paired with a credential vault and a slice of shared
-team knowledge. Teams share tools and knowledge; members keep their own
+loopat treats every AI chat as a **loop** — a persistent, sandboxed
+session with its own credential vault and a slice of shared team
+knowledge. Teams share tools and knowledge; members keep their own
 credentials and identity. The agent itself is the
 [Claude Agent SDK][sdk] — what makes loopat distinct is the **context
 architecture around it**.
@@ -29,16 +29,23 @@ architecture around it**.
 
 ## What makes loopat different
 
-- **Sandbox × Vault.** Capability (tools the loop can use) and identity
-  (credentials it runs as) are orthogonal. *alice × dev*, *alice × prod*,
-  *bob × dev*, *carol × prod* — four cells of the same matrix, one engine.
-- **Layered context.** System doctrine + team conventions + per-project
-  rules + cross-session **memory**, all assembled per turn, all distillable
-  upward into shared knowledge.
-- **Git-based.** Every artifact is a file, every change a commit on the
-  loop's branch. `ls` and `cat` reveal full state. No DB.
-- **Your data, your keys.** Self-hosted, BYO API key, per-vault credential
-  isolation. Nothing leaves your machine except the model API call itself.
+- **End-to-end context management.** Chat history, code edits, agent
+  decisions, memory — all live in the same context graph and all flow
+  into the next loop. Most tools treat the conversation as ephemeral
+  and only persist files; loopat treats **chat itself** as a first-class
+  context artifact.
+- **Reproducible loops.** Every loop runs in a bwrap sandbox with a
+  pinned toolchain (mise) and a pinned credential vault. Spawn the same
+  loop tomorrow on a different machine and get the same starting state.
+  No "works on my machine" for AI sessions.
+- **Built for teams, not just individuals.** Shared `knowledge/` and
+  `notes/` git repos sync across members; loops contribute back via
+  auto-commit and distillation. Almost every AI coding tool today is
+  built for a solo dev — loopat is built for a team working on the same
+  codebase together.
+- **Self-hosted, data you own.** BYO API key, per-vault credential
+  isolation, everything lives in local git repos. Nothing leaves your
+  machine except the model API call itself.
 
 ## How loopat compares
 
@@ -50,7 +57,7 @@ architecture around it**.
 | Multi-user | ❌ | ❌ | account-based | **shared workspace** |
 | Sandbox isolation | process-level | process-level | OpenAI-managed | **bwrap (lightweight, default) · Docker (planned)** |
 | Context layers | `CLAUDE.md` | `AGENTS.md` | in-session | **doctrine + team + project + memory** |
-| Cross-session knowledge | none | none | none | **memory + knowledge + auto distillation** |
+| Memory management | personal (`CLAUDE.md`) | personal (`AGENTS.md`) | none | **personal + team-shared, auto distillation between layers** |
 | Credential storage | env vars | env vars | platform-managed | **filesystem vault overlay** |
 | Parallel sessions | many terminals | many terminals | tabs | **loops as first-class objects** |
 | Agent engine | proprietary | pluggable | proprietary | **Claude Agent SDK** |
