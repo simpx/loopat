@@ -1,0 +1,864 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>loopat architecture — the loop and its layers</title>
+<style>
+  /* ─── base ─────────────────────────────────────────────────────────── */
+  :root {
+    --ink:      #1b1f24;
+    --ink-2:    #424a55;
+    --muted:    #7a8696;
+    --line:     #c8cdd4;
+    --line-soft:#e1e5ea;
+    --bg:       #f7f8fa;
+    --paper:    #ffffff;
+
+    --host:      #f1f4f9;
+    --operator:  #eef0f3;
+    --knowledge: #e6eef9;   /* ro = cool blue */
+    --notes:     #fff5d6;   /* rw shared = warm yellow */
+    --personal:  #f4e7f3;   /* rw private = purple */
+    --chat:      #e6f5ec;   /* separate, green */
+    --sandbox:   #ffffff;
+    --agent:     #fcfaf3;   /* parchment */
+
+    --ro:    #2c6ad0;
+    --rw:    #2e8a3f;
+    --tmpfs: #c2410c;
+    --over:  #b45309;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 36px 24px 80px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 0 0 4px 0;
+    letter-spacing: -0.01em;
+  }
+  .tagline {
+    color: var(--ink-2);
+    margin: 0 0 28px 0;
+    font-size: 14px;
+  }
+  h2 {
+    font-size: 15px;
+    margin: 40px 0 12px 0;
+    letter-spacing: -0.005em;
+  }
+  code, .mono {
+    font-family: "SF Mono", "Monaco", "JetBrains Mono", Menlo, "Consolas", "Liberation Mono", monospace;
+    font-size: 12px;
+  }
+
+  /* ─── the centerpiece ─────────────────────────────────────────────── */
+  .stage {
+    position: relative;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  /* arrow overlay sits underneath the boxes so connectors don't obscure text */
+  .stage svg.arrows {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .stage > .row,
+  .stage > .layer-label,
+  .stage > .sandbox,
+  .stage > .distill {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ─── shared box style ────────────────────────────────────────────── */
+  .box {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .box .title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .box .title .badge {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: white;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .box .item {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 1px 0;
+  }
+  .box .item code { color: var(--ink); }
+  .box .item .desc { color: var(--ink-2); }
+
+  /* zone colors */
+  .b-operator   { background: var(--operator); }
+  .b-knowledge  { background: var(--knowledge); }
+  .b-notes      { background: var(--notes); }
+  .b-personal   { background: var(--personal); }
+  .b-chat       { background: var(--chat); }
+  .b-agent      { background: var(--agent); border-color: #cdb98a; }
+
+  /* row of sources */
+  .row.sources {
+    display: grid;
+    grid-template-columns: 1.05fr 1.3fr 1.05fr 1.3fr 0.95fr;
+    grid-gap: 14px;
+    margin-bottom: 22px;
+  }
+  .layer-label {
+    text-align: center;
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 6px 0 18px 0;
+  }
+  .layer-label::before,
+  .layer-label::after {
+    content: " ── ";
+    color: var(--line);
+  }
+
+  /* ─── sandbox container ──────────────────────────────────────────── */
+  .sandbox {
+    background: var(--sandbox);
+    border: 1.5px dashed #8895a8;
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .sandbox .sandbox-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .sandbox .sandbox-head .right {
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .sandbox .paths {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .path {
+    border: 1px solid var(--line-soft);
+    border-radius: 5px;
+    padding: 8px 10px;
+    background: #fafbfd;
+  }
+  .path .p-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .path .p-desc {
+    font-size: 11.5px;
+    color: var(--ink-2);
+    margin-top: 4px;
+  }
+  .path .sub {
+    margin-top: 6px;
+    padding-left: 8px;
+    border-left: 2px solid var(--line-soft);
+  }
+  .path .sub div {
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: 11.5px;
+    padding: 1px 0;
+    color: var(--ink-2);
+  }
+  .path .sub code { color: var(--ink); }
+
+  /* permission badges */
+  .perm {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: white;
+    letter-spacing: 0.03em;
+  }
+  .perm-ro    { background: var(--ro); }
+  .perm-rw    { background: var(--rw); }
+  .perm-tmpfs { background: var(--tmpfs); }
+  .perm-over  { background: var(--over); }
+
+  /* ─── AGENT panel ─────────────────────────────────────────────────── */
+  .agent {
+    border: 1.5px solid #cdb98a;
+    background: var(--agent);
+    border-radius: 8px;
+    padding: 14px;
+    margin-top: 6px;
+  }
+  .agent .agent-head {
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #6b5616;
+    margin-bottom: 10px;
+  }
+  .agent .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .agent .pane h4 {
+    margin: 0 0 6px 0;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b5616;
+    border-bottom: 1px solid #ddd2a8;
+    padding-bottom: 3px;
+  }
+  .agent .pane h4 .dir {
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  .agent .pane .src {
+    padding: 3px 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .agent .pane .src .lbl {
+    display: inline-block;
+    min-width: 96px;
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .agent .pane .src .arrow {
+    color: var(--muted);
+  }
+  .agent .pane .src code { color: var(--ink); }
+
+  /* ─── distillation flow ──────────────────────────────────────────── */
+  .distill {
+    margin-top: 18px;
+    padding: 14px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: #fdfdfd;
+  }
+  .distill h3 {
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+  }
+  .distill .flow {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr 60px 1fr;
+    align-items: center;
+    gap: 6px;
+  }
+  .distill .step {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 8px 10px;
+    text-align: center;
+  }
+  .distill .step .label {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--ink);
+  }
+  .distill .step .role {
+    color: var(--muted);
+    font-size: 10.5px;
+    margin-top: 2px;
+  }
+  .distill .arrow-step {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .distill .arrow-step .glyph {
+    display: block;
+    font-size: 18px;
+    color: var(--ink-2);
+    line-height: 1;
+  }
+
+  /* ─── legend ─────────────────────────────────────────────────────── */
+  .legend {
+    margin: 20px 0 0 0;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 12px 14px;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  .legend .l {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+  .legend .swatch {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.08);
+  }
+
+  /* ─── orthogonal axes infographic ────────────────────────────────── */
+  .axes {
+    display: grid;
+    grid-template-columns: 1fr 70px 1fr;
+    margin-top: 12px;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .axes .axis {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px;
+    background: var(--paper);
+  }
+  .axes .axis.sandbox-axis { background: linear-gradient(180deg, #f5f9fe, var(--paper)); }
+  .axes .axis.vault-axis   { background: linear-gradient(180deg, #fbf3fa, var(--paper)); }
+  .axes .axis h3 {
+    margin: 0 0 6px 0;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink);
+  }
+  .axes .axis .sub {
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 8px;
+  }
+  .axes .x {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    font-weight: 200;
+    color: var(--muted);
+  }
+  .axes .examples {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--line);
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  .axes .examples .ex {
+    padding: 2px 0;
+  }
+  .axes .examples code { color: var(--ink); }
+
+  /* ─── tables (read/write paths) ──────────────────────────────────── */
+  table.detail {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+    font-size: 12.5px;
+  }
+  table.detail th, table.detail td {
+    text-align: left;
+    border-bottom: 1px solid var(--line-soft);
+    padding: 6px 8px;
+    vertical-align: top;
+  }
+  table.detail th {
+    background: #f5f6f8;
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  table.detail tr:last-child td { border-bottom: none; }
+  table.detail code { color: var(--ink); }
+
+  /* ─── philosophy ─────────────────────────────────────────────────── */
+  .philo {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .philo .p {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ink);
+    border-radius: 5px;
+    padding: 12px 14px;
+  }
+  .philo .p h4 {
+    margin: 0 0 4px 0;
+    font-size: 12.5px;
+  }
+  .philo .p p {
+    margin: 0;
+    font-size: 12px;
+    color: var(--ink-2);
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <h1>loopat architecture</h1>
+  <p class="tagline">
+    A loop = context + AI + workdir, bound together in a per-loop bwrap sandbox.
+    Every path the agent sees is composed from a few host-side sources. This is the map.
+  </p>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       CENTERPIECE
+  ──────────────────────────────────────────────────────────────── -->
+  <div class="stage">
+
+    <!-- arrow overlay (SVG path connectors).
+         Path data hand-drawn assuming the row layout below. Coordinates are
+         given as percentages of the stage's bounding box for resilience to
+         minor reflow; refine if box dimensions change. -->
+    <svg class="arrows" viewBox="0 0 1240 1180" preserveAspectRatio="none">
+      <defs>
+        <marker id="ah-ro" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2c6ad0"/>
+        </marker>
+        <marker id="ah-rw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2e8a3f"/>
+        </marker>
+        <marker id="ah-over" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+        </marker>
+      </defs>
+
+      <!-- knowledge → sandbox (ro) -->
+      <path d="M 290 290 C 290 380, 340 360, 340 420" fill="none" stroke="#2c6ad0" stroke-width="1.5" marker-end="url(#ah-ro)"/>
+      <!-- notes → sandbox (rw) -->
+      <path d="M 600 290 C 600 380, 580 360, 580 420" fill="none" stroke="#2e8a3f" stroke-width="1.5" marker-end="url(#ah-rw)"/>
+      <!-- personal → sandbox (rw) -->
+      <path d="M 810 290 C 810 380, 760 360, 760 420" fill="none" stroke="#2e8a3f" stroke-width="1.5" marker-end="url(#ah-rw)"/>
+      <!-- personal:vault → /vault overlay (heavy line) -->
+      <path d="M 940 290 C 940 360, 900 360, 880 420" fill="none" stroke="#b45309" stroke-width="2.2" marker-end="url(#ah-over)" stroke-dasharray="0"/>
+      <!-- operator → $HOME -->
+      <path d="M 130 290 C 130 380, 170 380, 200 420" fill="none" stroke="#2e8a3f" stroke-width="1.5" marker-end="url(#ah-rw)"/>
+      <!-- chat → /context/chat/ (ro, only on spawn-from-chat) -->
+      <path d="M 1130 290 C 1130 380, 1100 380, 1080 420" fill="none" stroke="#2c6ad0" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#ah-ro)"/>
+    </svg>
+
+    <!-- HOST sources -->
+    <div class="row sources">
+
+      <!-- OPERATOR -->
+      <div class="box b-operator">
+        <div class="title">Operator <span class="badge" style="background:#5c6473">host</span></div>
+        <div class="item"><code>~/.dashscope/config.json</code></div>
+        <div class="item"><span class="desc">workspace mounts (any host path)</span></div>
+        <div class="item" style="margin-top:6px"><code>host-secrets/&lt;user&gt;/</code></div>
+        <div class="item"><span class="desc">deploy-key, git-crypt.key</span></div>
+        <div class="item"><span class="desc">not bound into sandbox</span></div>
+      </div>
+
+      <!-- KNOWLEDGE -->
+      <div class="box b-knowledge">
+        <div class="title">Knowledge <span class="badge" style="background:#2c6ad0">team git · ro</span></div>
+        <div class="item"><code>context/knowledge/&lt;docs&gt;/</code></div>
+        <div class="item"><code>.loopat/claude/CLAUDE.md</code> <span class="desc">— L2 doctrine</span></div>
+        <div class="item"><code>.loopat/claude/skills/</code> <span class="desc">— team skills</span></div>
+        <div class="item"><code>.loopat/claude/claude.json</code> <span class="desc">— team mcp</span></div>
+        <div class="item"><code>.loopat/sandboxes/&lt;name&gt;/</code> <span class="desc">— toolchain catalog</span></div>
+      </div>
+
+      <!-- NOTES -->
+      <div class="box b-notes">
+        <div class="title">Notes <span class="badge" style="background:#a07807">team git · rw</span></div>
+        <div class="item"><code>inbox.md</code> <span class="desc">— workspace scratch</span></div>
+        <div class="item"><code>focus/&lt;name&gt;.md</code> <span class="desc">— task trees</span></div>
+        <div class="item"><code>memory/MEMORY.md</code> <span class="desc">— team memory (deliberate)</span></div>
+        <div class="item"><span class="desc">auto-commit on save</span></div>
+      </div>
+
+      <!-- PERSONAL -->
+      <div class="box b-personal">
+        <div class="title">Personal <span class="badge" style="background:#7a3170">user git · git-crypt</span></div>
+        <div class="item"><code>memory/</code> <span class="desc">— personal mem (SDK auto-recall)</span></div>
+        <div class="item"><code>.loopat/config.json</code> <span class="desc">— providers, mounts, shell</span></div>
+        <div class="item" style="margin-top:4px"><b>.loopat/vaults/</b> <span class="desc">— catalog (hidden in sandbox)</span></div>
+        <div class="item" style="padding-left:14px"><code>default/</code> <span class="desc">baseline</span></div>
+        <div class="item" style="padding-left:14px"><code>dev/  prod/  test/  …</code> <span class="desc">exactly ONE selected per loop</span></div>
+      </div>
+
+      <!-- CHAT -->
+      <div class="box b-chat">
+        <div class="title">Chat <span class="badge" style="background:#36794a">separate</span></div>
+        <div class="item"><span class="desc">threads with their own agent</span></div>
+        <div class="item"><span class="desc">no workdir, no sandbox</span></div>
+        <div class="item" style="margin-top:6px"><span class="desc">on <b>/spawn-loop</b>:</span></div>
+        <div class="item"><span class="desc">thread.jsonl → new loop's</span></div>
+        <div class="item"><code>/context/chat/&lt;id&gt;/</code> <span class="desc">(ro)</span></div>
+      </div>
+
+    </div>
+
+    <div class="layer-label">composed into one mount namespace by bwrap</div>
+
+    <!-- SANDBOX -->
+    <div class="sandbox">
+      <div class="sandbox-head">
+        <span>Sandbox <span style="color:var(--ink);font-weight:700;letter-spacing:0;text-transform:none">(one per loop, ephemeral)</span></span>
+        <span class="right">paths visible to the agent</span>
+      </div>
+
+      <div class="paths">
+
+        <!-- /loopat/loop -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-rw">rw</span><code>/loopat/loop/&lt;id&gt;/</code></div>
+          <div class="p-desc">this loop's ephemeral instance</div>
+          <div class="sub">
+            <div><code>workdir/</code> — git worktree, branch <code>loop/&lt;slug&gt;-&lt;id6&gt;</code></div>
+            <div><code>.claude/</code> — SDK session state</div>
+            <div><code>.claude/CLAUDE.md</code> ◀ ro-bind L2 from knowledge</div>
+            <div><code>.claude/skills/</code> ◀ ro-bind from knowledge</div>
+          </div>
+        </div>
+
+        <!-- /loopat/context/knowledge -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-ro">ro</span><code>/loopat/context/knowledge/</code></div>
+          <div class="p-desc">team git, read-only inside sandbox (AI never edits)</div>
+        </div>
+
+        <!-- /loopat/context/notes -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-rw">rw</span><code>/loopat/context/notes/</code></div>
+          <div class="p-desc">team git, auto-commit on save</div>
+          <div class="sub">
+            <div>inbox · focus · memory/MEMORY.md</div>
+          </div>
+        </div>
+
+        <!-- /loopat/context/personal -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-rw">rw</span><code>/loopat/context/personal/</code></div>
+          <div class="p-desc">user's personal git, auto-commit</div>
+          <div class="sub">
+            <div><code>memory/</code> — personal memory</div>
+            <div><code>.loopat/config.json</code> — per-user config</div>
+            <div><code>.loopat/vaults/</code> ◀ <span class="perm perm-tmpfs">tmpfs</span> catalog hidden</div>
+            <div><code>.loopat/vault/</code> ◀ <span class="perm perm-over">overlay</span> selected vault's files</div>
+          </div>
+        </div>
+
+        <!-- repos -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-rw">rw</span><code>/loopat/context/repos/&lt;name&gt;/</code></div>
+          <div class="p-desc">workspace's registered code repos; worktree origin</div>
+        </div>
+
+        <!-- chat (conditional) -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-ro">ro</span><code>/loopat/context/chat/&lt;id&gt;/</code></div>
+          <div class="p-desc">only when spawned from a chat thread — seed history</div>
+        </div>
+
+        <!-- $HOME -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-tmpfs">tmpfs</span><code>$HOME</code></div>
+          <div class="p-desc">fresh tmpfs + member-mounts re-overlaid</div>
+          <div class="sub">
+            <div>e.g. <code>.loopat/vault/.ssh</code> ► <code>$HOME/.ssh</code></div>
+          </div>
+        </div>
+
+        <!-- system -->
+        <div class="path">
+          <div class="p-head"><span class="perm perm-ro">ro</span><code>/usr /etc /lib /bin /sbin</code></div>
+          <div class="p-desc">host system paths (so binaries work). <code>/tmp</code> shared.</div>
+        </div>
+
+      </div>
+
+      <!-- AGENT -->
+      <div class="agent">
+        <div class="agent-head">◆ Agent — driving this loop</div>
+        <div class="split">
+
+          <!-- READ -->
+          <div class="pane">
+            <h4><span class="dir" style="color:#2c6ad0">▼ READ</span> sources concatenated each turn</h4>
+            <div class="src"><span class="lbl">L1 doctrine</span><span class="arrow">◀</span> bundled <code>templates/CLAUDE.md</code></div>
+            <div class="src"><span class="lbl">L2 team</span><span class="arrow">◀</span> <code>knowledge/.loopat/claude/CLAUDE.md</code></div>
+            <div class="src"><span class="lbl">L3 project</span><span class="arrow">◀</span> <code>workdir/CLAUDE.md</code></div>
+            <div class="src"><span class="lbl">L4 runtime</span><span class="arrow">◀</span> server-computed (id, title, vault, sandbox)</div>
+            <div class="src"><span class="lbl">skills</span><span class="arrow">◀</span> team <code>knowledge/.loopat/claude/skills/</code></div>
+            <div class="src"><span class="lbl">mcp tools</span><span class="arrow">◀</span> team <code>claude.json</code></div>
+            <div class="src"><span class="lbl">personal mem</span><span class="arrow">◀</span> SDK auto-recalls each turn</div>
+            <div class="src"><span class="lbl">team mem</span><span class="arrow">◀</span> reads MEMORY.md on complex turns</div>
+            <div class="src"><span class="lbl">credentials</span><span class="arrow">◀</span> <code>/personal/.loopat/vault/*</code> (one vault only)</div>
+            <div class="src"><span class="lbl">chat history</span><span class="arrow">◀</span> <code>/context/chat/&lt;id&gt;/</code> (if spawned from chat)</div>
+          </div>
+
+          <!-- WRITE -->
+          <div class="pane">
+            <h4><span class="dir" style="color:#2e8a3f">▲ WRITE</span> destinations (server auto-commits)</h4>
+            <div class="src"><span class="lbl">workdir/*</span><span class="arrow">►</span> auto-commit on loop branch</div>
+            <div class="src"><span class="lbl">notes/inbox</span><span class="arrow">►</span> append to team scratch</div>
+            <div class="src"><span class="lbl">notes/focus</span><span class="arrow">►</span> task trees</div>
+            <div class="src"><span class="lbl">notes/memory</span><span class="arrow">►</span> agent auto-promotes from personal when team-relevant</div>
+            <div class="src"><span class="lbl">personal/memory</span><span class="arrow">►</span> SDK-managed observations</div>
+            <div class="src"><span class="lbl">/vault/*</span><span class="arrow">►</span> rare — credential helper refresh</div>
+            <div class="src" style="margin-top:8px;padding-top:6px;border-top:1px dashed #ddd2a8;color:#9e3030">
+              <span class="lbl" style="color:#9e3030">never writes</span>
+              <span class="arrow">⊘</span>
+              <code>knowledge/</code>, other <code>repos/&lt;x&gt;</code>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- DISTILLATION -->
+    <div class="distill">
+      <h3>distillation — knowledge condenses upward</h3>
+      <div class="flow">
+        <div class="step">
+          <div class="label">personal/memory/</div>
+          <div class="role">private observations</div>
+        </div>
+        <div class="arrow-step">
+          <span class="glyph">▶</span>
+          <span>auto-promote</span><br/>
+          <span>or curate</span>
+        </div>
+        <div class="step">
+          <div class="label">notes/memory/</div>
+          <div class="role">team-shared, deliberate</div>
+        </div>
+        <div class="arrow-step">
+          <span class="glyph">▶</span>
+          <span>distill</span><br/>
+          <span>loop</span>
+        </div>
+        <div class="step">
+          <div class="label">knowledge/</div>
+          <div class="role">canonical, human-reviewed</div>
+        </div>
+      </div>
+      <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:8px">
+        and separately: <code>loop/workdir/</code> ▶ <code>repos/&lt;name&gt;/</code> (merge the loop's branch back)
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       LEGEND
+  ──────────────────────────────────────────────────────────────── -->
+  <div class="legend">
+    <div class="l"><span class="perm perm-ro">ro</span> read-only bind — agent sees, cannot write</div>
+    <div class="l"><span class="perm perm-rw">rw</span> read-write bind — agent's writes hit disk</div>
+    <div class="l"><span class="perm perm-tmpfs">tmpfs</span> empty fs mounted on top to hide what's underneath</div>
+    <div class="l"><span class="perm perm-over">overlay</span> multiple host files composed into one sandbox path</div>
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       ORTHOGONAL AXES
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Loop = Sandbox × Vault</h2>
+  <p class="tagline" style="margin-bottom:6px">The one thing to internalize. Two orthogonal axes, picked independently at spawn.</p>
+
+  <div class="axes">
+    <div class="axis sandbox-axis">
+      <h3>Sandbox</h3>
+      <div class="sub">"what tools the loop can use"</div>
+      <div><b>owned by:</b> admin / team (knowledge git)</div>
+      <div><b>contains:</b> mise toolchain · shell · mcp servers</div>
+      <div><b>versioned by:</b> knowledge git commit</div>
+      <div class="examples">
+        <div class="ex"><code>frontend</code> — node, bun, jira-mcp, figma-mcp</div>
+        <div class="ex"><code>backend</code>  — go, python, redis-cli</div>
+        <div class="ex"><code>sre</code>      — kubectl, aws-cli, datadog-mcp</div>
+      </div>
+    </div>
+    <div class="x">×</div>
+    <div class="axis vault-axis">
+      <h3>Vault</h3>
+      <div class="sub">"with what credentials it runs"</div>
+      <div><b>owned by:</b> member / individual (personal git, git-crypt)</div>
+      <div><b>contains:</b> apiKey · ssh · tokens · provider keys</div>
+      <div><b>isolated by:</b> bwrap overlay (other vaults invisible)</div>
+      <div class="examples">
+        <div class="ex"><code>default</code> — shared baseline</div>
+        <div class="ex"><code>dev</code>      — dev env credentials</div>
+        <div class="ex"><code>prod</code>     — prod credentials (you specifically have)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       READ PATH TABLE
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Read path — what the agent learns from</h2>
+  <table class="detail">
+    <thead>
+      <tr><th>Layer</th><th>Source on host</th><th>Loaded by</th><th>Scope</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><b>L1 doctrine</b></td><td><code>server/templates/CLAUDE.md</code></td><td>system-prompt builder, always-on</td><td>sandbox basics, path conventions</td></tr>
+      <tr><td><b>L2 team</b></td><td><code>knowledge/.loopat/claude/CLAUDE.md</code></td><td>ro-bind to <code>.claude/CLAUDE.md</code>, SDK loads</td><td>workspace conventions</td></tr>
+      <tr><td><b>L3 project</b></td><td><code>workdir/CLAUDE.md</code></td><td>SDK loads from cwd</td><td>repo-specific conventions</td></tr>
+      <tr><td><b>L4 runtime</b></td><td>server-computed (id, vault, sandbox, …)</td><td>concat into system prompt</td><td>per-turn variables</td></tr>
+      <tr><td><b>skills</b></td><td><code>knowledge/.loopat/claude/skills/</code></td><td>ro-bind to <code>.claude/skills/</code>, SDK discovers</td><td>callable procedures</td></tr>
+      <tr><td><b>mcp</b></td><td><code>knowledge/.loopat/claude/claude.json</code></td><td>passed to SDK at spawn</td><td>jira, github, datadog, …</td></tr>
+      <tr><td><b>personal memory</b></td><td><code>personal/memory/</code></td><td>SDK auto-recall (per <code>.claude/settings.json</code>)</td><td>your habits, user facts</td></tr>
+      <tr><td><b>team memory</b></td><td><code>notes/memory/</code></td><td>doctrine tells agent to read MEMORY.md</td><td>gotchas, conventions</td></tr>
+      <tr><td><b>chat thread</b></td><td><code>chat/&lt;tid&gt;/history.jsonl</code></td><td>ro-bind into sandbox if loop spawned from chat</td><td>seed conversation</td></tr>
+      <tr><td><b>credentials</b></td><td><code>personal/.loopat/vaults/&lt;v&gt;/</code></td><td>walked & overlay-mounted at <code>.loopat/vault/</code></td><td>apiKey, ssh, tokens</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       WRITE PATH TABLE
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Write path — where the agent's output lives</h2>
+  <table class="detail">
+    <thead>
+      <tr><th>Path</th><th>Persistence</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>workdir/*</code></td><td>auto-commit on <code>loop/&lt;slug&gt;-&lt;id6&gt;</code></td><td>the loop's actual work product</td></tr>
+      <tr><td><code>notes/inbox.md</code></td><td>auto-commit to team notes git</td><td>append-only scratchpad</td></tr>
+      <tr><td><code>notes/&lt;focus&gt;.md</code></td><td>auto-commit</td><td>small markdown task trees</td></tr>
+      <tr><td><code>notes/memory/&lt;name&gt;.md</code> + index</td><td>auto-commit</td><td><b>agent auto-promotes</b> from personal when topic is workspace-wide</td></tr>
+      <tr><td><code>personal/memory/&lt;name&gt;.md</code></td><td>SDK-managed, auto-commit</td><td>private observations</td></tr>
+      <tr><td><code>/vault/*</code></td><td>git-crypt encrypted at commit</td><td>rare — credential rotation paths</td></tr>
+      <tr style="color:#9e3030"><td><code>knowledge/</code></td><td>—</td><td><b>NEVER</b> — flows back via distillation</td></tr>
+      <tr style="color:#9e3030"><td><code>repos/&lt;x&gt;/</code></td><td>—</td><td><b>NEVER</b> directly — only via the loop's <code>workdir/</code></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       BOUNDARIES
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Boundaries the sandbox enforces</h2>
+  <table class="detail">
+    <thead>
+      <tr><th>Agent attempts to …</th><th>What stops it</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>read another user's secrets</td><td><code>personal/&lt;other-user&gt;/</code> isn't bound into this sandbox at all</td></tr>
+      <tr><td>read another vault's keys</td><td>host-side <code>.loopat/vaults/</code> is tmpfs'd; only selected vault overlays as <code>/.loopat/vault/</code></td></tr>
+      <tr><td>escape via a symlink in the vault</td><td><code>walkVaultFiles</code> checks <code>realpath</code> against <code>personal/&lt;user&gt;/</code> and refuses targets outside</td></tr>
+      <tr><td>modify team knowledge</td><td><code>knowledge/</code> is <code>ro-bind</code>; writes return EROFS</td></tr>
+      <tr><td>commit into a sibling repo's mainline</td><td>repos are rw but workflow rules + worktree-branch isolation steer commits onto <code>loop/…</code> only</td></tr>
+      <tr><td>see the host filesystem outside <code>/loopat</code></td><td>sandbox root is fresh tmpfs; only explicitly-bound paths exist</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       PHILOSOPHY
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Why this shape</h2>
+  <div class="philo">
+    <div class="p">
+      <h4>Filesystem-first, no DB</h4>
+      <p>Every artifact is a file. State of a loop, vault contents, memory, branch — all <code>ls</code>-able. No "what does the DB say" debugging.</p>
+    </div>
+    <div class="p">
+      <h4>Loop ephemeral, context persistent</h4>
+      <p><code>/loopat/loop/&lt;id&gt;/</code> dies with the loop. <code>/loopat/context/</code> survives — branch + memory + notes remain.</p>
+    </div>
+    <div class="p">
+      <h4>Capability ⊥ identity</h4>
+      <p>Sandbox × vault. Same engine powers "alice testing the frontend" and "carol fighting a prod fire" — different cells of the matrix.</p>
+    </div>
+    <div class="p">
+      <h4>Read down, write up — slowly</h4>
+      <p>Knowledge flows downward (consumed). Writing back to <code>knowledge/</code> takes a distill loop, not a one-line append. Friction is intentional.</p>
+    </div>
+    <div class="p">
+      <h4>Sandbox is the membrane</h4>
+      <p>Nothing crosses implicitly. Every path the agent sees is a <code>--bind</code> line in <code>buildBwrapArgs</code>. The host can sleep through misbehavior.</p>
+    </div>
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────────
+       CODE MAP
+  ──────────────────────────────────────────────────────────────── -->
+  <h2>Where to look in the code</h2>
+  <table class="detail">
+    <thead>
+      <tr><th>Concept</th><th>File(s)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>sandbox composition (<code>buildBwrapArgs</code>)</td><td><code>server/src/bwrap.ts</code></td></tr>
+      <tr><td>vault catalog + symlink validation</td><td><code>server/src/vaults.ts</code></td></tr>
+      <tr><td>loop lifecycle + auto-init</td><td><code>server/src/loops.ts</code></td></tr>
+      <tr><td>L1 doctrine (bundled)</td><td><code>server/templates/CLAUDE.md</code></td></tr>
+      <tr><td>memory recall config</td><td><code>server/src/loops.ts</code> (<code>.claude/settings.json</code> per loop)</td></tr>
+      <tr><td>auto-commit on writes</td><td><code>server/src/workspace.ts</code> (<code>vaultWrite</code>)</td></tr>
+      <tr><td>chat → loop spawn</td><td><code>server/src/chat.ts</code></td></tr>
+      <tr><td>sandbox toolchain spec</td><td><code>server/src/sandboxes.ts</code>, <code>knowledge/.loopat/sandboxes/&lt;name&gt;/</code></td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+</body>
+</html>

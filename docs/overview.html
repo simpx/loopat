@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>loopat — overview</title>
+<style>
+  html, body {
+    margin: 0;
+    background: #fbf9f4;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    color: #1c2733;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 36px 16px 56px; }
+  svg.hero { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<svg class="hero" viewBox="0 0 1280 650" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+  <title id="t">loopat overview</title>
+  <desc id="d">Three cards (context, loop, chat) + a repos bar. Four simple colored arrows connect K/N/P sources and chat to the loop; inside the loop, 5 color-matched pills mirror those sources. Distillation curves on the left of the context card; write-back arc loops back to personal.</desc>
+
+  <defs>
+    <marker id="arr-K" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/></marker>
+    <marker id="arr-N" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d4a017"/></marker>
+    <marker id="arr-P" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9333ea"/></marker>
+    <marker id="arr-C" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+    <marker id="arr-write" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="arr-dist" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── TITLE ────────────────────────────────────────────────── -->
+  <text x="640" y="46" text-anchor="middle" font-size="40" font-weight="700" letter-spacing="-0.5" fill="#1c2733">loopat</text>
+  <text x="640" y="82" text-anchor="middle" font-size="16" fill="#5b6776">a loop = context · AI · workdir, sandboxed per task</text>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LEFT CARD — CONTEXT  (x=60..460, y=120..550)
+  ══════════════════════════════════════════════════════════════ -->
+  <g filter="url(#soft)">
+    <rect x="60" y="120" width="400" height="430" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+  </g>
+  <rect x="60" y="120" width="400" height="40" rx="14" fill="#eef2f7"/>
+  <rect x="60" y="146" width="400" height="14" fill="#eef2f7"/>
+  <text x="80" y="146" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">CONTEXT</text>
+  <text x="440" y="146" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">VERSIONED · GIT</text>
+
+  <line x1="76" y1="300" x2="444" y2="300" stroke="#eaecf1" stroke-width="1"/>
+  <line x1="76" y1="420" x2="444" y2="420" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- KNOWLEDGE zone -->
+  <g>
+    <circle cx="92" cy="185" r="14" fill="#3b5bdb"/>
+    <text x="92" y="190" text-anchor="middle" font-size="12" font-weight="700" fill="white">K</text>
+    <text x="115" y="183" font-size="17" font-weight="600" fill="#1c2733">knowledge</text>
+    <text x="115" y="201" font-size="11" fill="#7e8794" letter-spacing="0.3">team-shared</text>
+    <g transform="translate(404, 173)" stroke="#3b5bdb" fill="#dfe6fb" stroke-width="1.2">
+      <path d="M0,4 L8,4 L11,1 L28,1 L28,18 L0,18 z"/>
+      <line x1="4" y1="9" x2="24" y2="9" stroke="#3b5bdb" stroke-width="0.8"/>
+      <line x1="4" y1="13" x2="24" y2="13" stroke="#3b5bdb" stroke-width="0.8"/>
+    </g>
+    <g font-size="13" fill="#1c2733">
+      <text x="125" y="226">docs</text>
+      <text x="125" y="242">skills</text>
+      <text x="125" y="258">mcp servers</text>
+      <text x="125" y="274">sandboxes</text>
+    </g>
+    <g stroke="#3b5bdb" stroke-width="1.5" fill="none">
+      <path d="M 110 223 L 118 223"/>
+      <path d="M 110 239 L 118 239"/>
+      <path d="M 110 255 L 118 255"/>
+      <path d="M 110 271 L 118 271"/>
+    </g>
+    <g font-size="10" fill="#9ba3ad" font-style="italic">
+      <text x="210" y="226">— curated articles</text>
+      <text x="210" y="242">— reusable procedures</text>
+      <text x="210" y="258">— jira / github / …</text>
+      <text x="210" y="274">— toolchain catalog</text>
+    </g>
+  </g>
+
+  <!-- NOTES zone -->
+  <g>
+    <circle cx="92" cy="325" r="14" fill="#d4a017"/>
+    <text x="92" y="330" text-anchor="middle" font-size="12" font-weight="700" fill="white">N</text>
+    <text x="115" y="323" font-size="17" font-weight="600" fill="#1c2733">notes</text>
+    <text x="115" y="341" font-size="11" fill="#7e8794" letter-spacing="0.3">team-shared</text>
+    <g transform="translate(404, 313)" stroke="#a07807" fill="#fcefb6" stroke-width="1.2">
+      <path d="M0,4 L8,4 L11,1 L28,1 L28,18 L0,18 z"/>
+      <line x1="4" y1="9" x2="24" y2="9" stroke="#a07807" stroke-width="0.8"/>
+      <line x1="4" y1="13" x2="24" y2="13" stroke="#a07807" stroke-width="0.8"/>
+    </g>
+    <g font-size="13" fill="#1c2733">
+      <text x="125" y="368">inbox</text>
+      <text x="125" y="384">focus</text>
+      <text x="125" y="400">memory</text>
+    </g>
+    <g stroke="#a07807" stroke-width="1.5" fill="none">
+      <path d="M 110 365 L 118 365"/>
+      <path d="M 110 381 L 118 381"/>
+      <path d="M 110 397 L 118 397"/>
+    </g>
+    <g font-size="10" fill="#9ba3ad" font-style="italic">
+      <text x="210" y="368">— workspace scratch</text>
+      <text x="210" y="384">— task trees</text>
+      <text x="210" y="400">— shared team memory</text>
+    </g>
+  </g>
+
+  <!-- PERSONAL zone -->
+  <g>
+    <circle cx="92" cy="445" r="14" fill="#9333ea"/>
+    <text x="92" y="450" text-anchor="middle" font-size="12" font-weight="700" fill="white">P</text>
+    <text x="115" y="443" font-size="17" font-weight="600" fill="#1c2733">personal</text>
+    <text x="115" y="461" font-size="11" fill="#7e8794" letter-spacing="0.3">yours · per-user</text>
+    <g transform="translate(404, 433)" stroke="#9333ea" fill="#f3e3fb" stroke-width="1.2">
+      <path d="M0,4 L8,4 L11,1 L28,1 L28,18 L0,18 z"/>
+    </g>
+    <g transform="translate(413, 440)">
+      <rect x="0" y="4" width="10" height="8" rx="1.2" fill="#9333ea"/>
+      <path d="M2,4 A 3,3 0 0 1 8,4" fill="none" stroke="#9333ea" stroke-width="1.6"/>
+    </g>
+    <g font-size="13" fill="#1c2733">
+      <text x="125" y="488">memory</text>
+      <text x="125" y="504">config</text>
+      <text x="125" y="520">vaults</text>
+    </g>
+    <g stroke="#9333ea" stroke-width="1.5" fill="none">
+      <path d="M 110 485 L 118 485"/>
+      <path d="M 110 501 L 118 501"/>
+      <path d="M 110 517 L 118 517"/>
+    </g>
+    <g font-size="10" fill="#9ba3ad" font-style="italic">
+      <text x="210" y="488">— your private memory</text>
+      <text x="210" y="504">— providers · mounts</text>
+      <text x="210" y="520">— encrypted · one selected per loop</text>
+    </g>
+    <g transform="translate(189, 512)">
+      <rect x="0" y="3" width="6" height="5" rx="1" fill="#9333ea"/>
+      <path d="M 1.2 3 A 1.8 1.8 0 0 1 4.8 3" fill="none" stroke="#9333ea" stroke-width="1.1"/>
+    </g>
+  </g>
+
+  <!-- ── DISTILLATION curves on LEFT edge — both labeled "distill" ── -->
+  <g fill="none" stroke="#d97706" stroke-width="1.5" stroke-dasharray="3 4">
+    <path d="M 60 460 C 18 440, 18 365, 60 348" marker-end="url(#arr-dist)"/>
+    <path d="M 60 325 C 18 305, 18 230, 60 213" marker-end="url(#arr-dist)"/>
+  </g>
+  <text x="34" y="408" text-anchor="middle" font-size="10" font-style="italic" fill="#d97706">distill</text>
+  <text x="34" y="272" text-anchor="middle" font-size="10" font-style="italic" fill="#d97706">distill</text>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       MIDDLE CARD — LOOP  (x=500..980, y=120..550)
+       Title simplified: "LOOP" + "EPHEMERAL".
+       Sandbox label drops "(bwrap)".
+  ══════════════════════════════════════════════════════════════ -->
+  <g filter="url(#soft)">
+    <rect x="500" y="120" width="480" height="430" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+  </g>
+  <rect x="500" y="120" width="480" height="40" rx="14" fill="#fef3c7"/>
+  <rect x="500" y="146" width="480" height="14" fill="#fef3c7"/>
+  <text x="520" y="146" font-size="13" font-weight="700" fill="#8a6418" letter-spacing="2">LOOP</text>
+  <text x="960" y="146" font-size="11" text-anchor="end" fill="#a47e2c" letter-spacing="1">EPHEMERAL</text>
+
+  <rect x="525" y="178" width="430" height="350" rx="10" fill="#fffbef" stroke="#8a6418" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="740" y="200" text-anchor="middle" font-size="11" fill="#8a6418" letter-spacing="3" font-weight="600">SANDBOX</text>
+
+  <!-- /loopat/context/ — 5 separate pills -->
+  <text x="540" y="226" font-size="10.5" fill="#8a6418" font-style="italic">/loopat/context/</text>
+  <!-- 4 pills (K/N/P/C) — wider than 5-pill layout, evenly spaced -->
+  <g>
+    <rect x="545" y="234" width="90" height="32" rx="6" fill="#3b5bdb"/>
+    <text x="590" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="white">K</text>
+    <rect x="645" y="234" width="90" height="32" rx="6" fill="#d4a017"/>
+    <text x="690" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="white">N</text>
+    <rect x="745" y="234" width="90" height="32" rx="6" fill="#9333ea"/>
+    <text x="790" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="white">P</text>
+    <rect x="845" y="234" width="90" height="32" rx="6" fill="#16a34a"/>
+    <text x="890" y="255" text-anchor="middle" font-size="13" font-weight="700" fill="white">C</text>
+  </g>
+  <g font-size="9" fill="#a47e2c" text-anchor="middle" letter-spacing="0.5">
+    <text x="590" y="278">ro</text>
+    <text x="690" y="278">rw</text>
+    <text x="790" y="278">rw</text>
+    <text x="890" y="278">ro</text>
+  </g>
+  <text x="740" y="296" text-anchor="middle" font-size="10" fill="#8a6418" font-style="italic">mounted from outside · colors match source cards</text>
+
+  <!-- agent -->
+  <line x1="540" y1="300" x2="940" y2="300" stroke="#e1d4b3" stroke-width="0.8" stroke-dasharray="2 3"/>
+  <g>
+    <circle cx="740" cy="350" r="34" fill="#fbbf24" stroke="#8a6418" stroke-width="1.8"/>
+    <text x="740" y="357" text-anchor="middle" font-size="16" font-weight="700" fill="#3d2c08">agent</text>
+  </g>
+
+  <!-- /loopat/loop/<id>/ organ row — simplified copy -->
+  <line x1="540" y1="395" x2="940" y2="395" stroke="#e1d4b3" stroke-width="0.8" stroke-dasharray="2 3"/>
+  <text x="540" y="411" font-size="10.5" fill="#8a6418" font-style="italic">selected at spawn</text>
+  <g>
+    <rect x="545" y="419" width="124" height="80" rx="8" fill="#eef2ff" stroke="#3b5bdb" stroke-width="1.2"/>
+    <text x="607" y="446" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">workdir</text>
+    <text x="607" y="467" text-anchor="middle" font-size="11" fill="#3b5bdb">git worktree</text>
+    <text x="607" y="484" text-anchor="middle" font-size="11" fill="#3b5bdb">rw</text>
+  </g>
+  <g>
+    <rect x="677" y="419" width="124" height="80" rx="8" fill="#fce7f3" stroke="#be185d" stroke-width="1.2"/>
+    <text x="739" y="446" text-anchor="middle" font-size="14" font-weight="700" fill="#831843">vault</text>
+    <text x="739" y="467" text-anchor="middle" font-size="11" fill="#be185d">encrypted</text>
+    <text x="739" y="484" text-anchor="middle" font-size="11" fill="#be185d">one of many</text>
+  </g>
+  <g>
+    <rect x="809" y="419" width="124" height="80" rx="8" fill="#ccfbf1" stroke="#0d9488" stroke-width="1.2"/>
+    <text x="871" y="446" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">toolchain</text>
+    <text x="871" y="467" text-anchor="middle" font-size="11" fill="#0d9488">cli + mcp</text>
+    <text x="871" y="484" text-anchor="middle" font-size="11" fill="#0d9488">managed catalog</text>
+  </g>
+
+  <text x="740" y="518" text-anchor="middle" font-size="10.5" fill="#8a6418" font-style="italic">one mount namespace · isolated · disposable</text>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       RIGHT CARD — CHAT  (no spawn-loop label; one simple arrow)
+  ══════════════════════════════════════════════════════════════ -->
+  <g filter="url(#soft)">
+    <rect x="1000" y="120" width="220" height="430" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+  </g>
+  <rect x="1000" y="120" width="220" height="40" rx="14" fill="#e3f2eb"/>
+  <rect x="1000" y="146" width="220" height="14" fill="#e3f2eb"/>
+  <text x="1020" y="146" font-size="13" font-weight="700" fill="#1e6b3b" letter-spacing="2">CHAT</text>
+  <text x="1200" y="146" font-size="11" text-anchor="end" fill="#3d8458" letter-spacing="1">LIVE</text>
+
+  <circle cx="1030" cy="185" r="14" fill="#16a34a"/>
+  <text x="1030" y="190" text-anchor="middle" font-size="12" font-weight="700" fill="white">C</text>
+  <text x="1055" y="183" font-size="17" font-weight="600" fill="#1c2733">chat</text>
+  <text x="1055" y="201" font-size="11" fill="#7e8794" letter-spacing="0.3">agents · live threads</text>
+
+  <!-- 3 thread bubbles. Each bubble shows alternating speakers via
+       line color: green = a person, amber = an agent. The amber matches
+       the loop's agent circle (#fbbf24) — same agent color identity. -->
+  <g>
+    <!-- bubble 1: human asks, agent replies, human follow-up -->
+    <g>
+      <rect x="1018" y="222" width="186" height="42" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1"/>
+      <line x1="1030" y1="236" x2="1190" y2="236" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="244" x2="1170" y2="244" stroke="#d4a017" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="252" x2="1145" y2="252" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+    </g>
+    <!-- bubble 2: agent opens, human answers, agent replies -->
+    <g>
+      <rect x="1018" y="276" width="186" height="42" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1"/>
+      <line x1="1030" y1="290" x2="1170" y2="290" stroke="#d4a017" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="298" x2="1180" y2="298" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="306" x2="1140" y2="306" stroke="#d4a017" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+    </g>
+    <!-- bubble 3 -->
+    <g>
+      <rect x="1018" y="330" width="186" height="42" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1"/>
+      <line x1="1030" y1="344" x2="1150" y2="344" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="352" x2="1190" y2="352" stroke="#d4a017" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="1030" y1="360" x2="1130" y2="360" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round" opacity="0.6"/>
+    </g>
+  </g>
+
+  <!-- legend: tiny key tying line colors to speakers (kept; explains the
+       bubble visuals). The subtitle "agents · live threads" already names
+       the dual-party nature, so no separate footer needed. -->
+  <g font-size="10" font-family="inherit">
+    <line x1="1030" y1="394" x2="1042" y2="394" stroke="#16a34a" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="1046" y="397" fill="#1e6b3b">human</text>
+    <line x1="1100" y1="394" x2="1112" y2="394" stroke="#d4a017" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="1116" y="397" fill="#a47e2c">agent</text>
+  </g>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       READ ARROWS — 4 simple colored lines pointing AT the loop card
+       (general direction, not internal targeting).
+  ══════════════════════════════════════════════════════════════ -->
+  <!-- K knowledge → loop -->
+  <path d="M 460 185 C 480 185, 495 220, 510 245"
+        stroke="#3b5bdb" stroke-width="1.4" fill="none" marker-end="url(#arr-K)"/>
+  <!-- N notes → loop -->
+  <path d="M 460 325 C 482 325, 498 345, 510 350"
+        stroke="#d4a017" stroke-width="1.4" fill="none" marker-end="url(#arr-N)"/>
+  <!-- P personal → loop -->
+  <path d="M 460 445 C 484 445, 498 455, 510 455"
+        stroke="#9333ea" stroke-width="1.4" fill="none" marker-end="url(#arr-P)"/>
+  <!-- C chat → loop -->
+  <path d="M 1000 350 C 990 350, 982 350, 970 350"
+        stroke="#16a34a" stroke-width="1.4" fill="none" marker-end="url(#arr-C)"/>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       WRITE-BACK arc (slim)
+  ══════════════════════════════════════════════════════════════ -->
+  <!-- Simpler arc now that repos is gone — gentle dip from loop bottom to
+       personal zone right edge. -->
+  <path d="M 600 545 C 545 605, 485 605, 460 490"
+        stroke="#d97706" stroke-width="1.5" fill="none" stroke-dasharray="2 5"
+        marker-end="url(#arr-write)"/>
+  <text x="525" y="625" text-anchor="middle" font-size="13" font-weight="600" fill="#d97706" letter-spacing="2">memory</text>
+
+</svg>
+
+</div>
+</body>
+</html>
