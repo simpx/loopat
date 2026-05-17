@@ -28,7 +28,7 @@ import { useChatUnreadTitle } from "./useChatUnreadTitle"
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
 
-  { id: "kanban", label: "Kanban", icon: "☰" },
+  { id: "kanban", label: "Focus", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
   { id: "chat", label: "Chat", icon: <MessageCircle size={14} /> },
 ] as const
@@ -109,7 +109,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const handleCreate = async (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => {
     const m = await ws.createLoop(opts)
     if (ws.kanbanCreateCtx) {
-      await linkKanbanLoop(ws.kanbanCreateCtx.filename, ws.kanbanCreateCtx.cid, m.id)
+      await linkKanbanLoop(ws.kanbanCreateCtx.board, ws.kanbanCreateCtx.filename, ws.kanbanCreateCtx.cid, m.id)
     }
     ws.setNewLoopDialogOpen(false)
     navigate(`/loop/${m.id}`)
@@ -272,8 +272,9 @@ export function App() {
                 read-only share view (server gates by meta.public). Shell
                 drops the chrome when anonymous. */}
             <Route path="/loop/:id" element={<LoopPage />} />
-            <Route path="/kanban" element={<KanbanPage />} />
             <Route path="/topic/:name" element={<TopicView />} />
+            <Route path="/kanban" element={<Navigate to="/kanban/default" replace />} />
+            <Route path="/kanban/:board" element={<KanbanPage />} />
             <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
             <Route path="/context/:sub" element={<ContextPage />} />
             <Route path="/chat" element={<ChatPage />} />
