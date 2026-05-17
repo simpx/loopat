@@ -20,11 +20,10 @@ sync axis.
   <img src="docs/overview.svg" alt="loopat architecture" width="100%">
 </p>
 
-The agent itself is the [Claude Agent SDK][sdk] — what makes loopat
-distinct is the **context architecture around it**. Every loop is a
-persistent, sandboxed session with its own credential vault and a
-slice of shared team knowledge. Teams share tools and knowledge;
-members keep their own credentials and identity.
+The agent itself is the [Claude Agent SDK][sdk]; what makes loopat
+distinct is the **context architecture around it** — how chat, code,
+memory, and knowledge interlock so context doesn't get lost across
+sessions or teammates.
 
 [sdk]: https://github.com/anthropics/claude-agent-sdk
 
@@ -32,25 +31,23 @@ members keep their own credentials and identity.
 🚀 [Quick start](#quick-start) ·
 📖 [Architecture](docs/architecture.md)
 
-<!-- TODO: add docs/screenshot.png — a single product screenshot showing
-     a loop view with chat on one side and workdir/git on the other. -->
-
 ---
 
 ## What makes loopat different
 
-- **End-to-end context management.** Team IM threads, code edits,
-  agent decisions, memory — all live in the same context graph and all
-  flow into the next loop. Most AI tools make you copy-paste from
-  Slack into the AI to give it situational context; loopat ships with
-  **built-in IM** that the agent reads directly as a first-class
-  context source.
+- **End-to-end context management.** Team chat (IM) threads, code
+  edits, agent decisions, memory — all live in the same context graph
+  and all flow into the next loop. Most AI tools make you copy-paste
+  from Slack into the AI to give it situational context; loopat treats
+  team chat as **a first-class context source** — spawn a loop from
+  any chat thread and that thread becomes part of the loop's context
+  automatically.
 - **Works solo, scales to teams.** Same workspace whether you're
   alone or onboarding teammates. Solo, it's a personal AI workspace;
   with a team, shared `knowledge/` and `notes/` git repos sync across
-  members and loops contribute back via auto-commit and distillation.
-  Most AI tools force you to pick between solo CLI and team SaaS —
-  loopat is one tool at any scale.
+  members, loops auto-commit their work, and observations promote
+  upward through a distillation pipeline. Most AI tools force you to
+  pick between solo CLI and team SaaS — loopat is one tool at any scale.
 - **Reproducible loops.** Every loop runs in its own sandbox with a
   versioned toolchain and a pinned credential vault. Spawn the same
   loop tomorrow on a different machine and get the same starting
@@ -66,8 +63,8 @@ members keep their own credentials and identity.
 |---|---|---|---|---|---|
 | Form factor | CLI | IDE | TUI | Web (hosted) | **Web (self-hosted)** |
 | License | proprietary | proprietary | MIT | proprietary | **Apache 2.0** |
-| Team IM integration | external (manual paste) | external (manual paste) | external (manual paste) | external (manual paste) | **built-in, agent-readable** |
-| Memory management | personal (`CLAUDE.md`) | personal (rules + memories) | personal (`AGENTS.md`) | none | **personal + team-shared, auto distillation** |
+| Team IM integration | external (manual paste) | external (manual paste) | external (manual paste) | external (manual paste) | **built-in, threads ingested into loop context** |
+| Memory management | personal (`CLAUDE.md`) | personal (rules + memories) | personal (`AGENTS.md`) | none | **personal + team-shared, with distillation pipeline** |
 | Multi-user | single user | per-seat | single user | per-account | **shared workspace** |
 | Shared team knowledge | individual config | individual config | individual config | individual config | **git-synced across team** |
 | Per-session sandbox | process-level | process-level | process-level | OpenAI-managed | **bwrap (default) · Docker (planned)** |
@@ -102,20 +99,22 @@ prints a checklist, and prompts you to set your API key in
 
 ## Deployment
 
-### Docker (easiest, cross-platform)
+### Docker (recommended)
 
 ```sh
 docker compose up -d
 ```
 
-Exposes `17787:7787`, persists the workspace in the `loopat-data` volume.
-Needs `SYS_ADMIN` + unconfined AppArmor for bwrap mount namespaces — see
-[`docker-compose.yml`](docker-compose.yml).
+Open <http://localhost:17787> (note: **17787**, not 7787 — the host
+port is remapped to avoid collision with a local dev server; see
+[`docker-compose.yml`](docker-compose.yml)). Workspace persists in
+the `loopat-data` volume. Needs `SYS_ADMIN` + unconfined AppArmor for
+bwrap mount namespaces.
 
 ### From source (Linux)
 
 ```sh
-cd web && bun run build           # → web/dist/
+bun run build                     # installs deps + builds frontend → web/dist/
 PORT=7787 bun run server/src/index.ts
 ```
 
@@ -125,15 +124,13 @@ Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
 ## Documentation
 
 - **[Architecture](docs/architecture.md)** — the read/write path, layered
-  context model, distillation pipeline, philosophy.
+  context model, distillation pipeline, Claude config injection paths.
 - **[Sandbox](docs/sandbox.md)** — bwrap mount mechanics, three-tier mount
   authority, what stops the agent from escaping.
 - **[Installation guide](docs/install.md)** — full bootstrap, team setup,
   environment variables.
 - **[Troubleshooting](docs/troubleshoot.md)** — chat won't start, banner
   errors, common pitfalls.
-- **[Claude config](docs/claude-config.md)** — how the L1/L2/L3
-  `CLAUDE.md` layers compose per turn.
 
 ## Contributing
 
@@ -143,8 +140,8 @@ right layer (sandbox / vault / loop / chat).
 
 Contributors are asked to sign the [Contributor License Agreement](CLA.md)
 on their first PR — the [CLA Assistant][cla-assistant] bot prompts you
-with a one-click link. This grants the project the right to relicense in
-the future (e.g. for a hosted commercial offering) without re-collecting
+with a one-click link. This keeps future licensing options open (e.g.
+moving to a business-friendly license) without having to re-collect
 permission from every contributor.
 
 [cla-assistant]: https://cla-assistant.io/
@@ -159,6 +156,7 @@ loopat is built on top of:
 - [Hono](https://hono.dev/) — the HTTP + WebSocket server
 - [bubblewrap](https://github.com/containers/bubblewrap) — sandbox mount
   namespaces
+- [mise](https://mise.jdx.dev/) — per-loop toolchain installs
 
 ## License
 
