@@ -467,26 +467,34 @@ function DocView({
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [lastCommit, setLastCommit] = useState<string | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(false)
+  // Server flags secret files; the response never carries plaintext, so
+  // `original` stays empty and the only way to mutate is to type a new value.
+  const [secretFromServer, setSecretFromServer] = useState(false)
   const isMobile = useIsMobile()
 
   useEffect(() => {
     setEditing(false)
     setLastCommit(null)
+    setSecretFromServer(false)
     vaultRead(vault, path).then((r) => {
       const c = r?.content ?? ""
       setOriginal(c)
       setDraft(c)
+      setSecretFromServer(!!r?.secret)
     })
     vaultBacklinks(vault, path).then(setBacklinks)
   }, [vault, path])
 
-  const isSecret = isSecretPath(path)
+  const isSecret = isSecretPath(path) || secretFromServer
   const isMd = path.endsWith(".md")
   const allowDirectEdit = vault !== "knowledge"
   const allowLoopEdit = !isSecret
   const allowDistill = vault === "notes" && !isSecret
 
-  const dirty = draft !== original
+  // For secrets, the editor opens empty and a non-empty draft is always
+  // considered "dirty" (a replacement). For non-secrets, the diff between
+  // draft and the loaded original drives dirty state.
+  const dirty = isSecret ? draft.length > 0 : draft !== original
 
   const save = useCallback(async () => {
     if (!dirty || saving) return
@@ -494,7 +502,15 @@ function DocView({
     try {
       const r = await vaultWrite(vault, path, draft)
       if (r.ok) {
-        setOriginal(draft)
+        // For secrets, throw the just-typed value away from React state
+        // immediately after the write returns ok — otherwise re-entering
+        // edit would surface it. The server never reads it back to us.
+        if (isSecret) {
+          setOriginal("")
+          setDraft("")
+        } else {
+          setOriginal(draft)
+        }
         setLastCommit(r.commit ?? null)
         setEditing(false)
         onSaved()
@@ -506,7 +522,7 @@ function DocView({
     } finally {
       setSaving(false)
     }
-  }, [vault, path, draft, dirty, saving, onSaved])
+  }, [vault, path, draft, dirty, saving, onSaved, isSecret])
 
   const startEdit = () => setEditing(true)
 
@@ -615,37 +631,57 @@ function DocView({
       </header>
 
       {editing ? (
-        // edit mode: split source / preview
-        <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
-          <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
-            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
-              source · markdown
+        isSecret ? (
+          // edit mode for a secret: single full-width editor starting empty;
+          // save sends the typed value as a full replacement.
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
+              <span className="text-amber-700">🔒</span>
+              <span>new value · saved encrypted (whatever's currently stored will be replaced)</span>
             </div>
             <div className="flex-1 min-h-0">
-              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
+              <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}>
+                <CodeEditor path={path} value={draft} onChange={setDraft} />
+              </Suspense>
             </div>
           </div>
-          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-            <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
-              preview
+        ) : (
+          // edit mode: split source / preview
+          <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
+            <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
+              <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
+                source · markdown
+              </div>
+              <div className="flex-1 min-h-0">
+                <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
+              </div>
             </div>
-            <div className="flex-1 min-h-0 overflow-auto px-6 py-4">
-              <div className="max-w-[760px]">
-                <Suspense fallback={<div className="text-gray-400 text-sm">Loading preview...</div>}><Markdown text={draft} onWikilink={onWikilink} /></Suspense>
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center text-[11px] text-gray-500">
+                preview
+              </div>
+              <div className="flex-1 min-h-0 overflow-auto px-6 py-4">
+                <div className="max-w-[760px]">
+                  <Suspense fallback={<div className="text-gray-400 text-sm">Loading preview...</div>}><Markdown text={draft} onWikilink={onWikilink} /></Suspense>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )
       ) : (
         // read mode: article + backlinks
         <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
           <article className="flex-1 min-h-0 overflow-auto px-4 md:px-8 py-4 md:py-6">
             <div className="max-w-[760px]">
               {isSecret ? (
-                <div className="font-mono text-[14px] text-gray-400 select-none">
-                  ••••••••••••••••••••••••
-                  <div className="mt-2 text-[12px] text-gray-500 font-sans">
-                    点 edit 编辑（值不显示）
+                <div className="font-sans text-[13px] text-gray-600 leading-relaxed">
+                  <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[12px] font-medium">
+                    encrypted · value hidden by design
+                  </div>
+                  <div className="mt-3 text-[12px] text-gray-500">
+                    Click <b>edit</b> to overwrite. The current value is never
+                    returned by the server, so editing means typing a new
+                    replacement — there is no decrypt-and-view.
                   </div>
                 </div>
               ) : isMd ? (
