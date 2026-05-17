@@ -3,12 +3,13 @@
  * personal / repos). Auto-commits on write per user's design:
  * "每次修改自动 commit, log 记录动作"。
  */
-import { readdir, readFile, writeFile, stat, mkdir, rm, unlink } from "node:fs/promises"
+import { readdir, readFile, writeFile, stat, lstat, mkdir, rm, unlink, symlink } from "node:fs/promises"
 // Re-using readFile for parsing focus/inbox markdown.
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { join, normalize, relative, sep, dirname } from "node:path"
+import { homedir } from "node:os"
+import { join, normalize, relative, resolve as resolvePath, sep, dirname } from "node:path"
 import {
   workspaceKnowledgeDir,
   workspaceNotesDir,
@@ -557,6 +558,70 @@ export async function readRepoDetail(name: string): Promise<RepoDetail | null> {
     } catch {}
   }
   return { name, path, remote, branch, status: online, readme }
+}
+
+const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+
+function isRepoUrl(source: string): boolean {
+  return /:\/\//.test(source) || /^git@/.test(source)
+}
+
+function expandHome(p: string): string {
+  if (p === "~") return homedir()
+  if (p.startsWith("~/")) return join(homedir(), p.slice(2))
+  return p
+}
+
+export function deriveRepoName(source: string): string {
+  let s = source.trim().replace(/[?#].*$/, "")
+  s = s.replace(/\/+$/, "").replace(/\.git$/i, "")
+  const m = s.match(/[/:]([^/:]+)$/)
+  return (m ? m[1] : s).trim()
+}
+
+/**
+ * Register a repo under workspaceReposDir(). Source can be either:
+ *   - a git URL (http/https/ssh/git@) → `git clone` into the target
+ *   - a local filesystem path → symlink into the target
+ * Symlinks are preferred for local working trees so edits in the source
+ * tree show up in loops without re-cloning.
+ */
+export async function addRepo(opts: { name: string; source: string }): Promise<{ ok: boolean; name?: string; kind?: "clone" | "symlink"; error?: string }> {
+  const source = (opts.source || "").trim()
+  if (!source) return { ok: false, error: "source required" }
+  const name = (opts.name || "").trim()
+  if (!REPO_NAME_RE.test(name)) {
+    return { ok: false, error: "invalid name (letters/digits/_.-, max 64, must start with alnum)" }
+  }
+  const root = workspaceReposDir()
+  const target = join(root, name)
+  try {
+    await lstat(target)
+    return { ok: false, error: "already exists" }
+  } catch {}
+  await mkdir(root, { recursive: true })
+  if (isRepoUrl(source)) {
+    try {
+      await execFileP("git", ["clone", source, target], { timeout: 300_000 })
+      return { ok: true, name, kind: "clone" }
+    } catch (e: any) {
+      const msg = (e?.stderr || e?.stdout || e?.message || "clone failed").toString().trim()
+      return { ok: false, error: msg }
+    }
+  }
+  const abs = resolvePath(expandHome(source))
+  try {
+    const s = await stat(abs)
+    if (!s.isDirectory()) return { ok: false, error: "source path is not a directory" }
+  } catch {
+    return { ok: false, error: "source path does not exist" }
+  }
+  try {
+    await symlink(abs, target)
+    return { ok: true, name, kind: "symlink" }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "symlink failed" }
+  }
 }
 
 export async function pullRepo(name: string): Promise<{ ok: boolean; output?: string; error?: string }> {

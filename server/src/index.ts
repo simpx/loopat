@@ -27,7 +27,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
@@ -1153,6 +1153,17 @@ app.get("/api/workspace/backlinks", requireAuth, async (c) => {
 
 app.get("/api/workspace/repos", requireAuth, async (c) => {
   return c.json({ repos: await listRepos() })
+})
+
+// Register a new repo. Body: { name, source } where source is a git URL
+// (cloned) or a local path (symlinked).
+app.post("/api/workspace/repos", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const source = typeof body.source === "string" ? body.source : ""
+  const name = typeof body.name === "string" ? body.name : ""
+  const r = await addRepo({ name, source })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true, name: r.name, kind: r.kind })
 })
 
 app.get("/api/sandboxes", requireAuth, async (c) => {
