@@ -1,2 +1,13 @@
-loopat-data/
+node_modules/
+.git/
+dist/
+.vite/
+*.tsbuildinfo
+*.log
 .env
+.env.local
+.DS_Store
+loopat-data/
+bun.lock
+server/src/*.js
+server/src/*.js.map
