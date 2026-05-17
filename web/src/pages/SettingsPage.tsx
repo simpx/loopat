@@ -357,14 +357,17 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <span className="text-[13px] font-medium text-gray-900">{name}</span>
-                <label className="text-[11px] text-gray-500 flex items-center gap-1">
+                <label
+                  className={"text-[11px] flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer select-none " + (draft.default === name ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+                >
                   <input
                     type="radio"
                     name="default-provider"
                     checked={draft.default === name}
                     onChange={() => setDraft((d) => d ? { ...d, default: name } : d)}
+                    className="hidden"
                   />
-                  <span>default</span>
+                  <span>★ default</span>
                 </label>
               </div>
               <button
@@ -568,17 +571,20 @@ function EnvsSection({ disk, refExists, onChanged, disabled }: {
               />
             )}
           </Labeled>
-          <label className="flex items-center gap-1.5 mt-5 text-[11.5px] text-gray-700 whitespace-nowrap">
-            <input
-              type="checkbox"
-              checked={r.encrypted}
-              onChange={(e) => update(i, { encrypted: e.target.checked, newValue: "", stored: false })}
-            />
-            <span>encrypted</span>
-          </label>
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium text-gray-500">{r.encrypted ? "🔒 Encrypted" : "Encryption"}</span>
+            <label className="flex items-center gap-1.5 h-[34px] text-[12px] text-gray-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={r.encrypted}
+                onChange={(e) => update(i, { encrypted: e.target.checked, newValue: "", stored: false })}
+              />
+              <span>{r.encrypted ? "stored encrypted" : "plain text"}</span>
+            </label>
+          </div>
           <button
             onClick={() => remove(i)}
-            className="self-start mt-5 h-7 w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
+            className="self-start h-[34px] mt-[19px] w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
             title="remove"
           >
             <Trash2 size={14} />
@@ -733,17 +739,20 @@ function MountsSection({ disk, onChanged, disabled }: {
                 className="ip font-mono"
               />
             </Labeled>
-            <label className="flex items-center gap-1 mt-5 text-[11px] text-gray-700">
-              <input
-                type="checkbox"
-                checked={r.rw}
-                onChange={(e) => update(i, { rw: e.target.checked })}
-              />
-              <span>writable</span>
-            </label>
+            <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-medium text-gray-500">Access</span>
+              <label className="flex items-center gap-1.5 h-[34px] text-[12px] text-gray-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={r.rw}
+                  onChange={(e) => update(i, { rw: e.target.checked })}
+                />
+                <span>read-write</span>
+              </label>
+            </div>
             <button
               onClick={() => remove(i)}
-              className="self-start mt-5 h-7 w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
+              className="self-start h-[34px] mt-[19px] w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
               title="remove"
             >
               <Trash2 size={14} />
