@@ -1,7 +1,9 @@
 FROM oven/bun:1-slim AS base
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  bubblewrap openssh-client git ca-certificates fish vim \
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources \
+  && sed -i 's|http://security.debian.org|http://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update && apt-get install -y --no-install-recommends \
+  bubblewrap openssh-client git git-crypt ca-certificates fish vim \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
