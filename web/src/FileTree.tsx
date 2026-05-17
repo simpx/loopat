@@ -1,11 +1,10 @@
 /**
- * File tree, structurally ported from phase1-prototype/src/pages/loop.tsx
- * (FileTreeNode + workdir layout). Loop dir contains 2 top-level
- * "section" folders: `context` (cyan) and `workdir` (emerald).
+ * File tree for loop workdir, using the generic Tree component.
  */
-import { useEffect, useState, useRef } from "react"
-import { listFiles, uploadFile, type FileEntry } from "./api"
-import { Upload } from "lucide-react"
+import { useEffect, useState, useRef, useCallback } from "react"
+import { listFiles, uploadFile, writeFile, type FileEntry } from "./api"
+import { Tree, type TreeNodeData, type TreeContextAction, type TreeProps } from "./components/Tree"
+import { Upload, Trash2, Eye, FilePlus, FolderPlus } from "lucide-react"
 
 const ROOTS: { name: string; section: "context" | "workdir"; emoji: string; hint?: string }[] = [
   { name: "context", section: "context", emoji: "🧷", hint: "knowledge / notes / personal" },
@@ -27,14 +26,66 @@ export function FileTree({
 }) {
   const [reloadKey, setReloadKey] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploadTarget, setUploadTarget] = useState<string>("")
+  const [creating, setCreating] = useState<{ type: "file" | "folder"; path: string } | null>(null)
+  const [newName, setNewName] = useState("")
+
+  const triggerUpload = useCallback((targetPath?: string) => {
+    setUploadTarget(targetPath ?? "workdir")
+    fileInputRef.current?.click()
+  }, [])
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    await uploadFile(loopId, file)
     setReloadKey((k) => k + 1)
     if (fileInputRef.current) fileInputRef.current.value = ""
+    setUploadTarget("")
   }
+
+  const handleCreate = async () => {
+    if (!creating || !newName.trim()) { setCreating(null); return }
+    const targetPath = creating.path + "/" + newName.trim()
+    if (creating.type === "file") {
+      await writeFile(loopId, targetPath, "")
+    } else {
+      // TODO: mkdir API when available
+    }
+    setCreating(null)
+    setNewName("")
+    setReloadKey((k) => k + 1)
+  }
+
+  const handleAction = useCallback((action: string, node: TreeNodeData) => {
+    if (action === "upload") {
+      triggerUpload(node.path)
+    } else if (action === "new-file" || action === "new-folder") {
+      setCreating({ type: action === "new-file" ? "file" : "folder", path: node.path })
+      setNewName("")
+    } else if (action === "delete") {
+      // TODO: delete API
+      setReloadKey((k) => k + 1)
+    }
+  }, [triggerUpload])
+
+  const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
+    if (node.type === "dir") {
+      return [
+        { label: "Upload here", icon: <Upload size={12} />, action: "upload" },
+        { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
+        { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
+        { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+      ]
+    }
+    return [
+      { label: "View", icon: <Eye size={12} />, action: "view" },
+      { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+    ]
+  }, [])
+
+  const handleLoadChildren = useCallback((path: string) => {
+    return listFiles(loopId, path).then((entries) => entries as TreeNodeData[])
+  }, [loopId])
 
   return (
     <aside className="flex-1 min-h-0 overflow-auto py-2 text-[13px]">
@@ -54,9 +105,24 @@ export function FileTree({
           hint={r.hint}
           onPick={onPick}
           picked={picked}
-          onUpload={r.section === "workdir" ? () => fileInputRef.current?.click() : undefined}
+          onUpload={() => triggerUpload(r.name)}
+          onReload={() => setReloadKey((k) => k + 1)}
+          reloadKey={reloadKey}
+          getContextActions={getContextActions}
+          onAction={handleAction}
+          treeId={`loop-${loopId}`}
         />
       ))}
+      {creating && (
+        <CreateInline
+          depth={1}
+          type={creating.type}
+          value={newName}
+          onChange={setNewName}
+          onSubmit={handleCreate}
+          onCancel={() => setCreating(null)}
+        />
+      )}
     </aside>
   )
 }
@@ -70,6 +136,11 @@ function SectionFolder({
   onPick,
   picked,
   onUpload,
+  onReload,
+  reloadKey,
+  getContextActions,
+  onAction,
+  treeId,
 }: {
   loopId: string
   name: string
@@ -78,13 +149,23 @@ function SectionFolder({
   hint?: string
   onPick: (path: string) => void
   picked: string | null
-  onUpload?: () => void
+  onUpload: () => void
+  onReload: () => void
+  reloadKey: number
+  getContextActions: (node: TreeNodeData) => TreeContextAction[]
+  onAction: (action: string, node: TreeNodeData) => void
+  treeId: string
 }) {
   const [open, setOpen] = useState(true)
   const sectionClass =
     section === "context"
       ? "w-full py-1.5 flex items-center gap-1.5 bg-cyan-50/50 hover:bg-cyan-50 text-left border-y border-cyan-100/70"
       : "w-full py-1.5 flex items-center gap-1.5 bg-emerald-50/40 hover:bg-emerald-50 text-left border-y border-emerald-100/70"
+
+  const handleLoadChildren = useCallback((path: string) => {
+    return listFiles(loopId, path).then((entries) => entries as TreeNodeData[])
+  }, [loopId])
+
   return (
     <>
       <button
@@ -97,7 +178,7 @@ function SectionFolder({
         <span className="text-[12px]">{emoji}</span>
         <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-700">{name}</span>
         {hint && <span className="text-[10px] text-gray-500 italic ml-1">{hint}</span>}
-        {onUpload && (
+        {section === "workdir" && (
           <>
             <div className="flex-1" />
             <span
@@ -110,104 +191,49 @@ function SectionFolder({
           </>
         )}
       </button>
-      {open && <Branch loopId={loopId} path={name} depth={1} onPick={onPick} picked={picked} initialOpen />}
+      {open && (
+        <Tree
+          treeId={`${treeId}-${name}`}
+          entries={[{ name, path: name, type: "dir" }]}
+          onPick={onPick}
+          picked={picked}
+          onLoadChildren={handleLoadChildren}
+          getContextActions={getContextActions}
+          onAction={onAction}
+          depthOffset={1}
+        />
+      )}
     </>
   )
 }
 
-function Branch({
-  loopId,
-  path,
-  depth,
-  onPick,
-  picked,
-  initialOpen = false,
-}: {
-  loopId: string
-  path: string
-  depth: number
-  onPick: (path: string) => void
-  picked: string | null
-  initialOpen?: boolean
+function CreateInline({ depth, type, value, onChange, onSubmit, onCancel }: {
+  depth: number;
+  type: "file" | "folder";
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
 }) {
-  const [entries, setEntries] = useState<FileEntry[] | null>(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!initialOpen) return
-    setLoading(true)
-    listFiles(loopId, path)
-      .then(setEntries)
-      .finally(() => setLoading(false))
-  }, [loopId, path, initialOpen])
-
-  if (loading)
-    return (
-      <div className="text-[12px] text-gray-400 italic" style={{ paddingLeft: 8 + depth * 12 }}>
-        ...
-      </div>
-    )
-  if (!entries) return null
-  if (entries.length === 0)
-    return (
-      <div className="text-[12px] text-gray-400 italic py-1" style={{ paddingLeft: 8 + depth * 12 }}>
-        (empty)
-      </div>
-    )
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => { ref.current?.focus() }, [])
 
   return (
-    <>
-      {entries.map((e) => (
-        <Node key={e.path} entry={e} loopId={loopId} depth={depth} onPick={onPick} picked={picked} />
-      ))}
-    </>
-  )
-}
-
-function Node({
-  entry,
-  loopId,
-  depth,
-  onPick,
-  picked,
-}: {
-  entry: FileEntry
-  loopId: string
-  depth: number
-  onPick: (p: string) => void
-  picked: string | null
-}) {
-  const [open, setOpen] = useState(false)
-  const isPicked = picked === entry.path
-  if (entry.type === "dir") {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="w-full py-1 flex items-center gap-1.5 hover:bg-gray-50 text-left"
-          style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-        >
-          <span className="text-gray-500">{open ? "▾" : "▸"}</span>
-          <span className="text-gray-500">📁</span>
-          <span className="text-[13px] text-gray-900 truncate">{entry.name}</span>
-        </button>
-        {open && <Branch loopId={loopId} path={entry.path} depth={depth + 1} onPick={onPick} picked={picked} initialOpen />}
-      </>
-    )
-  }
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(entry.path)}
-      className={
-        "w-full py-1 flex items-center gap-2 text-left " +
-        (isPicked ? "bg-gray-100" : "hover:bg-gray-50")
-      }
-      style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-    >
-      <span className="w-4" />
-      <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{entry.name}</span>
-    </button>
+    <div className="flex items-center gap-1 py-0.5" style={{ paddingLeft: 8 + depth * 12 }}>
+      <span className="text-gray-400">{type === "file" ? "📄" : "📁"}</span>
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit()
+          if (e.key === "Escape") onCancel()
+        }}
+        placeholder={type === "file" ? "filename.txt" : "folder-name"}
+        className="flex-1 px-1.5 py-0.5 text-[12px] border border-gray-300 rounded outline-none focus:border-gray-900"
+      />
+      <button onClick={onSubmit} className="text-[10px] text-emerald-600 hover:text-emerald-800 px-1">✓</button>
+      <button onClick={onCancel} className="text-[10px] text-gray-400 hover:text-gray-600 px-1">✕</button>
+    </div>
   )
 }
