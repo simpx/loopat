@@ -122,8 +122,8 @@ export type PersonalConfig = {
 }
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
-  knowledge: { git: "git@github.com:simpx/loopat-knowledge.git" },
-  notes: { git: "git@github.com:simpx/loopat-notes.git" },
+  knowledge: { git: "" },
+  notes: { git: "" },
   repos: [
     { name: "loopat", git: "git@github.com:simpx/loopat.git" },
   ],
