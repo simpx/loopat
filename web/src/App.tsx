@@ -6,7 +6,7 @@
  */
 import { useEffect, useState } from "react"
 import { MessageCircle } from "lucide-react"
-import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch } from "react-router-dom"
+import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx } from "./ctx"
@@ -22,6 +22,7 @@ import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
 import { ChatPage } from "./pages/ChatPage"
 import { AuthPage } from "./pages/AuthPage"
+import { FloatingDm } from "./components/FloatingDm"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
@@ -44,6 +45,7 @@ function Layout() {
 
 function Shell({ ws }: { ws: WorkspaceState }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -53,6 +55,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const isAdmin = ws.currentUser?.role === "admin"
   const loggedIn = !!ws.currentUser
   const onLoopRoute = !!useMatch("/loop/:id")
+  const onChatRoute = location.pathname.startsWith("/chat")
   // Anonymous viewers on a loop URL get the "shared" experience: no header,
   // no tabs, no login affordance, no dialogs. The page itself enforces
   // meta.public via server gating; if it's not public the page renders its
@@ -228,6 +231,8 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           currentUserId={me}
         />
       )}
+      {/* Floating DM bubble — hidden on /chat where the full surface is already up. */}
+      {!onChatRoute && <FloatingDm me={me} />}
     </div>
   )
 }
