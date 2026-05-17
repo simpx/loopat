@@ -12,7 +12,7 @@ import {
   type User,
 } from "./api"
 
-export type KanbanCreateCtx = { filename: string; cid: string }
+export type KanbanCreateCtx = { board: string; filename: string; cid: string }
 
 export type WorkspaceState = {
   loops: LoopMeta[]

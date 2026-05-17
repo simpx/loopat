@@ -24,6 +24,16 @@ export type KanbanColumn = {
   cards: KanbanCard[]
 }
 
+// ── board path helpers ──
+
+function boardsRoot(): string {
+  return join(workspaceNotesDir(), "focus", "boards")
+}
+
+function boardDir(board: string): string {
+  return join(boardsRoot(), board)
+}
+
 // ── regex ──
 
 const BULLET_CARD_RE = /^(\s*)- \[([ xX])\]\s+(.*)$/
@@ -157,16 +167,54 @@ function parseColumnFile(filename: string, body: string): KanbanColumn {
   return { filename, title, cards }
 }
 
-// ── directory ──
+// ── board management ──
 
-function todoDir(): string {
-  return join(workspaceNotesDir(), "todo")
+export async function listBoards(): Promise<string[]> {
+  try {
+    const entries = await readdir(boardsRoot())
+    const dirs: string[] = []
+    for (const e of entries) {
+      if (e.startsWith(".")) continue
+      try {
+        const s = await readdir(join(boardsRoot(), e))
+        if (s) dirs.push(e) // it's a directory
+      } catch { /* skip non-directories */ }
+    }
+    // "default" always first
+    return dirs.sort((a, b) => {
+      if (a === "default") return -1
+      if (b === "default") return 1
+      return a.localeCompare(b)
+    })
+  } catch {
+    return ["default"]
+  }
+}
+
+export async function createBoard(name: string): Promise<boolean> {
+  if (!name || name.startsWith(".") || /[/\\]/.test(name)) return false
+  try {
+    await mkdir(boardDir(name), { recursive: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function renameBoard(oldName: string, newName: string): Promise<boolean> {
+  if (!newName || newName.startsWith(".") || /[/\\]/.test(newName)) return false
+  try {
+    await rename(boardDir(oldName), boardDir(newName))
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ── read / list ──
 
-export async function listKanbanColumns(): Promise<KanbanColumn[]> {
-  const dir = todoDir()
+export async function listKanbanColumns(board = "default"): Promise<KanbanColumn[]> {
+  const dir = boardDir(board)
   let entries: string[] = []
   try { entries = await readdir(dir) } catch { return [] }
 
@@ -192,10 +240,10 @@ export async function listKanbanColumns(): Promise<KanbanColumn[]> {
   return cols
 }
 
-async function readColumnRaw(filename: string): Promise<{ body: string; path: string } | null> {
+async function readColumnRaw(board: string, filename: string): Promise<{ body: string; path: string } | null> {
   const safe = basename(filename)
   if (!safe || safe.startsWith(".")) return null
-  const path = join(todoDir(), safe)
+  const path = join(boardDir(board), safe)
   try {
     const body = await readFile(path, "utf8")
     return { body, path }
@@ -228,7 +276,7 @@ function findCardRange(body: string, cid: string): { start: number; end: number;
 
 // ── mutations ──
 
-export async function addCard(filename: string, opts: {
+export async function addCard(board: string, filename: string, opts: {
   text: string
   assignee?: string
   priority?: string
@@ -236,13 +284,14 @@ export async function addCard(filename: string, opts: {
   topics?: string[]
   description?: string
 }): Promise<{ ok: boolean; cid?: string }> {
-  const raw = await readColumnRaw(filename)
+  const raw = await readColumnRaw(board, filename)
+  const dir = boardDir(board)
   if (!raw) {
     // create new column file
     const title = basename(filename, ".md")
     const body = `# ${title}\n\n- [ ] ${opts.text}\n`
-    await mkdir(todoDir(), { recursive: true })
-    await writeFile(join(todoDir(), basename(filename)), body)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, basename(filename)), body)
     return { ok: true, cid: hashCid(opts.text) }
   }
 
@@ -275,8 +324,8 @@ export async function addCard(filename: string, opts: {
   return { ok: true, cid: hashCid(opts.text) }
 }
 
-export async function toggleCard(filename: string, cid: string): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+export async function toggleCard(board: string, filename: string, cid: string): Promise<boolean> {
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
 
   const lines = raw.body.split("\n")
@@ -293,8 +342,8 @@ export async function toggleCard(filename: string, cid: string): Promise<boolean
   return false
 }
 
-export async function deleteCard(filename: string, cid: string): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+export async function deleteCard(board: string, filename: string, cid: string): Promise<boolean> {
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
 
   const range = findCardRange(raw.body, cid)
@@ -311,8 +360,8 @@ export async function deleteCard(filename: string, cid: string): Promise<boolean
   return true
 }
 
-export async function moveCard(fromFile: string, cid: string, toFile: string, toIndex?: number): Promise<boolean> {
-  const fromRaw = await readColumnRaw(fromFile)
+export async function moveCard(board: string, fromFile: string, cid: string, toFile: string, toIndex?: number): Promise<boolean> {
+  const fromRaw = await readColumnRaw(board, fromFile)
   if (!fromRaw) return false
 
   const range = findCardRange(fromRaw.body, cid)
@@ -334,13 +383,14 @@ export async function moveCard(fromFile: string, cid: string, toFile: string, to
   await writeFile(fromRaw.path, newFromBody)
 
   // insert into target at position
-  const toRaw = await readColumnRaw(toFile)
+  const toRaw = await readColumnRaw(board, toFile)
+  const dir = boardDir(board)
   if (!toRaw) {
     // create target column
     const title = basename(toFile, ".md")
     const body = `# ${title}\n\n${cardLines.join("\n")}\n`
-    await mkdir(todoDir(), { recursive: true })
-    await writeFile(join(todoDir(), basename(toFile)), body)
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, basename(toFile)), body)
     return true
   }
 
@@ -379,10 +429,10 @@ export async function moveCard(fromFile: string, cid: string, toFile: string, to
   return true
 }
 
-export async function updateCardMeta(filename: string, cid: string, patch: {
+export async function updateCardMeta(board: string, filename: string, cid: string, patch: {
   text?: string; assignee?: string; priority?: string; due?: string
 }): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
 
   const range = findCardRange(raw.body, cid)
@@ -438,8 +488,8 @@ export async function updateCardMeta(filename: string, cid: string, patch: {
 }
 
 /** Replace the entire card block (bullet line + indented content) in a column file. */
-export async function updateCardBlock(filename: string, cid: string, newBlock: string): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+export async function updateCardBlock(board: string, filename: string, cid: string, newBlock: string): Promise<boolean> {
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
   const range = findCardRange(raw.body, cid)
   if (!range) return false
@@ -455,11 +505,12 @@ export async function updateCardBlock(filename: string, cid: string, newBlock: s
 }
 
 export async function assignDriverForCard(
+  board: string,
   filename: string,
   cid: string,
   userId: string
 ): Promise<{ ok: boolean; loopId?: string }> {
-  const cols = await listKanbanColumns()
+  const cols = await listKanbanColumns(board)
   const col = cols.find((c) => c.filename === filename)
   const card = col?.cards.find((c) => c.cid === cid)
   if (!card || !card.loopId) return { ok: false }
@@ -467,17 +518,18 @@ export async function assignDriverForCard(
   const updated = await patchLoopMeta(card.loopId, { driver: userId } as Partial<LoopMeta>)
   if (!updated) return { ok: false }
 
-  await updateCardMeta(filename, cid, { assignee: userId })
+  await updateCardMeta(board, filename, cid, { assignee: userId })
   return { ok: true, loopId: card.loopId }
 }
 
 export async function linkLoopToCard(
+  board: string,
   filename: string,
   cid: string,
   loopId: string,
   userId: string
 ): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
 
   const range = findCardRange(raw.body, cid)
@@ -492,11 +544,12 @@ export async function linkLoopToCard(
 }
 
 export async function createLoopFromCard(
+  board: string,
   filename: string,
   cid: string,
   userId: string
 ): Promise<{ ok: boolean; loopId?: string }> {
-  const cols = await listKanbanColumns()
+  const cols = await listKanbanColumns(board)
   const col = cols.find((c) => c.filename === filename)
   const card = col?.cards.find((c) => c.cid === cid)
   if (!card) return { ok: false }
@@ -506,7 +559,7 @@ export async function createLoopFromCard(
   await patchLoopMeta(loop.id, { driver: userId } as Partial<LoopMeta>)
 
   // add loop association as a meta line
-  const raw = await readColumnRaw(filename)
+  const raw = await readColumnRaw(board, filename)
   if (raw) {
     const range = findCardRange(raw.body, cid)
     if (range) {
@@ -519,10 +572,10 @@ export async function createLoopFromCard(
   return { ok: true, loopId: loop.id }
 }
 
-export async function createColumn(filename: string, title?: string): Promise<boolean> {
+export async function createColumn(board: string, filename: string, title?: string): Promise<boolean> {
   const safe = basename(filename)
   if (!safe || safe.startsWith(".")) return false
-  const dir = todoDir()
+  const dir = boardDir(board)
   await mkdir(dir, { recursive: true })
   const path = join(dir, safe)
   const displayTitle = title || basename(safe, ".md")
@@ -531,8 +584,8 @@ export async function createColumn(filename: string, title?: string): Promise<bo
 }
 
 /** Persist card order within a column file. */
-export async function reorderCards(filename: string, orderedCids: string[]): Promise<boolean> {
-  const raw = await readColumnRaw(filename)
+export async function reorderCards(board: string, filename: string, orderedCids: string[]): Promise<boolean> {
+  const raw = await readColumnRaw(board, filename)
   if (!raw) return false
 
   const lines = raw.body.split("\n")
@@ -588,7 +641,7 @@ export async function reorderCards(filename: string, orderedCids: string[]): Pro
   return true
 }
 
-// ── column config (notes/todo/config.yaml) ──
+// ── column config (config.yaml per board) ──
 
 export type KanbanColumnConfig = {
   file: string
@@ -599,27 +652,27 @@ export type KanbanConfig = {
   columns: KanbanColumnConfig[]
 }
 
-function configPath(): string {
-  return join(todoDir(), "config.yaml")
+function configPath(board: string): string {
+  return join(boardDir(board), "config.yaml")
 }
 
-export async function readKanbanConfig(): Promise<KanbanConfig | null> {
+export async function readKanbanConfig(board: string): Promise<KanbanConfig | null> {
   try {
-    const raw = await readFile(configPath(), "utf8")
+    const raw = await readFile(configPath(board), "utf8")
     return parseYaml(raw)
   } catch {
     return null
   }
 }
 
-async function writeKanbanConfig(cfg: KanbanConfig): Promise<void> {
-  await mkdir(todoDir(), { recursive: true })
+async function writeKanbanConfig(board: string, cfg: KanbanConfig): Promise<void> {
+  await mkdir(boardDir(board), { recursive: true })
   const lines = ["columns:"]
   for (const c of cfg.columns) {
     lines.push(`  - file: ${c.file}`)
     if (c.color) lines.push(`    color: "${c.color}"`)
   }
-  await writeFile(configPath(), lines.join("\n") + "\n")
+  await writeFile(configPath(board), lines.join("\n") + "\n")
 }
 
 /** Minimal YAML parser for our simple config format. */
@@ -643,8 +696,8 @@ function parseYaml(raw: string): KanbanConfig {
 }
 
 /** Save column order to config. Creates/updates config.yaml. */
-export async function saveColumnOrder(orderedFiles: string[]): Promise<void> {
-  const existing = await readKanbanConfig()
+export async function saveColumnOrder(board: string, orderedFiles: string[]): Promise<void> {
+  const existing = await readKanbanConfig(board)
   const colorMap = new Map((existing?.columns ?? []).map((c) => [c.file, c.color]))
   const columns: KanbanColumnConfig[] = orderedFiles.map((f) => {
     const entry: KanbanColumnConfig = { file: f }
@@ -652,12 +705,12 @@ export async function saveColumnOrder(orderedFiles: string[]): Promise<void> {
     if (color) entry.color = color
     return entry
   })
-  await writeKanbanConfig({ columns })
+  await writeKanbanConfig(board, { columns })
 }
 
 /** Update column color in config. */
-export async function setColumnColor(filename: string, color: string): Promise<void> {
-  const cfg = await readKanbanConfig()
+export async function setColumnColor(board: string, filename: string, color: string): Promise<void> {
+  const cfg = await readKanbanConfig(board)
   const existing = cfg?.columns ?? []
   const found = existing.find((c) => c.file === filename)
   if (found) {
@@ -665,42 +718,42 @@ export async function setColumnColor(filename: string, color: string): Promise<v
   } else {
     existing.push({ file: filename, color })
   }
-  await writeKanbanConfig({ columns: existing })
+  await writeKanbanConfig(board, { columns: existing })
 }
 
 /** Delete a column file. All cards in the column are lost (caller should archive first). */
-export async function deleteColumn(filename: string): Promise<boolean> {
+export async function deleteColumn(board: string, filename: string): Promise<boolean> {
   const safe = basename(filename)
   try {
-    await unlink(join(todoDir(), safe))
+    await unlink(join(boardDir(board), safe))
   } catch {
     return false
   }
-  const cfg = await readKanbanConfig()
+  const cfg = await readKanbanConfig(board)
   if (cfg) {
     cfg.columns = cfg.columns.filter((c) => c.file !== safe)
-    await writeKanbanConfig(cfg)
+    await writeKanbanConfig(board, cfg)
   }
   return true
 }
 
 /** Rename a column file on disk and update config if present. */
-export async function renameColumn(fromFile: string, toFile: string): Promise<boolean> {
+export async function renameColumn(board: string, fromFile: string, toFile: string): Promise<boolean> {
   const safeFrom = basename(fromFile)
   const safeTo = basename(toFile)
   if (!safeTo || safeTo.startsWith(".") || !safeTo.endsWith(".md")) return false
-  const dir = todoDir()
+  const dir = boardDir(board)
   try {
     await rename(join(dir, safeFrom), join(dir, safeTo))
   } catch {
     return false
   }
   // update config if present
-  const cfg = await readKanbanConfig()
+  const cfg = await readKanbanConfig(board)
   if (cfg) {
     const found = cfg.columns.find((c) => c.file === safeFrom)
     if (found) found.file = safeTo
-    await writeKanbanConfig(cfg)
+    await writeKanbanConfig(board, cfg)
   }
   return true
 }
