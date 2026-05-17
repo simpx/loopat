@@ -206,7 +206,7 @@ export function FloatingDm({ me }: { me: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-30 w-12 h-12 rounded-full bg-gray-900 text-white shadow-lg hover:bg-gray-700 flex items-center justify-center"
+          className="fixed bottom-20 right-5 z-30 w-12 h-12 rounded-full bg-gray-700 text-white shadow-lg hover:bg-gray-500 flex items-center justify-center"
           title="direct messages"
         >
           <MessageCircle size={20} />
@@ -219,7 +219,7 @@ export function FloatingDm({ me }: { me: string }) {
       )}
 
       {open && (
-        <div className="fixed bottom-5 right-5 z-30 w-[22rem] max-w-[calc(100vw-2.5rem)] h-[32rem] max-h-[calc(100vh-2.5rem)] bg-white rounded-lg shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed bottom-20 right-5 z-30 w-[22rem] max-w-[calc(100vw-2.5rem)] h-[32rem] max-h-[calc(100vh-2.5rem)] bg-white rounded-lg shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
           <header className="h-10 shrink-0 border-b border-gray-200 px-2 flex items-center gap-1">
             {active ? (
               <button
