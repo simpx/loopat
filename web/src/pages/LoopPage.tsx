@@ -266,6 +266,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   useEffect(() => {
     getContext(meta.id).then(setMounts)
     getLoopSandbox(meta.id).then(setSandboxInfo)
+    markLoopViewed(meta.id)
   }, [meta.id])
 
   const onRefreshSandbox = async () => {

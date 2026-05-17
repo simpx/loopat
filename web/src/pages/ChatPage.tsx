@@ -11,6 +11,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { useIsMobile } from "../lib/useIsMobile"
 import {
   listChatConversations,
   listChatMessages,
@@ -101,6 +103,8 @@ export function ChatPage() {
   const [spawning, setSpawning] = useState(false)
   const [showDmPicker, setShowDmPicker] = useState(false)
   const [showNewChannel, setShowNewChannel] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const isMobile = useIsMobile()
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const threadEndRef = useRef<HTMLDivElement | null>(null)
   const activeConvIdRef = useRef<string | undefined>(convId)
@@ -405,10 +409,21 @@ export function ChatPage() {
 
   // ── render ──
 
-  return (
-    <div className="flex h-full w-full bg-white">
-      {/* Rail */}
-      <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col">
+  const sidebar = (
+    <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
+      {isMobile && (
+        <div className="h-9 flex items-center px-3 border-b border-gray-200">
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100 mr-1"
+            title="close sidebar"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">Chat</span>
+        </div>
+      )}
+      <div className={isMobile ? "flex-1 min-h-0 overflow-auto py-2" : ""}>
         <div className="px-3 mt-3 mb-1 text-xs text-gray-500 flex items-center justify-between">
           <span>Channels</span>
           <button
@@ -424,7 +439,7 @@ export function ChatPage() {
               key={c.id}
               conv={c}
               active={c.id === convId}
-              onClick={() => navigate(`/chat/${c.id}`)}
+              onClick={() => { navigate(`/chat/${c.id}`); if (isMobile) setSidebarOpen(false) }}
               onDelete={isAdmin ? () => handleDeleteChannel(c.id) : undefined}
             />
           ))}
@@ -447,15 +462,46 @@ export function ChatPage() {
               key={c.id}
               conv={c}
               active={c.id === convId}
-              onClick={() => navigate(`/chat/${c.id}`)}
+              onClick={() => { navigate(`/chat/${c.id}`); if (isMobile) setSidebarOpen(false) }}
             />
           ))}
           {dms.length === 0 && (
             <div className="mx-2 px-2 py-1 text-[11px] text-gray-400">no DMs yet</div>
           )}
         </div>
-        <div className="flex-1" />
-      </aside>
+      </div>
+      <div className="flex-1" />
+    </aside>
+  )
+
+  return (
+    <div className="flex h-full w-full bg-white">
+      {/* Rail */}
+      {isMobile ? (
+        <>
+          {sidebarOpen ? (
+            <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
+              <div className="absolute inset-0 bg-black/30" />
+              <div className="absolute left-0 top-0 bottom-0 w-60 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+                {sidebar}
+              </div>
+            </div>
+          ) : (
+            <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
+                title="open sidebar"
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </aside>
+          )}
+        </>
+      ) : (
+        sidebar
+      )}
 
       {/* Conversation pane */}
       <main className="flex-1 min-w-0 flex flex-col bg-white">
@@ -541,88 +587,22 @@ export function ChatPage() {
           when a thread is open. Width is fixed-ish (96 → 30vw) so the main
           feed shrinks gracefully on smaller screens. */}
       {active && activeThreadRootId != null && (
-        <aside className="w-[28rem] max-w-[40vw] min-w-[20rem] shrink-0 border-l border-gray-200 bg-white flex flex-col">
-          <header className="px-4 h-12 shrink-0 border-b border-gray-200 flex items-center justify-between">
-            <div className="text-[13px] font-medium text-gray-900">Thread</div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleSpawnLoopFromThread}
-                disabled={spawning || !thread}
-                className="px-2 py-1 rounded border border-gray-200 text-[11px] text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 flex items-center gap-1"
-                title="spawn a loop seeded with this thread (root + replies snapshot to /loopat/context/chat/<rootId>.jsonl)"
-              >
-                <span className="text-gray-500">⑂</span>
-                <span>{spawning ? "spawning…" : "spawn loop"}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveThreadRootId(null)}
-                className="text-gray-400 hover:text-gray-900 text-base leading-none px-1"
-                title="close thread"
-              >×</button>
-            </div>
-          </header>
-          <div className="flex-1 min-h-0 overflow-auto px-4 py-3 flex flex-col gap-3">
-            {thread === null ? (
-              <div className="text-[12px] text-gray-400 italic">loading…</div>
-            ) : (
-              <>
-                <MessageRow message={thread.root} isMe={thread.root.author === me} compact />
-                {thread.replies.length > 0 && (
-                  <div className="flex items-center gap-2 text-[11px] text-gray-400">
-                    <span className="flex-1 h-px bg-gray-200" />
-                    <span>{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</span>
-                    <span className="flex-1 h-px bg-gray-200" />
-                  </div>
-                )}
-                {thread.replies.map((r) => (
-                  <MessageRow key={r.id} message={r} isMe={r.author === me} compact />
-                ))}
-                {pendingReplies
-                  .filter((p) => p.parentId === thread.root.id)
-                  .map((p) => (
-                    <PendingRow
-                      key={p.tempId}
-                      pending={p}
-                      author={me}
-                      compact
-                      onRetry={() => retryReply(p)}
-                      onDiscard={() => discardReply(p.tempId)}
-                    />
-                  ))}
-                <div ref={threadEndRef} />
-              </>
-            )}
-          </div>
-          <div className="px-4 pb-4 pt-2 shrink-0">
-            <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm flex flex-col gap-2">
-              <textarea
-                value={threadDraft}
-                onChange={(e) => setThreadDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    handleThreadSend()
-                  }
-                }}
-                rows={1}
-                placeholder="Reply…"
-                className="field-sizing-content w-full max-h-40 min-h-10 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
-              />
-              <div className="flex items-center justify-between border-t border-gray-100 pt-2 px-0.5">
-                <div className="text-[10px] text-gray-400">Enter to reply · Shift+Enter for newline</div>
-                <button
-                  type="button"
-                  onClick={handleThreadSend}
-                  disabled={threadSending || !threadDraft.trim() || !thread}
-                  className="px-3 py-1 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-40"
-                >reply</button>
-              </div>
-            </div>
-          </div>
-        </aside>
+        <ThreadPanel
+          isMobile={isMobile}
+          thread={thread}
+          me={me}
+          spawning={spawning}
+          threadDraft={threadDraft}
+          threadSending={threadSending}
+          pendingReplies={pendingReplies}
+          threadEndRef={threadEndRef}
+          onClose={() => setActiveThreadRootId(null)}
+          onSpawnLoop={handleSpawnLoopFromThread}
+          onThreadDraftChange={setThreadDraft}
+          onThreadSend={handleThreadSend}
+          onRetryReply={retryReply}
+          onDiscardReply={discardReply}
+        />
       )}
 
       {showNewChannel && (
@@ -640,6 +620,123 @@ export function ChatPage() {
         />
       )}
     </div>
+  )
+}
+
+function ThreadPanel({ isMobile, thread, me, spawning, threadDraft, threadSending, pendingReplies, threadEndRef, onClose, onSpawnLoop, onThreadDraftChange, onThreadSend, onRetryReply, onDiscardReply }: {
+  isMobile: boolean
+  thread: { root: ChatMessage; replies: ChatMessage[] } | null
+  me: string
+  spawning: boolean
+  threadDraft: string
+  threadSending: boolean
+  pendingReplies: PendingMsg[]
+  threadEndRef: React.RefObject<HTMLDivElement | null>
+  onClose: () => void
+  onSpawnLoop: () => void
+  onThreadDraftChange: (v: string) => void
+  onThreadSend: () => void
+  onRetryReply: (p: PendingMsg) => void
+  onDiscardReply: (tempId: string) => void
+}) {
+  const body = (
+    <>
+      <header className="px-4 h-12 shrink-0 border-b border-gray-200 flex items-center justify-between">
+        <div className="text-[13px] font-medium text-gray-900">Thread</div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onSpawnLoop}
+            disabled={spawning || !thread}
+            className="px-2 py-1 rounded border border-gray-200 text-[11px] text-gray-700 hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 flex items-center gap-1"
+          >
+            <span className="text-gray-500">⑂</span>
+            <span>{spawning ? "spawning…" : "spawn loop"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-900 text-base leading-none px-1"
+          >×</button>
+        </div>
+      </header>
+      <div className="flex-1 min-h-0 overflow-auto px-4 py-3 flex flex-col gap-3">
+        {thread === null ? (
+          <div className="text-[12px] text-gray-400 italic">loading…</div>
+        ) : (
+          <>
+            <MessageRow message={thread.root} isMe={thread.root.author === me} compact />
+            {thread.replies.length > 0 && (
+              <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                <span className="flex-1 h-px bg-gray-200" />
+                <span>{thread.replies.length} {thread.replies.length === 1 ? "reply" : "replies"}</span>
+                <span className="flex-1 h-px bg-gray-200" />
+              </div>
+            )}
+            {thread.replies.map((r) => (
+              <MessageRow key={r.id} message={r} isMe={r.author === me} compact />
+            ))}
+            {pendingReplies
+              .filter((p) => thread && p.parentId === thread.root.id)
+              .map((p) => (
+                <PendingRow
+                  key={p.tempId}
+                  pending={p}
+                  author={me}
+                  compact
+                  onRetry={() => onRetryReply(p)}
+                  onDiscard={() => onDiscardReply(p.tempId)}
+                />
+              ))}
+            <div ref={threadEndRef} />
+          </>
+        )}
+      </div>
+      <div className="px-4 pb-4 pt-2 shrink-0">
+        <div className="rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm flex flex-col gap-2">
+          <textarea
+            value={threadDraft}
+            onChange={(e) => onThreadDraftChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                onThreadSend()
+              }
+            }}
+            rows={1}
+            placeholder="Reply…"
+            className="field-sizing-content w-full max-h-40 min-h-10 resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+          />
+          <div className="flex items-center justify-between border-t border-gray-100 pt-2 px-0.5">
+            <div className="text-[10px] text-gray-400">Enter to reply · Shift+Enter for newline</div>
+            <button
+              type="button"
+              onClick={onThreadSend}
+              disabled={threadSending || !threadDraft.trim() || !thread}
+              className="px-3 py-1 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-40"
+            >reply</button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-30" onClick={onClose}>
+        <div className="absolute inset-0 bg-black/30" />
+        <div className="absolute right-0 top-0 bottom-0 w-full max-w-full bg-white border-l border-gray-200 shadow-xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+          {body}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <aside className="w-[28rem] max-w-[40vw] min-w-[20rem] shrink-0 border-l border-gray-200 bg-white flex flex-col">
+      {body}
+    </aside>
   )
 }
 
