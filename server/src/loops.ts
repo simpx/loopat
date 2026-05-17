@@ -740,6 +740,180 @@ export async function syncPersonalToRemote(
 }
 
 /**
+ * Pull from remote. Best-effort: fetches and merges. If there are conflicts,
+ * returns conflict details so the UI can let the user choose.
+ */
+export type PersonalPullResult =
+  | { ok: true; message: string }
+  | { ok: false; error: string; conflicts?: string[]; needsStash?: boolean }
+
+export async function pullPersonalFromRemote(
+  userId: string,
+): Promise<PersonalPullResult> {
+  const dir = personalDir(userId)
+  if (!existsSyncBase(join(dir, ".git"))) {
+    return { ok: false, error: "personal/ is not a git repo" }
+  }
+
+  let hasOrigin = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasOrigin = true
+  } catch {}
+  if (!hasOrigin) {
+    return { ok: false, error: "no remote configured" }
+  }
+
+  // Determine current branch
+  let branch = "main"
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    const v = stdout.trim()
+    if (v) branch = v
+  } catch {}
+
+  // Check for uncommitted changes
+  let uncommitted = 0
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
+    uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
+  } catch {}
+
+  if (uncommitted > 0) {
+    // Stash changes before pull
+    try {
+      await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
+    } catch (e: any) {
+      return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
+    }
+  }
+
+  // Fetch
+  try {
+    await execFileP("git", ["-C", dir, "fetch", "origin"], {
+      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+      timeout: 30_000,
+    })
+  } catch (e: any) {
+    return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+
+  // Merge
+  try {
+    await execFileP("git", ["-C", dir, "merge", `origin/${branch}`])
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString()
+    if (stderr.includes("CONFLICT")) {
+      // Extract conflicted files
+      const conflicts: string[] = []
+      const lines = stderr.split("\n")
+      for (const line of lines) {
+        const match = line.match(/CONFLICT\s*\(.*?\):\s*Merge conflict in\s*(.+)/)
+        if (match) conflicts.push(match[1].trim())
+      }
+      // Also check git status for conflicts
+      try {
+        const { stdout } = await execFileP("git", ["-C", dir, "diff", "--name-only", "--diff-filter=U"])
+        const statusConflicts = stdout.split("\n").filter((l) => l.trim())
+        conflicts.push(...statusConflicts)
+      } catch {}
+      return { ok: false, error: "merge conflicts", conflicts: [...new Set(conflicts)] }
+    }
+    return { ok: false, error: `merge failed: ${stderr || e?.message || e}` }
+  }
+
+  // Pop stash if we stashed earlier
+  if (uncommitted > 0) {
+    try {
+      await execFileP("git", ["-C", dir, "stash", "pop"])
+    } catch (e: any) {
+      // Stash pop conflict — user will need to resolve manually
+      return { ok: false, error: `pull succeeded but stash pop failed: ${e?.stderr ?? e?.message ?? e}. Your changes are still in stash.`, needsStash: true }
+    }
+  }
+
+  return { ok: true, message: "pulled successfully" }
+}
+
+/**
+ * Push to remote. Stages, commits, and pushes. Returns conflict/error details.
+ */
+export type PersonalPushResult =
+  | { ok: true; message: string }
+  | { ok: false; error: string; needsPull?: boolean }
+
+export async function pushPersonalToRemote(
+  userId: string,
+): Promise<PersonalPushResult> {
+  const dir = personalDir(userId)
+  if (!existsSyncBase(join(dir, ".git"))) {
+    return { ok: false, error: "personal/ is not a git repo" }
+  }
+
+  // Author must be set
+  try {
+    await execFileP("git", ["-C", dir, "config", "user.email", "loopat@local"])
+    await execFileP("git", ["-C", dir, "config", "user.name", "loopat"])
+  } catch (e: any) {
+    return { ok: false, error: `git config failed: ${e?.message ?? e}` }
+  }
+
+  // Stage everything
+  try {
+    await execFileP("git", ["-C", dir, "add", "-A"])
+  } catch (e: any) {
+    return { ok: false, error: `git add failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+
+  // Commit if there's anything staged
+  let hadStaged = false
+  try {
+    await execFileP("git", ["-C", dir, "diff", "--cached", "--quiet"])
+  } catch {
+    hadStaged = true
+  }
+  if (hadStaged) {
+    try {
+      await execFileP("git", ["-C", dir, "commit", "-m", "loopat: sync personal vault"])
+    } catch (e: any) {
+      return { ok: false, error: `commit failed: ${e?.stderr ?? e?.message ?? e}` }
+    }
+  }
+
+  // Determine target branch
+  let branch = "main"
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    const v = stdout.trim()
+    if (v) branch = v
+  } catch {}
+
+  // Need an origin
+  let hasOrigin = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasOrigin = true
+  } catch {}
+  if (!hasOrigin) {
+    return { ok: false, error: "no remote configured" }
+  }
+
+  try {
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
+      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+    })
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    if (stderr.includes("non-fast-forward") || stderr.includes("rejected") || stderr.includes("pull")) {
+      return { ok: false, error: `push rejected: remote has newer commits`, needsPull: true }
+    }
+    return { ok: false, error: `push failed: ${stderr || e?.message || e}` }
+  }
+
+  return { ok: true, message: hadStaged ? "committed and pushed" : "pushed (no new changes)" }
+}
+
+/**
  * Wipe personal/<user>/ AND the saved git-crypt key. Deploy keypair stays
  * (it's the SSH identity, reusable for the next import). Re-scaffolds an
  * empty git-init'd personal/<user>/ so workspace bind paths still resolve.

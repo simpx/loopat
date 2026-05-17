@@ -4,8 +4,11 @@ import {
   exportPersonalCryptKey,
   getPersonalStatus,
   importPersonal,
+  pullPersonalVault,
+  pushPersonalVault,
   type PersonalStatus,
 } from "@/api"
+import { ArrowUp, ArrowDown, AlertTriangle, Check, X } from "lucide-react"
 
 /**
  * Personal-repo deploy-key flow, rendered as a settings panel.
@@ -337,8 +340,24 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
  *     three independent acknowledgements that data will be lost.
  */
 function ImportedPanel({ status }: { status: PersonalStatus }) {
-  type Action = null | "export" | "delete"
+  type Action = null | "export" | "delete" | "pull" | "push"
   const [action, setAction] = useState<Action>(null)
+  const [pullResult, setPullResult] = useState<{ ok: boolean; error?: string; conflicts?: string[]; needsStash?: boolean } | null>(null)
+  const [pushResult, setPushResult] = useState<{ ok: boolean; error?: string; needsPull?: boolean } | null>(null)
+
+  const handlePull = async () => {
+    setAction("pull")
+    setPullResult(null)
+    const r = await pullPersonalVault()
+    setPullResult(r)
+  }
+
+  const handlePush = async () => {
+    setAction("push")
+    setPushResult(null)
+    const r = await pushPersonalVault()
+    setPushResult(r)
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -350,16 +369,48 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
         .
       </div>
       <div className="text-[11px] text-gray-400 leading-relaxed">
-        To re-import, delete the vault below (loopat will sync first) and start
-        a fresh import.
+        Sync your personal vault with the remote repo.
       </div>
 
       {action === "export" ? (
         <ExportKeyFlow onDone={() => setAction(null)} />
       ) : action === "delete" ? (
         <DeleteVaultFlow status={status} onDone={() => setAction(null)} />
+      ) : action === "pull" ? (
+        <PullPushResultFlow
+          type="pull"
+          result={pullResult}
+          onDone={() => setAction(null)}
+          onRetry={handlePull}
+        />
+      ) : action === "push" ? (
+        <PullPushResultFlow
+          type="push"
+          result={pushResult}
+          onDone={() => setAction(null)}
+          onRetry={handlePush}
+        />
       ) : (
         <div className="flex flex-col gap-2">
+          {/* Pull/Push buttons */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handlePull}
+              className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] text-gray-700 border border-gray-200 rounded hover:bg-gray-50"
+            >
+              <ArrowDown size={12} />
+              Pull
+            </button>
+            <button
+              type="button"
+              onClick={handlePush}
+              className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-[11px] text-gray-700 border border-gray-200 rounded hover:bg-gray-50"
+            >
+              <ArrowUp size={12} />
+              Push
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setAction("export")}
@@ -376,6 +427,135 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function PullPushResultFlow({
+  type,
+  result,
+  onDone,
+  onRetry,
+}: {
+  type: "pull" | "push"
+  result: { ok: boolean; error?: string; conflicts?: string[]; needsStash?: boolean; needsPull?: boolean } | null
+  onDone: () => void
+  onRetry: () => void
+}) {
+  const [showConflicts, setShowConflicts] = useState(false)
+
+  if (!result) {
+    return (
+      <div className="flex flex-col gap-2 border border-gray-200 rounded p-2.5">
+        <div className="text-xs font-semibold text-gray-900">
+          {type === "pull" ? "Pulling from remote..." : "Pushing to remote..."}
+        </div>
+      </div>
+    )
+  }
+
+  if (result.ok) {
+    return (
+      <div className="flex flex-col gap-2 border border-emerald-200 bg-emerald-50 rounded p-2.5">
+        <div className="flex items-center gap-2 text-sm font-semibold text-emerald-800">
+          <Check size={14} />
+          {type === "pull" ? "Pulled successfully" : "Pushed successfully"}
+        </div>
+        <div className="text-xs text-emerald-700 leading-relaxed">
+          {type === "pull"
+            ? "Your local vault is now up to date with the remote."
+            : "Your changes have been pushed to the remote."}
+        </div>
+        <button
+          type="button"
+          onClick={onDone}
+          className="self-end px-3 h-8 text-sm rounded bg-emerald-700 text-white hover:bg-emerald-800"
+        >
+          Done
+        </button>
+      </div>
+    )
+  }
+
+  // Error state
+  const hasConflicts = type === "pull" && result.conflicts && result.conflicts.length > 0
+  const needsPull = type === "push" && result.needsPull
+
+  return (
+    <div className="flex flex-col gap-2 border border-red-200 bg-red-50 rounded p-2.5">
+      <div className="flex items-center gap-2 text-sm font-semibold text-red-800">
+        <AlertTriangle size={14} />
+        {type === "pull" ? "Pull failed" : "Push failed"}
+      </div>
+
+      {hasConflicts && (
+        <>
+          <div className="text-xs text-red-800 leading-relaxed">
+            Merge conflicts detected. You'll need to resolve them manually in the
+            terminal or by editing the files directly.
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowConflicts(!showConflicts)}
+            className="text-left text-[11px] text-red-700 underline"
+          >
+            {showConflicts ? "Hide" : "Show"} conflicted files ({result.conflicts!.length})
+          </button>
+          {showConflicts && (
+            <ul className="font-mono text-[10.5px] text-red-900 bg-white/60 rounded p-1.5 max-h-24 overflow-auto">
+              {result.conflicts!.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {result.needsStash && (
+        <div className="text-xs text-red-800 leading-relaxed">
+          Your local changes were stashed but couldn't be auto-applied after the pull.
+          Run <code className="bg-white/60 px-1 rounded">git stash pop</code> manually to resolve.
+        </div>
+      )}
+
+      {needsPull && (
+        <div className="text-xs text-red-800 leading-relaxed">
+          Remote has newer commits. Pull first, then try pushing again.
+        </div>
+      )}
+
+      {!hasConflicts && !result.needsStash && !needsPull && (
+        <div className="text-xs text-red-800 leading-relaxed">
+          {result.error}
+        </div>
+      )}
+
+      <div className="flex gap-2 mt-1">
+        {hasConflicts || needsPull ? (
+          <button
+            type="button"
+            onClick={needsPull ? () => { onDone(); setTimeout(() => window.location.reload(), 100) } : onDone}
+            className="flex-1 px-3 h-8 text-sm rounded bg-red-700 text-white hover:bg-red-800"
+          >
+            {needsPull ? "Switch to Pull" : "Done"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="flex-1 px-3 h-8 text-sm rounded bg-red-700 text-white hover:bg-red-800"
+          >
+            Retry
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onDone}
+          className="px-3 h-8 text-sm rounded border border-red-300 text-red-700 bg-white hover:bg-red-50"
+        >
+          Close
+        </button>
+      </div>
     </div>
   )
 }
@@ -524,23 +704,23 @@ function DeleteVaultFlow({
     try {
       const r = await deletePersonalVault(password, force)
       if (r.ok) {
-        setDone({ synced: r.synced, dataLost: r.dataLost })
+        setDone({ synced: r.synced ?? false, dataLost: r.dataLost ?? false })
         return
       }
       if (r.wrongPassword) {
-        setError(r.error)
+        setError(r.error ?? "wrong password")
         return
       }
       if (r.syncFailed) {
         setDataLoss({
-          syncError: r.syncError ?? r.error,
+          syncError: (r as any).syncError ?? r.error ?? "unknown sync error",
           uncommitted: r.uncommitted,
           unpushed: r.unpushed,
           hasRemote: r.hasRemote,
         })
         return
       }
-      setError(r.error)
+      setError(r.error ?? "delete failed")
     } finally {
       setBusy(false)
     }

@@ -30,13 +30,14 @@ import {
   type SandboxEntry,
   type SandboxFile,
 } from "../api"
-import { useEffect, useState, useCallback, type FormEvent } from "react"
+import { useEffect, useState, useCallback, useRef, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
 import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
-import { PanelLeftClose, PanelLeftOpen, Trash2 } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Trash2, Folder, FolderOpen, File, Eye, FilePlus, FolderPlus, Upload } from "lucide-react"
+import { Tree, type TreeNodeData, type TreeContextAction } from "../components/Tree"
 
 type SubId = VaultId | "sandboxes"
 
@@ -94,18 +95,18 @@ const VAULT_TAGLINE: Record<VaultId, string> = {
 function VaultPane({ vault }: { vault: VaultId }) {
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [flat, setFlat] = useState<VaultEntry[]>([])
-  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
   const [pickedPath, setPickedPath] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [showNewFile, setShowNewFile] = useState(false)
   const [query, setQuery] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [creating, setCreating] = useState<{ type: "file" | "folder"; path: string } | null>(null)
+  const [newName, setNewName] = useState("")
   const isMobile = useIsMobile()
 
   useEffect(() => {
     vaultList(vault).then((entries) => {
       setTree(entries)
-      // auto-pick first .md file
       const findFirst = (arr: VaultEntry[]): string | null => {
         for (const e of arr) {
           if (e.type === "file" && e.path.endsWith(".md")) return e.path
@@ -115,18 +116,8 @@ function VaultPane({ vault }: { vault: VaultId }) {
       setPickedPath(findFirst(entries))
     })
     vaultFlatList(vault).then(setFlat)
-    setOpenFolders(new Set())
     setQuery("")
   }, [vault, reloadKey])
-
-  const toggleFolder = (path: string) => {
-    setOpenFolders((prev) => {
-      const next = new Set(prev)
-      if (next.has(path)) next.delete(path)
-      else next.add(path)
-      return next
-    })
-  }
 
   const onCreate = async (path: string) => {
     const r = await vaultCreateFile(vault, path)
@@ -138,6 +129,116 @@ function VaultPane({ vault }: { vault: VaultId }) {
       alert(`failed: ${r.error}`)
     }
   }
+
+  const handleCreate = async () => {
+    if (!creating || !newName.trim()) { setCreating(null); return }
+    const targetPath = creating.path + "/" + newName.trim()
+    if (creating.type === "file") {
+      await vaultCreateFile(vault, targetPath)
+    }
+    setCreating(null)
+    setNewName("")
+    setReloadKey((k) => k + 1)
+  }
+
+  const handleAction = useCallback((action: string, node: TreeNodeData) => {
+    if (action === "view") {
+      setPickedPath(node.path)
+    } else if (action === "new-file" || action === "new-folder") {
+      setCreating({ type: action === "new-file" ? "file" : "folder", path: node.path })
+      setNewName("")
+    } else if (action === "delete") {
+      if (!confirm(`Delete "${node.name}"?`)) return
+      // TODO: vault delete API
+      setReloadKey((k) => k + 1)
+    }
+  }, [])
+
+  const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
+    if (isSecretsFolder(vault, node.path)) return []
+    if (node.type === "dir") {
+      return [
+        { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
+        { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
+        { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+      ]
+    }
+    if (isSecretFile(vault, node.path)) {
+      return []
+    }
+    return [
+      { label: "View", icon: <Eye size={12} />, action: "view" },
+      { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+    ]
+  }, [vault])
+
+  const handleLoadChildren = useCallback((path: string) => {
+    return vaultList(vault, path).then((entries) => entries as TreeNodeData[])
+  }, [vault])
+
+  const renderVaultNode = useCallback((node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => {
+    if (node.type === "dir") {
+      const secretsFolder = isSecretsFolder(vault, node.path)
+      return (
+        <button
+          type="button"
+          onClick={toggleOpen}
+          className={
+            secretsFolder
+              ? "w-full py-1.5 flex items-center gap-1.5 bg-amber-50/40 hover:bg-amber-50 text-left border-y border-amber-200/60 mt-1"
+              : "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
+          }
+          style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
+          title={secretsFolder ? "secrets · convention: encrypted (placeholder, not yet implemented)" : undefined}
+        >
+          <span className={secretsFolder ? "text-amber-700" : "text-gray-500"}>{isOpen ? "▾" : "▸"}</span>
+          <span className="text-[12px]">{secretsFolder ? "🔐" : isOpen ? <FolderOpen size={13} /> : <Folder size={13} />}</span>
+          <span
+            className={
+              secretsFolder
+                ? "text-[12px] uppercase tracking-wider font-semibold text-amber-900"
+                : "text-[13px] text-gray-900 truncate"
+            }
+          >
+            {node.name}
+          </span>
+          {secretsFolder && (
+            <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+              encrypted
+            </span>
+          )}
+        </button>
+      )
+    }
+    const sel = pickedPath === node.path
+    const secret = isSecretFile(vault, node.path)
+    return (
+      <button
+        type="button"
+        onClick={() => setPickedPath(node.path)}
+        className={
+          "w-full py-1 flex items-center gap-2 text-left " +
+          (sel ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
+        }
+        style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
+        title={secret ? "secret · 仅可注入" : undefined}
+      >
+        <span className="w-4" />
+        {secret ? (
+          <span className="text-amber-600 text-[12px] shrink-0">🔒</span>
+        ) : (
+          <span className="text-gray-500"><File size={13} /></span>
+        )}
+        <span
+          className={
+            "flex-1 min-w-0 truncate text-[13px] " + (secret ? "text-amber-900" : "text-gray-900")
+          }
+        >
+          {node.name}
+        </span>
+      </button>
+    )
+  }, [vault, pickedPath])
 
   const q = query.trim().toLowerCase()
   const searching = q.length > 0
@@ -208,21 +309,19 @@ function VaultPane({ vault }: { vault: VaultId }) {
           )
         ) : (
           <>
-            {tree.map((node) => (
-              <TreeNode
-                key={node.path}
-                vault={vault}
-                node={node}
-                depth={0}
-                openFolders={openFolders}
-                toggleFolder={toggleFolder}
-                picked={pickedPath}
-                onPick={(p) => {
-                  setPickedPath(p)
-                  if (isMobile) setSidebarOpen(false)
-                }}
-              />
-            ))}
+            <Tree
+              treeId={`vault-${vault}`}
+              entries={tree as TreeNodeData[]}
+              onPick={(path) => {
+                setPickedPath(path)
+                if (isMobile) setSidebarOpen(false)
+              }}
+              picked={pickedPath}
+              onLoadChildren={handleLoadChildren}
+              getContextActions={getContextActions}
+              onAction={handleAction}
+              renderNode={renderVaultNode}
+            />
             {tree.length === 0 && (
               <div className="px-3 py-4 text-[12px] text-gray-400 italic">
                 empty · click + 创建第一个文件
@@ -279,6 +378,16 @@ function VaultPane({ vault }: { vault: VaultId }) {
         )}
       </main>
       {showNewFile && <NewFileDialog vault={vault} onClose={() => setShowNewFile(false)} onCreate={onCreate} />}
+      {creating && (
+        <CreateInline
+          depth={1}
+          type={creating.type}
+          value={newName}
+          onChange={setNewName}
+          onSubmit={handleCreate}
+          onCancel={() => setCreating(null)}
+        />
+      )}
     </div>
   )
 }
@@ -318,136 +427,34 @@ function isSecretFile(vault: VaultId, path: string): boolean {
   return rest.includes("/")
 }
 
-function TreeNode({
-  vault,
-  node,
-  depth,
-  openFolders,
-  toggleFolder,
-  picked,
-  onPick,
-}: {
-  vault: VaultId
-  node: VaultEntry
-  depth: number
-  openFolders: Set<string>
-  toggleFolder: (path: string) => void
-  picked: string | null
-  onPick: (path: string) => void
+function CreateInline({ depth, type, value, onChange, onSubmit, onCancel }: {
+  depth: number;
+  type: "file" | "folder";
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
 }) {
-  if (node.type === "dir") {
-    const open = openFolders.has(node.path)
-    const secretsFolder = isSecretsFolder(vault, node.path)
-    return (
-      <>
-        <button
-          type="button"
-          onClick={() => toggleFolder(node.path)}
-          className={
-            secretsFolder
-              ? "w-full py-1.5 flex items-center gap-1.5 bg-amber-50/40 hover:bg-amber-50 text-left border-y border-amber-200/60 mt-1"
-              : "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
-          }
-          style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-          title={secretsFolder ? "encrypted at rest (git-crypt) · values never returned by the API" : undefined}
-        >
-          <span className={secretsFolder ? "text-amber-700" : "text-gray-500"}>{open ? "▾" : "▸"}</span>
-          <span className="text-[12px]">{secretsFolder ? "🔐" : "📁"}</span>
-          <span
-            className={
-              secretsFolder
-                ? "text-[12px] uppercase tracking-wider font-semibold text-amber-900"
-                : "text-[13px] text-gray-900 truncate"
-            }
-          >
-            {node.name}
-          </span>
-          {secretsFolder && (
-            <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-              encrypted
-            </span>
-          )}
-        </button>
-        {open && (
-          <Branch
-            vault={vault}
-            path={node.path}
-            depth={depth + 1}
-            openFolders={openFolders}
-            toggleFolder={toggleFolder}
-            picked={picked}
-            onPick={onPick}
-          />
-        )}
-      </>
-    )
-  }
-  const sel = picked === node.path
-  const secret = isSecretFile(vault, node.path)
-  return (
-    <button
-      type="button"
-      onClick={() => onPick(node.path)}
-      className={
-        "w-full py-1 flex items-center gap-2 text-left " +
-        (sel ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
-      }
-      style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-      title={secret ? "secret — value redacted; edit to overwrite" : undefined}
-    >
-      <span className="w-4" />
-      {secret ? (
-        <span className="text-amber-600 text-[12px] shrink-0">🔒</span>
-      ) : (
-        <span className="text-gray-500">📄</span>
-      )}
-      <span
-        className={
-          "flex-1 min-w-0 truncate text-[13px] " + (secret ? "text-amber-900" : "text-gray-900")
-        }
-      >
-        {node.name}
-      </span>
-    </button>
-  )
-}
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => { ref.current?.focus() }, [])
 
-function Branch({
-  vault,
-  path,
-  depth,
-  openFolders,
-  toggleFolder,
-  picked,
-  onPick,
-}: {
-  vault: VaultId
-  path: string
-  depth: number
-  openFolders: Set<string>
-  toggleFolder: (p: string) => void
-  picked: string | null
-  onPick: (p: string) => void
-}) {
-  const [entries, setEntries] = useState<VaultEntry[]>([])
-  useEffect(() => {
-    vaultList(vault, path).then(setEntries)
-  }, [vault, path])
   return (
-    <>
-      {entries.map((e) => (
-        <TreeNode
-          key={e.path}
-          vault={vault}
-          node={e}
-          depth={depth}
-          openFolders={openFolders}
-          toggleFolder={toggleFolder}
-          picked={picked}
-          onPick={onPick}
-        />
-      ))}
-    </>
+    <div className="flex items-center gap-1 py-0.5" style={{ paddingLeft: 8 + depth * 12 }}>
+      <span className="text-gray-400">{type === "file" ? "📄" : "📁"}</span>
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit()
+          if (e.key === "Escape") onCancel()
+        }}
+        placeholder={type === "file" ? "filename.md" : "folder-name"}
+        className="flex-1 px-1.5 py-0.5 text-[12px] border border-gray-300 rounded outline-none focus:border-gray-900"
+      />
+      <button onClick={onSubmit} className="text-[10px] text-emerald-600 hover:text-emerald-800 px-1">✓</button>
+      <button onClick={onCancel} className="text-[10px] text-gray-400 hover:text-gray-600 px-1">✕</button>
+    </div>
   )
 }
 

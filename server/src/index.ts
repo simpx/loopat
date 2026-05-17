@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote } from "./loops"
 import {
   initChat,
   listChannels,
@@ -599,6 +599,29 @@ app.post("/api/personal/delete", requireAuth, async (c) => {
     synced: !force && dirty,
     dataLost: force && dirty,
   })
+})
+
+// Pull from remote. Stashes local changes, fetches, merges, then pops stash.
+app.post("/api/personal/pull", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const r = await pullPersonalFromRemote(userId)
+  if (!r.ok) {
+    const status: Record<string, unknown> = { error: r.error }
+    if (r.conflicts) status.conflicts = r.conflicts
+    if (r.needsStash) status.needsStash = true
+    return c.json(status, r.conflicts ? 409 : 400)
+  }
+  return c.json({ ok: true, message: r.message })
+})
+
+// Push to remote. Stages, commits, and pushes.
+app.post("/api/personal/push", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const r = await pushPersonalToRemote(userId)
+  if (!r.ok) {
+    return c.json({ error: r.error, needsPull: r.needsPull }, r.needsPull ? 409 : 400)
+  }
+  return c.json({ ok: true, message: r.message })
 })
 
 // All /api/* routes below require auth, EXCEPT the two endpoints used by the

@@ -147,20 +147,18 @@ export async function exportPersonalCryptKey(
 
 export async function deletePersonalVault(
   password: string,
-  force = false,
-): Promise<
-  | { ok: true; synced: boolean; dataLost: boolean }
-  | {
-      ok: false
-      error: string
-      wrongPassword?: boolean
-      syncFailed?: boolean
-      syncError?: string
-      uncommitted?: number
-      unpushed?: number
-      hasRemote?: boolean
-    }
-> {
+  force: boolean = false,
+): Promise<{
+  ok: boolean
+  error?: string
+  wrongPassword?: boolean
+  syncFailed?: boolean
+  synced?: boolean
+  dataLost?: boolean
+  uncommitted?: number
+  unpushed?: number
+  hasRemote?: boolean
+}> {
   const r = await apiFetch("/api/personal/delete", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -170,16 +168,53 @@ export async function deletePersonalVault(
   if (!r.ok) {
     return {
       ok: false,
-      error: j.error ?? `request failed (${r.status})`,
+      error: j.error ?? `delete failed (${r.status})`,
       wrongPassword: r.status === 403,
-      syncFailed: !!j.syncFailed,
-      syncError: typeof j.syncError === "string" ? j.syncError : undefined,
-      uncommitted: typeof j.uncommitted === "number" ? j.uncommitted : undefined,
-      unpushed: typeof j.unpushed === "number" ? j.unpushed : undefined,
-      hasRemote: typeof j.hasRemote === "boolean" ? j.hasRemote : undefined,
+      syncFailed: j.syncFailed,
+      uncommitted: j.uncommitted,
+      unpushed: j.unpushed,
+      hasRemote: j.hasRemote,
     }
   }
-  return { ok: true, synced: !!j.synced, dataLost: !!j.dataLost }
+  return { ok: true, synced: j.synced, dataLost: j.dataLost }
+}
+
+export async function pullPersonalVault(): Promise<{
+  ok: boolean
+  error?: string
+  conflicts?: string[]
+  needsStash?: boolean
+  message?: string
+}> {
+  const r = await apiFetch("/api/personal/pull", { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: j.error ?? `pull failed (${r.status})`,
+      conflicts: j.conflicts,
+      needsStash: j.needsStash,
+    }
+  }
+  return { ok: true, message: j.message }
+}
+
+export async function pushPersonalVault(): Promise<{
+  ok: boolean
+  error?: string
+  needsPull?: boolean
+  message?: string
+}> {
+  const r = await apiFetch("/api/personal/push", { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: j.error ?? `push failed (${r.status})`,
+      needsPull: j.needsPull,
+    }
+  }
+  return { ok: true, message: j.message }
 }
 
 export async function importPersonal(
