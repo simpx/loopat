@@ -29,6 +29,25 @@
     <marker id="arr-C" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
     <marker id="arr-write" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
     <marker id="arr-dist" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+
+    <!-- Brand-flow gradient — applied to "loop at" in the tagline to mark
+         the brand wordplay (loop + at = loopat). Colors are loopat's own
+         palette (K · P · orange · N · C · teal), looped back to K so the
+         animation seamlessly wraps. spreadMethod="repeat" + translate over
+         one period (80px) = continuous flow. -->
+    <linearGradient id="brand-flow" gradientUnits="userSpaceOnUse"
+                    x1="0" y1="0" x2="80" y2="0" spreadMethod="repeat">
+      <stop offset="0"     stop-color="#3b5bdb"/>
+      <stop offset="0.166" stop-color="#9333ea"/>
+      <stop offset="0.333" stop-color="#d97706"/>
+      <stop offset="0.5"   stop-color="#d4a017"/>
+      <stop offset="0.666" stop-color="#16a34a"/>
+      <stop offset="0.833" stop-color="#0d9488"/>
+      <stop offset="1"     stop-color="#3b5bdb"/>
+      <animateTransform attributeName="gradientTransform" type="translate"
+                        from="0 0" to="80 0" dur="4s" repeatCount="indefinite"/>
+    </linearGradient>
+
     <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
       <feOffset dx="0" dy="2" result="off"/>
@@ -39,7 +58,7 @@
 
   <!-- ── TITLE ────────────────────────────────────────────────── -->
   <text x="640" y="46" text-anchor="middle" font-size="40" font-weight="700" letter-spacing="-0.5" fill="#1c2733">loopat</text>
-  <text x="640" y="82" text-anchor="middle" font-size="16" fill="#5b6776">loop at context, distill into knowledge</text>
+  <text x="640" y="82" text-anchor="middle" font-size="16" fill="#5b6776"><tspan font-weight="600" fill="url(#brand-flow)">loop at</tspan> context, distill into knowledge</text>
 
   <!-- ══════════════════════════════════════════════════════════════
        LEFT CARD — CONTEXT  (x=60..460, y=120..550)
