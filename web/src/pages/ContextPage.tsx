@@ -8,7 +8,7 @@
  *   - Header buttons: distill (notes), edit by loop (non-secret), edit (non-knowledge)
  *   - Save → auto-commit (server side)
  */
-import { NavLink, useParams, useNavigate } from "react-router-dom"
+import { NavLink, useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   vaultList,
   vaultFlatList,
@@ -57,7 +57,9 @@ const VALID = new Set<SubId>(["knowledge", "notes", "personal", "repos", "sandbo
 
 export function ContextPage() {
   const { sub } = useParams<{ sub: string }>()
+  const [searchParams] = useSearchParams()
   const active = (VALID.has(sub as SubId) ? sub : "knowledge") as SubId
+  const initialFile = searchParams.get("file") || undefined
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -79,7 +81,7 @@ export function ContextPage() {
       <div className="flex-1 min-h-0 min-w-0">
         {active === "repos" ? <ReposPane />
           : active === "sandboxes" ? <SandboxesPane />
-          : <VaultPane key={active} vault={active as VaultId} />}
+          : <VaultPane key={active} vault={active as VaultId} initialFile={initialFile} />}
       </div>
     </div>
   )
@@ -96,10 +98,10 @@ const VAULT_TAGLINE: Record<VaultId, string> = {
   repos: "registered code repos",
 }
 
-function VaultPane({ vault }: { vault: VaultId }) {
+function VaultPane({ vault, initialFile }: { vault: VaultId; initialFile?: string }) {
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [flat, setFlat] = useState<VaultEntry[]>([])
-  const [pickedPath, setPickedPath] = useState<string | null>(null)
+  const [pickedPath, setPickedPath] = useState<string | null>(initialFile ?? null)
   const [reloadKey, setReloadKey] = useState(0)
   const [showNewFile, setShowNewFile] = useState(false)
   const [query, setQuery] = useState("")
@@ -108,11 +110,30 @@ function VaultPane({ vault }: { vault: VaultId }) {
   const [newName, setNewName] = useState("")
   const isMobile = useIsMobile()
 
+  // initialize expansion and file selection from ?file= query param
+  const initRef = useRef(false)
+  if (!initRef.current && initialFile) {
+    initRef.current = true
+    const treeId = `vault-${vault}`
+    const parentDir = initialFile.includes("/") ? initialFile.substring(0, initialFile.lastIndexOf("/")) : ""
+    if (parentDir) {
+      try {
+        const key = "loopat:tree:expanded:" + treeId
+        const raw = localStorage.getItem(key)
+        const expanded: string[] = raw ? JSON.parse(raw) : []
+        for (let p = parentDir; p; p = p.includes("/") ? p.substring(0, p.lastIndexOf("/")) : "") {
+          if (!expanded.includes(p)) expanded.push(p)
+        }
+        localStorage.setItem(key, JSON.stringify(expanded))
+      } catch {}
+    }
+  }
+
   useEffect(() => {
     vaultList(vault).then((entries) => {
       setTree(entries)
       setPickedPath((prev) => {
-        if (prev && entries.some((e) => e.path === prev)) return prev
+        if (prev) return prev
         const first = entries.find((e) => e.type === "file" && e.path.endsWith(".md"))
         return first ? first.path : null
       })
