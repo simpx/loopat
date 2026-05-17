@@ -2,23 +2,18 @@ services:
   loopat:
     build: .
     image: loopat:latest
+    privileged: true
     ports:
       - "17787:7787"
       - "17788:7788"
     volumes:
-      - loopat-data:/root/.loopat
-      # - ~/.ssh:/root/.ssh:ro  # 可选：挂载 SSH 密钥用于 git 操作
+      - loopat-data:/home/loopat/.loopat
+      # - ~/.ssh:/home/loopat/.ssh:ro  # 可选：挂载 SSH 密钥用于 git 操作
     environment:
-      - LOOPAT_HOME=/root/.loopat
-      - LOOPAT_USER=root
+      - LOOPAT_HOME=/home/loopat/.loopat
       - HOST=0.0.0.0
       - LOOPAT_SERVE_HOST=0.0.0.0
     restart: unless-stopped
-    # 需要特权模式以支持 bubblewrap 沙箱
-    cap_add:
-      - SYS_ADMIN
-    security_opt:
-      - apparmor:unconfined
 
 volumes:
   loopat-data:
