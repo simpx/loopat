@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET_BRANCH_FILE="$HOME/.loopat/personal/panlilu/target_branch"
 SLEEP_SEC=300
 
@@ -26,14 +26,14 @@ while true; do
   if [[ -z "$local_sha" ]]; then
     log "local branch $branch does not exist, creating from origin/$branch"
     git checkout -b "$branch" "origin/$branch"
-    bash "$REPO_ROOT/build-to-nginx.sh"
+    bash "$REPO_ROOT/scripts/build-to-nginx.sh"
     pkill -f "bun run server/src/index.ts" 2>/dev/null || true
     log "deployed $remote_sha, server restart signaled"
   elif [[ "$local_sha" != "$remote_sha" ]]; then
     log "update detected: $local_sha -> $remote_sha"
     git checkout "$branch"
     git reset --hard "origin/$branch"
-    bash "$REPO_ROOT/build-to-nginx.sh"
+    bash "$REPO_ROOT/scripts/build-to-nginx.sh"
     pkill -f "bun run server/src/index.ts" 2>/dev/null || true
     log "deployed $remote_sha, server restart signaled"
   else

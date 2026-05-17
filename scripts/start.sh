@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 while true; do
   echo "==> Starting server... ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
