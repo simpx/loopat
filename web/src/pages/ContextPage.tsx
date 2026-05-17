@@ -582,7 +582,7 @@ function DocView({
     }
   }, [vault, path, draft, dirty, saving, onSaved, isSecret])
 
-  const startEdit = () => setEditing(true)
+  const startEdit = () => { setEditing(true); if (isMd) setMilkdown(true) }
 
   const cancelEdit = () => {
     setDraft(original)
