@@ -26,8 +26,8 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
-import { listDir, readWorkdirFile, writeWorkdirFile } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
+import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
@@ -833,6 +833,30 @@ app.post("/api/loops/:id/upload", requireAuth, async (c) => {
   }
 })
 
+app.delete("/api/loops/:id/file", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const path = c.req.query("path") ?? ""
+  if (!path) return c.json({ error: "path required" }, 400)
+  const ok = await deleteWorkdirFile(id, path)
+  if (!ok) return c.json({ error: "delete failed" }, 500)
+  return c.json({ ok: true })
+})
+
+app.post("/api/loops/:id/folder", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
+  const ok = await createWorkdirFolder(id, body.path)
+  if (!ok) return c.json({ error: "mkdir failed" }, 500)
+  return c.json({ ok: true })
+})
+
 // ── git operations (workdir) ──
 
 type GitFileInfo = {
@@ -1092,6 +1116,28 @@ app.post("/api/workspace/file", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
   const r = await vaultCreateFile(vault as VaultId, body.path, userId)
+  if (!r.ok) return c.json({ error: r.error }, r.error === "exists" ? 409 : 500)
+  return c.json({ ok: true })
+})
+
+app.delete("/api/workspace/file", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const vault = c.req.query("vault") ?? ""
+  if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
+  const path = c.req.query("path") ?? ""
+  if (!path) return c.json({ error: "path required" }, 400)
+  const r = await vaultDelete(vault as VaultId, path, userId)
+  if (!r.ok) return c.json({ error: r.error }, 500)
+  return c.json({ ok: true })
+})
+
+app.post("/api/workspace/folder", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const vault = c.req.query("vault") ?? ""
+  if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
+  const r = await vaultCreateFolder(vault as VaultId, body.path, userId)
   if (!r.ok) return c.json({ error: r.error }, r.error === "exists" ? 409 : 500)
   return c.json({ ok: true })
 })

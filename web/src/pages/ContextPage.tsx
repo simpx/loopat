@@ -15,6 +15,8 @@ import {
   vaultRead,
   vaultWrite,
   vaultCreateFile,
+  vaultCreateFolder,
+  vaultDeleteFile,
   vaultBacklinks,
   listRepos,
   getRepo,
@@ -36,7 +38,7 @@ import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
-import { PanelLeftClose, PanelLeftOpen, Trash2, Folder, FolderOpen, File, Eye, FilePlus, FolderPlus, Upload } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload } from "lucide-react"
 import { Tree, type TreeNodeData, type TreeContextAction } from "../components/Tree"
 
 type SubId = VaultId | "sandboxes"
@@ -107,13 +109,11 @@ function VaultPane({ vault }: { vault: VaultId }) {
   useEffect(() => {
     vaultList(vault).then((entries) => {
       setTree(entries)
-      const findFirst = (arr: VaultEntry[]): string | null => {
-        for (const e of arr) {
-          if (e.type === "file" && e.path.endsWith(".md")) return e.path
-        }
-        return null
-      }
-      setPickedPath(findFirst(entries))
+      setPickedPath((prev) => {
+        if (prev && entries.some((e) => e.path === prev)) return prev
+        const first = entries.find((e) => e.type === "file" && e.path.endsWith(".md"))
+        return first ? first.path : null
+      })
     })
     vaultFlatList(vault).then(setFlat)
     setQuery("")
@@ -134,7 +134,11 @@ function VaultPane({ vault }: { vault: VaultId }) {
     if (!creating || !newName.trim()) { setCreating(null); return }
     const targetPath = creating.path + "/" + newName.trim()
     if (creating.type === "file") {
-      await vaultCreateFile(vault, targetPath)
+      const r = await vaultCreateFile(vault, targetPath)
+      if (!r.ok) { alert(`create failed: ${r.error}`); return }
+    } else {
+      const r = await vaultCreateFolder(vault, targetPath)
+      if (!r.ok) { alert(`create failed: ${r.error}`); return }
     }
     setCreating(null)
     setNewName("")
@@ -149,10 +153,16 @@ function VaultPane({ vault }: { vault: VaultId }) {
       setNewName("")
     } else if (action === "delete") {
       if (!confirm(`Delete "${node.name}"?`)) return
-      // TODO: vault delete API
-      setReloadKey((k) => k + 1)
+      vaultDeleteFile(vault, node.path).then((r) => {
+        if (r.ok) {
+          setPickedPath((p) => p === node.path ? null : p)
+          setReloadKey((k) => k + 1)
+        } else {
+          alert(`delete failed: ${r.error}`)
+        }
+      })
     }
-  }, [])
+  }, [vault])
 
   const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
     if (isSecretsFolder(vault, node.path)) return []
@@ -176,69 +186,20 @@ function VaultPane({ vault }: { vault: VaultId }) {
     return vaultList(vault, path).then((entries) => entries as TreeNodeData[])
   }, [vault])
 
-  const renderVaultNode = useCallback((node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => {
+  const getNodeClassName = useCallback((node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean): string => {
     if (node.type === "dir") {
       const secretsFolder = isSecretsFolder(vault, node.path)
-      return (
-        <button
-          type="button"
-          onClick={toggleOpen}
-          className={
-            secretsFolder
-              ? "w-full py-1.5 flex items-center gap-1.5 bg-amber-50/40 hover:bg-amber-50 text-left border-y border-amber-200/60 mt-1"
-              : "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
-          }
-          style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-          title={secretsFolder ? "secrets · convention: encrypted (placeholder, not yet implemented)" : undefined}
-        >
-          <span className={secretsFolder ? "text-amber-700" : "text-gray-500"}>{isOpen ? "▾" : "▸"}</span>
-          <span className="text-[12px]">{secretsFolder ? "🔐" : isOpen ? <FolderOpen size={13} /> : <Folder size={13} />}</span>
-          <span
-            className={
-              secretsFolder
-                ? "text-[12px] uppercase tracking-wider font-semibold text-amber-900"
-                : "text-[13px] text-gray-900 truncate"
-            }
-          >
-            {node.name}
-          </span>
-          {secretsFolder && (
-            <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
-              encrypted
-            </span>
-          )}
-        </button>
-      )
+      if (secretsFolder) {
+        return "w-full py-1.5 flex items-center gap-1.5 bg-amber-50/40 hover:bg-amber-50 text-left border-y border-amber-200/60 mt-1"
+      }
+      return "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
     }
-    const sel = pickedPath === node.path
     const secret = isSecretFile(vault, node.path)
     return (
-      <button
-        type="button"
-        onClick={() => setPickedPath(node.path)}
-        className={
-          "w-full py-1 flex items-center gap-2 text-left " +
-          (sel ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
-        }
-        style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-        title={secret ? "secret · 仅可注入" : undefined}
-      >
-        <span className="w-4" />
-        {secret ? (
-          <span className="text-amber-600 text-[12px] shrink-0">🔒</span>
-        ) : (
-          <span className="text-gray-500"><File size={13} /></span>
-        )}
-        <span
-          className={
-            "flex-1 min-w-0 truncate text-[13px] " + (secret ? "text-amber-900" : "text-gray-900")
-          }
-        >
-          {node.name}
-        </span>
-      </button>
+      "w-full py-1 flex items-center gap-2 text-left " +
+      (isPicked ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
     )
-  }, [vault, pickedPath])
+  }, [vault])
 
   const q = query.trim().toLowerCase()
   const searching = q.length > 0
@@ -320,7 +281,8 @@ function VaultPane({ vault }: { vault: VaultId }) {
               onLoadChildren={handleLoadChildren}
               getContextActions={getContextActions}
               onAction={handleAction}
-              renderNode={renderVaultNode}
+              nodeClassName={getNodeClassName}
+              reloadKey={reloadKey}
             />
             {tree.length === 0 && (
               <div className="px-3 py-4 text-[12px] text-gray-400 italic">
@@ -379,9 +341,9 @@ function VaultPane({ vault }: { vault: VaultId }) {
       </main>
       {showNewFile && <NewFileDialog vault={vault} onClose={() => setShowNewFile(false)} onCreate={onCreate} />}
       {creating && (
-        <CreateInline
-          depth={1}
+        <CreateItemDialog
           type={creating.type}
+          parentPath={creating.path}
           value={newName}
           onChange={setNewName}
           onSubmit={handleCreate}
@@ -425,6 +387,52 @@ function isSecretFile(vault: VaultId, path: string): boolean {
   if (!path.startsWith(".loopat/vaults/")) return false
   const rest = path.slice(".loopat/vaults/".length)
   return rest.includes("/")
+}
+
+function CreateItemDialog({ type, parentPath, value, onChange, onSubmit, onCancel }: {
+  type: "file" | "folder";
+  parentPath: string;
+  value: string;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const label = type === "file" ? "New file" : "New folder"
+  const placeholder = type === "file" ? "filename.md" : "folder-name"
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center" onClick={onCancel}>
+      <div
+        className="w-full max-w-[420px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-base font-semibold text-gray-900 mb-3">{label} in <span className="font-mono text-[13px]">{parentPath || "root"}</span></div>
+        <input
+          autoFocus
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onSubmit()
+            if (e.key === "Escape") onCancel()
+          }}
+          placeholder={placeholder}
+          className="w-full px-3 py-2 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
+        />
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onCancel} className="px-3 h-8 text-sm rounded text-gray-700 hover:bg-gray-100">
+            cancel
+          </button>
+          <button
+            onClick={() => value.trim() && onSubmit()}
+            disabled={!value.trim()}
+            className="px-3 h-8 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            create
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function CreateInline({ depth, type, value, onChange, onSubmit, onCancel }: {

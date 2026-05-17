@@ -1,6 +1,5 @@
-import { readdir, readFile, writeFile, stat } from "node:fs/promises"
+import { readdir, readFile, writeFile, stat, mkdir, rm, unlink } from "node:fs/promises"
 import { join, normalize, relative, sep, dirname } from "node:path"
-import { mkdir } from "node:fs/promises"
 import { loopDir } from "./paths"
 
 export type FileEntry = {
@@ -78,6 +77,35 @@ export async function writeWorkdirFile(loopId: string, relPath: string, content:
   try {
     await mkdir(dirname(abs), { recursive: true })
     await writeFile(abs, content)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function deleteWorkdirFile(loopId: string, relPath: string): Promise<boolean> {
+  const root = loopDir(loopId)
+  const abs = safeJoin(root, relPath)
+  if (!abs) return false
+  try {
+    const s = await stat(abs)
+    if (s.isDirectory()) {
+      await rm(abs, { recursive: true, force: true })
+    } else {
+      await unlink(abs)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function createWorkdirFolder(loopId: string, relPath: string): Promise<boolean> {
+  const root = loopDir(loopId)
+  const abs = safeJoin(root, relPath)
+  if (!abs) return false
+  try {
+    await mkdir(abs, { recursive: true })
     return true
   } catch {
     return false

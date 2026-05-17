@@ -60,6 +60,10 @@ export type TreeProps = {
   depthOffset?: number
   /** Custom node renderer (optional) */
   renderNode?: (node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => ReactNode
+  /** Optional className for the row element (for special styling without custom renderer) */
+  nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
+  /** Bump to force re-fetch children for all nodes */
+  reloadKey?: number
 }
 
 export function Tree({
@@ -72,6 +76,8 @@ export function Tree({
   onAction,
   depthOffset = 0,
   renderNode,
+  nodeClassName,
+  reloadKey,
 }: TreeProps) {
   return (
     <>
@@ -87,6 +93,8 @@ export function Tree({
           getContextActions={getContextActions}
           onAction={onAction}
           renderNode={renderNode}
+          nodeClassName={nodeClassName}
+          reloadKey={reloadKey}
         />
       ))}
     </>
@@ -103,6 +111,8 @@ function TreeNode({
   getContextActions,
   onAction,
   renderNode,
+  nodeClassName,
+  reloadKey,
 }: {
   treeId: string
   entry: TreeNodeData
@@ -113,6 +123,8 @@ function TreeNode({
   getContextActions: (node: TreeNodeData) => TreeContextAction[]
   onAction: (action: string, node: TreeNodeData) => void
   renderNode?: (node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => ReactNode
+  nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
+  reloadKey?: number
 }) {
   const [open, setOpen] = useState(false)
   const [children, setChildren] = useState<TreeNodeData[] | null>(null)
@@ -132,8 +144,17 @@ function TreeNode({
     setOpen((o) => !o)
   }, [treeId, entry.path])
 
+  const prevReloadKey = useRef(reloadKey)
+  useEffect(() => {
+    if (prevReloadKey.current !== reloadKey) {
+      setChildren(null)
+      prevReloadKey.current = reloadKey
+    }
+  }, [reloadKey])
+
   useEffect(() => {
     if (!open || children !== null) return
+    if (entry.type !== "dir") return
     setLoading(true)
     onLoadChildren(entry.path)
       .then(setChildren)
@@ -169,6 +190,8 @@ function TreeNode({
                   getContextActions={getContextActions}
                   onAction={onAction}
                   renderNode={renderNode}
+                  nodeClassName={nodeClassName}
+                  reloadKey={reloadKey}
                 />
               ))}
             </>
@@ -192,7 +215,10 @@ function TreeNode({
           <button
             type="button"
             onClick={toggleOpen}
-            className="w-full py-1 flex items-center gap-1.5 hover:bg-gray-50 text-left group"
+            className={nodeClassName
+              ? nodeClassName(entry, depth, open, false)
+              : "w-full py-1 flex items-center gap-1.5 hover:bg-gray-50 text-left group"
+            }
             style={{ paddingLeft, paddingRight: 8 }}
           >
             <span className="text-gray-500 w-3">{open ? "▾" : "▸"}</span>
@@ -219,6 +245,8 @@ function TreeNode({
                 getContextActions={getContextActions}
                 onAction={onAction}
                 renderNode={renderNode}
+                nodeClassName={nodeClassName}
+                reloadKey={reloadKey}
               />
             ))}
             {children.length === 0 && (
@@ -274,9 +302,10 @@ function TreeNode({
         <button
           type="button"
           onClick={() => onPick(entry.path)}
-          className={
-            "w-full py-1 flex items-center gap-2 text-left " +
-            (isPicked ? "bg-gray-100" : "hover:bg-gray-50")
+          className={nodeClassName
+            ? nodeClassName(entry, depth, false, isPicked)
+            : ("w-full py-1 flex items-center gap-2 text-left " +
+              (isPicked ? "bg-gray-100" : "hover:bg-gray-50"))
           }
           style={{ paddingLeft, paddingRight: 8 }}
         >
@@ -305,7 +334,8 @@ function ContextMenu({ x, y, items, onAction, onClose }: {
 }) {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      e.preventDefault()
+      const target = e.target as HTMLElement | null
+      if (target?.closest("[data-context-menu]")) return
       onClose()
     }
     const keyHandler = (e: KeyboardEvent) => {
@@ -321,6 +351,7 @@ function ContextMenu({ x, y, items, onAction, onClose }: {
 
   return createPortal(
     <div
+      data-context-menu
       className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-[12px] min-w-[140px]"
       style={{ left: x, top: y }}
       onContextMenu={(e) => e.preventDefault()}
@@ -328,7 +359,7 @@ function ContextMenu({ x, y, items, onAction, onClose }: {
       {items.map((item) => (
         <button
           key={item.action}
-          onClick={() => onAction(item.action)}
+          onClick={() => { onAction(item.action); onClose() }}
           className={
             "w-full px-3 py-1.5 flex items-center gap-2 text-left hover:bg-gray-50 " +
             (item.danger ? "text-red-600 hover:bg-red-50" : "text-gray-700")

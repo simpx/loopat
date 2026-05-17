@@ -2,7 +2,7 @@
  * File tree for loop workdir, using the generic Tree component.
  */
 import { useEffect, useState, useRef, useCallback } from "react"
-import { listFiles, uploadFile, writeFile, type FileEntry } from "./api"
+import { listFiles, uploadFile, writeFile, deleteWorkdirFile, createWorkdirFolder, type FileEntry } from "./api"
 import { Tree, type TreeNodeData, type TreeContextAction, type TreeProps } from "./components/Tree"
 import { Upload, Trash2, Eye, FilePlus, FolderPlus } from "lucide-react"
 
@@ -38,6 +38,8 @@ export function FileTree({
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    const r = await uploadFile(loopId, file)
+    if (!r.ok) { alert(`upload failed: ${r.error}`) }
     setReloadKey((k) => k + 1)
     if (fileInputRef.current) fileInputRef.current.value = ""
     setUploadTarget("")
@@ -46,11 +48,13 @@ export function FileTree({
   const handleCreate = async () => {
     if (!creating || !newName.trim()) { setCreating(null); return }
     const targetPath = creating.path + "/" + newName.trim()
+    let ok = false
     if (creating.type === "file") {
-      await writeFile(loopId, targetPath, "")
+      ok = await writeFile(loopId, targetPath, "")
     } else {
-      // TODO: mkdir API when available
+      ok = await createWorkdirFolder(loopId, targetPath)
     }
+    if (!ok) { alert("create failed"); setCreating(null); return }
     setCreating(null)
     setNewName("")
     setReloadKey((k) => k + 1)
@@ -63,10 +67,13 @@ export function FileTree({
       setCreating({ type: action === "new-file" ? "file" : "folder", path: node.path })
       setNewName("")
     } else if (action === "delete") {
-      // TODO: delete API
-      setReloadKey((k) => k + 1)
+      if (!confirm(`Delete "${node.name}"?`)) return
+      deleteWorkdirFile(loopId, node.path).then((ok) => {
+        if (!ok) { alert("delete failed"); return }
+        setReloadKey((k) => k + 1)
+      })
     }
-  }, [triggerUpload])
+  }, [triggerUpload, loopId])
 
   const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
     if (node.type === "dir") {
@@ -201,6 +208,7 @@ function SectionFolder({
           getContextActions={getContextActions}
           onAction={onAction}
           depthOffset={1}
+          reloadKey={reloadKey}
         />
       )}
     </>
