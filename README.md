@@ -31,6 +31,10 @@ sessions or teammates.
 🚀 [Quick start](#quick-start) ·
 📖 [Architecture](docs/architecture.md)
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="loopat — Loop view with chat, workdir, terminal, and team DM" width="100%">
+</p>
+
 ---
 
 ## What makes loopat different
