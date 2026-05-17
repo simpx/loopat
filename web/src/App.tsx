@@ -9,7 +9,7 @@ import { MessageCircle } from "lucide-react"
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
-import { WorkspaceCtx } from "./ctx"
+import { WorkspaceCtx, useWorkspace } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
 import { AdminDialog } from "./components/dialog/AdminDialog"
@@ -235,7 +235,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 }
 
 function LoopRedirect() {
-  const ws = useWorkspaceState()
+  const ws = useWorkspace()
   if (ws.loops.length === 0) {
     return <LoopEmpty loggedIn={!!ws.currentUser} onNew={() => ws.setNewLoopDialogOpen(true)} />
   }
