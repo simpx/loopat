@@ -6,7 +6,29 @@
   <img src="docs/overview.svg" alt="loopat architecture" width="100%">
 </p>
 
-Single-binary collaborative AI coding workspace, sandboxed per-loop with bwrap, served as a web app on `localhost:7787`. See [`docs/overview.html`](docs/overview.html) for the live page, [`docs/architecture.md`](docs/architecture.md) for the deeper architecture.
+**A collaborative AI coding workspace that runs every chat in its own sandbox.**
+One process, one port, one workspace dir. Every loop (chat session) gets a
+bwrap mount namespace, a selectable toolchain, and a selectable credential
+vault — so "alice testing the frontend" and "carol fighting a prod fire" are
+the same engine, different cells of the same matrix.
+
+See [`docs/architecture.md`](docs/architecture.md) for the deep dive,
+[`docs/overview.html`](docs/overview.html) for the live diagram.
+
+## Why loopat
+
+- **Loop = Sandbox × Vault.** Capability (mise toolchain + MCP servers) and
+  identity (apiKey, ssh, tokens) are orthogonal axes. Pick one of each per
+  loop. Same workspace, four-cell matrix.
+- **Filesystem-first, no database.** Loop state, vaults, memory, branches —
+  every artifact is a file. `ls` and `cat` reveal full state.
+- **The sandbox is the membrane.** Every path the agent sees is a `--bind`
+  line in `buildBwrapArgs`. Misbehavior cannot escape what isn't bound.
+- **Read down, write up — slowly.** Shared `knowledge/` flows into every
+  loop read-only; promoting back up takes a deliberate distillation loop,
+  not an `echo >>`.
+- **Single binary, single port.** Hono serves the API, the static SPA, and
+  the websocket on `localhost:7787`. Drop a reverse proxy in front and ship.
 
 ## Bootstrap on a clean machine
 
@@ -37,7 +59,7 @@ read-only into each loop's sandbox, so tool installs are shared across loops
 ### 2. clone + install
 
 ```sh
-git clone git@github.com:simpx/loopat.git
+git clone https://github.com/simpx/loopat.git
 cd loopat
 bun install                          # also pulls the platform-specific claude binary
 ```
@@ -73,6 +95,8 @@ Open <http://localhost:7787> → the banner ends with `ready.` → create a loop
 
 ## Production
 
+### From source
+
 ```sh
 # 1. Build the frontend
 cd web && bun run build         # → web/dist/
@@ -84,6 +108,16 @@ PORT=7787 bun run server/src/index.ts
 Open `http://localhost:7787`. The server serves static files from `web/dist/`. `/api/*` and `/ws/*` go to the API; everything else falls back to `index.html` for SPA routing.
 
 To put a reverse proxy in front, point `/` to `web/dist/` (or `localhost:7787`) and proxy `/api` + `/ws` to the server.
+
+### Docker
+
+```sh
+docker compose up -d            # exposes 17787:7787, persists workspace in the loopat-data volume
+```
+
+The image bundles bubblewrap, openssh-client, and git. The container needs
+`SYS_ADMIN` + unconfined AppArmor so bwrap can create mount namespaces — see
+[`docker-compose.yml`](docker-compose.yml) for the canonical setup.
 
 ## Env knobs
 
@@ -108,3 +142,22 @@ Each loop runs in a bwrap mount namespace with a virtualized fs view (`/loop/<id
 ## Troubleshooting
 
 If chat doesn't start or you see "Claude code process exited with code 1", see [docs/troubleshoot.md](docs/troubleshoot.md).
+
+## Contributing
+
+Issues and PRs welcome at <https://github.com/simpx/loopat>. Before opening
+a non-trivial PR, please skim [`docs/architecture.md`](docs/architecture.md)
+so the change lands in the right layer (sandbox / vault / loop / chat).
+
+Contributors are asked to sign the [Contributor License Agreement](CLA.md)
+on their first PR — the [CLA Assistant][cla-assistant] bot will prompt you
+with a one-click link. This grants the project the right to relicense
+in the future (e.g. for a hosted commercial offering) without re-collecting
+permission from every contributor.
+
+[cla-assistant]: https://cla-assistant.io/
+
+## License
+
+[Apache License 2.0](LICENSE). See [`NOTICE`](NOTICE) for required
+attributions and [`CLA.md`](CLA.md) for contribution terms.
