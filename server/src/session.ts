@@ -199,8 +199,8 @@ class LoopSession {
    *    2. personal config's `default` field
    *    3. workspace config's `default` field
    *    4. enumeration of all providers (personal first, then workspace) */
-  private async resolveProvider(meta: { createdBy: string }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
-    const pCfg = await loadPersonalConfig(meta.createdBy)
+  private async resolveProvider(meta: { createdBy: string; config?: { vault?: string } }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
+    const pCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
     const wCfg = await loadConfig()
     const names = [
       ...candidateNames,
@@ -271,7 +271,7 @@ class LoopSession {
       meta.config?.default_model,
     ], true)
     if (!resolved) {
-      throw new Error(`no provider with a valid apiKey — set one in personal/${meta.createdBy}/.loopat/secrets/provider-keys/`)
+      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${meta.createdBy}/.loopat/vaults/${meta.config?.vault ?? "default"}/provider-keys/`)
     }
     const providerName = resolved.name
     const provider = resolved.provider
@@ -299,7 +299,7 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox)
+    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox, meta.config?.vault)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)

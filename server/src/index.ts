@@ -498,7 +498,7 @@ app.get("/api/personal/status", requireAuth, async (c) => {
 
 // Export the user's git-crypt key (base64). Behind a fresh password check
 // to prevent walk-up attacks on an unattended browser. The key decrypts
-// .loopat/secrets/** on any host that holds it, so we don't want a stolen
+// .loopat/vaults/** on any host that holds it, so we don't want a stolen
 // session cookie to be enough to lift it.
 app.post("/api/personal/crypt-key", requireAuth, async (c) => {
   const userId = c.get("userId") as string
@@ -617,14 +617,25 @@ app.get("/api/loops", requireAuth, async (c) => {
   return c.json({ loops })
 })
 
+// List vaults this user has on disk. Each entry is the name a loop can put
+// in `meta.config.vault` to bind that vault's contents into the sandbox.
+// When the user hasn't created any vaults yet, the legacy `secrets/` dir
+// shows up as the implicit "default" vault.
+app.get("/api/vaults", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const { listVaults } = await import("./vaults")
+  return c.json({ vaults: listVaults(userId) })
+})
+
 app.post("/api/loops", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
   const sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
+  const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, sandbox })
+    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
@@ -1768,7 +1779,8 @@ app.get(
                 let p: { model: string; maxContextTokens?: number } | undefined
                 if (userId) {
                   try {
-                    const pCfg = await loadPersonalConfig(userId)
+                    const loopMeta = await getLoop(id)
+                    const pCfg = await loadPersonalConfig(userId, loopMeta?.config?.vault)
                     p = pCfg.providers[msg.provider]
                   } catch {}
                 }

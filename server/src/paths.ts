@@ -81,13 +81,22 @@ export const loopSandboxMetaPath = (id: string) => join(loopSandboxDir(id), "san
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 
-// Personal `.loopat/` reserved namespace: per-user loopat config + secrets.
+// Personal `.loopat/` reserved namespace: per-user loopat config + vaults.
 // Mirrors `knowledge/.loopat/` as the personal counterpart.
+//
+// Vault model: each loop selects one vault (default = "default"). The selected
+// vault's contents are mounted into the sandbox at
+// `/loopat/context/personal/.loopat/vault/` (singular — one active vault per
+// loop). Other vaults on the host are hidden inside the sandbox.
 export const personalLoopatDir = (user: string) => join(personalDir(user), ".loopat")
 export const personalLoopatConfigPath = (user: string) => join(personalLoopatDir(user), "config.json")
-export const personalLoopatSecretsDir = (user: string) => join(personalLoopatDir(user), "secrets")
-export const personalProviderKeyPath = (user: string, providerName: string) =>
-  join(personalLoopatSecretsDir(user), "provider-keys", providerName)
+export const personalVaultsDir = (user: string) => join(personalLoopatDir(user), "vaults")
+export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
+/** Sandbox-internal path where the active vault's contents land. */
+export const sandboxVaultMountPoint = () => "/loopat/context/personal/.loopat/vault"
+/** Provider apiKey file inside a specific vault. */
+export const personalProviderKeyPath = (user: string, vault: string, providerName: string) =>
+  join(personalVaultDir(user, vault), "provider-keys", providerName)
 
 // Host-only per-user state: deploy key (loopat → personal repo) and git-crypt
 // key (decrypts secrets/ inside the cloned personal repo). Kept OUTSIDE

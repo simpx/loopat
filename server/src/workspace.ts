@@ -122,14 +122,18 @@ export async function vaultFlatList(vault: VaultId, user: string): Promise<Vault
 const MAX_BYTES = 1024 * 1024
 
 /**
- * Anything under `personal/<user>/.loopat/secrets/` is a secret value. The
- * worktree holds plaintext (so the sandbox can use it) but the API surface
- * MUST NEVER hand it back to the browser — the only way to "edit" is to
- * overwrite with a new value the user types.
+ * Anything under `personal/<user>/.loopat/vaults/<vault>/...` is a secret
+ * value. The worktree holds plaintext (so the sandbox can use it) but the API
+ * surface MUST NEVER hand it back to the browser — editing means overwriting
+ * with a new value the user types, never decrypt-and-view.
  */
 function isSecretPath(vault: VaultId, relPath: string): boolean {
   if (vault !== "personal") return false
-  return relPath === ".loopat/secrets" || relPath.startsWith(".loopat/secrets/")
+  if (!relPath.startsWith(".loopat/vaults/")) return false
+  // Need at least one path segment under the vault name to be a real file
+  // (`.loopat/vaults/prod` is the vault dir itself, not a secret).
+  const rest = relPath.slice(".loopat/vaults/".length)
+  return rest.includes("/")
 }
 
 export async function vaultRead(

@@ -6,9 +6,11 @@ import {
   personalLoopatDir,
   personalProviderKeyPath,
   personalTokenUsagePath,
+  personalVaultDir,
   workspaceDir,
   workspaceClaudeJsonPath,
 } from "./paths"
+import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
 /**
  * MCP server config — shape matches Claude Agent SDK `McpServerConfig`.
@@ -61,7 +63,7 @@ export type RepoSpec = {
  *   host, so we don't restrict scope.
  * - **Member** (`personal/<user>/.loopat/config.json` `mounts`): `src` MUST
  *   be relative under `personal/<user>/` (no `..`, no absolute). Encrypted
- *   dotfiles live at `.loopat/secrets/<...>` (git-crypt covers that
+ *   dotfiles live at `.loopat/vaults/<vault>/<...>` (git-crypt covers that
  *   subtree); reference them via mounts.
  *
  * `rw` defaults to false (RO bind). Missing source is silently skipped.
@@ -106,8 +108,8 @@ export type WorkspaceConfig = {
  * provider choice.
  *
  * apiKey is NOT stored here — for each provider, loadPersonalConfig reads
- * personal/<user>/.loopat/secrets/provider-keys/<name> and fills the
- * `apiKey` field at load time. The secrets/ subtree is git-crypt encrypted;
+ * personal/<user>/.loopat/vaults/<vault>/provider-keys/<name> and fills the
+ * `apiKey` field at load time. The vaults/ subtree is git-crypt encrypted;
  * config.json itself stays plain text so diffs / blame remain useful.
  */
 export type PersonalConfig = {
@@ -158,10 +160,27 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
   return cachedWorkspace
 }
 
+// Cache key = `${user}|${vault}` so per-vault apiKey resolutions don't
+// clobber each other. The cfg shape stays the same; only the apiKey fields
+// differ across cache entries.
 const personalCache = new Map<string, { cfg: PersonalConfig; mtimeMs: number; keyMtimes: Record<string, number> }>()
 
-async function readApiKey(user: string, providerName: string): Promise<{ key: string; mtimeMs: number }> {
-  const p = personalProviderKeyPath(user, providerName)
+/**
+ * Resolve the on-disk path of a provider's apiKey for the given vault. If
+ * the vault doesn't exist yet, returns the path it WOULD be at — callers do
+ * `existsSync` and treat absence as "no key configured".
+ */
+function providerKeyPathInVault(user: string, providerName: string, vault: string): string {
+  const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
+  return join(root, "provider-keys", providerName)
+}
+
+async function readApiKey(
+  user: string,
+  providerName: string,
+  vault: string = DEFAULT_VAULT,
+): Promise<{ key: string; mtimeMs: number }> {
+  const p = providerKeyPathInVault(user, providerName, vault)
   if (!existsSync(p)) return { key: "", mtimeMs: 0 }
   try {
     const k = (await readFile(p, "utf8")).trim()
@@ -173,27 +192,33 @@ async function readApiKey(user: string, providerName: string): Promise<{ key: st
 
 /**
  * Load personal config from personal/<user>/.loopat/config.json. Fills each
- * provider's apiKey from personal/<user>/.loopat/secrets/provider-keys/<name>.
+ * provider's apiKey from the selected vault (default = "default", which
+ * itself transparently falls back to legacy `secrets/` when the user hasn't
+ * created any vaults yet).
  *
- * If the file is missing (user hasn't imported, or just deleted the vault),
+ * If config.json is missing (user hasn't imported, or just deleted the vault),
  * return an in-memory empty template — DO NOT lazy-write it to disk. Writes
  * are restricted to explicit save paths (savePersonalConfig, register, import)
  * so "delete vault" really means deleted and the directory doesn't grow back
  * on the next request that happens to touch personal config.
  */
-export async function loadPersonalConfig(user: string): Promise<PersonalConfig> {
+export async function loadPersonalConfig(
+  user: string,
+  vault: string = DEFAULT_VAULT,
+): Promise<PersonalConfig> {
   const path = personalLoopatConfigPath(user)
   if (!existsSync(path)) {
     // Synthetic empty config; caller sees no providers configured.
     return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
   }
   const mtimeMs = statSync(path).mtimeMs
-  const cached = personalCache.get(user)
+  const cacheKey = `${user}|${vault}`
+  const cached = personalCache.get(cacheKey)
   // Reuse cache only if config.json AND every apiKey file's mtime are unchanged.
   if (cached && cached.mtimeMs === mtimeMs) {
     let stale = false
     for (const name of Object.keys(cached.cfg.providers)) {
-      const p = personalProviderKeyPath(user, name)
+      const p = providerKeyPathInVault(user, name, vault)
       const m = existsSync(p) ? statSync(p).mtimeMs : 0
       if ((cached.keyMtimes[name] ?? 0) !== m) {
         stale = true
@@ -220,11 +245,11 @@ export async function loadPersonalConfig(user: string): Promise<PersonalConfig> 
   }
   const keyMtimes: Record<string, number> = {}
   for (const [name, p] of Object.entries(parsed.providers)) {
-    const { key, mtimeMs: km } = await readApiKey(user, name)
+    const { key, mtimeMs: km } = await readApiKey(user, name, vault)
     p.apiKey = key
     keyMtimes[name] = km
   }
-  personalCache.set(user, { cfg: parsed, mtimeMs, keyMtimes })
+  personalCache.set(cacheKey, { cfg: parsed, mtimeMs, keyMtimes })
   return parsed
 }
 
@@ -298,11 +323,12 @@ export async function savePersonalConfig(user: string, cfg: {
         baseUrl: p.baseUrl,
         ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
       }
-      // Write apiKey to secrets file only if a non-empty value was provided
+      // Write apiKey into the default vault. Settings UI is per-user, not
+      // per-vault — power users edit non-default vaults via the Context page.
       if (p.apiKey !== undefined && p.apiKey.trim()) {
-        const keyDir = dirname(personalProviderKeyPath(user, name))
-        await mkdir(keyDir, { recursive: true })
-        await writeFile(personalProviderKeyPath(user, name), p.apiKey.trim() + "\n")
+        const keyPath = personalProviderKeyPath(user, DEFAULT_VAULT, name)
+        await mkdir(dirname(keyPath), { recursive: true })
+        await writeFile(keyPath, p.apiKey.trim() + "\n")
       }
     }
   }

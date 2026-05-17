@@ -50,6 +50,8 @@ import {
 } from "./paths"
 import { resolveSandboxFile } from "./sandboxes"
 import { loadConfig, loadPersonalConfig } from "./config"
+import { DEFAULT_VAULT, resolveVaultRoot, walkVaultFiles } from "./vaults"
+import { personalVaultsDir } from "./paths"
 
 const execFileP = promisify(execFile)
 
@@ -172,6 +174,7 @@ export async function buildBwrapArgs(
   createdBy: string,
   extraSetenv: SandboxExtraEnv = {},
   sandboxName?: string,
+  vaultName?: string,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -215,6 +218,30 @@ export async function buildBwrapArgs(
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
+
+  // ── vault overlay ──
+  // Personal is bound wholesale above (so memory/, .loopat/config.json, etc.
+  // are visible). Now narrow what's exposed for credentials:
+  //   - Hide host-side `.loopat/vaults/` (the multi-vault catalog) — AI
+  //     doesn't need to know which named vaults exist.
+  //   - Expose the selected vault's contents at `.loopat/vault/` (singular).
+  //     Inside the sandbox there's only ever ONE active vault.
+  const vault = vaultName && vaultName.trim() ? vaultName.trim() : DEFAULT_VAULT
+  const hostVaultsDir = personalVaultsDir(createdBy)
+  const V_PERSONAL_VAULTS = `${V_CONTEXT_PERSONAL}/.loopat/vaults`
+  const V_PERSONAL_VAULT = `${V_CONTEXT_PERSONAL}/.loopat/vault`
+  if (existsSync(hostVaultsDir)) {
+    args.push("--tmpfs", V_PERSONAL_VAULTS)
+  }
+  const vaultRoot = resolveVaultRoot(createdBy, vault)
+  if (vaultRoot) {
+    for await (const entry of walkVaultFiles(createdBy, vaultRoot)) {
+      // rw-bind so credential helpers can refresh a key in place if needed.
+      args.push("--bind", entry.realpath, `${V_PERSONAL_VAULT}/${entry.rel}`)
+    }
+  } else {
+    console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
+  }
 
   // workspace skills: nested ro-bind over .claude/ so Claude Code discovers them
   // as user-tier skills (CLAUDE_CONFIG_DIR/skills). Only mount if populated.
@@ -288,7 +315,7 @@ export async function buildBwrapArgs(
     args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
   }
 
-  const personalCfg = await loadPersonalConfig(createdBy)
+  const personalCfg = await loadPersonalConfig(createdBy, vault)
   const personalRoot = personalDir(createdBy)
   for (const m of personalCfg.mounts ?? []) {
     if (!isValidMemberMountSrc(m.src) || !isValidMountDst(m.dst)) {

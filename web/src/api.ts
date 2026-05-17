@@ -14,6 +14,11 @@ export type LoopMeta = {
   shareMode?: "static" | "port"
   shareAlias?: string
   sharePort?: number
+  config?: {
+    sandbox?: string
+    vault?: string
+    [k: string]: unknown
+  }
 }
 
 export type UserRole = "admin" | "member"
@@ -231,13 +236,20 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string; sandbox?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string }): Promise<LoopMeta> {
   const r = await apiFetch("/api/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(opts),
   })
   return (await r.json()) as LoopMeta
+}
+
+export async function listVaults(): Promise<string[]> {
+  const r = await apiFetch("/api/vaults")
+  if (!r.ok) return []
+  const j = await r.json()
+  return Array.isArray(j.vaults) ? j.vaults : []
 }
 
 export async function markLoopViewed(id: string): Promise<boolean> {
