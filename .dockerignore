@@ -19,6 +19,5 @@ dist
 .DS_Store
 loopat-data/
 loopat-data
-bun.lock
 server/src/*.js
 server/src/*.js.map
