@@ -67,15 +67,10 @@ export function useWorkspaceState(): WorkspaceState {
     }
   }, [])
 
-  // load loops on mount (public read)
+  // load loops on mount; re-load when showArchived or auth state changes
   useEffect(() => {
     refresh()
-  }, [refresh])
-
-  // re-load loops when auth state changes (so newly-visible items show up if needed)
-  useEffect(() => {
-    refresh()
-  }, [currentUser, refresh])
+  }, [showArchived, currentUser])
 
   const createLoop = useCallback(async (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => {
     const m = await apiCreateLoop(opts)
