@@ -5,7 +5,7 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown } from "lucide-react"
 import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
@@ -500,6 +500,7 @@ function LoopHeader({
   toggleMode: (m: RightMode) => void
   onShareWork: () => void
 }) {
+  const [collapsed, setCollapsed] = useState(false)
   const modeBtn = (label: string, m: RightMode) => (
     <button
       key={m}
@@ -514,8 +515,16 @@ function LoopHeader({
     </button>
   )
   return (
-    <header className="px-3 md:px-5 pt-3 pb-2 shrink-0 border-b border-gray-200">
+    <header className={"group/header px-3 md:px-5 shrink-0 border-b border-gray-200 " + (collapsed ? "py-1.5" : "pt-3 pb-2")}>
       <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setCollapsed((v) => !v)}
+          className="text-gray-400 hover:text-gray-700 -ml-1 p-0.5 rounded hover:bg-gray-100"
+          title={collapsed ? "expand header" : "collapse header"}
+        >
+          <ChevronDown size={14} className={"transition-transform " + (collapsed ? "-rotate-90" : "")} />
+        </button>
         <span className="text-[14px] md:text-[15px] font-medium text-gray-900">{meta.title}</span>
         <span className="text-xs text-gray-500">
           driver: <span className="text-gray-900">{meta.createdBy}</span>
@@ -547,6 +556,8 @@ function LoopHeader({
         <ShareToggle meta={meta} />
       </div>
 
+      {!collapsed && (
+      <>
       {/* workdir + branch + mode toggles */}
       <div className="text-xs text-gray-500 mt-1.5 flex items-center gap-2 flex-wrap">
         <span className="font-mono">~/.loopat/loops/{meta.id.slice(0, 8)}/workdir</span>
@@ -619,6 +630,8 @@ function LoopHeader({
           value="loaded"
         />
       </div>
+      </>
+      )}
     </header>
   )
 }
