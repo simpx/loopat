@@ -40,7 +40,7 @@ import {
   loopWorkdir,
   loopHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, type ProviderConfig, type ConfigValue } from "./config"
 import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -321,6 +321,104 @@ app.put("/api/settings/personal", requireAuth, async (c) => {
   } catch (e: any) {
     return c.json({ error: e?.message ?? "save failed" }, 500)
   }
+})
+
+// ── disk-shape settings (for the rich Settings page) ──
+// `/api/settings/personal/disk` returns the raw personal/<user>/.loopat/
+// config.json shape with ConfigValue refs intact, plus "ref exists" flags
+// for each apiKey / env reference. The resolved (secret) values are NEVER
+// included — the UI sees structure and existence only.
+
+app.get("/api/settings/personal/disk", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const disk = await readPersonalDiskRaw(userId)
+  const refExists: Record<string, { kind: string; exists: boolean }> = {}
+  if (disk.providers) {
+    for (const [name, val] of Object.entries(disk.providers)) {
+      if (name === "default" || !val || typeof val !== "object") continue
+      const apiKey = (val as any).apiKey
+      if (apiKey !== undefined) {
+        const d = describeConfigValue(apiKey, userId)
+        refExists[`providers.${name}.apiKey`] = { kind: d.kind, exists: d.exists }
+      }
+    }
+  }
+  if (disk.envs) {
+    for (const [k, v] of Object.entries(disk.envs)) {
+      const d = describeConfigValue(v, userId)
+      refExists[`envs.${k}`] = { kind: d.kind, exists: d.exists }
+    }
+  }
+  return c.json({ disk, refExists })
+})
+
+app.put("/api/settings/personal/disk", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const r = await savePersonalDisk(userId, body)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
+// List entries (files + dirs) under either the user's personal root or
+// the active default vault root. Used by the Settings UI for the mount
+// "src" picker. Depth-limited, skips noise (.git, node_modules, etc.).
+app.get("/api/settings/personal/entries", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const root = c.req.query("root") ?? "personal"
+  if (root !== "personal" && root !== "vault") return c.json({ error: "root must be personal|vault" }, 400)
+  const { readdir, stat } = await import("node:fs/promises")
+  const { join, relative } = await import("node:path")
+  const { personalDir } = await import("./paths")
+  const { resolveVaultRoot, DEFAULT_VAULT } = await import("./vaults")
+  const rootPath = root === "personal" ? personalDir(userId) : resolveVaultRoot(userId, DEFAULT_VAULT)
+  if (!rootPath) return c.json({ entries: [] })
+  const SKIP = new Set([".git", "node_modules", ".DS_Store", "dist", "target", "build"])
+  const MAX_DEPTH = 3
+  type Entry = { path: string; type: "file" | "dir" }
+  const out: Entry[] = []
+  async function walk(abs: string, rel: string, depth: number) {
+    if (depth > MAX_DEPTH) return
+    let names: string[]
+    try {
+      names = await readdir(abs)
+    } catch { return }
+    for (const name of names) {
+      if (SKIP.has(name)) continue
+      // For personal root, hide `.loopat` (that's where config + vaults live —
+      // mount UI should expose dotfiles from personal, not the meta dir).
+      if (root === "personal" && rel === "" && name === ".loopat") continue
+      const childAbs = join(abs, name)
+      const childRel = rel ? `${rel}/${name}` : name
+      let s
+      try { s = await stat(childAbs) } catch { continue }
+      if (s.isDirectory()) {
+        out.push({ path: childRel, type: "dir" })
+        await walk(childAbs, childRel, depth + 1)
+      } else if (s.isFile()) {
+        out.push({ path: childRel, type: "file" })
+      }
+    }
+  }
+  await walk(rootPath, "", 1)
+  out.sort((a, b) => a.path.localeCompare(b.path))
+  return c.json({ entries: out })
+})
+
+// Write a literal value to a ConfigValue ref's target file. Used by the
+// Settings UI when the user types a new apiKey/env value behind a
+// `{ vault }` or `{ file }` ref. Body: `{ ref, value }`.
+app.post("/api/settings/personal/value", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const ref = body.ref as ConfigValue
+  const value = typeof body.value === "string" ? body.value : ""
+  if (!ref || typeof ref !== "object" || (!("vault" in ref) && !("file" in ref))) {
+    return c.json({ error: "ref must be { vault } or { file }" }, 400)
+  }
+  const r = await writeConfigValueTarget(ref, userId, value)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
 })
 
 app.get("/api/settings/workspace", requireAuth, async (c) => {
