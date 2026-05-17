@@ -115,6 +115,10 @@ export function KanbanPage() {
           >+</button>
         )}
         <div className="flex-1" />
+        <button onClick={() => setShowArchived((v) => !v)}
+          className={`text-[11px] px-2 py-0.5 rounded border transition-colors shrink-0 ${showArchived ? "border-gray-400 bg-gray-200 text-gray-700" : "border-gray-200 text-gray-500 hover:text-gray-700"}`}>
+          {showArchived ? "Hide archived" : "Archived"}
+        </button>
         <button
           onClick={() => navigate(`/context/notes?file=focus/boards/${encodeURIComponent(board)}`)}
           className="shrink-0 text-[11px] text-gray-500 hover:text-gray-900 ml-2"
@@ -124,15 +128,6 @@ export function KanbanPage() {
           <span> ↗</span>
         </button>
       </div>
-
-      <header className="h-9 shrink-0 flex items-center gap-3 px-3 border-b border-gray-200">
-        <span className="text-[13px] text-gray-700 tracking-tight">{board}</span>
-        <div className="flex-1" />
-        <button onClick={() => setShowArchived((v) => !v)}
-          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${showArchived ? "border-gray-400 bg-gray-200 text-gray-700" : "border-gray-200 text-gray-500 hover:text-gray-700"}`}>
-          {showArchived ? "Hide archived" : "Archived"}
-        </button>
-      </header>
 
       {/* Rename board dialog */}
       {renamingBoard && (
