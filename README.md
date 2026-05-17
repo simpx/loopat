@@ -1,6 +1,6 @@
 # loopat
 
-> **Self-hosted AI workspace for teams — built around context management**
+> **Self-hosted AI workspace built around context management — works solo, scales to teams**
 
 When humans collaborate with AI, three things only humans can bring:
 
@@ -45,11 +45,12 @@ members keep their own credentials and identity.
   Slack into the AI to give it situational context; loopat ships with
   **built-in IM** that the agent reads directly as a first-class
   context source.
-- **Built for teams. Works just as well solo.** Shared `knowledge/`
-  and `notes/` git repos sync across members; loops contribute back
-  via auto-commit and distillation. Most AI tools today assume a
-  single dev — loopat scales naturally from one person to a team
-  without changing tools.
+- **Works solo, scales to teams.** Same workspace whether you're
+  alone or onboarding teammates. Solo, it's a personal AI workspace;
+  with a team, shared `knowledge/` and `notes/` git repos sync across
+  members and loops contribute back via auto-commit and distillation.
+  Most AI tools force you to pick between solo CLI and team SaaS —
+  loopat is one tool at any scale.
 - **Reproducible loops.** Every loop runs in its own sandbox with a
   versioned toolchain and a pinned credential vault. Spawn the same
   loop tomorrow on a different machine and get the same starting
@@ -61,21 +62,17 @@ members keep their own credentials and identity.
 
 ## How loopat compares
 
-Rows are grouped by the four differentiators above: **context** (rows 3–4),
-**team** (rows 5–6), **reproducibility** (rows 7–9), **data ownership**
-(rows 10–11).
-
 | | Claude Code | Cursor | opencode | Codex | **loopat** |
 |---|---|---|---|---|---|
 | Form factor | CLI | IDE | TUI | Web (hosted) | **Web (self-hosted)** |
-| Open source | ❌ | ❌ | ✓ MIT | ❌ | **✓ Apache 2.0** |
-| Team IM as context | ❌ (copy-paste from Slack) | ❌ | ❌ | ❌ | **✓ built-in IM, agent reads directly** |
+| License | proprietary | proprietary | MIT | proprietary | **Apache 2.0** |
+| Team IM integration | external (manual paste) | external (manual paste) | external (manual paste) | external (manual paste) | **built-in, agent-readable** |
 | Memory management | personal (`CLAUDE.md`) | personal (rules + memories) | personal (`AGENTS.md`) | none | **personal + team-shared, auto distillation** |
-| Multi-user | single user | per-seat (isolated) | single user | per-account | **shared workspace** |
-| Shared team knowledge | ❌ | ❌ | ❌ | ❌ | **✓ git-synced across members** |
-| Per-session sandbox | ❌ (process-level) | ❌ | ❌ (process-level) | OpenAI-managed | **bwrap (default) · Docker (planned)** |
-| Toolchain pinning | ❌ | ❌ | ❌ | fixed (hosted env) | **✓ per-loop versioned** |
-| Per-task credential isolation | ❌ | ❌ | ❌ | ❌ | **✓ vault overlay per loop** |
+| Multi-user | single user | per-seat | single user | per-account | **shared workspace** |
+| Shared team knowledge | individual config | individual config | individual config | individual config | **git-synced across team** |
+| Per-session sandbox | process-level | process-level | process-level | OpenAI-managed | **bwrap (default) · Docker (planned)** |
+| Toolchain pinning | host runtime | host runtime | host runtime | fixed (hosted env) | **per-loop versioned** |
+| Per-task credential isolation | shared (env vars) | shared (subscription) | shared (env vars) | account-managed | **per-loop vault overlay** |
 | Data location | local files | cloud | local files | OpenAI servers | **git repos you control** |
 | Secrets storage | env vars (plaintext) | cloud-managed | env vars (plaintext) | platform-managed | **git-crypt encrypted vault** |
 | Agent engine | proprietary (Anthropic) | proprietary (multi-model) | pluggable | proprietary (OpenAI) | **Claude Agent SDK** |
