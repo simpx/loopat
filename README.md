@@ -1,6 +1,12 @@
 # loopat
 
-Single-binary collaborative AI coding workspace. Loop = context + AI + workdir, sandboxed per-loop with bwrap, served as a web app on `localhost:7787`.
+> loop at context, distill into knowledge
+
+<p align="center">
+  <img src="docs/overview.svg" alt="loopat architecture" width="100%">
+</p>
+
+Single-binary collaborative AI coding workspace, sandboxed per-loop with bwrap, served as a web app on `localhost:7787`. See [`docs/overview.html`](docs/overview.html) for the live page, [`docs/architecture.md`](docs/architecture.md) for the deeper architecture.
 
 ## Bootstrap on a clean machine
 
