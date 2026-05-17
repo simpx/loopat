@@ -118,6 +118,65 @@ export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   return (await r.json()) as PersonalStatus
 }
 
+export async function exportPersonalCryptKey(
+  password: string,
+): Promise<
+  { ok: true; cryptKey: string } | { ok: false; error: string; wrongPassword?: boolean }
+> {
+  const r = await apiFetch("/api/personal/crypt-key", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: j.error ?? `request failed (${r.status})`,
+      wrongPassword: r.status === 403,
+    }
+  }
+  if (typeof j.cryptKey !== "string") return { ok: false, error: "missing cryptKey in response" }
+  return { ok: true, cryptKey: j.cryptKey }
+}
+
+export async function deletePersonalVault(
+  password: string,
+  force = false,
+): Promise<
+  | { ok: true; synced: boolean; dataLost: boolean }
+  | {
+      ok: false
+      error: string
+      wrongPassword?: boolean
+      syncFailed?: boolean
+      syncError?: string
+      uncommitted?: number
+      unpushed?: number
+      hasRemote?: boolean
+    }
+> {
+  const r = await apiFetch("/api/personal/delete", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password, force }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: j.error ?? `request failed (${r.status})`,
+      wrongPassword: r.status === 403,
+      syncFailed: !!j.syncFailed,
+      syncError: typeof j.syncError === "string" ? j.syncError : undefined,
+      uncommitted: typeof j.uncommitted === "number" ? j.uncommitted : undefined,
+      unpushed: typeof j.unpushed === "number" ? j.unpushed : undefined,
+      hasRemote: typeof j.hasRemote === "boolean" ? j.hasRemote : undefined,
+    }
+  }
+  return { ok: true, synced: !!j.synced, dataLost: !!j.dataLost }
+}
+
 export async function importPersonal(
   repoUrl?: string,
   cryptKey?: string,
@@ -125,8 +184,11 @@ export async function importPersonal(
   ok: boolean
   error?: string
   needsCryptKey?: boolean
+  notClean?: boolean
   secretsExposed?: boolean
   exposedFiles?: string[]
+  autoInitialized?: boolean
+  cryptKey?: string | null
 }> {
   const payload: Record<string, string> = {}
   if (repoUrl) payload.repoUrl = repoUrl
@@ -142,11 +204,16 @@ export async function importPersonal(
       ok: false,
       error: j.error ?? `import failed (${r.status})`,
       needsCryptKey: !!j.needsCryptKey,
+      notClean: !!j.notClean,
       secretsExposed: !!j.secretsExposed,
       exposedFiles: Array.isArray(j.exposedFiles) ? j.exposedFiles : [],
     }
   }
-  return { ok: true }
+  return {
+    ok: true,
+    autoInitialized: !!j.autoInitialized,
+    cryptKey: typeof j.cryptKey === "string" ? j.cryptKey : null,
+  }
 }
 
 export async function logout(): Promise<void> {

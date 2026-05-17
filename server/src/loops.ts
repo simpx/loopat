@@ -254,10 +254,23 @@ export async function isPersonalFresh(userId: string): Promise<boolean> {
  * One-shot clone using the user's loopat-managed deploy key. Replaces the
  * fresh-scaffolded `personal/<user>/` with the cloned repo.
  *
- * If the cloned repo has `.gitattributes` with git-crypt entries, `cryptKey`
- * (base64-encoded git-crypt key) must be provided — we run `git-crypt unlock`
- * against it to decrypt the worktree. Save the key under host-secrets/ so
- * subsequent `git pull` / re-clone can re-unlock without re-prompting.
+ * Two paths:
+ *
+ * 1. Default (auto-init). User provides a *clean* repo URL (no git-crypt
+ *    config and no tracked `.loopat/secrets/**`). Server clones, runs
+ *    `git-crypt init`, writes `.gitattributes` + `.gitignore`, commits the
+ *    scaffold, and pushes. The newly-generated symmetric key is saved under
+ *    `host-secrets/<user>/git-crypt.key` AND returned to the caller exactly
+ *    once so the UI can show it for backup.
+ *
+ * 2. Recovery (BYOK). User pastes a base64-encoded git-crypt key in
+ *    `cryptKey`. Repo must already be a git-crypt'd loopat repo (typical
+ *    case: same user, new host). Server runs `git-crypt unlock`, stores the
+ *    key under host-secrets/, swaps personal/ in.
+ *
+ * Anything in between (partially set-up repo, leftover plaintext secrets,
+ * git-crypt configured but no key supplied, etc.) is refused with a precise
+ * error so the user knows what to fix.
  *
  * Returns { ok: false, error } on any failure; on failure personal/<user>/
  * is left untouched (we clone into a temp dir first).
@@ -267,8 +280,15 @@ export async function importPersonalFromRepo(
   repoUrl: string,
   cryptKey?: string,
 ): Promise<
-  | { ok: true; needsCryptKey?: boolean }
-  | { ok: false; error: string; needsCryptKey?: boolean; secretsExposed?: boolean; exposedFiles?: string[] }
+  | { ok: true; autoInitialized?: boolean; cryptKey?: string }
+  | {
+      ok: false
+      error: string
+      needsCryptKey?: boolean
+      notClean?: boolean
+      secretsExposed?: boolean
+      exposedFiles?: string[]
+    }
 > {
   if (!repoUrl?.trim()) return { ok: false, error: "repoUrl required" }
 
@@ -287,7 +307,7 @@ export async function importPersonalFromRepo(
   // accept-new because we have no pre-populated known_hosts for github/gitlab
   // on first run; UserKnownHostsFile=/dev/null avoids polluting any host file.
   const tmp = await mkdtemp(join(tmpdir(), `loopat-import-${userId}-`))
-  const gitSsh = `ssh -i ${priv} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+  const gitSsh = sshCommandForUser(userId)
   try {
     await execFileP("git", ["clone", "--", repoUrl, tmp], {
       env: { ...process.env, GIT_SSH_COMMAND: gitSsh },
@@ -298,10 +318,9 @@ export async function importPersonalFromRepo(
     return { ok: false, error: `clone failed: ${msg}` }
   }
 
-  // Exposure check: refuse to adopt a repo whose .loopat/secrets/** are
-  // plaintext in git. Force user to set up git-crypt FIRST (and rotate the
-  // already-exposed secrets). If we proceeded, loopat would silently take
-  // ownership of leaked data — bad outcome, hard to undo.
+  // Exposure check (always, regardless of path): refuse to adopt a repo whose
+  // .loopat/secrets/** are plaintext in git. Even with BYOK this is bad —
+  // if any single secret blob is plaintext, those secrets are already burned.
   const exposed = await detectExposedSecrets(tmp)
   if (exposed.length > 0) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
@@ -313,28 +332,71 @@ export async function importPersonalFromRepo(
     }
   }
 
-  // Detect git-crypt: presence of `filter=git-crypt` in any tracked
-  // .gitattributes. If yes, require cryptKey and unlock the worktree.
-  const isEncrypted = await detectGitCryptEnabled(tmp)
-  if (isEncrypted) {
-    if (!cryptKey?.trim()) {
+  const hasGitCrypt = await detectGitCryptEnabled(tmp)
+  const trackedSecrets = await listTrackedSecretFiles(tmp)
+
+  if (cryptKey?.trim()) {
+    // ── BYOK / recovery path ──
+    if (!hasGitCrypt) {
       await rm(tmp, { recursive: true, force: true }).catch(() => {})
-      return { ok: false, error: "repo uses git-crypt — paste your git-crypt key to unlock", needsCryptKey: true }
+      return {
+        ok: false,
+        error:
+          "you provided a crypt key but this repo has no git-crypt config — leave the key field empty to let loopat initialize the repo, or point at the right repo",
+      }
     }
     const unlockResult = await unlockWithCryptKey(tmp, userId, cryptKey)
     if (!unlockResult.ok) {
       await rm(tmp, { recursive: true, force: true }).catch(() => {})
       return { ok: false, error: unlockResult.error }
     }
+    return await swapPersonalDir(userId, tmp)
   }
 
-  // Replace personal/<user>/ with the clone. host-secrets/<user>/ is outside
-  // this dir so nothing to preserve.
+  // ── Default / auto-init path ──
+  // Require a strictly clean repo: no git-crypt config, no tracked secrets.
+  if (hasGitCrypt) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    return {
+      ok: false,
+      notClean: true,
+      error:
+        "this repo already has git-crypt configured — either point at a fresh empty repo, or paste your existing crypt key under Recovery to import it",
+    }
+  }
+  if (trackedSecrets.length > 0) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    return {
+      ok: false,
+      notClean: true,
+      error: `\`.loopat/secrets/\` in this repo isn't empty (${trackedSecrets.length} file(s) tracked) — use a fresh repo`,
+    }
+  }
+
+  const init = await autoInitGitCrypt(tmp, userId)
+  if (!init.ok) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {})
+    return { ok: false, error: init.error }
+  }
+
+  const swap = await swapPersonalDir(userId, tmp)
+  if (!swap.ok) return swap
+  return { ok: true, autoInitialized: true, cryptKey: init.cryptKey }
+}
+
+function sshCommandForUser(userId: string): string {
+  const priv = hostDeployKeyPath(userId)
+  return `ssh -i ${priv} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+}
+
+async function swapPersonalDir(
+  userId: string,
+  tmp: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const dir = personalDir(userId)
   try {
     await rm(dir, { recursive: true, force: true })
     await rename(tmp, dir)
-    // Top up memory/ index if remote didn't ship one
     const pm = personalMemoryDir(userId)
     await mkdir(pm, { recursive: true })
     const pmIdx = `${pm}/MEMORY.md`
@@ -343,6 +405,353 @@ export async function importPersonalFromRepo(
   } catch (e: any) {
     return { ok: false, error: `swap failed: ${e?.message ?? e}` }
   }
+}
+
+/**
+ * Server-side bootstrap for a clean personal repo: git-crypt init, write the
+ * scaffold (`.gitattributes`, `.gitignore`, `.loopat/secrets/.gitkeep`),
+ * commit, push, and stash the freshly-generated symmetric key under
+ * host-secrets/<user>/. Returns the key base64-encoded so the UI can show it
+ * to the user exactly once for backup.
+ *
+ * On any failure (clone tampered, push permission missing, git-crypt missing)
+ * the saved host-secrets key is rolled back so a retry starts from scratch.
+ */
+async function autoInitGitCrypt(
+  repoDir: string,
+  userId: string,
+): Promise<{ ok: true; cryptKey: string } | { ok: false; error: string }> {
+  // git-crypt must be on the host; check early with a useful error
+  try {
+    await execFileP("git-crypt", ["--version"])
+  } catch {
+    return {
+      ok: false,
+      error: "git-crypt not installed on host (sudo apt install git-crypt / brew install git-crypt)",
+    }
+  }
+
+  // Local-only commit author so this doesn't depend on global git config
+  try {
+    await execFileP("git", ["-C", repoDir, "config", "user.email", "loopat@local"])
+    await execFileP("git", ["-C", repoDir, "config", "user.name", "loopat"])
+  } catch (e: any) {
+    return { ok: false, error: `git config failed: ${e?.message ?? e}` }
+  }
+
+  try {
+    await execFileP("git-crypt", ["init"], { cwd: repoDir })
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `git-crypt init failed: ${stderr || e?.message || e}` }
+  }
+
+  // Merge .gitattributes (preserve any existing lines, e.g. LFS / line endings)
+  await appendLineIfMissing(
+    join(repoDir, ".gitattributes"),
+    ".loopat/secrets/** filter=git-crypt diff=git-crypt",
+    (existing, line) => existing.includes(line) || /filter=git-crypt/.test(existing),
+  )
+
+  // Merge .gitignore so host-only state under .loopat/host/ never gets pushed
+  await appendLineIfMissing(
+    join(repoDir, ".gitignore"),
+    "/.loopat/host/",
+    (existing, line) =>
+      existing.split("\n").some((l) => l.trim() === line || l.trim() === ".loopat/host/"),
+  )
+
+  // Scaffold secrets/ so future writes land in a tracked directory
+  await mkdir(join(repoDir, ".loopat/secrets"), { recursive: true })
+  await writeFile(join(repoDir, ".loopat/secrets/.gitkeep"), "")
+
+  // Ship the memory index in the scaffold commit so cloning onto a second
+  // host doesn't depend on swapPersonalDir's late top-up.
+  await mkdir(join(repoDir, "memory"), { recursive: true })
+  if (!existsSyncBase(join(repoDir, "memory/MEMORY.md"))) {
+    await writeFile(join(repoDir, "memory/MEMORY.md"), PERSONAL_MEMORY_INDEX_STUB)
+  }
+
+  // Export the key BEFORE pushing so a push failure rolls back to a state
+  // that knows whether we had the key at all
+  let cryptKeyB64: string
+  let keyBuf: Buffer
+  try {
+    const exportPath = join(repoDir, ".git", "git-crypt-export.key")
+    await execFileP("git-crypt", ["export-key", exportPath], { cwd: repoDir })
+    keyBuf = await readFile(exportPath)
+    cryptKeyB64 = keyBuf.toString("base64")
+    await rm(exportPath, { force: true })
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `git-crypt export-key failed: ${stderr || e?.message || e}` }
+  }
+
+  // Persist to host-secrets BEFORE push so loop start-up code can find it
+  // even if push partially succeeded. We undo on push failure below.
+  const { saveGitCryptKey } = await import("./git-crypt-key")
+  try {
+    await saveGitCryptKey(userId, keyBuf)
+  } catch (e: any) {
+    return { ok: false, error: `failed to save git-crypt key: ${e?.message ?? e}` }
+  }
+
+  // Stage + commit
+  try {
+    await execFileP("git", [
+      "-C",
+      repoDir,
+      "add",
+      ".gitattributes",
+      ".gitignore",
+      ".loopat",
+      "memory",
+    ])
+    await execFileP("git", [
+      "-C",
+      repoDir,
+      "commit",
+      "-m",
+      "loopat: initialize personal vault (git-crypt enabled)",
+    ])
+  } catch (e: any) {
+    await rollbackSavedKey(userId)
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `commit failed: ${stderr || e?.message || e}` }
+  }
+
+  // Determine target branch: prefer existing local HEAD (carries remote's
+  // default); fall back to "main" for the empty-repo case where there's no
+  // symbolic ref to follow.
+  let branch = "main"
+  try {
+    const { stdout } = await execFileP("git", ["-C", repoDir, "symbolic-ref", "--short", "HEAD"])
+    const v = stdout.trim()
+    if (v) branch = v
+  } catch {}
+
+  try {
+    await execFileP("git", ["-C", repoDir, "push", "origin", `HEAD:${branch}`], {
+      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+    })
+  } catch (e: any) {
+    await rollbackSavedKey(userId)
+    const stderr = (e?.stderr ?? "").toString().trim()
+    const hint = /denied|read.only|permission/i.test(stderr)
+      ? " (does the deploy key have write access?)"
+      : ""
+    return { ok: false, error: `push failed${hint}: ${stderr || e?.message || e}` }
+  }
+
+  return { ok: true, cryptKey: cryptKeyB64 }
+}
+
+async function rollbackSavedKey(userId: string) {
+  const { rm: rmFile } = await import("node:fs/promises")
+  await rmFile(personalGitCryptKeyPath(userId), { force: true }).catch(() => {})
+}
+
+async function appendLineIfMissing(
+  path: string,
+  line: string,
+  alreadyPresent: (existing: string, line: string) => boolean,
+) {
+  let existing = ""
+  try {
+    existing = await readFile(path, "utf8")
+  } catch {}
+  if (alreadyPresent(existing, line)) return
+  const sep = existing.length === 0 || existing.endsWith("\n") ? "" : "\n"
+  await writeFile(path, existing + sep + line + "\n")
+}
+
+async function listTrackedSecretFiles(repoDir: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileP("git", [
+      "-C",
+      repoDir,
+      "ls-files",
+      "-z",
+      ".loopat/secrets",
+    ])
+    return stdout.split("\0").filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+export type PersonalDirtyStatus = {
+  uncommitted: number
+  unpushed: number
+  isGitRepo: boolean
+  hasRemote: boolean
+}
+
+/**
+ * Inspect personal/<user>/: how many uncommitted worktree changes, how many
+ * commits not reachable from any remote-tracking branch. Used as the
+ * pre-flight before a destructive delete.
+ *
+ * Returns counts only; the caller decides what "dirty" means (we treat
+ * uncommitted > 0 || unpushed > 0 as dirty).
+ */
+export async function inspectPersonalDirty(userId: string): Promise<PersonalDirtyStatus> {
+  const dir = personalDir(userId)
+  if (!existsSyncBase(dir) || !existsSyncBase(join(dir, ".git"))) {
+    return { uncommitted: 0, unpushed: 0, isGitRepo: false, hasRemote: false }
+  }
+  let hasRemote = false
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "remote"])
+    hasRemote = stdout.trim().length > 0
+  } catch {}
+
+  // Refresh remote-tracking refs so "unpushed" reflects current remote state.
+  // Best-effort — offline / no network is fine, we'll just over-report.
+  if (hasRemote) {
+    try {
+      await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], {
+        env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+        timeout: 15_000,
+      })
+    } catch {}
+  }
+
+  let uncommitted = 0
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
+    uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
+  } catch {}
+
+  let unpushed = 0
+  try {
+    // Commits on HEAD not reachable from any remote-tracking branch.
+    const { stdout } = await execFileP("git", [
+      "-C",
+      dir,
+      "rev-list",
+      "--count",
+      "HEAD",
+      "--not",
+      "--remotes",
+    ])
+    unpushed = parseInt(stdout.trim(), 10) || 0
+  } catch {
+    // No commits at all on HEAD → rev-list errors; treat as 0
+  }
+
+  return { uncommitted, unpushed, isGitRepo: true, hasRemote }
+}
+
+/**
+ * Stage + commit + push everything in personal/<user>/. Best-effort. If
+ * there's nothing to commit but there are unpushed commits, just push.
+ */
+export async function syncPersonalToRemote(
+  userId: string,
+): Promise<{ ok: true } | { ok: false, error: string }> {
+  const dir = personalDir(userId)
+  if (!existsSyncBase(join(dir, ".git"))) {
+    return { ok: false, error: "personal/ is not a git repo — nothing to sync to" }
+  }
+
+  // Author must be set for the commit step. Set locally so we don't rely
+  // on the host's global git config.
+  try {
+    await execFileP("git", ["-C", dir, "config", "user.email", "loopat@local"])
+    await execFileP("git", ["-C", dir, "config", "user.name", "loopat"])
+  } catch (e: any) {
+    return { ok: false, error: `git config failed: ${e?.message ?? e}` }
+  }
+
+  // Stage everything
+  try {
+    await execFileP("git", ["-C", dir, "add", "-A"])
+  } catch (e: any) {
+    return { ok: false, error: `git add failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+
+  // Commit if there's anything staged. `git diff --cached --quiet` exits
+  // non-zero when there are staged changes, so we invert the check.
+  let hadStaged = false
+  try {
+    await execFileP("git", ["-C", dir, "diff", "--cached", "--quiet"])
+  } catch {
+    hadStaged = true
+  }
+  if (hadStaged) {
+    try {
+      await execFileP("git", [
+        "-C",
+        dir,
+        "commit",
+        "-m",
+        "loopat: sync personal vault before delete",
+      ])
+    } catch (e: any) {
+      return { ok: false, error: `commit failed: ${e?.stderr ?? e?.message ?? e}` }
+    }
+  }
+
+  // Determine target branch
+  let branch = "main"
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    const v = stdout.trim()
+    if (v) branch = v
+  } catch {}
+
+  // Need an origin to push to. If there's no remote (e.g. the user never
+  // imported, personal/ is the local-only scaffold), refuse — sync is
+  // impossible. Caller can still force-delete.
+  let hasOrigin = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasOrigin = true
+  } catch {}
+  if (!hasOrigin) {
+    return { ok: false, error: "no remote configured — nothing to sync to" }
+  }
+
+  try {
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
+      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+    })
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `push failed: ${stderr || e?.message || e}` }
+  }
+  return { ok: true }
+}
+
+/**
+ * Wipe personal/<user>/ AND the saved git-crypt key. Deploy keypair stays
+ * (it's the SSH identity, reusable for the next import). Re-scaffolds an
+ * empty git-init'd personal/<user>/ so workspace bind paths still resolve.
+ */
+export async function deletePersonalVault(userId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const dir = personalDir(userId)
+  try {
+    await rm(dir, { recursive: true, force: true })
+  } catch (e: any) {
+    return { ok: false, error: `rm personal/ failed: ${e?.message ?? e}` }
+  }
+  const { rm: rmFile } = await import("node:fs/promises")
+  await rmFile(personalGitCryptKeyPath(userId), { force: true }).catch(() => {})
+
+  // Re-scaffold empty so the workspace doesn't have a hole. Mirrors
+  // provisionUserPersonal but without re-running deploy-key gen.
+  try {
+    await mkdir(dir, { recursive: true })
+    const pm = personalMemoryDir(userId)
+    await mkdir(pm, { recursive: true })
+    const pmIdx = `${pm}/MEMORY.md`
+    if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
+    await gitInitIfMissing(dir)
+  } catch (e: any) {
+    return { ok: false, error: `re-scaffold failed: ${e?.message ?? e}` }
+  }
+  return { ok: true }
 }
 
 // git-crypt's per-file magic header (10 bytes): \x00 G I T C R Y P T \x00
