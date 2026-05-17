@@ -1,10 +1,10 @@
 import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, join, normalize, relative } from "node:path"
 import {
+  personalDir,
   personalLoopatConfigPath,
   personalLoopatDir,
-  personalProviderKeyPath,
   personalTokenUsagePath,
   personalVaultDir,
   workspaceDir,
@@ -26,10 +26,34 @@ export type WorkspaceClaudeJson = {
   mcpServers?: Record<string, McpServerConfig>
 }
 
+/**
+ * Reference for a config value that gets resolved at load time:
+ *   - string             → literal value
+ *   - { vault: "x/y" }   → read `<active-vault-root>/x/y` (rebinds per loop)
+ *   - { file:  "a/b" }   → read `personal/<user>/a/b` (vault-agnostic)
+ *
+ * Trailing whitespace (including the conventional file-final newline) is
+ * stripped; leading/interior whitespace is preserved.
+ */
+export type ConfigValue =
+  | string
+  | { vault: string }
+  | { file: string }
+
+/** On-disk shape of a provider — apiKey is a ConfigValue (or absent). */
+export type ProviderConfigDisk = {
+  model: string
+  baseUrl: string
+  apiKey?: ConfigValue
+  maxContextTokens?: number
+}
+
+/** Runtime/resolved shape — apiKey is the actual string after resolution. */
 export type ProviderConfig = {
   model: string
   baseUrl: string
-  /** Filled in by loadPersonalConfig from secrets/provider-keys/<name>. */
+  /** Resolved at load time from `apiKey: ConfigValue` on disk. Empty string
+   *  if the reference is missing or the target file doesn't exist. */
   apiKey: string
   /**
    * Override cli's context-window detection for this model. cli has a
@@ -103,21 +127,31 @@ export type WorkspaceConfig = {
 
 /**
  * Personal config (personal/<user>/.loopat/config.json): per-user, kept in
- * each driver's personal/ tree. Carries member-level mounts (personal-
- * relative bind specs) + shell override + model providers + default
- * provider choice.
+ * each driver's personal/ tree.
  *
- * apiKey is NOT stored here — for each provider, loadPersonalConfig reads
- * personal/<user>/.loopat/vaults/<vault>/provider-keys/<name> and fills the
- * `apiKey` field at load time. The vaults/ subtree is git-crypt encrypted;
- * config.json itself stays plain text so diffs / blame remain useful.
+ * The on-disk shape stores explicit `ConfigValue` references for apiKey and
+ * envs (no name-based magic). Plain string = literal, `{vault}` = vault-
+ * relative (rebinds per loop's active vault), `{file}` = personal-relative
+ * (vault-agnostic). At load time, references are resolved against disk and
+ * exposed as plain strings (`providers[].apiKey`, `envs[K]`).
  */
-export type PersonalConfig = {
+export type PersonalConfigDisk = {
   default: string
-  providers: Record<string, ProviderConfig>
+  providers: Record<string, ProviderConfigDisk>
+  /** Environment variables to inject into the sandbox / process env. */
+  envs?: Record<string, ConfigValue>
   /** Member-level mounts — src must be personal-relative. See Mount JSDoc. */
   mounts?: Mount[]
   /** PTY shell override (highest precedence; beats sandbox.json's shell). */
+  shell?: string
+}
+
+export type PersonalConfig = {
+  default: string
+  providers: Record<string, ProviderConfig>
+  /** Resolved envs (ConfigValue → string). Missing files drop the entry. */
+  envs?: Record<string, string>
+  mounts?: Mount[]
   shell?: string
 }
 
@@ -160,47 +194,78 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
   return cachedWorkspace
 }
 
-// Cache key = `${user}|${vault}` so per-vault apiKey resolutions don't
-// clobber each other. The cfg shape stays the same; only the apiKey fields
-// differ across cache entries.
-const personalCache = new Map<string, { cfg: PersonalConfig; mtimeMs: number; keyMtimes: Record<string, number> }>()
+// Cache key = `${user}|${vault}` so per-vault apiKey/env resolutions don't
+// clobber each other.
+const personalCache = new Map<string, {
+  cfg: PersonalConfig
+  configMtimeMs: number
+  /** mtime of every file referenced (resolved) by apiKey/envs. */
+  refMtimes: Record<string, number>
+}>()
 
-/**
- * Resolve the on-disk path of a provider's apiKey for the given vault. If
- * the vault doesn't exist yet, returns the path it WOULD be at — callers do
- * `existsSync` and treat absence as "no key configured".
- */
-function providerKeyPathInVault(user: string, providerName: string, vault: string): string {
-  const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
-  return join(root, "provider-keys", providerName)
+function clearPersonalCache(user: string): void {
+  for (const k of personalCache.keys()) {
+    if (k === user || k.startsWith(`${user}|`)) personalCache.delete(k)
+  }
 }
 
-async function readApiKey(
-  user: string,
-  providerName: string,
-  vault: string = DEFAULT_VAULT,
-): Promise<{ key: string; mtimeMs: number }> {
-  const p = providerKeyPathInVault(user, providerName, vault)
-  if (!existsSync(p)) return { key: "", mtimeMs: 0 }
+/** Reject `..` / absolute / drive paths under `root`. Returns the absolute
+ *  resolved path on success, null if the relpath escapes. */
+function safeUnder(root: string, rel: string): string | null {
+  if (typeof rel !== "string" || rel.length === 0) return null
+  const candidate = normalize(join(root, rel))
+  const insideRel = relative(root, candidate)
+  if (insideRel === "" || insideRel.startsWith("..") || insideRel.startsWith("/")) return null
+  return candidate
+}
+
+/** Read a file as utf8 and strip trailing newlines only (file-final \n is
+ *  the convention; trailing spaces/tabs are taken as intentional content).
+ *  Leading/interior whitespace is preserved. Missing/unreadable → empty. */
+async function readTrimmedEnd(path: string): Promise<{ value: string; mtimeMs: number }> {
+  if (!existsSync(path)) return { value: "", mtimeMs: 0 }
   try {
-    const k = (await readFile(p, "utf8")).trim()
-    return { key: k, mtimeMs: statSync(p).mtimeMs }
+    const raw = await readFile(path, "utf8")
+    return { value: raw.replace(/[\r\n]+$/, ""), mtimeMs: statSync(path).mtimeMs }
   } catch {
-    return { key: "", mtimeMs: 0 }
+    return { value: "", mtimeMs: 0 }
   }
 }
 
 /**
- * Load personal config from personal/<user>/.loopat/config.json. Fills each
- * provider's apiKey from the selected vault (default = "default", which
- * itself transparently falls back to legacy `secrets/` when the user hasn't
- * created any vaults yet).
+ * Resolve one ConfigValue against the active vault / user root. Returns the
+ * literal value plus the path read (for cache mtime tracking). The path is
+ * empty when the value is a string literal (nothing to watch).
+ */
+async function resolveConfigValue(
+  v: ConfigValue,
+  user: string,
+  vault: string,
+): Promise<{ value: string; path: string; mtimeMs: number }> {
+  if (typeof v === "string") return { value: v, path: "", mtimeMs: 0 }
+  if (v && typeof v === "object" && "vault" in v && typeof v.vault === "string") {
+    const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
+    const abs = safeUnder(root, v.vault)
+    if (!abs) return { value: "", path: "", mtimeMs: 0 }
+    const r = await readTrimmedEnd(abs)
+    return { value: r.value, path: abs, mtimeMs: r.mtimeMs }
+  }
+  if (v && typeof v === "object" && "file" in v && typeof v.file === "string") {
+    const root = personalDir(user)
+    const abs = safeUnder(root, v.file)
+    if (!abs) return { value: "", path: "", mtimeMs: 0 }
+    const r = await readTrimmedEnd(abs)
+    return { value: r.value, path: abs, mtimeMs: r.mtimeMs }
+  }
+  return { value: "", path: "", mtimeMs: 0 }
+}
+
+/**
+ * Load personal config from personal/<user>/.loopat/config.json. Resolves
+ * each provider's apiKey + every env entry against the selected vault.
  *
- * If config.json is missing (user hasn't imported, or just deleted the vault),
- * return an in-memory empty template — DO NOT lazy-write it to disk. Writes
- * are restricted to explicit save paths (savePersonalConfig, register, import)
- * so "delete vault" really means deleted and the directory doesn't grow back
- * on the next request that happens to touch personal config.
+ * Missing config.json → in-memory empty template (do NOT lazy-write it; the
+ * vault may have been intentionally deleted).
  */
 export async function loadPersonalConfig(
   user: string,
@@ -208,49 +273,75 @@ export async function loadPersonalConfig(
 ): Promise<PersonalConfig> {
   const path = personalLoopatConfigPath(user)
   if (!existsSync(path)) {
-    // Synthetic empty config; caller sees no providers configured.
     return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
   }
-  const mtimeMs = statSync(path).mtimeMs
+  const configMtimeMs = statSync(path).mtimeMs
   const cacheKey = `${user}|${vault}`
   const cached = personalCache.get(cacheKey)
-  // Reuse cache only if config.json AND every apiKey file's mtime are unchanged.
-  if (cached && cached.mtimeMs === mtimeMs) {
+  if (cached && cached.configMtimeMs === configMtimeMs) {
     let stale = false
-    for (const name of Object.keys(cached.cfg.providers)) {
-      const p = providerKeyPathInVault(user, name, vault)
-      const m = existsSync(p) ? statSync(p).mtimeMs : 0
-      if ((cached.keyMtimes[name] ?? 0) !== m) {
-        stale = true
-        break
-      }
+    for (const [p, m] of Object.entries(cached.refMtimes)) {
+      const cur = existsSync(p) ? statSync(p).mtimeMs : 0
+      if (cur !== m) { stale = true; break }
     }
     if (!stale) return cached.cfg
   }
 
   const raw = await readFile(path, "utf8")
-  let parsed: PersonalConfig
+  let disk: PersonalConfigDisk
   try {
-    parsed = JSON.parse(raw) as PersonalConfig
-    if (!parsed.providers || typeof parsed.providers !== "object") {
+    disk = JSON.parse(raw) as PersonalConfigDisk
+    if (!disk.providers || typeof disk.providers !== "object") {
       throw new Error(`missing providers`)
     }
-    if (parsed.default && !parsed.providers[parsed.default]) {
-      throw new Error(`default "${parsed.default}" not in providers`)
+    if (disk.default && !disk.providers[disk.default]) {
+      throw new Error(`default "${disk.default}" not in providers`)
     }
   } catch (e: any) {
     console.warn(`[loopat] personal config: ${path} is malformed (${e?.message ?? e}), rewriting template`)
     await writeFile(path, JSON.stringify(PERSONAL_TEMPLATE, null, 2) + "\n")
-    parsed = JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
+    disk = JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
   }
-  const keyMtimes: Record<string, number> = {}
-  for (const [name, p] of Object.entries(parsed.providers)) {
-    const { key, mtimeMs: km } = await readApiKey(user, name, vault)
-    p.apiKey = key
-    keyMtimes[name] = km
+
+  const refMtimes: Record<string, number> = {}
+  const providers: Record<string, ProviderConfig> = {}
+  for (const [name, p] of Object.entries(disk.providers)) {
+    let apiKey = ""
+    if (p.apiKey !== undefined) {
+      const r = await resolveConfigValue(p.apiKey, user, vault)
+      apiKey = r.value
+      if (r.path) refMtimes[r.path] = r.mtimeMs
+    }
+    providers[name] = {
+      model: p.model,
+      baseUrl: p.baseUrl,
+      apiKey,
+      ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
+    }
   }
-  personalCache.set(cacheKey, { cfg: parsed, mtimeMs, keyMtimes })
-  return parsed
+
+  let envs: Record<string, string> | undefined
+  if (disk.envs && typeof disk.envs === "object") {
+    envs = {}
+    for (const [k, v] of Object.entries(disk.envs)) {
+      const r = await resolveConfigValue(v, user, vault)
+      if (r.path) refMtimes[r.path] = r.mtimeMs
+      // Drop empty resolutions for non-literal refs (missing file). Literal
+      // empty strings, conversely, are kept — that's user intent.
+      const isLiteral = typeof v === "string"
+      if (isLiteral || r.value !== "") envs[k] = r.value
+    }
+  }
+
+  const cfg: PersonalConfig = {
+    default: disk.default ?? "",
+    providers,
+    ...(envs ? { envs } : {}),
+    ...(disk.mounts ? { mounts: disk.mounts } : {}),
+    ...(disk.shell ? { shell: disk.shell } : {}),
+  }
+  personalCache.set(cacheKey, { cfg, configMtimeMs, refMtimes })
+  return cfg
 }
 
 export function getActiveProvider(cfg: PersonalConfig): { name: string; provider: ProviderConfig } | null {
@@ -306,42 +397,83 @@ export async function addTokenUsage(user: string, model: string, inputTokens: nu
 
 // ── config persistence ──
 
-/** Save personal config to disk. apiKeys are written separately to secrets files
- *  only when non-empty values are provided (otherwise existing keys are kept). */
+/**
+ * Read the raw on-disk shape (without resolving any references). Used by
+ * savers that need to preserve existing apiKey/env reference structure.
+ */
+async function readPersonalDisk(user: string): Promise<PersonalConfigDisk> {
+  const path = personalLoopatConfigPath(user)
+  if (!existsSync(path)) {
+    return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
+  }
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as PersonalConfigDisk
+  } catch {
+    return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfigDisk
+  }
+}
+
+/**
+ * Resolve where to physically write a new value for a ConfigValue reference.
+ * `vault` uses the default vault (settings UI is per-user, not per-vault).
+ * Returns null for string-literal refs (no file to write to).
+ */
+function resolveWritablePath(ref: ConfigValue, user: string): string | null {
+  if (typeof ref === "string") return null
+  if ("vault" in ref && typeof ref.vault === "string") {
+    return safeUnder(personalVaultDir(user, DEFAULT_VAULT), ref.vault)
+  }
+  if ("file" in ref && typeof ref.file === "string") {
+    return safeUnder(personalDir(user), ref.file)
+  }
+  return null
+}
+
+/**
+ * Save personal config to disk. Provider apiKey values are written into
+ * whatever path each provider's `apiKey` reference points to (with default
+ * `{ vault: "provider-keys/<name>" }` if no ref exists yet). String-literal
+ * refs are updated in-place in config.json.
+ */
 export async function savePersonalConfig(user: string, cfg: {
   default?: string
   providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
 }): Promise<void> {
-  // Load existing config to merge
-  const existing = await loadPersonalConfig(user)
-  // Build the config.json content (no apiKeys)
-  const providers: Record<string, Omit<ProviderConfig, "apiKey">> = {}
-  if (cfg.providers) {
+  const disk = await readPersonalDisk(user)
+
+  if (cfg.providers !== undefined) {
+    const newProviders: Record<string, ProviderConfigDisk> = {}
     for (const [name, p] of Object.entries(cfg.providers)) {
-      providers[name] = {
+      const existingRef = disk.providers?.[name]?.apiKey
+      // Preserve existing reference shape; default to vault-relative if absent.
+      let ref: ConfigValue = existingRef ?? { vault: `provider-keys/${name}` }
+      const hasNewKey = p.apiKey !== undefined && p.apiKey.trim() !== ""
+      if (hasNewKey) {
+        if (typeof ref === "string") {
+          // Literal: store the new value directly in config.json.
+          ref = p.apiKey!.trim()
+        } else {
+          const writeAt = resolveWritablePath(ref, user)
+          if (writeAt) {
+            await mkdir(dirname(writeAt), { recursive: true })
+            await writeFile(writeAt, p.apiKey!.trim() + "\n")
+          }
+        }
+      }
+      newProviders[name] = {
         model: p.model,
         baseUrl: p.baseUrl,
+        apiKey: ref,
         ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
       }
-      // Write apiKey into the default vault. Settings UI is per-user, not
-      // per-vault — power users edit non-default vaults via the Context page.
-      if (p.apiKey !== undefined && p.apiKey.trim()) {
-        const keyPath = personalProviderKeyPath(user, DEFAULT_VAULT, name)
-        await mkdir(dirname(keyPath), { recursive: true })
-        await writeFile(keyPath, p.apiKey.trim() + "\n")
-      }
     }
+    disk.providers = newProviders
   }
-  const out: PersonalConfig = {
-    default: cfg.default ?? existing.default,
-    providers: cfg.providers !== undefined ? providers as any : existing.providers,
-    ...(existing.mounts ? { mounts: existing.mounts } : {}),
-    ...(existing.shell ? { shell: existing.shell } : {}),
-  }
+  if (cfg.default !== undefined) disk.default = cfg.default
+
   await mkdir(personalLoopatDir(user), { recursive: true })
-  await writeFile(personalLoopatConfigPath(user), JSON.stringify(out, null, 2) + "\n")
-  // Clear cache for this user so next load picks up changes
-  personalCache.delete(user)
+  await writeFile(personalLoopatConfigPath(user), JSON.stringify(disk, null, 2) + "\n")
+  clearPersonalCache(user)
 }
 
 /** Save workspace config to disk. Only provided fields are overwritten.
