@@ -758,48 +758,8 @@ export async function linkKanbanLoop(filename: string, cid: string, loopId: stri
   return r.ok
 }
 
-// ── focus + topics ──
-//
-// Storage in notes/focus/<name>.md, ccx-style markdown task tree. See
-// server/src/workspace.ts for the parsing model.
-
-export type FocusMeta = {
-  name: string
-  title: string
-  pinned: boolean
-  priority?: string
-  topics: string[]
-  doneCount: number
-  totalCount: number
-  mtimeMs: number
-}
-
-export async function listFocuses(): Promise<FocusMeta[]> {
-  const r = await apiFetch("/api/focus")
-  if (!r.ok) return []
-  const j = await r.json()
-  return j.focuses as FocusMeta[]
-}
-
-export async function readFocus(name: string): Promise<{ body: string; mtimeMs: number } | null> {
-  const r = await apiFetch(`/api/focus/${encodeURIComponent(name)}`)
-  if (!r.ok) return null
-  const j = await r.json()
-  return { body: j.body, mtimeMs: j.mtimeMs }
-}
-
-export async function writeFocus(name: string, body: string): Promise<boolean> {
-  const r = await apiFetch(`/api/focus/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ body }),
-  })
-  return r.ok
-}
-
 export type TopicAggregate = {
   name: string
-  focuses: string[]
   loops: { id: string; title: string }[]
 }
 

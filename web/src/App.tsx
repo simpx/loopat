@@ -14,8 +14,7 @@ import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
 import { AdminDialog } from "./components/dialog/AdminDialog"
 import { LoopPage } from "./pages/LoopPage"
-import { FocusPage } from "./pages/FocusPage"
-import { FocusDetail } from "./pages/FocusDetail"
+
 import { TopicView } from "./pages/TopicView"
 import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
@@ -28,7 +27,7 @@ import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
-  { id: "focus", label: "Focus", icon: "◉" },
+
   { id: "kanban", label: "Kanban", icon: "☰" },
   { id: "context", label: "Context", icon: "⌘" },
   { id: "chat", label: "Chat", icon: <MessageCircle size={14} /> },
@@ -274,8 +273,6 @@ export function App() {
                 drops the chrome when anonymous. */}
             <Route path="/loop/:id" element={<LoopPage />} />
             <Route path="/kanban" element={<KanbanPage />} />
-            <Route path="/focus" element={<FocusPage />} />
-            <Route path="/focus/:name" element={<FocusDetail />} />
             <Route path="/topic/:name" element={<TopicView />} />
             <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
             <Route path="/context/:sub" element={<ContextPage />} />

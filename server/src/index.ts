@@ -27,7 +27,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listFocuses, readFocus, writeFocus, listTopics, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
@@ -967,7 +967,7 @@ app.get("/api/loops/:id/chat-history", requireAuth, async (c) => {
   const lines = raw.split("\n").filter(Boolean)
   const entries = lines.map((l) => {
     try { return JSON.parse(l) } catch { return null }
-  }).filter((e): e => e !== null)
+  }).filter((e): e is NonNullable<typeof e> => e !== null)
   return c.json(entries)
 })
 
@@ -1362,27 +1362,7 @@ app.post("/api/workspace/repo/:name/pull", requireAuth, async (c) => {
   return c.json({ ok: true, output: r.output })
 })
 
-// ── focus + topics ──
-app.get("/api/focus", requireAuth, async (c) => {
-  const focuses = await listFocuses()
-  return c.json({ focuses })
-})
-
-app.get("/api/focus/:name", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  const r = await readFocus(decodeURIComponent(name))
-  if (!r) return c.json({ error: "not found" }, 404)
-  return c.json({ name, body: r.body, mtimeMs: r.mtimeMs })
-})
-
-app.put("/api/focus/:name", requireAuth, async (c) => {
-  const name = decodeURIComponent(c.req.param("name") ?? "")
-  const body = await c.req.json().catch(() => ({}))
-  if (typeof body.body !== "string") return c.json({ error: "body required" }, 400)
-  const ok = await writeFocus(name, body.body)
-  if (!ok) return c.json({ error: "write failed" }, 500)
-  return c.json({ ok: true })
-})
+// ── topics ──
 
 // ── kanban: notes/todo/*.md board (one file = one column) ──
 app.get("/api/kanban", requireAuth, async (c) => {
