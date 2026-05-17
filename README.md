@@ -39,38 +39,46 @@ members keep their own credentials and identity.
 
 ## What makes loopat different
 
-- **End-to-end context management.** Chat history, code edits, agent
-  decisions, memory — all live in the same context graph and all flow
-  into the next loop. Most tools treat the conversation as ephemeral
-  and only persist files; loopat treats **chat itself** as a first-class
-  context artifact.
-- **Reproducible loops.** Every loop runs in a bwrap sandbox with a
-  pinned toolchain (mise) and a pinned credential vault. Spawn the same
-  loop tomorrow on a different machine and get the same starting state.
-  No "works on my machine" for AI sessions.
-- **Built for teams, not just individuals.** Shared `knowledge/` and
-  `notes/` git repos sync across members; loops contribute back via
-  auto-commit and distillation. Almost every AI coding tool today is
-  built for a solo dev — loopat is built for a team working on the same
-  codebase together.
-- **Self-hosted, data you own.** BYO API key, per-vault credential
-  isolation, everything lives in local git repos. Nothing leaves your
-  machine except the model API call itself.
+- **End-to-end context management.** Team IM threads, code edits,
+  agent decisions, memory — all live in the same context graph and all
+  flow into the next loop. Most AI tools make you copy-paste from
+  Slack into the AI to give it situational context; loopat ships with
+  **built-in IM** that the agent reads directly as a first-class
+  context source.
+- **Built for teams. Works just as well solo.** Shared `knowledge/`
+  and `notes/` git repos sync across members; loops contribute back
+  via auto-commit and distillation. Most AI tools today assume a
+  single dev — loopat scales naturally from one person to a team
+  without changing tools.
+- **Reproducible loops.** Every loop runs in its own sandbox with a
+  versioned toolchain and a pinned credential vault. Spawn the same
+  loop tomorrow on a different machine and get the same starting
+  state. No "works on my machine" for AI sessions.
+- **Self-hosted, data you own.** All artifacts live in plain git
+  repos you fully control; vault secrets are git-crypt encrypted.
+  BYO API key — nothing leaves your machine except the model API call
+  itself.
 
 ## How loopat compares
 
-| | Claude Code | opencode | Codex | **loopat** |
-|---|---|---|---|---|
-| Form factor | CLI | TUI | Web (hosted) | **Web (self-hosted)** |
-| Data location | local files | local files | OpenAI servers | **local git repos** |
-| API key | BYO | BYO | OpenAI account | **BYO + per-vault isolation** |
-| Multi-user | ❌ | ❌ | account-based | **shared workspace** |
-| Sandbox isolation | process-level | process-level | OpenAI-managed | **bwrap (lightweight, default) · Docker (planned)** |
-| Context layers | `CLAUDE.md` | `AGENTS.md` | in-session | **doctrine + team + project + memory** |
-| Memory management | personal (`CLAUDE.md`) | personal (`AGENTS.md`) | none | **personal + team-shared, auto distillation between layers** |
-| Credential storage | env vars | env vars | platform-managed | **filesystem vault overlay** |
-| Parallel sessions | many terminals | many terminals | tabs | **loops as first-class objects** |
-| Agent engine | proprietary | pluggable | proprietary | **Claude Agent SDK** |
+Rows are grouped by the four differentiators above: **context** (rows 3–4),
+**team** (rows 5–6), **reproducibility** (rows 7–9), **data ownership**
+(rows 10–11).
+
+| | Claude Code | Cursor | opencode | Codex | **loopat** |
+|---|---|---|---|---|---|
+| Form factor | CLI | IDE | TUI | Web (hosted) | **Web (self-hosted)** |
+| Open source | ❌ | ❌ | ✓ MIT | ❌ | **✓ Apache 2.0** |
+| Team IM as context | ❌ (copy-paste from Slack) | ❌ | ❌ | ❌ | **✓ built-in IM, agent reads directly** |
+| Memory management | personal (`CLAUDE.md`) | personal (rules + memories) | personal (`AGENTS.md`) | none | **personal + team-shared, auto distillation** |
+| Multi-user | single user | per-seat (isolated) | single user | per-account | **shared workspace** |
+| Shared team knowledge | ❌ | ❌ | ❌ | ❌ | **✓ git-synced across members** |
+| Per-session sandbox | ❌ (process-level) | ❌ | ❌ (process-level) | OpenAI-managed | **bwrap (default) · Docker (planned)** |
+| Toolchain pinning | ❌ | ❌ | ❌ | fixed (hosted env) | **✓ per-loop versioned** |
+| Per-task credential isolation | ❌ | ❌ | ❌ | ❌ | **✓ vault overlay per loop** |
+| Data location | local files | cloud | local files | OpenAI servers | **git repos you control** |
+| Secrets storage | env vars (plaintext) | cloud-managed | env vars (plaintext) | platform-managed | **git-crypt encrypted vault** |
+| Agent engine | proprietary (Anthropic) | proprietary (multi-model) | pluggable | proprietary (OpenAI) | **Claude Agent SDK** |
 
 ---
 
