@@ -69,6 +69,8 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     await chmod(fishRuntime, 0o700).catch(() => {})
 
     const bwrapArgs = await buildBwrapArgs(loopId, meta.createdBy, {
+      // User envs go first so platform-managed vars below can't be clobbered.
+      ...(personalCfg.envs ?? {}),
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
