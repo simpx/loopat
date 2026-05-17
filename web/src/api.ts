@@ -554,6 +554,13 @@ export async function getRepo(name: string): Promise<RepoDetail | null> {
   return (await r.json()) as RepoDetail
 }
 
+export async function pullRepo(name: string): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const r = await apiFetch(`/api/workspace/repo/${encodeURIComponent(name)}/pull`, { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
+  return { ok: true, output: j.output }
+}
+
 // ── kanban ──
 // Storage in notes/todo/<filename>.md, one file per column.
 // Cards are top-level - [ ] bullet items within each file.

@@ -20,6 +20,7 @@ import {
   vaultBacklinks,
   listRepos,
   getRepo,
+  pullRepo,
   listSandboxes,
   readSandbox,
   writeSandbox,
@@ -38,7 +39,7 @@ import { useIsMobile } from "../lib/useIsMobile"
 import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
-import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload, RefreshCw } from "lucide-react"
 import { Tree, type TreeNodeData, type TreeContextAction } from "../components/Tree"
 
 type SubId = VaultId | "sandboxes"
@@ -846,6 +847,7 @@ function ReposPane() {
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const [detail, setDetail] = useState<RepoDetail | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const isMobile = useIsMobile()
 
@@ -859,7 +861,7 @@ function ReposPane() {
   useEffect(() => {
     if (!selectedName) return
     getRepo(selectedName).then(setDetail)
-  }, [selectedName])
+  }, [selectedName, reloadKey])
 
   const onSpawnLoop = async () => {
     if (!selectedName) return
@@ -951,7 +953,12 @@ function ReposPane() {
       )}
       <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
         {detail ? (
-          <RepoView repo={detail} onSpawnLoop={onSpawnLoop} />
+          <RepoView
+            key={detail.name}
+            repo={detail}
+            onSpawnLoop={onSpawnLoop}
+            onPulled={() => setReloadKey((k) => k + 1)}
+          />
         ) : (
           <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
             select a repo
@@ -962,23 +969,56 @@ function ReposPane() {
   )
 }
 
-function RepoView({ repo, onSpawnLoop }: { repo: RepoDetail; onSpawnLoop: () => void }) {
+function RepoView({ repo, onSpawnLoop, onPulled }: { repo: RepoDetail; onSpawnLoop: () => void; onPulled: () => void }) {
   const navigate = useNavigate()
+  const [pulling, setPulling] = useState(false)
+  const [pullMsg, setPullMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const onPull = async () => {
+    if (pulling) return
+    setPulling(true)
+    setPullMsg(null)
+    const r = await pullRepo(repo.name)
+    setPulling(false)
+    if (r.ok) {
+      setPullMsg({ ok: true, text: r.output?.split("\n").pop() || "up to date" })
+      onPulled()
+    } else {
+      setPullMsg({ ok: false, text: r.error ?? "pull failed" })
+    }
+  }
+
   return (
     <>
-      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-[13px]">
+      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[13px] min-w-0">
           <span
             className={
               repo.status === "online"
-                ? "w-2 h-2 rounded-full bg-emerald-500"
-                : "w-2 h-2 rounded-full bg-gray-300"
+                ? "w-2 h-2 rounded-full bg-emerald-500 shrink-0"
+                : "w-2 h-2 rounded-full bg-gray-300 shrink-0"
             }
           />
-          <span className="text-gray-900 font-medium">{repo.name}</span>
-          {repo.remote && <span className="text-gray-500">· {repo.remote}</span>}
+          <span className="text-gray-900 font-medium truncate">{repo.name}</span>
+          {repo.remote && <span className="text-gray-500 truncate">· {repo.remote}</span>}
         </div>
-        <div className="text-xs text-gray-500">default branch: {repo.branch ?? "—"}</div>
+        <div className="flex items-center gap-3 shrink-0">
+          {pullMsg && (
+            <span className={"text-[11px] truncate max-w-[260px] " + (pullMsg.ok ? "text-emerald-700" : "text-red-600")} title={pullMsg.text}>
+              {pullMsg.text}
+            </span>
+          )}
+          <span className="text-xs text-gray-500">default branch: {repo.branch ?? "—"}</span>
+          <button
+            onClick={onPull}
+            disabled={pulling || repo.status !== "online"}
+            className="px-2.5 h-7 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-900 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="git pull --ff-only from origin"
+          >
+            <RefreshCw size={12} className={pulling ? "animate-spin" : ""} />
+            <span>{pulling ? "syncing…" : "sync"}</span>
+          </button>
+        </div>
       </header>
       <article className="flex-1 min-h-0 overflow-auto px-4 md:px-8 py-4 md:py-6">
         <div className="max-w-[820px]">
