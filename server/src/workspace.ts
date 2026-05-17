@@ -3,7 +3,7 @@
  * personal / repos). Auto-commits on write per user's design:
  * "每次修改自动 commit, log 记录动作"。
  */
-import { readdir, readFile, writeFile, stat, mkdir } from "node:fs/promises"
+import { readdir, readFile, writeFile, stat, mkdir, rm, unlink } from "node:fs/promises"
 // Re-using readFile for parsing focus/inbox markdown.
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
@@ -207,6 +207,36 @@ export async function vaultCreateFile(vault: VaultId, relPath: string, user: str
     await writeFile(abs, "")
   } catch (e: any) {
     return { ok: false, error: e?.message }
+  }
+  return { ok: true }
+}
+
+export async function vaultCreateFolder(vault: VaultId, relPath: string, user: string): Promise<{ ok: boolean; error?: string }> {
+  const root = vaultRoot(vault, user)
+  const abs = safeJoin(root, relPath)
+  if (!abs) return { ok: false, error: "path escapes root" }
+  if (existsSync(abs)) return { ok: false, error: "exists" }
+  try {
+    await mkdir(abs, { recursive: true })
+  } catch (e: any) {
+    return { ok: false, error: e?.message }
+  }
+  return { ok: true }
+}
+
+export async function vaultDelete(vault: VaultId, relPath: string, user: string): Promise<{ ok: boolean; error?: string }> {
+  const root = vaultRoot(vault, user)
+  const abs = safeJoin(root, relPath)
+  if (!abs) return { ok: false, error: "path escapes root" }
+  try {
+    const s = await stat(abs)
+    if (s.isDirectory()) {
+      await rm(abs, { recursive: true, force: true })
+    } else {
+      await unlink(abs)
+    }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "delete failed" }
   }
   return { ok: true }
 }

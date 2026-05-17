@@ -354,6 +354,22 @@ export async function writeFile(loopId: string, path: string, content: string): 
   return r.ok
 }
 
+export async function deleteWorkdirFile(loopId: string, path: string): Promise<boolean> {
+  const r = await apiFetch(`/api/loops/${loopId}/file?path=${encodeURIComponent(path)}`, {
+    method: "DELETE",
+  })
+  return r.ok
+}
+
+export async function createWorkdirFolder(loopId: string, path: string): Promise<boolean> {
+  const r = await apiFetch(`/api/loops/${loopId}/folder`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+  return r.ok
+}
+
 export async function uploadFile(loopId: string, file: File): Promise<{ ok: boolean; path?: string; error?: string }> {
   const formData = new FormData()
   formData.append("file", file)
@@ -414,6 +430,22 @@ export async function vaultCreateFile(vault: VaultId, path: string): Promise<{ o
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ path }),
+  })
+  return (await r.json()) as { ok: boolean; error?: string }
+}
+
+export async function vaultCreateFolder(vault: VaultId, path: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/workspace/folder?vault=${vault}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  })
+  return (await r.json()) as { ok: boolean; error?: string }
+}
+
+export async function vaultDeleteFile(vault: VaultId, path: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/workspace/file?vault=${vault}&path=${encodeURIComponent(path)}`, {
+    method: "DELETE",
   })
   return (await r.json()) as { ok: boolean; error?: string }
 }
