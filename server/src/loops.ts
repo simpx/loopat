@@ -67,6 +67,15 @@ export type LoopMeta = {
      * repo or the sandbox wasn't committed.
      */
     sandbox_version?: string | null
+    /**
+     * Vault selected for this loop. The named vault under
+     * `personal/<user>/.loopat/vaults/<vault>/` provides this loop's
+     * credentials at runtime. Default: "default". The act of choosing here
+     * is the security boundary — other vaults are not exposed inside the
+     * sandbox. Set to null only by very old loops created before vaults
+     * existed; bwrap treats absent/null as "default" for backward compat.
+     */
+    vault?: string
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes
@@ -257,7 +266,7 @@ export async function isPersonalFresh(userId: string): Promise<boolean> {
  * Two paths:
  *
  * 1. Default (auto-init). User provides a *clean* repo URL (no git-crypt
- *    config and no tracked `.loopat/secrets/**`). Server clones, runs
+ *    config and no tracked `.loopat/vaults/**`). Server clones, runs
  *    `git-crypt init`, writes `.gitattributes` + `.gitignore`, commits the
  *    scaffold, and pushes. The newly-generated symmetric key is saved under
  *    `host-secrets/<user>/git-crypt.key` AND returned to the caller exactly
@@ -319,7 +328,7 @@ export async function importPersonalFromRepo(
   }
 
   // Exposure check (always, regardless of path): refuse to adopt a repo whose
-  // .loopat/secrets/** are plaintext in git. Even with BYOK this is bad —
+  // .loopat/vaults/** are plaintext in git. Even with BYOK this is bad —
   // if any single secret blob is plaintext, those secrets are already burned.
   const exposed = await detectExposedSecrets(tmp)
   if (exposed.length > 0) {
@@ -369,7 +378,7 @@ export async function importPersonalFromRepo(
     return {
       ok: false,
       notClean: true,
-      error: `\`.loopat/secrets/\` in this repo isn't empty (${trackedSecrets.length} file(s) tracked) — use a fresh repo`,
+      error: `\`.loopat/vaults/\` in this repo isn't empty (${trackedSecrets.length} file(s) tracked) — use a fresh repo`,
     }
   }
 
@@ -409,7 +418,7 @@ async function swapPersonalDir(
 
 /**
  * Server-side bootstrap for a clean personal repo: git-crypt init, write the
- * scaffold (`.gitattributes`, `.gitignore`, `.loopat/secrets/.gitkeep`),
+ * scaffold (`.gitattributes`, `.gitignore`, `.loopat/vaults/default/.gitkeep`),
  * commit, push, and stash the freshly-generated symmetric key under
  * host-secrets/<user>/. Returns the key base64-encoded so the UI can show it
  * to the user exactly once for backup.
@@ -446,11 +455,11 @@ async function autoInitGitCrypt(
     return { ok: false, error: `git-crypt init failed: ${stderr || e?.message || e}` }
   }
 
-  // Merge .gitattributes (preserve any existing lines, e.g. LFS / line endings)
+  // Merge .gitattributes (preserve any existing lines, e.g. LFS / line endings).
   await appendLineIfMissing(
     join(repoDir, ".gitattributes"),
-    ".loopat/secrets/** filter=git-crypt diff=git-crypt",
-    (existing, line) => existing.includes(line) || /filter=git-crypt/.test(existing),
+    ".loopat/vaults/** filter=git-crypt diff=git-crypt",
+    (existing, line) => existing.includes(line),
   )
 
   // Merge .gitignore so host-only state under .loopat/host/ never gets pushed
@@ -461,9 +470,11 @@ async function autoInitGitCrypt(
       existing.split("\n").some((l) => l.trim() === line || l.trim() === ".loopat/host/"),
   )
 
-  // Scaffold secrets/ so future writes land in a tracked directory
-  await mkdir(join(repoDir, ".loopat/secrets"), { recursive: true })
-  await writeFile(join(repoDir, ".loopat/secrets/.gitkeep"), "")
+  // Scaffold vaults/default/ so future writes land in a tracked directory.
+  // New imports start in the new layout; legacy `secrets/` is only consulted
+  // for users who imported before vaults existed.
+  await mkdir(join(repoDir, ".loopat/vaults/default"), { recursive: true })
+  await writeFile(join(repoDir, ".loopat/vaults/default/.gitkeep"), "")
 
   // Ship the memory index in the scaffold commit so cloning onto a second
   // host doesn't depend on swapPersonalDir's late top-up.
@@ -572,9 +583,13 @@ async function listTrackedSecretFiles(repoDir: string): Promise<string[]> {
       repoDir,
       "ls-files",
       "-z",
-      ".loopat/secrets",
+      ".loopat/vaults",
     ])
-    return stdout.split("\0").filter(Boolean)
+    return stdout
+      .split("\0")
+      .filter(Boolean)
+      // Scaffold marker files are not real content; ignore them.
+      .filter((f) => !f.endsWith("/.gitkeep"))
   } catch {
     return []
   }
@@ -758,26 +773,36 @@ export async function deletePersonalVault(userId: string): Promise<{ ok: true } 
 const GIT_CRYPT_MAGIC = Buffer.from([0x00, 0x47, 0x49, 0x54, 0x43, 0x52, 0x59, 0x50, 0x54, 0x00])
 
 /**
- * Returns tracked files under `.loopat/secrets/**` that are stored as
+ * Returns tracked files under `.loopat/vaults/**` that are stored as
  * plaintext (i.e., the worktree blob doesn't start with the git-crypt magic
  * header). Reads the worktree directly: in a fresh clone where git-crypt
  * isn't unlocked, the worktree contents ARE the raw blobs, so non-encrypted
  * files are visibly plaintext here.
  */
 async function detectExposedSecrets(repoDir: string): Promise<string[]> {
+  // Anything under `.loopat/vaults/` stored as plaintext is an exposure and
+  // refuses import.
+  //
+  // Symlinks are skipped: git stores a symlink's target as the blob, and
+  // git-crypt's filter doesn't (and can't) encrypt that. The target path
+  // itself isn't a secret value — and walkVaultFiles refuses to bind any
+  // symlink whose realpath escapes personal/<user>/.
+  const exposed: string[] = []
   let stdout = ""
   try {
-    const r = await execFileP("git", ["-C", repoDir, "ls-files", "-z", ".loopat/secrets"])
+    const r = await execFileP("git", ["-C", repoDir, "ls-files", "-z", ".loopat/vaults"])
     stdout = r.stdout
   } catch {
-    return []
+    return exposed
   }
   const files = stdout.split("\0").filter(Boolean)
-  const exposed: string[] = []
   for (const f of files) {
+    if (f.endsWith("/.gitkeep")) continue
     try {
+      const lst = await lstat(join(repoDir, f))
+      if (lst.isSymbolicLink()) continue
       const buf = await readFile(join(repoDir, f))
-      if (buf.length === 0) continue // empty file is not "exposed", just useless
+      if (buf.length === 0) continue
       if (!buf.subarray(0, GIT_CRYPT_MAGIC.length).equals(GIT_CRYPT_MAGIC)) {
         exposed.push(f)
       }
@@ -941,7 +966,13 @@ async function shortBranchSlug(title: string): Promise<string> {
   return base || "loop"
 }
 
-export async function createLoop(opts: { title: string; repo?: string; createdBy: string; sandbox?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: {
+  title: string
+  repo?: string
+  createdBy: string
+  sandbox?: string
+  vault?: string
+}): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
   const meta: LoopMeta = {
@@ -953,6 +984,9 @@ export async function createLoop(opts: { title: string; repo?: string; createdBy
   if (opts.sandbox) {
     const version = await snapshotSandboxIntoLoop(id, opts.sandbox)
     meta.config = { ...(meta.config ?? {}), sandbox: opts.sandbox, sandbox_version: version }
+  }
+  if (opts.vault && opts.vault !== "default") {
+    meta.config = { ...(meta.config ?? {}), vault: opts.vault }
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })

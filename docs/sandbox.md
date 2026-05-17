@@ -165,7 +165,7 @@ Claude 在 sandbox 里看到的：
 |---|---|---|---|---|
 | **operator** | `~/.dashscope/config.json` `mounts` | host shell 用户 | 任意 host 路径（`~/...`、`$HOME/...`、绝对 `/...`） | `$HOME/.cache`、`/etc/pki/ca-trust` |
 | **admin** | `knowledge/.loopat/sandboxes/<name>/sandbox.json` | 团队管理员（push knowledge git） | 无 mount 字段 | — |
-| **member** | `personal/<user>/.loopat/config.json` `mounts` | 团队个人 | `personal/<user>/` subtree 内（禁 `..` / 绝对路径） | `.loopat/secrets/.ssh`、`.cache/uv` |
+| **member** | `personal/<user>/.loopat/config.json` `mounts` | 团队个人 | `personal/<user>/` subtree 内（禁 `..` / 绝对路径） | `.loopat/vaults/default/.ssh`、`.cache/uv` |
 
 权责跟文件系统所有权自然对齐 —— 谁能写哪个目录，谁就拥有那层 mount 决策权。
 
@@ -188,7 +188,7 @@ Claude 在 sandbox 里看到的：
 // personal/<user>/.loopat/config.json
 {
   "mounts": [
-    { "src": ".loopat/secrets/.ssh", "dst": "$HOME/.ssh" },
+    { "src": ".loopat/vaults/default/.ssh", "dst": "$HOME/.ssh" },
     { "src": ".cache/uv", "dst": "$HOME/.cache/uv", "rw": true }
   ]
 }
@@ -197,6 +197,61 @@ Claude 在 sandbox 里看到的：
 member 的 cache 落在 `personal/<user>/.cache/uv` —— 跨自己 loop 共享，跟别的 member 完全隔离。
 
 Sandbox 默认看不到 host 任意路径（`~/.ssh`、`~/.aws` 等）。opt-in 由 operator 或 member 显式声明。**目录所有权 = ACL**。
+
+## Vault（凭据隔离）
+
+Loop = `sandbox × vault` 的笛卡尔积：
+
+- **Sandbox**（admin 拥有）= "用什么工具"。Toolchain + MCP，团队共享。
+- **Vault**（member 拥有）= "以什么身份"。一组命名好的凭据，per-user 加密落盘。
+
+每个 loop 在 `meta.config.vault` 上选一个 vault（默认 `"default"`）。bwrap 在挂载时**只**把那一个 vault 的内容 bind 进 sandbox 的 `/loopat/context/personal/.loopat/vault/`（单数 — 沙箱内永远只激活一个 vault）。其他 vault 物理不可见，sandbox 内 `ls` 都列不出来。
+
+### 目录结构
+
+```
+personal/<user>/.loopat/vaults/
+├── default/
+│   ├── github-token
+│   └── provider-keys/anthropic
+├── dev/
+└── prod/
+    ├── github-token → ../default/github-token            ← 用 symlink 共享
+    └── provider-keys/
+        ├── anthropic → ../../default/provider-keys/anthropic
+        └── bailian                                       ← prod 特有
+```
+
+- **Symlink 在 vault 内 / 跨 vault 都允许**，但 realpath 必须仍落在 `personal/<user>/` 内（不能逃出去指向 host 任意路径）。
+- AI 在 sandbox 里看到的永远是扁平 `/loopat/context/personal/.loopat/vault/...`（单数）——它不知道 vault 这个概念存在，也看不到没选中的 vault。
+
+### Sandbox 内合成的视图
+
+选了 vault=prod 时（沿用上面目录结构），sandbox 内：
+
+```
+/loopat/context/personal/.loopat/vault/
+├── github-token                     (host: vaults/default/github-token，via symlink)
+├── provider-keys/anthropic          (host: vaults/default/provider-keys/anthropic)
+└── provider-keys/bailian            (host: vaults/prod/provider-keys/bailian)
+```
+
+`.loopat/vaults/`（复数，host 上的 catalog）和 `.loopat/secrets/`（legacy 路径）都在 sandbox 内被 tmpfs 遮空——sandbox 永远只通过 `.loopat/vault/` 这一条扁平路径访问凭据。
+
+### 向后兼容
+
+老用户 `personal/<user>/.loopat/secrets/`（pre-vault layout）依然能用：当 `.loopat/vaults/` 目录**不存在**时，server 自动把现有的 `secrets/` 当成隐式的 "default" vault。一旦用户在 `.loopat/vaults/` 下创建任何子目录，旧 `secrets/` 就退出 vault catalog（移走 / 重命名后即彻底切到新模型）。
+
+### git-crypt 加密
+
+Auto-init 生成的 `.gitattributes` 同时覆盖两段路径：
+
+```
+.loopat/secrets/** filter=git-crypt diff=git-crypt
+.loopat/vaults/**  filter=git-crypt diff=git-crypt
+```
+
+新写进任一路径都会自动加密。
 
 ## 网络
 
@@ -266,7 +321,7 @@ bun run --hot src/index.ts
 |---|---|
 | Claude 想 `cat ~/.aws/credentials` | tmpfs `/home/$USER` + 没 personal symlink → "No such file" |
 | Claude 想 `rm -rf /` | RO bind /usr /etc 等 → 写不动；rw 区域只有 workdir / context/notes / personal |
-| Claude 想 ssh 到外网机器 | personal/.ssh 没 ln 进来 → ssh client 找不到 key → 无法连。要 opt-in：用户 `ln -s ~/.ssh personal/.loopat/secrets/.ssh` |
+| Claude 想 ssh 到外网机器 | personal/.ssh 没 ln 进来 → ssh client 找不到 key → 无法连。要 opt-in：用户 `ln -s ~/.ssh personal/.loopat/vaults/default/.ssh` |
 | Claude 写 memory 时引用真路径 | 不会发生 —— CLI 在 sandbox 内，看到的就是虚拟路径 |
 | 多 loop 间数据隔离 | 每 loop 自己的 `/loop/<id>/` 独立 bind；跨 loop 看不见 |
 | /tmp 写恶意东西 | 共享 host /tmp，但 tmp 本来就是 ephemeral，无害 |

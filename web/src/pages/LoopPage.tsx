@@ -603,6 +603,16 @@ function LoopHeader({
           )}
         </div>
       )}
+
+      {/* vault row — which credential bundle was bound into this loop's sandbox.
+          Always shows: "default" is the implicit value when meta omits it. */}
+      <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
+        <span className="text-gray-400">vault:</span>
+        <ContextChip
+          label={meta.config?.vault ?? "default"}
+          value="loaded"
+        />
+      </div>
     </header>
   )
 }

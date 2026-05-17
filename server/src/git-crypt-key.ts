@@ -1,6 +1,6 @@
 /**
  * Per-user git-crypt symmetric key. Decrypts the user's personal repo
- * worktree (specifically `.loopat/secrets/**`).
+ * worktree (specifically `.loopat/vaults/**`).
  *
  * Storage: host-secrets/<user>/git-crypt.key — host-only, NOT bound into the
  * sandbox, NOT in any git repo. Mode 0600.

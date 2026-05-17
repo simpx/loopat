@@ -39,7 +39,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     // chain strips tty control).
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
-    const personalCfg = await loadPersonalConfig(meta.createdBy)
+    const personalCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
     // Shell resolution (highest precedence first):
     //   1. personal config `shell` — user's per-user override
     //   2. sandbox.json `shell` — sandbox author's choice (prefer loop snapshot
@@ -72,7 +72,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
-    }, meta.config?.sandbox)
+    }, meta.config?.sandbox, meta.config?.vault)
     const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
     console.error(`[term:${tag}] spawn bwrap argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"}`)
     const proc = spawn("bwrap", fullArgs, {

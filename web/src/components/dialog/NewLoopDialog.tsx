@@ -4,7 +4,7 @@
  * the repo picker (5.3); personal-context picker comes later.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { listSandboxes, listRepos, type SandboxEntry, type RepoEntry } from "../../api"
+import { listSandboxes, listRepos, listVaults, type SandboxEntry, type RepoEntry } from "../../api"
 
 export function NewLoopDialog({
   onClose,
@@ -12,14 +12,16 @@ export function NewLoopDialog({
   initialTitle,
 }: {
   onClose: () => void
-  onCreate: (opts: { title: string; repo?: string; sandbox?: string }) => Promise<string> | string
+  onCreate: (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => Promise<string> | string
   initialTitle?: string
 }) {
   const [title, setTitle] = useState(initialTitle ?? "")
   const [repo, setRepo] = useState("")
   const [sandbox, setSandbox] = useState("")
+  const [vault, setVault] = useState("default")
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [sandboxes, setSandboxes] = useState<SandboxEntry[]>([])
+  const [vaults, setVaults] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -35,6 +37,13 @@ export function NewLoopDialog({
         setSandbox(preferred.name)
       }
     })
+    listVaults().then((vs) => {
+      setVaults(vs)
+      // Preferred default = "default" if available, else first vault, else
+      // leave empty (server will warn but loop still spawns).
+      if (vs.includes("default")) setVault("default")
+      else if (vs.length > 0) setVault(vs[0])
+    })
     inputRef.current?.focus()
   }, [])
 
@@ -47,6 +56,7 @@ export function NewLoopDialog({
         title: title.trim() || "untitled",
         repo: repo || undefined,
         sandbox: sandbox || undefined,
+        vault: vault || undefined,
       })
     } finally {
       setBusy(false)
@@ -101,6 +111,28 @@ export function NewLoopDialog({
             {sandboxes.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
                 No sandboxes. Create one in Context → Sandboxes.
+              </div>
+            )}
+          </DialogField>
+
+          <DialogField label="Vault" hint="which keychain to inject — only this vault's secrets are visible inside the loop's sandbox.">
+            <select
+              value={vault}
+              onChange={(e) => setVault(e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
+            >
+              {vaults.length === 0 && <option value="default">default</option>}
+              {vaults.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+            {vaults.length === 0 && (
+              <div className="text-[11px] text-gray-400 mt-1">
+                No vaults yet — using the default. Create more under{" "}
+                <code className="bg-gray-100 px-1 rounded">personal/.loopat/vaults/&lt;name&gt;/</code>{" "}
+                to isolate prod / test credentials.
               </div>
             )}
           </DialogField>

@@ -297,11 +297,25 @@ function SearchIcon() {
   )
 }
 
+/**
+ * Anything under `.loopat/vaults/<vaultName>/...` is secret-bearing.
+ *
+ * "secrets folder" = the vault root and any directory inside it (gets the
+ * amber "encrypted" treatment in the tree).
+ * "secret file" = any file inside a vault (Context page redacts on read,
+ * lets the user overwrite blind on edit).
+ */
 function isSecretsFolder(vault: VaultId, path: string): boolean {
-  return vault === "personal" && (path === ".loopat/secrets" || path.endsWith("/.loopat/secrets"))
+  if (vault !== "personal") return false
+  if (!path.startsWith(".loopat/vaults/")) return false
+  const rest = path.slice(".loopat/vaults/".length)
+  return rest.length > 0
 }
 function isSecretFile(vault: VaultId, path: string): boolean {
-  return vault === "personal" && path.startsWith(".loopat/secrets/")
+  if (vault !== "personal") return false
+  if (!path.startsWith(".loopat/vaults/")) return false
+  const rest = path.slice(".loopat/vaults/".length)
+  return rest.includes("/")
 }
 
 function TreeNode({
@@ -335,7 +349,7 @@ function TreeNode({
               : "w-full py-1 flex items-center gap-1 hover:bg-gray-50 text-left"
           }
           style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-          title={secretsFolder ? "secrets · convention: encrypted (placeholder, not yet implemented)" : undefined}
+          title={secretsFolder ? "encrypted at rest (git-crypt) · values never returned by the API" : undefined}
         >
           <span className={secretsFolder ? "text-amber-700" : "text-gray-500"}>{open ? "▾" : "▸"}</span>
           <span className="text-[12px]">{secretsFolder ? "🔐" : "📁"}</span>
@@ -379,7 +393,7 @@ function TreeNode({
         (sel ? "bg-gray-100" : secret ? "hover:bg-amber-50/50" : "hover:bg-gray-50")
       }
       style={{ paddingLeft: 8 + depth * 12, paddingRight: 8 }}
-      title={secret ? "secret · 仅可注入" : undefined}
+      title={secret ? "secret — value redacted; edit to overwrite" : undefined}
     >
       <span className="w-4" />
       {secret ? (

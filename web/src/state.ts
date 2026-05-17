@@ -19,7 +19,7 @@ export type WorkspaceState = {
   showArchived: boolean
   setShowArchived: (b: boolean) => void
   refresh: () => Promise<void>
-  createLoop: (opts: { title: string; repo?: string; env?: string }) => Promise<LoopMeta>
+  createLoop: (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => Promise<LoopMeta>
   setLoopArchived: (id: string, archived: boolean) => Promise<void>
   setLoopPublic: (id: string, isPublic: boolean) => Promise<void>
   newLoopDialogOpen: boolean
@@ -77,7 +77,7 @@ export function useWorkspaceState(): WorkspaceState {
     refresh()
   }, [currentUser, refresh])
 
-  const createLoop = useCallback(async (opts: { title: string; repo?: string; env?: string }) => {
+  const createLoop = useCallback(async (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => {
     const m = await apiCreateLoop(opts)
     setLoops((prev) => [m, ...prev])
     return m
