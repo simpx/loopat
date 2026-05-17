@@ -2,7 +2,7 @@
  * Loop tab — AI chat with Claude Code-like experience.
  * Chat area uses assistant-ui runtime with custom claudecodeui-styled components.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, Navigate } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check } from "lucide-react"
@@ -62,14 +62,15 @@ function LoopsList({ currentId }: { currentId: string }) {
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loopat:loopsList:collapsed") === "1")
   const isMobile = useIsMobile()
-  const statusMap = useLoopStatus(ws.loops.map(l => l.id))
+  const loopIds = useMemo(() => ws.loops.map(l => l.id), [ws.loops])
+  const statusMap = useLoopStatus(loopIds)
 
   const userId = ws.currentUser?.id
-  const filtered = ws.loops.filter((loop) => {
+  const filtered = useMemo(() => ws.loops.filter((loop) => {
     if (scope === "mine") return loop.createdBy === userId
     if (scope === "rfd") return false // RFD tab
     return true // "all"
-  })
+  }), [ws.loops, scope, userId])
 
   const setCollapsedPersist = (v: boolean) => {
     setCollapsed(v)
