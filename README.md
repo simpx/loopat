@@ -2,6 +2,16 @@
 
 > **Self-hosted AI workspace built around context management — works solo, scales to teams**
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="loopat — Loop view with chat, workdir, terminal, and team DM" width="100%">
+</p>
+
+⭐ [Star on GitHub](https://github.com/simpx/loopat) ·
+🚀 [Quick start](#quick-start) ·
+📖 [Architecture](docs/architecture.md)
+
+---
+
 When humans collaborate with AI, three things only humans can bring:
 
 - **Drive** — pushing the work forward. AI has no desires, no
@@ -26,14 +36,6 @@ memory, and knowledge interlock so context doesn't get lost across
 sessions or teammates.
 
 [sdk]: https://github.com/anthropics/claude-agent-sdk
-
-⭐ [Star on GitHub](https://github.com/simpx/loopat) ·
-🚀 [Quick start](#quick-start) ·
-📖 [Architecture](docs/architecture.md)
-
-<p align="center">
-  <img src="docs/screenshot.png" alt="loopat — Loop view with chat, workdir, terminal, and team DM" width="100%">
-</p>
 
 ---
 
