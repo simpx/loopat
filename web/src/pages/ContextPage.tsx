@@ -21,6 +21,7 @@ import {
   listRepos,
   getRepo,
   pullRepo,
+  addRepo,
   listSandboxes,
   readSandbox,
   writeSandbox,
@@ -849,14 +850,20 @@ function ReposPane() {
   const [detail, setDetail] = useState<RepoDetail | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showAdd, setShowAdd] = useState(false)
   const isMobile = useIsMobile()
 
+  const refreshList = useCallback(async () => {
+    const rs = await listRepos()
+    setRepos(rs)
+    return rs
+  }, [])
+
   useEffect(() => {
-    listRepos().then((rs) => {
-      setRepos(rs)
+    refreshList().then((rs) => {
       if (rs.length > 0 && !selectedName) setSelectedName(rs[0].name)
     })
-  }, [])
+  }, [refreshList])
 
   useEffect(() => {
     if (!selectedName) return
@@ -909,16 +916,17 @@ function ReposPane() {
         })}
         {repos.length === 0 && (
           <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-            none · `ln -s` or `git clone` into ~/.loopat/context/repos/
+            none yet · click "add repo" below
           </div>
         )}
       </div>
       <button
-        disabled
-        className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-400 cursor-default flex items-center gap-2"
-        title="UI not wired yet — symlink/clone manually"
+        type="button"
+        onClick={() => setShowAdd(true)}
+        className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+        title="clone a remote URL or symlink a local directory"
       >
-        <span>↳</span>
+        <span>+</span>
         <span>add repo</span>
       </button>
     </aside>
@@ -965,6 +973,122 @@ function ReposPane() {
           </div>
         )}
       </main>
+      {showAdd && (
+        <AddRepoDialog
+          existingNames={repos.map((r) => r.name)}
+          onClose={() => setShowAdd(false)}
+          onAdded={async (name) => {
+            setShowAdd(false)
+            await refreshList()
+            setSelectedName(name)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
+
+function deriveRepoName(source: string): string {
+  let s = source.trim().replace(/[?#].*$/, "")
+  s = s.replace(/\/+$/, "").replace(/\.git$/i, "")
+  const m = s.match(/[/:]([^/:]+)$/)
+  return (m ? m[1] : s).trim()
+}
+
+function AddRepoDialog({
+  existingNames,
+  onClose,
+  onAdded,
+}: {
+  existingNames: string[]
+  onClose: () => void
+  onAdded: (name: string) => void
+}) {
+  const [source, setSource] = useState("")
+  const [name, setName] = useState("")
+  const [nameTouched, setNameTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const derived = deriveRepoName(source)
+  const effectiveName = nameTouched ? name : derived
+  const isUrl = /:\/\//.test(source.trim()) || /^git@/.test(source.trim())
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    const finalName = effectiveName.trim()
+    if (!source.trim()) { setErr("source required"); return }
+    if (!REPO_NAME_RE.test(finalName)) {
+      setErr("invalid name (letters/digits/_.-, max 64, must start with alnum)")
+      return
+    }
+    if (existingNames.includes(finalName)) {
+      setErr("name already exists")
+      return
+    }
+    setErr(null)
+    setBusy(true)
+    const r = await addRepo({ name: finalName, source: source.trim() })
+    setBusy(false)
+    if (!r.ok) { setErr(r.error ?? "add failed"); return }
+    onAdded(finalName)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center" onClick={onClose}>
+      <div
+        className="w-full max-w-[480px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="text-base font-semibold text-gray-900 mb-4">Add repo</div>
+        <form onSubmit={onSubmit} className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-700 font-medium">Source</span>
+            <input
+              autoFocus
+              type="text"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="git@github.com:user/repo.git  or  ~/code/myrepo"
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
+            />
+            <span className="text-[11px] text-gray-400">
+              {source.trim() === "" ? "git URL (clone) or local path (symlink)" : isUrl ? "→ git clone into context/repos/" : "→ symlink into context/repos/"}
+            </span>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-700 font-medium">Name</span>
+            <input
+              type="text"
+              value={effectiveName}
+              onChange={(e) => { setName(e.target.value); setNameTouched(true) }}
+              placeholder="repo-name"
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
+            />
+            <span className="text-[11px] text-gray-400">directory name under context/repos/</span>
+          </label>
+          {err && <div className="text-[11px] text-red-600 break-words">{err}</div>}
+          <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={busy}
+              className="px-3 h-8 text-sm rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+            >
+              cancel
+            </button>
+            <button
+              type="submit"
+              disabled={busy || !source.trim() || !effectiveName.trim()}
+              className="px-3 h-8 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+            >
+              {busy ? "adding…" : "add"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

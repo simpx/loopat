@@ -561,6 +561,17 @@ export async function pullRepo(name: string): Promise<{ ok: boolean; output?: st
   return { ok: true, output: j.output }
 }
 
+export async function addRepo(opts: { name: string; source: string }): Promise<{ ok: boolean; name?: string; kind?: "clone" | "symlink"; error?: string }> {
+  const r = await apiFetch(`/api/workspace/repos`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(opts),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
+  return { ok: true, name: j.name, kind: j.kind }
+}
+
 // ── kanban ──
 // Storage in notes/todo/<filename>.md, one file per column.
 // Cards are top-level - [ ] bullet items within each file.
