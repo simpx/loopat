@@ -64,8 +64,12 @@ function LoopsList({ currentId }: { currentId: string }) {
   const isMobile = useIsMobile()
   const statusMap = useLoopStatus(ws.loops.map(l => l.id))
 
-  // single-user MVP — "我的" / "全部" filter both show everything; RFD always 0
-  const filtered = ws.loops
+  const userId = ws.currentUser?.id
+  const filtered = ws.loops.filter((loop) => {
+    if (scope === "mine") return loop.createdBy === userId
+    if (scope === "rfd") return false // RFD tab
+    return true // "all"
+  })
 
   const setCollapsedPersist = (v: boolean) => {
     setCollapsed(v)
@@ -90,7 +94,7 @@ function LoopsList({ currentId }: { currentId: string }) {
                   : "px-2 h-6 rounded text-[11px] text-gray-500 hover:bg-gray-100"
             }
           >
-            {s === "mine" ? "我的" : s === "all" ? "全部" : "RFD"}
+            {s === "mine" ? "mine" : s === "all" ? "all" : "RFD"}
           </button>
         ))}
         <span className="text-[11px] text-gray-400 ml-auto pr-1">{filtered.length}</span>
