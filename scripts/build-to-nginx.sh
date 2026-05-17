@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 TARGET="${NGINX_ROOT:-/var/www/loopat}"
 
 echo "==> Building web frontend..."
-bun --cwd web run build
+(cd web && bun run build)
 
 echo "==> Copying to $TARGET ..."
 sudo mkdir -p "$TARGET"
