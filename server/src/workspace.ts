@@ -312,39 +312,6 @@ export async function vaultBacklinks(vault: VaultId, targetPath: string, user: s
   return out
 }
 
-// ── Focus model ──
-//
-// Storage: notes/focus/<name>.md  (one file per focus, including inbox.md)
-// Format: ccx-style markdown task tree.
-//   - `# [ ] Title #topic1 #topic2`  ← top-level task = focus title; topics inline
-//   - `> pinned: true` / `> priority: P0`  ← meta lines (blockquote)
-//   - `## [ ] Subtask` ... up to any depth via `#` count
-//   - `- [ ] Leaf task` (bullet) also accepted as a leaf
-//
-// Concepts:
-//   - Focus = a file in focus/; identified by filename slug
-//   - Topic = #xxx tokens anywhere in the markdown (or in loop title); cross-
-//     entity association key. Topics are NEVER renamed by the system; users
-//     rename via batch operation if needed.
-
-export type FocusMeta = {
-  /** filename without .md */
-  name: string
-  /** display title — text of the first `#` line, sans checkbox + topics */
-  title: string
-  /** parsed `> pinned: true` */
-  pinned: boolean
-  /** parsed `> priority: <string>` — free-form (P0/P1/high/low/…) */
-  priority?: string
-  /** unique #xxx tokens found anywhere in the file */
-  topics: string[]
-  /** count of `[ ]` / `[x]` tasks at any depth */
-  doneCount: number
-  totalCount: number
-  /** epoch ms of last write */
-  mtimeMs: number
-}
-
 const TOPIC_RE = /(?<![\w])#([A-Za-z0-9][\w-]*)/g
 function extractTopics(text: string): string[] {
   const out = new Set<string>()
@@ -355,168 +322,28 @@ function extractTopics(text: string): string[] {
   return [...out]
 }
 
-const TASK_HEADER_RE = /^(#+)\s*\[([ xX])\]\s*(.*)$/
-const TASK_BULLET_RE = /^\s*-\s*\[([ xX])\]\s*(.*)$/
-const META_RE = /^>\s*([\w-]+):\s*(.*)$/
-const H1_PLAIN_RE = /^#\s+(.*)$/
-
-function stripTopicsFromTitle(t: string): string {
-  return t.replace(TOPIC_RE, "").trim()
-}
-
-/** Parse a single focus md file. */
-function parseFocusFile(name: string, body: string, mtimeMs: number): FocusMeta {
-  const lines = body.split("\n")
-  let title = name
-  let pinned = false
-  let priority: string | undefined
-  let done = 0
-  let total = 0
-  let titleSet = false
-
-  for (const line of lines) {
-    // task header (# [ ] xxx, ## [ ] xxx, ...) — counts toward done/total + first one is title
-    const hm = line.match(TASK_HEADER_RE)
-    if (hm) {
-      const checked = hm[2].toLowerCase() === "x"
-      total++
-      if (checked) done++
-      if (!titleSet) {
-        title = stripTopicsFromTitle(hm[3]) || name
-        titleSet = true
-      }
-      continue
-    }
-    // bullet task (leaf)
-    const bm = line.match(TASK_BULLET_RE)
-    if (bm) {
-      const checked = bm[1].toLowerCase() === "x"
-      total++
-      if (checked) done++
-      continue
-    }
-    // plain `# Title` (no checkbox) — also acceptable as title, lower priority
-    if (!titleSet) {
-      const tm = line.match(H1_PLAIN_RE)
-      if (tm) {
-        title = stripTopicsFromTitle(tm[1]) || name
-        titleSet = true
-        continue
-      }
-    }
-    // meta blockquote (> key: value) — applies to the focus as a whole when
-    // appearing near the top before any subtask divergence
-    const mm = line.match(META_RE)
-    if (mm) {
-      const k = mm[1].toLowerCase()
-      const v = mm[2].trim()
-      if (k === "pinned") {
-        pinned = v.toLowerCase() === "true" || v === "1" || v === "yes"
-      } else if (k === "priority") {
-        priority = v
-      }
-    }
-  }
-
-  const topics = extractTopics(body)
-  return { name, title, pinned, priority, topics, doneCount: done, totalCount: total, mtimeMs }
-}
-
-export async function listFocuses(): Promise<FocusMeta[]> {
-  const dir = join(workspaceNotesDir(), "focus")
-  let entries: string[] = []
-  try {
-    entries = await readdir(dir)
-  } catch {
-    return []
-  }
-  const out: FocusMeta[] = []
-  for (const f of entries) {
-    if (!f.endsWith(".md")) continue
-    const path = join(dir, f)
-    let body = ""
-    let mtimeMs = 0
-    try {
-      body = await readFile(path, "utf8")
-      const s = await stat(path)
-      mtimeMs = s.mtimeMs
-    } catch {
-      continue
-    }
-    out.push(parseFocusFile(f.slice(0, -3), body, mtimeMs))
-  }
-  // Pinned first; within group: priority asc (P0 < P1 < ... < no-priority); then by name
-  const prioRank = (p?: string) => {
-    if (!p) return 99
-    const m = p.match(/^p?(\d+)$/i)
-    return m ? parseInt(m[1], 10) : 50
-  }
-  out.sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    const pa = prioRank(a.priority)
-    const pb = prioRank(b.priority)
-    if (pa !== pb) return pa - pb
-    return a.name.localeCompare(b.name)
-  })
-  return out
-}
-
-export async function readFocus(name: string): Promise<{ body: string; mtimeMs: number } | null> {
-  const safe = name.replace(/[/\\]/g, "")
-  const path = join(workspaceNotesDir(), "focus", safe + ".md")
-  try {
-    const body = await readFile(path, "utf8")
-    const s = await stat(path)
-    return { body, mtimeMs: s.mtimeMs }
-  } catch {
-    return null
-  }
-}
-
-export async function writeFocus(name: string, body: string): Promise<boolean> {
-  const safe = name.replace(/[/\\]/g, "")
-  if (!safe || safe.startsWith(".")) return false
-  const dir = join(workspaceNotesDir(), "focus")
-  const path = join(dir, safe + ".md")
-  await mkdir(dir, { recursive: true })
-  await writeFile(path, body)
-  return true
-}
-
-/** Aggregate all topics across focuses + loop titles. */
+/** Aggregate all topics across loop titles. */
 export type TopicAggregate = {
   name: string
-  focuses: string[]   // focus names containing this topic
   loops: { id: string; title: string }[]
 }
 
 export async function listTopics(loopTitles: { id: string; title: string }[]): Promise<TopicAggregate[]> {
   const map = new Map<string, TopicAggregate>()
-  const focuses = await listFocuses()
-  for (const f of focuses) {
-    for (const t of f.topics) {
-      let entry = map.get(t)
-      if (!entry) {
-        entry = { name: t, focuses: [], loops: [] }
-        map.set(t, entry)
-      }
-      entry.focuses.push(f.name)
-    }
-  }
   for (const { id, title } of loopTitles) {
     const topics = extractTopics(title)
     for (const t of topics) {
       let entry = map.get(t)
       if (!entry) {
-        entry = { name: t, focuses: [], loops: [] }
+        entry = { name: t, loops: [] }
         map.set(t, entry)
       }
       entry.loops.push({ id, title })
     }
   }
   return [...map.values()].sort((a, b) => {
-    const wa = a.focuses.length + a.loops.length
-    const wb = b.focuses.length + b.loops.length
+    const wb = b.loops.length
+    const wa = a.loops.length
     if (wa !== wb) return wb - wa
     return a.name.localeCompare(b.name)
   })

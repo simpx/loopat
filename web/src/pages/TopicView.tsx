@@ -1,9 +1,3 @@
-/**
- * TopicView — aggregate page for a single topic.
- *
- * Lists all entities sharing this topic: focuses (from notes/focus/*.md)
- * and loops (from loop title). Future: channels.
- */
 import { useEffect, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { listTopics, type TopicAggregate } from "../api"
@@ -45,55 +39,31 @@ export function TopicView() {
         <div className="px-4 md:px-8 py-4 md:py-8 mx-auto w-full max-w-[760px] flex flex-col gap-5">
           {loading ? (
             <div className="text-[12px] text-gray-400 italic">loading…</div>
-          ) : !topic ? (
+          ) : !topic || topic.loops.length === 0 ? (
             <div className="text-[12px] text-gray-400 italic">
               no entities tagged with <code>#{decoded}</code>
             </div>
           ) : (
-            <>
-              {topic.focuses.length > 0 && (
-                <section>
-                  <div className="text-[12px] uppercase tracking-wider text-gray-500 mb-2 px-1">
-                    Focuses ({topic.focuses.length})
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    {topic.focuses.map((f) => (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => navigate(`/focus/${encodeURIComponent(f)}`)}
-                        className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-[13px] text-gray-900"
-                      >
-                        {f}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {topic.loops.length > 0 && (
-                <section>
-                  <div className="text-[12px] uppercase tracking-wider text-gray-500 mb-2 px-1">
-                    Loops ({topic.loops.length})
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    {topic.loops.map((l) => (
-                      <button
-                        key={l.id}
-                        type="button"
-                        onClick={() => navigate(`/loop/${l.id}`)}
-                        className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-[13px] text-gray-900"
-                      >
-                        {l.title}
-                        <span className="ml-2 text-[10px] font-mono text-gray-400">
-                          {l.id.slice(0, 6)}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
+            <section>
+              <div className="text-[12px] uppercase tracking-wider text-gray-500 mb-2 px-1">
+                Loops ({topic.loops.length})
+              </div>
+              <div className="flex flex-col gap-1">
+                {topic.loops.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => navigate(`/loop/${l.id}`)}
+                    className="w-full text-left px-3 py-2 rounded border border-gray-200 hover:border-gray-400 hover:bg-gray-50 text-[13px] text-gray-900"
+                  >
+                    {l.title}
+                    <span className="ml-2 text-[10px] font-mono text-gray-400">
+                      {l.id.slice(0, 6)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
         </div>
       </main>
