@@ -4,6 +4,10 @@ cd "$(dirname "$0")/.."
 
 TARGET="${NGINX_ROOT:-/var/www/loopat}"
 
+echo "==> Installing dependencies..."
+(cd server && bun install)
+(cd web && bun install)
+
 echo "==> Building web frontend..."
 (cd web && bun run build)
 
