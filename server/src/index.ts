@@ -42,7 +42,7 @@ import {
   loopChatHistoryPath,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, type ProviderConfig, type ConfigValue } from "./config"
-import { listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
+import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
@@ -1364,164 +1364,212 @@ app.post("/api/workspace/repo/:name/pull", requireAuth, async (c) => {
 
 // ── topics ──
 
-// ── kanban: notes/todo/*.md board (one file = one column) ──
-app.get("/api/kanban", requireAuth, async (c) => {
-  const columns = await listKanbanColumns()
-  return c.json({ columns })
+// ── kanban: focus boards (one directory per board, one .md file per column) ──
+
+// Board management
+app.get("/api/kanban/boards", requireAuth, async (c) => {
+  const boards = await listBoards()
+  return c.json({ boards })
 })
 
-app.post("/api/kanban/:filename/cards", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+app.post("/api/kanban/boards", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  if (typeof body.text !== "string" || !body.text.trim()) {
-    return c.json({ error: "text required" }, 400)
+  if (typeof body.name !== "string" || !body.name.trim()) {
+    return c.json({ error: "name required" }, 400)
   }
-  const r = await addCard(filename, body)
-  if (!r.ok) return c.json({ error: "add failed" }, 500)
-  kanbanNotify()
-  return c.json({ cid: r.cid })
-})
-
-app.patch("/api/kanban/:filename/cards/:cid/toggle", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const cid = c.req.param("cid") ?? ""
-  const ok = await toggleCard(filename, cid)
-  if (!ok) return c.json({ error: "not found" }, 404)
-  kanbanNotify()
+  const ok = await createBoard(body.name.trim())
+  if (!ok) return c.json({ error: "create failed" }, 500)
   return c.json({ ok: true })
 })
 
-app.patch("/api/kanban/:filename/cards/:cid", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const cid = c.req.param("cid") ?? ""
-  const patch = await c.req.json().catch(() => ({}))
-  const ok = await updateCardMeta(filename, cid, patch)
-  if (!ok) return c.json({ error: "not found or patch failed" }, 404)
-  kanbanNotify()
-  return c.json({ ok: true })
-})
-
-app.put("/api/kanban/:filename/cards/:cid/block", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const cid = c.req.param("cid") ?? ""
+app.put("/api/kanban/boards/:name/rename", requireAuth, async (c) => {
+  const oldName = decodeURIComponent(c.req.param("name") ?? "")
   const body = await c.req.json().catch(() => ({}))
-  if (typeof body.block !== "string") return c.json({ error: "block required" }, 400)
-  const ok = await updateCardBlock(filename, cid, body.block)
-  if (!ok) return c.json({ error: "not found" }, 404)
-  kanbanNotify()
+  if (typeof body.name !== "string" || !body.name.trim()) {
+    return c.json({ error: "name required" }, 400)
+  }
+  const ok = await renameBoard(oldName, body.name.trim())
+  if (!ok) return c.json({ error: "rename failed" }, 500)
   return c.json({ ok: true })
 })
 
-app.delete("/api/kanban/:filename/cards/:cid", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const cid = c.req.param("cid") ?? ""
-  const ok = await deleteCard(filename, cid)
-  if (!ok) return c.json({ error: "not found" }, 404)
-  kanbanNotify()
-  return c.json({ ok: true })
-})
-
-app.post("/api/kanban/:filename/cards/:cid/move", requireAuth, async (c) => {
-  const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const cid = c.req.param("cid") ?? ""
-  const body = await c.req.json().catch(() => ({}))
-  if (typeof body.toFile !== "string") return c.json({ error: "toFile required" }, 400)
-  const ok = await moveCard(filename, cid, body.toFile, body.toIndex)
-  if (!ok) return c.json({ error: "move failed" }, 500)
-  kanbanNotify()
-  return c.json({ ok: true })
-})
-
-app.post("/api/kanban/columns", requireAuth, async (c) => {
+// Column management
+app.post("/api/kanban/columns/:board", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.filename !== "string" || !body.filename.trim()) {
     return c.json({ error: "filename required" }, 400)
   }
-  const ok = await createColumn(body.filename + (body.filename.endsWith(".md") ? "" : ".md"), body.title)
+  const ok = await createColumn(board, body.filename + (body.filename.endsWith(".md") ? "" : ".md"), body.title)
   if (!ok) return c.json({ error: "create failed" }, 500)
   kanbanNotify()
   return c.json({ ok: true })
 })
 
-app.get("/api/kanban/config", requireAuth, async (c) => {
-  const cfg = await readKanbanConfig()
-  return c.json(cfg ?? { columns: [] })
-})
-
-app.put("/api/kanban/config", requireAuth, async (c) => {
-  const body = await c.req.json().catch(() => ({}))
-  if (Array.isArray(body.columns)) {
-    await saveColumnOrder(body.columns)
-    kanbanNotify()
-  }
-  return c.json({ ok: true })
-})
-
-app.put("/api/kanban/:filename/rename", requireAuth, async (c) => {
+app.put("/api/kanban/columns/:board/:filename/rename", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const fromFile = decodeURIComponent(c.req.param("filename") ?? "")
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.toFile !== "string" || !body.toFile.trim()) {
     return c.json({ error: "toFile required" }, 400)
   }
-  const ok = await renameColumn(fromFile, body.toFile + (body.toFile.endsWith(".md") ? "" : ".md"))
+  const ok = await renameColumn(board, fromFile, body.toFile + (body.toFile.endsWith(".md") ? "" : ".md"))
   if (!ok) return c.json({ error: "rename failed" }, 500)
   kanbanNotify()
   return c.json({ ok: true })
 })
 
-app.delete("/api/kanban/:filename", requireAuth, async (c) => {
+app.delete("/api/kanban/columns/:board/:filename", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
-  const ok = await deleteColumn(filename)
+  const ok = await deleteColumn(board, filename)
   if (!ok) return c.json({ error: "delete failed" }, 500)
   kanbanNotify()
   return c.json({ ok: true })
 })
 
-app.put("/api/kanban/:filename/color", requireAuth, async (c) => {
+app.put("/api/kanban/columns/:board/:filename/color", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.color !== "string") return c.json({ error: "color required" }, 400)
-  await setColumnColor(filename, body.color)
+  await setColumnColor(board, filename, body.color)
   kanbanNotify()
   return c.json({ ok: true })
 })
 
-app.put("/api/kanban/:filename/reorder", requireAuth, async (c) => {
+app.put("/api/kanban/columns/:board/:filename/reorder", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const body = await c.req.json().catch(() => ({}))
   if (!Array.isArray(body.cids)) return c.json({ error: "cids array required" }, 400)
-  const ok = await reorderCards(filename, body.cids)
+  const ok = await reorderCards(board, filename, body.cids)
   if (!ok) return c.json({ error: "reorder failed" }, 500)
   kanbanNotify()
   return c.json({ ok: true })
 })
 
-app.post("/api/kanban/:filename/cards/:cid/assign-driver", requireAuth, async (c) => {
+// Card mutations
+app.post("/api/kanban/columns/:board/:filename/cards", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.text !== "string" || !body.text.trim()) {
+    return c.json({ error: "text required" }, 400)
+  }
+  const r = await addCard(board, filename, body)
+  if (!r.ok) return c.json({ error: "add failed" }, 500)
+  kanbanNotify()
+  return c.json({ cid: r.cid })
+})
+
+app.patch("/api/kanban/columns/:board/:filename/cards/:cid/toggle", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const ok = await toggleCard(board, filename, cid)
+  if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
+  return c.json({ ok: true })
+})
+
+app.patch("/api/kanban/columns/:board/:filename/cards/:cid", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const patch = await c.req.json().catch(() => ({}))
+  const ok = await updateCardMeta(board, filename, cid, patch)
+  if (!ok) return c.json({ error: "not found or patch failed" }, 404)
+  kanbanNotify()
+  return c.json({ ok: true })
+})
+
+app.put("/api/kanban/columns/:board/:filename/cards/:cid/block", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.block !== "string") return c.json({ error: "block required" }, 400)
+  const ok = await updateCardBlock(board, filename, cid, body.block)
+  if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
+  return c.json({ ok: true })
+})
+
+app.delete("/api/kanban/columns/:board/:filename/cards/:cid", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const ok = await deleteCard(board, filename, cid)
+  if (!ok) return c.json({ error: "not found" }, 404)
+  kanbanNotify()
+  return c.json({ ok: true })
+})
+
+app.post("/api/kanban/columns/:board/:filename/cards/:cid/move", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const filename = decodeURIComponent(c.req.param("filename") ?? "")
+  const cid = c.req.param("cid") ?? ""
+  const body = await c.req.json().catch(() => ({}))
+  if (typeof body.toFile !== "string") return c.json({ error: "toFile required" }, 400)
+  const ok = await moveCard(board, filename, cid, body.toFile, body.toIndex)
+  if (!ok) return c.json({ error: "move failed" }, 500)
+  kanbanNotify()
+  return c.json({ ok: true })
+})
+
+app.post("/api/kanban/columns/:board/:filename/cards/:cid/assign-driver", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const cid = c.req.param("cid") ?? ""
   const userId = c.get("userId") as string
-  const r = await assignDriverForCard(filename, cid, userId)
+  const r = await assignDriverForCard(board, filename, cid, userId)
   if (!r.ok) return c.json({ error: "no associated loop" }, 400)
   return c.json(r)
 })
 
-app.post("/api/kanban/:filename/cards/:cid/create-loop", requireAuth, async (c) => {
+app.post("/api/kanban/columns/:board/:filename/cards/:cid/create-loop", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const cid = c.req.param("cid") ?? ""
   const userId = c.get("userId") as string
-  const r = await createLoopFromCard(filename, cid, userId)
+  const r = await createLoopFromCard(board, filename, cid, userId)
   if (!r.ok) return c.json({ error: "create failed" }, 500)
   return c.json(r)
 })
 
-app.post("/api/kanban/:filename/cards/:cid/link-loop", requireAuth, async (c) => {
+app.post("/api/kanban/columns/:board/:filename/cards/:cid/link-loop", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
   const filename = decodeURIComponent(c.req.param("filename") ?? "")
   const cid = c.req.param("cid") ?? ""
   const userId = c.get("userId") as string
   const { loopId } = (await c.req.json().catch(() => ({}))) as { loopId?: string }
   if (!loopId) return c.json({ error: "loopId required" }, 400)
-  const ok = await linkLoopToCard(filename, cid, loopId, userId)
+  const ok = await linkLoopToCard(board, filename, cid, loopId, userId)
   if (!ok) return c.json({ error: "link failed" }, 500)
+  return c.json({ ok: true })
+})
+
+// Board data (list columns + config)
+app.get("/api/kanban/:board", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const columns = await listKanbanColumns(board)
+  return c.json({ columns })
+})
+
+app.get("/api/kanban/config/:board", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const cfg = await readKanbanConfig(board)
+  return c.json(cfg ?? { columns: [] })
+})
+
+app.put("/api/kanban/config/:board", requireAuth, async (c) => {
+  const board = decodeURIComponent(c.req.param("board") ?? "default")
+  const body = await c.req.json().catch(() => ({}))
+  if (Array.isArray(body.columns)) {
+    await saveColumnOrder(board, body.columns)
+    kanbanNotify()
+  }
   return c.json({ ok: true })
 })
 

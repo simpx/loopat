@@ -44,9 +44,9 @@ export function KanbanCardStatic({ card }: { card: KanbanCard }) {
 }
 
 export function KanbanCardView({
-  card, colFilename, onClick, onToggle, onArchive,
+  board, card, colFilename, onClick, onToggle, onArchive,
 }: {
-  card: KanbanCard; colFilename: string; onClick: () => void; onToggle: () => void; onArchive?: () => void
+  board: string; card: KanbanCard; colFilename: string; onClick: () => void; onToggle: () => void; onArchive?: () => void
 }) {
   const navigate = useNavigate()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -61,7 +61,7 @@ export function KanbanCardView({
   async function saveTitle() {
     const t = titleText.trim()
     if (!t || t === card.text) { setEditingTitle(false); return }
-    await updateKanbanCard(colFilename, card.cid, { text: t })
+    await updateKanbanCard(board, colFilename, card.cid, { text: t })
     setEditingTitle(false)
   }
 

@@ -18,10 +18,12 @@ import { KanbanCardStatic } from "./KanbanCardView"
 import { useKanbanWebSocket } from "../../useKanbanWebSocket"
 
 export function KanbanBoard({
+  board,
   onCardClick,
   onCardArchive,
   showArchived,
 }: {
+  board: string
   onCardClick: (card: KanbanCard, filename: string) => void
   onCardArchive: (card: KanbanCard, colFilename: string) => void
   showArchived: boolean
@@ -42,7 +44,7 @@ export function KanbanBoard({
   const isDraggingColRef = useRef(false)
 
   const refresh = useCallback(() => {
-    Promise.all([listKanbanColumns(), getKanbanConfig()]).then(([cols, cfg]) => {
+    Promise.all([listKanbanColumns(board), getKanbanConfig(board)]).then(([cols, cfg]) => {
       // sort: config order first, then remaining columns
       const sorted = [...cols].sort((a, b) => {
         const ai = cfg.findIndex((c) => c.file === a.filename)
@@ -57,7 +59,7 @@ export function KanbanBoard({
       setColConfig(cfg)
       setLoading(false)
     })
-  }, [])
+  }, [board])
 
   const connected = useKanbanWebSocket(refresh)
 
@@ -176,7 +178,7 @@ export function KanbanBoard({
         })
         return copy
       })
-      saveKanbanColumnOrder(newOrder)
+      saveKanbanColumnOrder(board, newOrder)
       return
     }
 
@@ -215,7 +217,7 @@ export function KanbanBoard({
     })
 
     if (fromFile !== toFile) {
-      moveKanbanCard(fromFile, cid, toFile, toIndex)
+      moveKanbanCard(board, fromFile, cid, toFile, toIndex)
     } else if (fromFile === toFile && toIndex !== undefined && srcIdx !== toIndex) {
       const col = columns.find((c) => c.filename === fromFile)
       if (col) {
@@ -223,7 +225,7 @@ export function KanbanBoard({
         const [moved] = cards.splice(srcIdx, 1)
         const ti = toIndex > srcIdx ? toIndex - 1 : toIndex
         cards.splice(ti, 0, moved)
-        reorderKanbanCards(fromFile, cards.map((c) => c.cid))
+        reorderKanbanCards(board, fromFile, cards.map((c) => c.cid))
       }
     }
   }
@@ -235,13 +237,13 @@ export function KanbanBoard({
         ? { ...col, cards: col.cards.map((c) => (c.cid === card.cid ? { ...c, done: next } : c)) }
         : col
     ))
-    toggleKanbanCard(colFilename, card.cid)
+    toggleKanbanCard(board, colFilename, card.cid)
   }
 
   async function handleCreateColumn() {
     const name = newColName.trim()
     if (!name) return
-    const ok = await createKanbanColumn(name)
+    const ok = await createKanbanColumn(board, name)
     if (ok) { setNewColOpen(false); setNewColName(""); refresh() }
   }
 
@@ -256,8 +258,20 @@ export function KanbanBoard({
     return (
       <div className="flex items-center justify-center h-full">
         <div className="flex flex-col items-center gap-3 text-gray-500">
-          <div className="text-[13px]">no kanban columns in notes/todo/</div>
-          <button onClick={() => setNewColOpen(true)} className="px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700">+ Create first column</button>
+          <div className="text-[13px]">no kanban columns in notes/focus/boards/{board}/</div>
+          {newColOpen ? (
+            <div className="w-56 bg-gray-50 rounded-lg p-3 space-y-2">
+              <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)} autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreateColumn() }}
+                className="w-full text-[13px] border border-gray-300 rounded px-2 py-1.5 outline-none focus:border-gray-500" placeholder="Column name" />
+              <div className="flex items-center gap-1.5">
+                <button onClick={handleCreateColumn} disabled={!newColName.trim()} className="px-2.5 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40">Create</button>
+                <button onClick={() => { setNewColOpen(false); setNewColName("") }} className="px-2.5 h-7 rounded text-[11px] text-gray-500 hover:bg-gray-200">✕</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setNewColOpen(true)} className="px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700">+ Create first column</button>
+          )}
         </div>
       </div>
     )
@@ -275,6 +289,7 @@ export function KanbanBoard({
               ),
               <SortableContext key={col.filename} items={col.cards.map((c) => c.cid)} strategy={verticalListSortingStrategy}>
                 <KanbanColumnView
+                  board={board}
                   column={{ id: col.filename, label: col.title }}
                   cards={col.cards}
                   onCardClick={(card) => onCardClick(card, col.filename)}

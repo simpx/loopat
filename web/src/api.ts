@@ -611,18 +611,18 @@ export type KanbanColumn = {
   cards: KanbanCard[]
 }
 
-export async function listKanbanColumns(): Promise<KanbanColumn[]> {
-  const r = await apiFetch("/api/kanban")
+export async function listKanbanColumns(board = "default"): Promise<KanbanColumn[]> {
+  const r = await apiFetch(`/api/kanban/${encodeURIComponent(board)}`)
   if (!r.ok) return []
   const j = await r.json()
   return j.columns as KanbanColumn[]
 }
 
-export async function addKanbanCard(filename: string, opts: {
+export async function addKanbanCard(board: string, filename: string, opts: {
   text: string; assignee?: string; priority?: string; due?: string
   topics?: string[]; description?: string
 }): Promise<{ cid?: string; error?: string }> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards`, {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(opts),
@@ -632,17 +632,17 @@ export async function addKanbanCard(filename: string, opts: {
   return { cid: j.cid }
 }
 
-export async function toggleKanbanCard(filename: string, cid: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/toggle`, {
+export async function toggleKanbanCard(board: string, filename: string, cid: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/toggle`, {
     method: "PATCH",
   })
   return r.ok
 }
 
-export async function updateKanbanCard(filename: string, cid: string, patch: {
+export async function updateKanbanCard(board: string, filename: string, cid: string, patch: {
   text?: string; assignee?: string; priority?: string; due?: string
 }): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}`, {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(patch),
@@ -650,8 +650,8 @@ export async function updateKanbanCard(filename: string, cid: string, patch: {
   return r.ok
 }
 
-export async function updateKanbanCardBlock(filename: string, cid: string, block: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/block`, {
+export async function updateKanbanCardBlock(board: string, filename: string, cid: string, block: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/block`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ block }),
@@ -659,15 +659,15 @@ export async function updateKanbanCardBlock(filename: string, cid: string, block
   return r.ok
 }
 
-export async function deleteKanbanCard(filename: string, cid: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}`, {
+export async function deleteKanbanCard(board: string, filename: string, cid: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}`, {
     method: "DELETE",
   })
   return r.ok
 }
 
-export async function moveKanbanCard(fromFile: string, cid: string, toFile: string, toIndex?: number): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(fromFile)}/cards/${encodeURIComponent(cid)}/move`, {
+export async function moveKanbanCard(board: string, fromFile: string, cid: string, toFile: string, toIndex?: number): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(fromFile)}/cards/${encodeURIComponent(cid)}/move`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ toFile, toIndex }),
@@ -675,8 +675,8 @@ export async function moveKanbanCard(fromFile: string, cid: string, toFile: stri
   return r.ok
 }
 
-export async function createKanbanColumn(filename: string, title?: string): Promise<boolean> {
-  const r = await apiFetch("/api/kanban/columns", {
+export async function createKanbanColumn(board: string, filename: string, title?: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ filename, title }),
@@ -684,17 +684,46 @@ export async function createKanbanColumn(filename: string, title?: string): Prom
   return r.ok
 }
 
+// ── board management ──
+
+export async function listBoards(): Promise<string[]> {
+  const r = await apiFetch("/api/kanban/boards")
+  if (!r.ok) return ["default"]
+  const j = await r.json()
+  return j.boards as string[]
+}
+
+export async function createBoard(name: string): Promise<boolean> {
+  const r = await apiFetch("/api/kanban/boards", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  return r.ok
+}
+
+export async function renameBoard(oldName: string, newName: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/boards/${encodeURIComponent(oldName)}/rename`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: newName }),
+  })
+  return r.ok
+}
+
+// ── column config ──
+
 export type KanbanColumnConfig = { file: string; color?: string }
 
-export async function getKanbanConfig(): Promise<KanbanColumnConfig[]> {
-  const r = await apiFetch("/api/kanban/config")
+export async function getKanbanConfig(board = "default"): Promise<KanbanColumnConfig[]> {
+  const r = await apiFetch(`/api/kanban/config/${encodeURIComponent(board)}`)
   if (!r.ok) return []
   const j = await r.json()
   return j.columns as KanbanColumnConfig[]
 }
 
-export async function saveKanbanColumnOrder(orderedFiles: string[]): Promise<boolean> {
-  const r = await apiFetch("/api/kanban/config", {
+export async function saveKanbanColumnOrder(board: string, orderedFiles: string[]): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/config/${encodeURIComponent(board)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ columns: orderedFiles }),
@@ -702,8 +731,8 @@ export async function saveKanbanColumnOrder(orderedFiles: string[]): Promise<boo
   return r.ok
 }
 
-export async function renameKanbanColumn(fromFile: string, toFile: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(fromFile)}/rename`, {
+export async function renameKanbanColumn(board: string, fromFile: string, toFile: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(fromFile)}/rename`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ toFile }),
@@ -711,13 +740,13 @@ export async function renameKanbanColumn(fromFile: string, toFile: string): Prom
   return r.ok
 }
 
-export async function deleteKanbanColumn(filename: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}`, { method: "DELETE" })
+export async function deleteKanbanColumn(board: string, filename: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}`, { method: "DELETE" })
   return r.ok
 }
 
-export async function setKanbanColumnColor(filename: string, color: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/color`, {
+export async function setKanbanColumnColor(board: string, filename: string, color: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/color`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ color }),
@@ -725,8 +754,8 @@ export async function setKanbanColumnColor(filename: string, color: string): Pro
   return r.ok
 }
 
-export async function reorderKanbanCards(filename: string, cids: string[]): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/reorder`, {
+export async function reorderKanbanCards(board: string, filename: string, cids: string[]): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/reorder`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ cids }),
@@ -734,23 +763,23 @@ export async function reorderKanbanCards(filename: string, cids: string[]): Prom
   return r.ok
 }
 
-export async function assignKanbanDriver(filename: string, cid: string): Promise<{ ok: boolean; loopId?: string }> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/assign-driver`, {
+export async function assignKanbanDriver(board: string, filename: string, cid: string): Promise<{ ok: boolean; loopId?: string }> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/assign-driver`, {
     method: "POST",
   })
   return r.ok ? await r.json() : { ok: false }
 }
 
-export async function createKanbanLoop(filename: string, cid: string): Promise<{ ok: boolean; loopId?: string }> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/create-loop`, {
+export async function createKanbanLoop(board: string, filename: string, cid: string): Promise<{ ok: boolean; loopId?: string }> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/create-loop`, {
     method: "POST",
   })
   if (!r.ok) return { ok: false }
   return await r.json()
 }
 
-export async function linkKanbanLoop(filename: string, cid: string, loopId: string): Promise<boolean> {
-  const r = await apiFetch(`/api/kanban/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/link-loop`, {
+export async function linkKanbanLoop(board: string, filename: string, cid: string, loopId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/kanban/columns/${encodeURIComponent(board)}/${encodeURIComponent(filename)}/cards/${encodeURIComponent(cid)}/link-loop`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ loopId }),

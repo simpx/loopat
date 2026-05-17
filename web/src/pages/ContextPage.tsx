@@ -134,7 +134,10 @@ function VaultPane({ vault, initialFile }: { vault: VaultId; initialFile?: strin
     vaultList(vault).then((entries) => {
       setTree(entries)
       setPickedPath((prev) => {
-        if (prev) return prev
+        if (prev) {
+          const entry = entries.find((e) => e.path === prev)
+          if (entry?.type === "file") return prev
+        }
         const first = entries.find((e) => e.type === "file" && e.path.endsWith(".md"))
         return first ? first.path : null
       })

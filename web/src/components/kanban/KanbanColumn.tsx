@@ -7,8 +7,9 @@ import { KanbanCardView } from "./KanbanCardView"
 const COLORS = ["", "#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"]
 
 export function KanbanColumn({
-  column, cards, onCardClick, onCardToggle, onCardArchive, onCardSaved, onColumnSaved, color,
+  board, column, cards, onCardClick, onCardToggle, onCardArchive, onCardSaved, onColumnSaved, color,
 }: {
+  board: string
   column: { id: string; label: string }
   cards: KanbanCard[]
   onCardClick: (card: KanbanCard) => void
@@ -39,7 +40,7 @@ export function KanbanColumn({
     const text = newText.trim()
     if (!text || saving) return
     setSaving(true)
-    const r = await addKanbanCard(column.id, { text })
+    const r = await addKanbanCard(board, column.id, { text })
     setSaving(false)
     if (r.cid) { setNewText(""); setAdding(false); onCardSaved() }
   }
@@ -48,13 +49,13 @@ export function KanbanColumn({
     const name = colTitle.trim()
     if (!name || name === column.label) { setEditingCol(false); return }
     const newFile = name.toLowerCase().replace(/[^a-z0-9一-鿿]+/g, "-").replace(/^-|-$/g, "") + ".md"
-    await renameKanbanColumn(column.id, newFile)
+    await renameKanbanColumn(board, column.id, newFile)
     setEditingCol(false); onColumnSaved()
   }
 
   async function handleColorChange(c: string) {
     setColColor(c)
-    await setKanbanColumnColor(column.id, c)
+    await setKanbanColumnColor(board, column.id, c)
     onColumnSaved()
   }
 
@@ -63,9 +64,9 @@ export function KanbanColumn({
     setDeleting(true)
     // archive all cards first
     for (const card of cards) {
-      await moveKanbanCard(column.id, card.cid, "archived.md")
+      await moveKanbanCard(board, column.id, card.cid, "archived.md")
     }
-    await deleteKanbanColumn(column.id)
+    await deleteKanbanColumn(board, column.id)
     setDeleting(false); setEditingCol(false); onColumnSaved()
   }
 
@@ -99,7 +100,7 @@ export function KanbanColumn({
           <div className="text-[11px] text-gray-300 italic px-2 py-4 text-center">drop here</div>
         ) : (
           cards.map((card) => (
-            <KanbanCardView key={card.cid} card={card} colFilename={column.id}
+            <KanbanCardView key={card.cid} board={board} card={card} colFilename={column.id}
               onClick={() => onCardClick(card)} onToggle={() => onCardToggle(card)}
               onArchive={() => onCardArchive(card)} />
           ))

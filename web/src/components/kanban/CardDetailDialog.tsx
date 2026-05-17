@@ -30,9 +30,9 @@ function buildCardBlock(title: string, done: boolean, priority: string, assignee
 }
 
 export function CardDetailDialog({
-  card, colFilename, onClose, onSaved, onDeleted,
+  board, card, colFilename, onClose, onSaved, onDeleted,
 }: {
-  card: KanbanCard; colFilename: string; onClose: () => void; onSaved: () => void; onDeleted: () => void
+  board: string; card: KanbanCard; colFilename: string; onClose: () => void; onSaved: () => void; onDeleted: () => void
 }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
@@ -66,27 +66,27 @@ export function CardDetailDialog({
   async function handleSave() {
     setSaving(true)
     const block = buildCardBlock(title.trim() || card.text, done, priority, assignee.trim(), due.trim(), desc.trim(), subtasks, topics)
-    await updateKanbanCardBlock(colFilename, card.cid, block)
+    await updateKanbanCardBlock(board, colFilename, card.cid, block)
     setSaving(false)
     onSaved()
   }
 
   async function handleToggleDone() {
-    await toggleKanbanCard(colFilename, card.cid)
+    await toggleKanbanCard(board, colFilename, card.cid)
     setDone((v) => !v)
   }
 
   async function handleDelete() {
     if (!confirm("Delete this card?")) return
     setDeleting(true)
-    await deleteKanbanCard(colFilename, card.cid)
+    await deleteKanbanCard(board, colFilename, card.cid)
     setDeleting(false)
     onDeleted()
   }
 
   async function handleAssignDriver() {
     setAssigning(true)
-    const r = await assignKanbanDriver(colFilename, card.cid)
+    const r = await assignKanbanDriver(board, colFilename, card.cid)
     setAssigning(false)
     if (r.ok) { onSaved() }
     else { alert("No associated loop on this card") }
@@ -94,7 +94,7 @@ export function CardDetailDialog({
 
   function handleCreateLoop() {
     onClose()
-    ws.setNewLoopDialogOpen(true, card.text, { filename: colFilename, cid: card.cid })
+    ws.setNewLoopDialogOpen(true, card.text, { board, filename: colFilename, cid: card.cid })
   }
 
   return (
