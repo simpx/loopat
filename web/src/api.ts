@@ -344,10 +344,13 @@ export async function vaultFlatList(vault: VaultId): Promise<VaultEntry[]> {
   return (j.entries ?? []) as VaultEntry[]
 }
 
-export async function vaultRead(vault: VaultId, path: string): Promise<{ content: string; size: number; truncated: boolean } | null> {
+export async function vaultRead(
+  vault: VaultId,
+  path: string,
+): Promise<{ content: string; size: number; truncated: boolean; secret?: boolean } | null> {
   const r = await apiFetch(`/api/workspace/file?vault=${vault}&path=${encodeURIComponent(path)}`)
   if (!r.ok) return null
-  return (await r.json()) as { content: string; size: number; truncated: boolean }
+  return (await r.json()) as { content: string; size: number; truncated: boolean; secret?: boolean }
 }
 
 export async function vaultWrite(vault: VaultId, path: string, content: string): Promise<{ ok: boolean; commit?: string; error?: string }> {

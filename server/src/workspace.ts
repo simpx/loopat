@@ -121,13 +121,33 @@ export async function vaultFlatList(vault: VaultId, user: string): Promise<Vault
 
 const MAX_BYTES = 1024 * 1024
 
-export async function vaultRead(vault: VaultId, relPath: string, user: string): Promise<{ content: string; size: number; truncated: boolean } | null> {
+/**
+ * Anything under `personal/<user>/.loopat/secrets/` is a secret value. The
+ * worktree holds plaintext (so the sandbox can use it) but the API surface
+ * MUST NEVER hand it back to the browser — the only way to "edit" is to
+ * overwrite with a new value the user types.
+ */
+function isSecretPath(vault: VaultId, relPath: string): boolean {
+  if (vault !== "personal") return false
+  return relPath === ".loopat/secrets" || relPath.startsWith(".loopat/secrets/")
+}
+
+export async function vaultRead(
+  vault: VaultId,
+  relPath: string,
+  user: string,
+): Promise<{ content: string; size: number; truncated: boolean; secret?: boolean } | null> {
   const root = vaultRoot(vault, user)
   const abs = safeJoin(root, relPath)
   if (!abs) return null
   try {
     const s = await stat(abs)
     if (!s.isFile()) return null
+    // Secrets: never return the plaintext, even to the authenticated user.
+    // Edit means "overwrite", never "decrypt and view".
+    if (isSecretPath(vault, relPath)) {
+      return { content: "", size: s.size, truncated: false, secret: true }
+    }
     const truncated = s.size > MAX_BYTES
     const buf = await readFile(abs)
     const slice = truncated ? buf.subarray(0, MAX_BYTES) : buf
