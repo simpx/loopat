@@ -6,6 +6,8 @@ import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
+import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
+import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
 import {
   initChat,
   listChannels,
@@ -42,7 +44,7 @@ import {
   loopHistoryPath,
   loopChatHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, type ProviderConfig, type ConfigValue } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -452,6 +454,106 @@ app.post("/api/onboarding/start", requireAuth, async (c) => {
 app.post("/api/onboarding/done", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   await markOnboardingDone(userId)
+  return c.json({ ok: true })
+})
+
+// ── MCP OAuth (auth required) ──
+// loopat owns the OAuth dance entirely: discovery + DCR + auth code + PKCE
+// + token exchange happen server-side. Sandboxed CC sees pre-authenticated
+// transports via header injection at spawn (see session.ts / mcp-tokens.ts).
+// Tokens are persisted per-(user, vault) inside the vault tree, so they're
+// auto-encrypted by git-crypt and isolated across vaults.
+
+const VAULT_RE = /^[a-zA-Z0-9_-]+$/
+
+/** Best-effort recovery of the public URL the user's browser is hitting us
+ *  on. Order: LOOPAT_PUBLIC_URL env → X-Forwarded-* headers → request Host
+ *  header. The OAuth `redirect_uri` is built from this and must match what
+ *  we register with DCR. */
+function publicBaseUrl(c: any): string {
+  if (process.env.LOOPAT_PUBLIC_URL) return process.env.LOOPAT_PUBLIC_URL.replace(/\/+$/, "")
+  const xfHost = c.req.header("x-forwarded-host")
+  const xfProto = c.req.header("x-forwarded-proto")
+  const host = xfHost ?? c.req.header("host")
+  const proto = xfProto ?? (c.req.url.startsWith("https") ? "https" : "http")
+  return `${proto}://${host}`
+}
+
+// Lists MCP servers declared in workspace claude.json. Public-ish: every
+// authenticated workspace member can see what's available to authorize.
+app.get("/api/workspace/mcp-servers", requireAuth, async (c) => {
+  const ws = await loadWorkspaceClaudeJson()
+  const out: Array<{ name: string; type: string; url?: string }> = []
+  for (const [name, srv] of Object.entries(ws.mcpServers ?? {})) {
+    out.push({
+      name,
+      type: (srv as any).type ?? "stdio",
+      ...((srv as any).url ? { url: (srv as any).url } : {}),
+    })
+  }
+  return c.json(out)
+})
+
+app.get("/api/mcp-auth", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const vault = c.req.query("vault") || "default"
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault name" }, 400)
+  const tokens = await loadMcpTokens(userId, vault)
+  // Mask values; report status only.
+  const summary: Record<string, { connected: boolean; expiresAt?: number; scope?: string }> = {}
+  for (const [name, t] of Object.entries(tokens)) {
+    summary[name] = {
+      connected: !!t.accessToken,
+      ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+      ...(t.scope ? { scope: t.scope } : {}),
+    }
+  }
+  return c.json(summary)
+})
+
+app.post("/api/mcp-auth/start", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const serverName = typeof body.serverName === "string" ? body.serverName.trim() : ""
+  const vault = typeof body.vault === "string" && body.vault ? body.vault.trim() : "default"
+  if (!serverName || !VAULT_RE.test(serverName)) return c.json({ error: "invalid serverName" }, 400)
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
+  const r = await startMcpAuth({
+    user: userId,
+    vault,
+    serverName,
+    publicBaseUrl: publicBaseUrl(c),
+  })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ authorizationUrl: r.authorizationUrl })
+})
+
+// OAuth provider redirects the browser here after the user authorizes. We
+// finish the token exchange and bounce back to the Settings UI with the
+// outcome in the query string — no JSON, browser-friendly redirect.
+app.get("/api/mcp-auth/callback", async (c) => {
+  const state = c.req.query("state") ?? ""
+  const code = c.req.query("code") ?? ""
+  const errParam = c.req.query("error")
+  if (errParam) {
+    return c.redirect(`/settings/mcp-auth?status=error&reason=${encodeURIComponent(errParam)}`)
+  }
+  if (!state || !code) {
+    return c.redirect(`/settings/mcp-auth?status=error&reason=missing_state_or_code`)
+  }
+  const r = await completeMcpAuth({ state, code })
+  if (!r.ok) {
+    return c.redirect(`/settings/mcp-auth?status=error&reason=${encodeURIComponent(r.error)}`)
+  }
+  return c.redirect(`/settings/mcp-auth?status=ok&server=${encodeURIComponent(r.serverName)}`)
+})
+
+app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const server = c.req.param("server")
+  const vault = c.req.query("vault") || "default"
+  if (!VAULT_RE.test(server) || !VAULT_RE.test(vault)) return c.json({ error: "invalid name" }, 400)
+  await deleteMcpToken(userId, vault, server)
   return c.json({ ok: true })
 })
 

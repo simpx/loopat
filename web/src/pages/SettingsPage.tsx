@@ -17,17 +17,24 @@ import {
   savePersonalDisk,
   writePersonalValue,
   listPersonalEntries,
+  getMcpAuth,
+  startMcpAuth,
+  deleteMcpAuth,
+  listWorkspaceMcpServers,
   type ConfigValue,
   type PersonalConfigDisk,
   type ProviderDisk,
   type MountDisk,
   type RefExistsMap,
   type PersonalEntry,
+  type McpAuthStatus,
+  type WorkspaceMcpServer,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, Link2, Unlink } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell"
+type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp-auth"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
@@ -35,6 +42,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
   { id: "envs",          label: "Environment Variables", gated: true,  description: "Env vars injected into every loop sandbox." },
   { id: "mounts",        label: "Sandbox Mounts",         gated: true,  description: "Expose personal files / dirs into loop sandboxes." },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
+  { id: "mcp-auth",      label: "MCP Auth",               gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -219,6 +227,9 @@ export function SettingsPage() {
                   )}
                   {active === "shell" && (
                     <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
+                  )}
+                  {active === "mcp-auth" && (
+                    <McpAuthSection disabled={isGatedAndLocked} />
                   )}
                 </div>
               </>
@@ -880,6 +891,206 @@ function ShellSection({ disk, onChanged, disabled }: {
           {saving ? "saving…" : "save shell"}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MCP Auth section — server-side OAuth (loopat owns the dance, not the
+// sandboxed CC). One row per workspace-declared MCP server; per-vault
+// connected state with Connect / Disconnect buttons.
+// ────────────────────────────────────────────────────────────────────────────
+
+function McpAuthSection({ disabled }: { disabled: boolean }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [servers, setServers] = useState<WorkspaceMcpServer[]>([])
+  const [status, setStatus] = useState<McpAuthStatus>({})
+  const [vault, setVault] = useState<string>("default")
+  const [loading, setLoading] = useState(true)
+  const [busyFor, setBusyFor] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const [s, st] = await Promise.all([listWorkspaceMcpServers(), getMcpAuth(vault)])
+    setServers(s)
+    setStatus(st)
+    setLoading(false)
+  }, [vault])
+
+  useEffect(() => {
+    refresh()
+  }, [refresh])
+
+  // On callback return, surface the result + scrub query params.
+  useEffect(() => {
+    const s = searchParams.get("status")
+    if (!s) return
+    if (s === "ok") {
+      const server = searchParams.get("server") ?? ""
+      setFlash({ kind: "ok", text: `Connected to ${server} ✓` })
+    } else if (s === "error") {
+      const reason = searchParams.get("reason") ?? "unknown error"
+      setFlash({ kind: "error", text: `Auth failed: ${reason}` })
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete("status")
+    next.delete("server")
+    next.delete("reason")
+    setSearchParams(next, { replace: true })
+    // No deps on setSearchParams — eslint will complain but this is intentional.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const connect = async (serverName: string) => {
+    if (busyFor) return
+    setBusyFor(serverName)
+    setError(null)
+    const r = await startMcpAuth(serverName, vault)
+    setBusyFor(null)
+    if (r.error || !r.authorizationUrl) {
+      setError(r.error ?? "start failed")
+      return
+    }
+    // Navigate the browser to the OAuth provider. After auth, the provider
+    // redirects to /api/mcp-auth/callback (server) → server redirects to this
+    // page with ?status=ok&server=… → useEffect above flashes the result.
+    window.location.href = r.authorizationUrl
+  }
+
+  const disconnect = async (serverName: string) => {
+    if (busyFor) return
+    if (!confirm(`Disconnect ${serverName}? You'll have to re-authorize next time.`)) return
+    setBusyFor(serverName)
+    await deleteMcpAuth(serverName, vault)
+    setBusyFor(null)
+    refresh()
+  }
+
+  return (
+    <div className={disabled ? "pointer-events-none opacity-50" : ""}>
+      <p className="text-[12px] text-gray-500 leading-relaxed mb-4">
+        loopat performs the OAuth flow on your behalf — sandboxed CC processes
+        receive pre-authenticated transports and never run their own OAuth
+        listener. Tokens are stored inside this vault (encrypted with
+        git-crypt), so connections you make here travel with the vault to
+        any host you clone your personal repo onto.
+      </p>
+
+      <div className="mb-4 flex items-center gap-2">
+        <label className="text-[11px] font-medium text-gray-500">Vault:</label>
+        <input
+          type="text"
+          value={vault}
+          onChange={(e) => setVault(e.target.value)}
+          className="px-2 py-1 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 w-32"
+        />
+        <button
+          type="button"
+          onClick={refresh}
+          className="px-2 h-7 text-xs rounded text-gray-700 hover:bg-gray-100 flex items-center gap-1"
+          title="reload"
+        >
+          <RefreshCw size={12} /> refresh
+        </button>
+      </div>
+
+      {flash && (
+        <div
+          className={`mb-3 rounded px-3 py-2 text-[12px] ${
+            flash.kind === "ok"
+              ? "bg-green-50 text-green-800 border border-green-200"
+              : "bg-red-50 text-red-800 border border-red-200"
+          }`}
+        >
+          {flash.text}
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-3 rounded px-3 py-2 text-[12px] bg-red-50 text-red-800 border border-red-200">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="text-[12px] text-gray-400">loading…</div>
+      ) : servers.length === 0 ? (
+        <div className="text-[12px] text-gray-400">
+          No MCP servers are configured in workspace claude.json. Ask your
+          admin to add some to{" "}
+          <code className="bg-gray-100 px-1 rounded">
+            knowledge/.loopat/claude/claude.json
+          </code>
+          .
+        </div>
+      ) : (
+        <div className="border border-gray-200 rounded overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">Server</th>
+                <th className="text-left px-3 py-2 font-medium">URL</th>
+                <th className="text-left px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {servers.map((s) => {
+                const st = status[s.name]
+                const isConnected = !!st?.connected
+                const busy = busyFor === s.name
+                return (
+                  <tr key={s.name} className="border-t border-gray-100">
+                    <td className="px-3 py-2 font-medium text-gray-700">{s.name}</td>
+                    <td className="px-3 py-2 text-[12px] text-gray-500 font-mono truncate max-w-xs">
+                      {s.url ?? `[${s.type}]`}
+                    </td>
+                    <td className="px-3 py-2">
+                      {isConnected ? (
+                        <span className="inline-flex items-center gap-1 text-[12px] text-green-700">
+                          <Check size={12} /> connected
+                          {st?.expiresAt && (
+                            <span className="text-gray-400 ml-1">
+                              · expires {new Date(st.expiresAt).toLocaleString()}
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-[12px] text-gray-400">not connected</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {s.type === "stdio" ? (
+                        <span className="text-[11px] text-gray-400">stdio (env-injected)</span>
+                      ) : isConnected ? (
+                        <button
+                          type="button"
+                          onClick={() => disconnect(s.name)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1 px-2 h-7 text-xs rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+                        >
+                          <Unlink size={12} /> Disconnect
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => connect(s.name)}
+                          disabled={busy}
+                          className="inline-flex items-center gap-1 px-3 h-7 text-xs rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+                        >
+                          <Link2 size={12} /> {busy ? "connecting…" : "Connect"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
