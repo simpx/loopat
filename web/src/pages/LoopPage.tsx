@@ -3,7 +3,7 @@
  * Chat area uses assistant-ui runtime with custom claudecodeui-styled components.
  */
 import { useEffect, useState, useMemo } from "react"
-import { useParams, useNavigate, Navigate } from "react-router-dom"
+import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown } from "lucide-react"
 import { Panel, Group, Separator } from "react-resizable-panels"
@@ -273,6 +273,20 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     getLoopSandbox(meta.id).then(setSandboxInfo)
     markLoopViewed(meta.id)
   }, [meta.id])
+
+  // Kickoff message: when navigated here with router state { kickoff: "..." },
+  // auto-send once the WS is connected. Used by the Welcome card to fire the
+  // onboarding flow (sends "/loopat:onboarding"). Clear state to prevent re-
+  // sending on refresh/back-nav.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const kickoff = (location.state as { kickoff?: string } | null)?.kickoff
+  useEffect(() => {
+    if (!kickoff || !connected) return
+    extra.enqueueMessage(kickoff)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kickoff, connected])
 
   const onRefreshSandbox = async () => {
     if (refreshingSandbox) return

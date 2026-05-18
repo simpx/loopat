@@ -99,6 +99,17 @@ prints a checklist, and prompts you to set your API key in
 > with shared knowledge/notes git repos and full bootstrap details, see
 > the [installation guide](docs/install.md).
 
+### Setup guides
+
+Loopat splits configuration along role lines — read whichever applies:
+
+- **[Admin setup](docs/setup-admin.md)** — provision the workspace:
+  knowledge / notes repos, team sandboxes, MCP, operator mounts. Run
+  this once per workspace.
+- **[User setup](docs/setup-user.md)** — join an existing workspace:
+  personal credential repo, providers, vaults, sandbox mounts. Run
+  this once per member, per machine.
+
 [bwrap]: https://github.com/containers/bubblewrap
 [mise]: https://mise.jdx.dev/
 [bun]: https://bun.sh/
@@ -129,12 +140,16 @@ Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
 
 ## Documentation
 
+- **[Admin setup](docs/setup-admin.md)** — workspace config, knowledge /
+  notes repos, sandboxes, MCP, operator mounts.
+- **[User setup](docs/setup-user.md)** — personal repo, providers,
+  vaults, sandbox mounts.
+- **[Installation guide](docs/install.md)** — host install, system deps,
+  environment variables.
 - **[Architecture](docs/architecture.md)** — the read/write path, layered
   context model, distillation pipeline, Claude config injection paths.
 - **[Sandbox](docs/sandbox.md)** — bwrap mount mechanics, three-tier mount
   authority, what stops the agent from escaping.
-- **[Installation guide](docs/install.md)** — full bootstrap, team setup,
-  environment variables.
 - **[Troubleshooting](docs/troubleshoot.md)** — chat won't start, banner
   errors, common pitfalls.
 
