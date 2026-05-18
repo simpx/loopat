@@ -23,7 +23,7 @@
 # Output:
 #   dist-macos-x64/    (server + sandbox for Intel Macs)
 #   dist-macos-arm64/  (server + sandbox for Apple Silicon)
-#   dist-macos-tauri/  (Tauri .app bundle, if built on macOS)
+#   dist-macos-tauri/  (native resources staged for the Tauri .app bundle)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -65,7 +65,7 @@ build_arch() {
     aarch64-apple-darwin) bun_target="bun-darwin-arm64"; claude_pkg="claude-agent-sdk-darwin-arm64"; misc_arch="arm64" ;;
   esac
   mkdir -p "$outdir"
-  bun build --compile --target="$bun_target" --outfile="$outdir/loopat" server/src/index.ts
+  bun build --compile --target="$bun_target" --outfile="$outdir/loopat-server" server/src/index.ts
 
   cp "loopat-sandbox/target/$target/release/loopat-sandbox" "$outdir/loopat-sandbox"
   cp scripts/install-macos.sh "$outdir/install.sh"
@@ -78,7 +78,7 @@ build_arch() {
   bundle_git_crypt_binary "$outdir" "$target"
 
   echo "==> $outdir:"
-  ls -lh "$outdir/loopat" "$outdir/loopat-sandbox" "$outdir/claude" "$outdir/mise" "$outdir/git-crypt" "$outdir/install.sh"
+  ls -lh "$outdir/loopat-server" "$outdir/loopat-sandbox" "$outdir/claude" "$outdir/mise" "$outdir/git-crypt" "$outdir/install.sh"
 }
 
 # Download the platform-specific claude CLI binary from the npm registry and
@@ -337,7 +337,7 @@ case "$ARCH" in
     echo "  Using binaries from $dist_src/"
 
     # Auto-build native arch binaries if missing
-    required_bins=("loopat" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
+    required_bins=("loopat-server" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
     need_build=false
     for bin in "${required_bins[@]}"; do
       if [ ! -f "$dist_src/$bin" ]; then
@@ -356,24 +356,25 @@ case "$ARCH" in
       cargo install tauri-cli --version "^2"
     fi
 
-    # tauri.conf.json hardcodes resources under dist-macos-x64/.
-    # Create a compatibility symlink so arm64 builds resolve correctly.
-    cleanup_symlink=false
-    if [ "$dist_src" != "dist-macos-x64" ] && [ ! -e "dist-macos-x64" ]; then
-      ln -sf "$dist_src" dist-macos-x64
-      cleanup_symlink=true
-    fi
+    # Stage native-arch resources at the stable path referenced by tauri.conf.json.
+    rm -rf dist-macos-tauri
+    mkdir -p dist-macos-tauri
+    cp "$dist_src/loopat-server" \
+       "$dist_src/loopat-sandbox" \
+       "$dist_src/claude" \
+       "$dist_src/mise" \
+       "$dist_src/git-crypt" \
+       "$dist_src/libcrypto.3.dylib" \
+       dist-macos-tauri/
+
+    tauri_config='{"bundle":{"resources":["../dist-macos-tauri/loopat-server","../dist-macos-tauri/loopat-sandbox","../dist-macos-tauri/claude","../dist-macos-tauri/mise","../dist-macos-tauri/git-crypt","../dist-macos-tauri/libcrypto.3.dylib"]}}'
 
     # Build the .app bundle + .dmg
     cd src-tauri
-    cargo tauri build --bundles dmg
+    cargo tauri build --bundles dmg --config "$tauri_config"
     echo "==> Tauri bundle: src-tauri/target/release/bundle/dmg/"
     cd ..
 
-    # Clean up compatibility symlink
-    if [ "$cleanup_symlink" = true ]; then
-      rm dist-macos-x64
-    fi
     ;;
   *)
     echo "Usage: $0 [all|x64|arm64|tauri]"

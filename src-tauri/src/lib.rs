@@ -4,6 +4,7 @@ use tauri::Manager;
 
 struct ServerProcess(Mutex<Option<Child>>);
 
+#[cfg(target_os = "windows")]
 const WSL_DISTRO: &str = "loopat";
 const SERVER_PORT: u16 = 7787;
 
@@ -20,7 +21,8 @@ fn decode_wsl(bytes: &[u8]) -> String {
         let null_at_odds = (1..bytes.len()).step_by(2).all(|i| bytes[i] == 0);
         if null_at_odds {
             // Likely UTF-16LE — decode as slices of u16
-            let u16s: Vec<u16> = bytes.chunks_exact(2)
+            let u16s: Vec<u16> = bytes
+                .chunks_exact(2)
                 .filter_map(|c| Some(u16::from_le_bytes([c[0], c[1]])))
                 .take_while(|&c| c != 0)
                 .collect();
@@ -58,7 +60,9 @@ fn wsl_output(args: &[&str]) -> Result<String, String> {
 #[cfg(target_os = "windows")]
 fn ensure_wsl2() -> Result<(), String> {
     if !std::path::Path::new(WSL_EXE).exists() {
-        return Err("WSL not found. Run `wsl --install` from admin PowerShell, then reboot.".into());
+        return Err(
+            "WSL not found. Run `wsl --install` from admin PowerShell, then reboot.".into(),
+        );
     }
     let status = wsl_output(&["--status"]).unwrap_or_default();
     eprintln!("[loopat] wsl --status: {status:?}");
@@ -96,8 +100,12 @@ fn import_distro(tar_path: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(&install_dir).map_err(|e| format!("mkdir: {e}"))?;
 
     let tar_size = std::fs::metadata(tar_path).map(|m| m.len()).unwrap_or(0);
-    eprintln!("[loopat] import: tar={}, size={}, install_dir={}",
-        tar_path.display(), tar_size, install_dir.display());
+    eprintln!(
+        "[loopat] import: tar={}, size={}, install_dir={}",
+        tar_path.display(),
+        tar_size,
+        install_dir.display()
+    );
 
     match try_import(&install_dir, tar_path, true) {
         Ok(()) => return Ok(()),
@@ -109,7 +117,11 @@ fn import_distro(tar_path: &std::path::Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn try_import(install_dir: &std::path::Path, tar_path: &std::path::Path, version_flag: bool) -> Result<(), String> {
+fn try_import(
+    install_dir: &std::path::Path,
+    tar_path: &std::path::Path,
+    version_flag: bool,
+) -> Result<(), String> {
     let mut args: Vec<String> = vec![
         "--import".into(),
         WSL_DISTRO.into(),
@@ -142,14 +154,15 @@ fn appdata_dir() -> std::path::PathBuf {
 
 // ── server lifecycle ──
 
-fn wait_for_server() {
+fn wait_for_server() -> bool {
     for _ in 0..120 {
         if std::net::TcpStream::connect(format!("127.0.0.1:{SERVER_PORT}")).is_ok() {
-            return;
+            return true;
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
-    eprintln!("loopat server did not start in time");
+    eprintln!("[loopat] server did not start in time");
+    false
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -172,22 +185,27 @@ pub fn run() {
                 {
                     let _ = Command::new(WSL_EXE)
                         .args(["-d", WSL_DISTRO, "--", "pkill", "-f", "loopat-server"])
-                        .stdout(Stdio::null()).stderr(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
                         .spawn();
                 }
             }
         })
         .setup(|app| {
             let server = start_server(app);
+            let server_started = server.is_some();
             if let Some(guard) = app.try_state::<ServerProcess>() {
                 if let Ok(mut g) = guard.0.lock() {
                     *g = server;
                 }
             }
-            wait_for_server();
-            if let Some(window) = app.get_webview_window("main") {
-                let url = format!("http://localhost:{SERVER_PORT}");
-                let _ = window.navigate(url.parse().unwrap());
+            if server_started && wait_for_server() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let url = format!("http://localhost:{SERVER_PORT}");
+                    let _ = window.navigate(url.parse().unwrap());
+                }
+            } else if !server_started {
+                eprintln!("[loopat] server was not started; keeping startup page open");
             }
             Ok(())
         })
@@ -195,10 +213,10 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn start_server(app: &tauri::App) -> Option<Child> {
+fn start_server(_app: &tauri::App) -> Option<Child> {
     #[cfg(target_os = "windows")]
     {
-        match setup_wsl(app) {
+        match setup_wsl(_app) {
             Ok(child) => return Some(child),
             Err(e) => {
                 eprintln!("[loopat] WSL setup error: {e}");
@@ -209,23 +227,33 @@ fn start_server(app: &tauri::App) -> Option<Child> {
     #[cfg(not(target_os = "windows"))]
     {
         find_server_binary().and_then(|path| {
+            eprintln!("[loopat] starting server binary: {}", path.display());
             let mut cmd = Command::new(path);
             cmd.stdin(Stdio::null());
             cmd.stdout(Stdio::inherit());
             cmd.stderr(Stdio::inherit());
-            cmd.spawn().ok()
+            match cmd.spawn() {
+                Ok(child) => Some(child),
+                Err(e) => {
+                    eprintln!("[loopat] failed to start server binary: {e}");
+                    None
+                }
+            }
         })
     }
 }
 
 #[cfg(target_os = "windows")]
 fn find_tar_path(app: &tauri::App) -> Option<std::path::PathBuf> {
-    app.handle().path().resource_dir()
+    app.handle()
+        .path()
+        .resource_dir()
         .ok()
         .map(|d| d.join("loopat-wsl.tar.gz"))
         .filter(|p| p.exists())
         .or_else(|| {
-            std::env::current_exe().ok()
+            std::env::current_exe()
+                .ok()
                 .and_then(|p| p.parent().map(|d| d.join("loopat-wsl.tar.gz")))
                 .filter(|p| p.exists())
         })
@@ -238,14 +266,17 @@ fn expected_version(tar_path: &std::path::Path) -> Option<String> {
         "{}.version",
         tar_path.file_stem()?.to_string_lossy()
     ));
-    std::fs::read_to_string(&vf).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(&vf)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 #[cfg(target_os = "windows")]
 fn current_distro_version() -> Option<String> {
     let out = Command::new(WSL_EXE)
         .args(["-d", WSL_DISTRO, "--", "cat", "/opt/loopat/.wsl-version"])
-        .output().ok()?;
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -257,8 +288,7 @@ fn setup_wsl(app: &tauri::App) -> Result<Child, String> {
     eprintln!("[loopat] WSL: checking installation…");
     ensure_wsl2()?;
 
-    let tar_path = find_tar_path(app)
-        .ok_or("loopat-wsl.tar.gz not found".to_string())?;
+    let tar_path = find_tar_path(app).ok_or("loopat-wsl.tar.gz not found".to_string())?;
     eprintln!("[loopat] tar resolved to: {}", tar_path.display());
 
     let need_import = if !distro_imported() {
@@ -300,10 +330,11 @@ fn find_server_binary() -> Option<std::path::PathBuf> {
 
     // Inside a macOS .app bundle: binary is in MacOS/, resources in Resources/
     // Tauri v2 preserves relative resource paths, so binaries may be nested under
-    // a subdirectory (e.g. Resources/dist-macos-x64/loopat).
+    // a subdirectory (e.g. Resources/dist-macos-tauri/loopat-server).
     let resource_dir = exe_dir.parent()?.join("Resources");
 
-    // Search Resources/ recursively (Tauri may preserve resource subdirectory structure)
+    // Search Resources/ recursively (Tauri may preserve resource subdirectory structure).
+    // Prefer loopat-server to avoid colliding with the Tauri GUI executable named loopat.
     if resource_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&resource_dir) {
             for entry in entries.flatten() {
@@ -326,12 +357,15 @@ fn find_server_binary() -> Option<std::path::PathBuf> {
         if candidate.exists() {
             return Some(candidate);
         }
-        // Same directory as the Tauri binary (dev / non-bundle builds)
-        let candidate = exe_dir.join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
     }
+    // Dev / non-bundle builds: only accept the explicit server name here.
+    // Never fall back to exe_dir/loopat, because that is the Tauri GUI binary
+    // in packaged apps and causes recursive window launches.
+    let candidate = exe_dir.join("loopat-server");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+
     // Dev mode: lookup relative to project root
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let base = manifest.parent()?;

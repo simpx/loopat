@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build loopat as a standalone binary distribution.
 #
-# Output:  dist/loopat          (compiled Bun server)
+# Output:  dist/loopat-server   (compiled Bun server)
 #          dist/loopat-sandbox  (Rust sandbox binary)
 #          dist/claude          (Claude CLI binary)
 #          dist/web/dist/       (frontend assets)
@@ -37,7 +37,7 @@ echo "==> Compiling loopat server binary..."
 # No compile-time defines needed — resolvers check bundleDir = dirname(binary)
 bun build --compile \
   --target=bun-linux-x64 \
-  --outfile=dist/loopat \
+  --outfile=dist/loopat-server \
   server/src/index.ts
 
 echo "==> Copying web assets..."
@@ -45,4 +45,4 @@ mkdir -p dist/web
 cp -r web/dist dist/web/dist
 
 echo "==> Done: dist/"
-ls -lh dist/loopat dist/loopat-sandbox dist/claude 2>/dev/null
+ls -lh dist/loopat-server dist/loopat-sandbox dist/claude 2>/dev/null

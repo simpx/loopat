@@ -5,13 +5,13 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
-if [ ! -f "$DIR/loopat" ]; then
-  echo "Error: loopat binary not found next to this script."
-  echo "Place this script in the same directory as loopat and loopat-sandbox."
+if [ ! -f "$DIR/loopat-server" ]; then
+  echo "Error: loopat-server binary not found next to this script."
+  echo "Place this script in the same directory as loopat-server and loopat-sandbox."
   exit 1
 fi
 
-BUNDLED_BINS=("$DIR/loopat" "$DIR/loopat-sandbox" "$DIR/claude" "$DIR/mise" "$DIR/git-crypt")
+BUNDLED_BINS=("$DIR/loopat-server" "$DIR/loopat-sandbox" "$DIR/claude" "$DIR/mise" "$DIR/git-crypt")
 
 echo "==> Removing quarantine attributes…"
 xattr -cr "${BUNDLED_BINS[@]}" 2>/dev/null || true
@@ -56,4 +56,4 @@ echo "    Verify it works:"
 echo "        ls -l \"\$LOOPAT_CLAUDE_BINARY\""
 echo ""
 echo "==> Done. Run:"
-echo "    $DIR/loopat"
+echo "    $DIR/loopat-server"

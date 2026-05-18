@@ -10,7 +10,7 @@ OUT="$PWD/dist-windows/loopat-wsl.tar.gz"
 mkdir -p dist-windows
 
 BUILD_DIR=$(mktemp -d)
-cp dist/loopat          "$BUILD_DIR/loopat-server"
+cp dist/loopat-server   "$BUILD_DIR/loopat-server"
 cp dist/loopat-sandbox  "$BUILD_DIR/loopat-sandbox"
 cp dist/claude          "$BUILD_DIR/claude"
 

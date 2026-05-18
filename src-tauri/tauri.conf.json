@@ -33,14 +33,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": [
-      "../dist-macos-x64/loopat",
-      "../dist-macos-x64/loopat-sandbox",
-      "../dist-macos-x64/claude",
-      "../dist-macos-x64/mise",
-      "../dist-macos-x64/git-crypt",
-      "../dist-macos-x64/libcrypto.3.dylib"
     ]
   }
 }
