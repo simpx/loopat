@@ -101,6 +101,10 @@ export const builtinPluginsDir = () => join(TEMPLATES_DIR, "plugins")
 export const personalLoopatDir = (user: string) => join(personalDir(user), ".loopat")
 export const personalLoopatConfigPath = (user: string) => join(personalLoopatDir(user), "config.json")
 export const personalVaultsDir = (user: string) => join(personalLoopatDir(user), "vaults")
+/** Per-(user, vault) MCP OAuth token store. Inside the vault so it's covered
+ *  by git-crypt — content is per-active-vault, never seen across vaults. */
+export const personalMcpTokensPath = (user: string, vault: string) =>
+  join(personalVaultsDir(user), vault, "mcp-tokens.json")
 // Personal claude/ namespace: mirrors knowledge/.loopat/claude/ for per-user
 // supplements. skills/ here become user-tier skills composed in.
 export const personalLoopatClaudeDir = (user: string) => join(personalLoopatDir(user), "claude")

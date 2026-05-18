@@ -1257,3 +1257,50 @@ export async function markOnboardingDone(): Promise<boolean> {
   const r = await apiFetch("/api/onboarding/done", { method: "POST" })
   return r.ok
 }
+
+// ── MCP auth ──
+
+export type McpAuthStatus = Record<string, { connected: boolean; expiresAt?: number; scope?: string }>
+
+/** List the user's MCP auth state for a given vault. */
+export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStatus> {
+  const r = await apiFetch(`/api/mcp-auth?vault=${encodeURIComponent(vault)}`)
+  if (!r.ok) return {}
+  return (await r.json()) as McpAuthStatus
+}
+
+/** Begin OAuth flow. Returns the authorizationUrl the browser should navigate to. */
+export async function startMcpAuth(
+  serverName: string,
+  vault: string = "default",
+): Promise<{ authorizationUrl?: string; error?: string }> {
+  const r = await apiFetch("/api/mcp-auth/start", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serverName, vault }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? "start failed" }
+  return { authorizationUrl: j.authorizationUrl }
+}
+
+export async function deleteMcpAuth(serverName: string, vault: string = "default"): Promise<boolean> {
+  const r = await apiFetch(`/api/mcp-auth/${encodeURIComponent(serverName)}?vault=${encodeURIComponent(vault)}`, {
+    method: "DELETE",
+  })
+  return r.ok
+}
+
+/** Public-facing MCP server config (workspace-defined). Used by Settings → MCP Auth
+ *  to know which servers are available to connect. */
+export type WorkspaceMcpServer = {
+  name: string
+  type: "http" | "sse" | "stdio"
+  url?: string  // http/sse
+}
+
+export async function listWorkspaceMcpServers(): Promise<WorkspaceMcpServer[]> {
+  const r = await apiFetch("/api/workspace/mcp-servers")
+  if (!r.ok) return []
+  return (await r.json()) as WorkspaceMcpServer[]
+}
