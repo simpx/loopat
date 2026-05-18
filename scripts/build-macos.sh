@@ -356,11 +356,24 @@ case "$ARCH" in
       cargo install tauri-cli --version "^2"
     fi
 
+    # tauri.conf.json hardcodes resources under dist-macos-x64/.
+    # Create a compatibility symlink so arm64 builds resolve correctly.
+    cleanup_symlink=false
+    if [ "$dist_src" != "dist-macos-x64" ] && [ ! -e "dist-macos-x64" ]; then
+      ln -sf "$dist_src" dist-macos-x64
+      cleanup_symlink=true
+    fi
+
     # Build the .app bundle + .dmg
     cd src-tauri
     cargo tauri build --bundles dmg
     echo "==> Tauri bundle: src-tauri/target/release/bundle/dmg/"
     cd ..
+
+    # Clean up compatibility symlink
+    if [ "$cleanup_symlink" = true ]; then
+      rm dist-macos-x64
+    fi
     ;;
   *)
     echo "Usage: $0 [all|x64|arm64|tauri]"
