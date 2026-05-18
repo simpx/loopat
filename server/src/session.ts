@@ -1,6 +1,6 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
-import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises"
+import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
@@ -300,6 +300,21 @@ class LoopSession {
     // entries show up at next session start.
     const { enabledPlugins } = await composeLoopClaudeConfig(loopId, meta.createdBy)
     await writeLoopSettings(loopId, enabledPlugins)
+
+    // Nuke any stale `.claude/.credentials.json` that CC may have written in
+    // a previous spawn — that file is CC's *ephemeral* MCP OAuth state, and
+    // when present, CC prefers it over the Authorization headers we inject
+    // via mcpServers config. Stale entries (revoked / rotated / mismatched
+    // hashes) cause MCP connections to fail with needs-auth even when our
+    // injection is correct.
+    //
+    // loopat owns MCP auth now (Settings → MCP → Connect), tokens live in
+    // the vault, and they're applied per-spawn through mergeMcpTokens(). The
+    // sandbox-side credentials.json is no longer authoritative — delete it.
+    try {
+      const credPath = join(loopClaudeDir(loopId), ".credentials.json")
+      await rm(credPath, { force: true })
+    } catch {}
 
     // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
