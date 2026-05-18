@@ -9,12 +9,13 @@
  */
 import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, ExternalLink } from "lucide-react"
+import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, ExternalLink, RotateCw } from "lucide-react"
 import {
   getMcpAuth,
   startMcpAuth,
   deleteMcpAuth,
   listMcpServers,
+  restartLoopSession,
   type McpAuthStatus,
   type McpServerInventory,
 } from "@/api"
@@ -25,10 +26,15 @@ export function McpStatusPanel({
   variant,
   vault: vaultProp,
   onClose,
+  loopId,
 }: {
   variant: Variant
   vault?: string
   onClose?: () => void
+  /** Required for the popover variant — enables the "Reload" button that
+   *  restarts the current loop's SDK session so newly-connected MCPs take
+   *  effect without /clear. Ignored in settings variant. */
+  loopId?: string
 }) {
   const navigate = useNavigate()
   const [inventory, setInventory] = useState<McpServerInventory | null>(null)
@@ -37,6 +43,7 @@ export function McpStatusPanel({
   const [loading, setLoading] = useState(true)
   const [busyFor, setBusyFor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [reloadFlash, setReloadFlash] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -73,6 +80,21 @@ export function McpStatusPanel({
   const goSettings = () => {
     onClose?.()
     navigate(`/settings/mcp`)
+  }
+
+  const reloadSession = async () => {
+    if (!loopId) return
+    setReloadFlash(null)
+    const r = await restartLoopSession(loopId)
+    if (r.error) {
+      setError(r.error)
+    } else {
+      setReloadFlash(
+        r.restarted
+          ? "Loop SDK session restarted. Send a message to re-spawn with new MCP tokens."
+          : "No active SDK session — next message will spawn fresh.",
+      )
+    }
   }
 
   return (
@@ -127,6 +149,12 @@ export function McpStatusPanel({
         </div>
       )}
 
+      {reloadFlash && (
+        <div className={`${variant === "settings" ? "mb-3" : "mx-3 mt-3"} rounded px-3 py-2 text-[12px] bg-blue-50 text-blue-800 border border-blue-200`}>
+          {reloadFlash}
+        </div>
+      )}
+
       {loading && !inventory ? (
         <div className={`${variant === "settings" ? "" : "px-3 py-4"} text-[12px] text-gray-400`}>loading…</div>
       ) : (
@@ -164,13 +192,24 @@ export function McpStatusPanel({
         </div>
       )}
 
-      {/* Popover footer with link to full settings */}
+      {/* Popover footer */}
       {variant === "popover" && (
         <div className="border-t border-gray-200 px-3 py-2 flex items-center justify-between text-[11px]">
           <span className="text-gray-400">vault: {vault}</span>
-          <button onClick={goSettings} className="text-gray-600 hover:text-gray-900 flex items-center gap-1">
-            Settings → MCP <ExternalLink size={10} />
-          </button>
+          <div className="flex items-center gap-3">
+            {loopId && (
+              <button
+                onClick={reloadSession}
+                className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                title="Restart the SDK session so newly-connected MCPs take effect. Conversation history is preserved."
+              >
+                <RotateCw size={10} /> Reload session
+              </button>
+            )}
+            <button onClick={goSettings} className="text-gray-600 hover:text-gray-900 flex items-center gap-1">
+              Settings → MCP <ExternalLink size={10} />
+            </button>
+          </div>
         </div>
       )}
     </div>

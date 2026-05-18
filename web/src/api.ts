@@ -1316,3 +1316,16 @@ export async function listMcpServers(): Promise<McpServerInventory> {
   if (!r.ok) return { tiers: [] }
   return (await r.json()) as McpServerInventory
 }
+
+/** Restart a loop's in-memory SDK session — interrupt the current query()
+ *  so the next user message re-spawns CC and re-reads mcpServers + tokens.
+ *  Used by the /mcp popover's "Reload" button after the user connects a new
+ *  MCP server. Conversation history is preserved by the SDK. */
+export async function restartLoopSession(loopId: string): Promise<{ restarted: boolean; error?: string }> {
+  const r = await apiFetch(`/api/loops/${encodeURIComponent(loopId)}/restart-session`, {
+    method: "POST",
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { restarted: false, error: j.error ?? `restart failed (${r.status})` }
+  return { restarted: !!j.restarted }
+}
