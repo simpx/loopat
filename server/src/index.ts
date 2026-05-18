@@ -28,7 +28,7 @@ import { join as pathJoin, dirname } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
-import { getSession, destroySession as destroyLoopSession } from "./session"
+import { getSession, destroySession as destroyLoopSession, restartSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
@@ -574,6 +574,20 @@ app.get("/api/mcp-auth/callback", async (c) => {
     return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(r.error)}`)
   }
   return c.redirect(`/settings/mcp?status=ok&server=${encodeURIComponent(r.serverName)}`)
+})
+
+// Restart the in-memory LoopSession for a loop (interrupt the running
+// query(), so the next user message re-spawns CC and re-injects mcpServers
+// + vault tokens + provider env). Conversation history is preserved via
+// the SDK's --continue. Auth: must be the loop's createdBy.
+app.post("/api/loops/:id/restart-session", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const id = c.req.param("id")
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "loop not found" }, 404)
+  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
+  const restarted = restartSession(id)
+  return c.json({ ok: true, restarted })
 })
 
 app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {

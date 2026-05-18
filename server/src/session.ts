@@ -240,13 +240,27 @@ class LoopSession {
    */
   setProvider(name: string | null) {
     this.providerOverride = name
+    this.restartOnNextMessage()
+    return true
+  }
+
+  /**
+   * Interrupt the current `query()` and clear `this.q`, so the next user
+   * message triggers a fresh `ensureStarted()` — picking up changes to env
+   * vars, provider config, **mcpServers**, etc. Conversation history is
+   * preserved because the SDK reads its session JSONL from disk on respawn
+   * (`continue: true` when `hasPriorSdkSession` is true).
+   *
+   * Idempotent: calling on a session that doesn't currently hold a query is
+   * a no-op. Fire-and-forget; the interrupt runs in the background.
+   */
+  restartOnNextMessage() {
     if (this.q) {
       const dying = this.q
       this.q = null
       this.input = pushIterable<SDKUserMessage>()
       dying.interrupt().catch(() => {})
     }
-    return true
   }
 
   private async loadHistoryFromDisk() {
@@ -1081,6 +1095,24 @@ export function destroySession(id: string): boolean {
   const s = sessions.get(id)
   if (!s) return false
   s.destroy()
+  return true
+}
+
+/**
+ * Restart the in-memory LoopSession for one loop, if it exists.
+ *
+ * "Restart" means: interrupt the current `query()` so the next user message
+ * re-runs `ensureStarted` — which re-reads vault tokens, `mcpServers`,
+ * provider env, etc. The SDK reads its session JSONL on respawn
+ * (`continue: true`), so conversation history is preserved.
+ *
+ * Returns true if a session was restarted, false if the loop had no active
+ * session (no-op).
+ */
+export function restartSession(id: string): boolean {
+  const s = sessions.get(id)
+  if (!s) return false
+  s.restartOnNextMessage()
   return true
 }
 

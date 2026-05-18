@@ -370,5 +370,11 @@ export async function completeMcpAuth(opts: {
   }
 
   await putMcpToken(flow.user, flow.vault, flow.serverName, stored)
+
+  // Token is persisted, but **already-running** LoopSessions still hold the
+  // old `query()` options. We intentionally do NOT auto-restart them here:
+  // that would interrupt long-running generations the user may have started
+  // in other loops. The /mcp popover exposes an explicit "Reload" button so
+  // the user reloads on their own terms, on the loop they're currently in.
   return { ok: true, serverName: flow.serverName }
 }
