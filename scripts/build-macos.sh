@@ -327,7 +327,6 @@ case "$ARCH" in
     fi
 
     # Detect native arch and pick the right dist directory
-    local native_arch
     native_arch="$(uname -m)"
     case "$native_arch" in
       x86_64)  dist_src="dist-macos-x64" ;;
@@ -338,8 +337,8 @@ case "$ARCH" in
     echo "  Using binaries from $dist_src/"
 
     # Auto-build native arch binaries if missing
-    local required_bins=("loopat" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
-    local need_build=false
+    required_bins=("loopat" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
+    need_build=false
     for bin in "${required_bins[@]}"; do
       if [ ! -f "$dist_src/$bin" ]; then
         need_build=true
