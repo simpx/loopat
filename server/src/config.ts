@@ -9,6 +9,7 @@ import {
   personalVaultDir,
   workspaceDir,
   workspaceClaudeJsonPath,
+  personalClaudeJsonPath,
 } from "./paths"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
@@ -417,6 +418,22 @@ export async function loadWorkspaceClaudeJson(): Promise<WorkspaceClaudeJson> {
     return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
   } catch (e: any) {
     console.warn(`[loopat] workspace claude.json malformed at ${p}: ${e?.message ?? e}`)
+    return {}
+  }
+}
+
+/**
+ * Per-user Claude config. Same JSON shape as workspace claude.json. Personal
+ * `mcpServers[<name>]` entries shadow workspace entries by name (user-tier
+ * wins over admin-tier — consistent with the skill/plugin compose model).
+ */
+export async function loadPersonalClaudeJson(user: string): Promise<WorkspaceClaudeJson> {
+  const p = personalClaudeJsonPath(user)
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
+  } catch (e: any) {
+    console.warn(`[loopat] personal claude.json malformed at ${p}: ${e?.message ?? e}`)
     return {}
   }
 }

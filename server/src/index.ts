@@ -44,7 +44,7 @@ import {
   loopHistoryPath,
   loopChatHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -479,19 +479,47 @@ function publicBaseUrl(c: any): string {
   return `${proto}://${host}`
 }
 
-// Lists MCP servers declared in workspace claude.json. Public-ish: every
-// authenticated workspace member can see what's available to authorize.
-app.get("/api/workspace/mcp-servers", requireAuth, async (c) => {
+// Lists MCP servers declared at every tier visible to this user, grouped by
+// source. Each tier reports its config-file path even when empty, so the UI
+// can tell users "add servers here if you want a personal-tier one".
+// Personal-tier shadows workspace-tier on name collision (matches spawn merge).
+app.get("/api/mcp-servers", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
   const ws = await loadWorkspaceClaudeJson()
-  const out: Array<{ name: string; type: string; url?: string }> = []
-  for (const [name, srv] of Object.entries(ws.mcpServers ?? {})) {
-    out.push({
-      name,
-      type: (srv as any).type ?? "stdio",
-      ...((srv as any).url ? { url: (srv as any).url } : {}),
-    })
-  }
-  return c.json(out)
+  const ps = await loadPersonalClaudeJson(userId)
+
+  const shape = (srv: any) => ({
+    type: (srv?.type ?? "stdio") as string,
+    ...(srv?.url ? { url: srv.url as string } : {}),
+  })
+
+  const workspaceTier = Object.entries(ws.mcpServers ?? {}).map(([name, srv]) => ({
+    name,
+    ...shape(srv),
+  }))
+  const personalTier = Object.entries(ps.mcpServers ?? {}).map(([name, srv]) => ({
+    name,
+    ...shape(srv),
+    /** Same-name in workspace will be shadowed by this entry at spawn time. */
+    shadowsWorkspace: !!ws.mcpServers?.[name],
+  }))
+
+  return c.json({
+    tiers: [
+      {
+        id: "workspace",
+        label: "Workspace MCPs (team-shared, admin-pushed)",
+        path: "context/knowledge/.loopat/claude/claude.json",
+        servers: workspaceTier,
+      },
+      {
+        id: "personal",
+        label: "Personal MCPs (per-user, your overrides)",
+        path: `personal/${userId}/.loopat/claude/claude.json`,
+        servers: personalTier,
+      },
+    ],
+  })
 })
 
 app.get("/api/mcp-auth", requireAuth, async (c) => {
@@ -536,16 +564,16 @@ app.get("/api/mcp-auth/callback", async (c) => {
   const code = c.req.query("code") ?? ""
   const errParam = c.req.query("error")
   if (errParam) {
-    return c.redirect(`/settings/mcp-auth?status=error&reason=${encodeURIComponent(errParam)}`)
+    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(errParam)}`)
   }
   if (!state || !code) {
-    return c.redirect(`/settings/mcp-auth?status=error&reason=missing_state_or_code`)
+    return c.redirect(`/settings/mcp?status=error&reason=missing_state_or_code`)
   }
   const r = await completeMcpAuth({ state, code })
   if (!r.ok) {
-    return c.redirect(`/settings/mcp-auth?status=error&reason=${encodeURIComponent(r.error)}`)
+    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(r.error)}`)
   }
-  return c.redirect(`/settings/mcp-auth?status=ok&server=${encodeURIComponent(r.serverName)}`)
+  return c.redirect(`/settings/mcp?status=ok&server=${encodeURIComponent(r.serverName)}`)
 })
 
 app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {

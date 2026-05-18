@@ -109,6 +109,10 @@ export const personalMcpTokensPath = (user: string, vault: string) =>
 // supplements. skills/ here become user-tier skills composed in.
 export const personalLoopatClaudeDir = (user: string) => join(personalLoopatDir(user), "claude")
 export const personalLoopatSkillsDir = (user: string) => join(personalLoopatClaudeDir(user), "skills")
+/** Per-user Claude config (mcpServers etc.) — sibling of the workspace
+ *  knowledge/.loopat/claude/claude.json. Same JSON shape; personal entries
+ *  shadow workspace entries by name (user > admin tier ordering). */
+export const personalClaudeJsonPath = (user: string) => join(personalLoopatClaudeDir(user), "claude.json")
 // Personal plugins (sibling of claude/), per-user namespaced.
 export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir(user), "plugins")
 // Composed output inside each loop's .claude/. Regenerated every spawn.
