@@ -8,6 +8,7 @@ import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
+import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
@@ -278,6 +279,13 @@ class LoopSession {
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
+
+    // Compose multi-tier claude config (skills + plugins) into the loop's
+    // private .claude/. Re-run every spawn so newly-added workspace/personal
+    // entries show up at next session start.
+    const { enabledPlugins } = await composeLoopClaudeConfig(loopId, meta.createdBy)
+    await writeLoopSettings(loopId, enabledPlugins)
+
     // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
     // servers should keep their token in `env`/`headers` directly (only ever
@@ -432,7 +440,16 @@ class LoopSession {
         sandbox: { enabled: false },
         // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
-          const fullArgs = [...bwrapBase, "--", command, ...args]
+          // CC's --plugin-dir flag points at a SINGLE plugin's root (uses the
+          // dir's basename as the plugin name), not a parent directory of
+          // multiple plugins. So enumerate the composed cache and pass one
+          // flag per plugin. Empty enabledPlugins → no extra flags.
+          const pluginDirArgs = enabledPlugins.flatMap((name) => [
+            "--plugin-dir",
+            `${V_LOOP_CLAUDE(loopId)}/plugins/cache/${name}`,
+          ])
+          const augmentedArgs = [...args, ...pluginDirArgs]
+          const fullArgs = [...bwrapBase, "--", command, ...augmentedArgs]
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed
