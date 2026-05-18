@@ -53,6 +53,10 @@ export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(),
 // Optional. If present, appended after the bundled platform doctrine.
 export const workspaceClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
 export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
+// Workspace plugins (admin-managed, lives under knowledge/.loopat/plugins/).
+// Sibling of claude/ — plugins are namespaced (loaded by CC via plugin manifest)
+// whereas claude/skills/ are flat user-tier skills (composed by loopat).
+export const workspaceLoopatPluginsDir = () => join(workspaceLoopatReservedDir(), "plugins")
 // Workspace-shared Claude Code config (mcpServers, future: hooks, ...).
 // Shape mirrors `.claude.json`. Workspace-versioned in knowledge repo.
 export const workspaceClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
@@ -82,6 +86,11 @@ export const loopSandboxMetaPath = (id: string) => join(loopSandboxDir(id), "san
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 
+// Builtin plugins (ship with loopat install). Composed into every loop's
+// plugin cache as the lowest-priority tier — workspace and personal plugins
+// can shadow them by name. See server/src/compose.ts.
+export const builtinPluginsDir = () => join(TEMPLATES_DIR, "plugins")
+
 // Personal `.loopat/` reserved namespace: per-user loopat config + vaults.
 // Mirrors `knowledge/.loopat/` as the personal counterpart.
 //
@@ -92,6 +101,15 @@ export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 export const personalLoopatDir = (user: string) => join(personalDir(user), ".loopat")
 export const personalLoopatConfigPath = (user: string) => join(personalLoopatDir(user), "config.json")
 export const personalVaultsDir = (user: string) => join(personalLoopatDir(user), "vaults")
+// Personal claude/ namespace: mirrors knowledge/.loopat/claude/ for per-user
+// supplements. skills/ here become user-tier skills composed in.
+export const personalLoopatClaudeDir = (user: string) => join(personalLoopatDir(user), "claude")
+export const personalLoopatSkillsDir = (user: string) => join(personalLoopatClaudeDir(user), "skills")
+// Personal plugins (sibling of claude/), per-user namespaced.
+export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir(user), "plugins")
+// Composed output inside each loop's .claude/. Regenerated every spawn.
+export const loopComposedSkillsDir = (id: string) => join(loopDir(id), ".claude", "skills")
+export const loopComposedPluginsCacheDir = (id: string) => join(loopDir(id), ".claude", "plugins", "cache")
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
 /** Sandbox-internal path where the active vault's contents land. */
 export const sandboxVaultMountPoint = () => "/loopat/context/personal/.loopat/vault"

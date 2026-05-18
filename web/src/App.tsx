@@ -22,7 +22,8 @@ import { ChatPage } from "./pages/ChatPage"
 import { SettingsPage } from "./pages/SettingsPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
-import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
+import { WelcomeCard } from "./components/WelcomeCard"
+import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
 const TABS = [
@@ -235,7 +236,45 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 }
 
 function LoopRedirect() {
+  // Use the SHARED workspace context, not a fresh useWorkspaceState() — the
+  // latter creates an independent state instance that double-bootstraps auth
+  // and races against Layout's, sometimes returning currentUser=null on the
+  // first render. With the context, authLoading is already false (Layout
+  // gates Shell on it) so currentUser is final when this mounts.
   const ws = useWorkspace()
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
+  const [personal, setPersonal] = useState<PersonalStatus | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    if (!ws.currentUser) return
+    Promise.all([getOnboarding(), getPersonalStatus()]).then(([o, p]) => {
+      setOnboarding(o)
+      setPersonal(p)
+    })
+  }, [ws.currentUser, reloadKey])
+
+  // For logged-in users, wait until both fetches resolve before deciding the
+  // route. Otherwise the very first render (currentUser set, fetches pending)
+  // falls through to Navigate(/loop/<first>) and we never see the Welcome card.
+  if (ws.currentUser && (onboarding === null || personal === null)) {
+    return null
+  }
+
+  if (
+    ws.currentUser &&
+    onboarding &&
+    onboarding.state !== "done" &&
+    personal?.imported
+  ) {
+    return (
+      <WelcomeCard
+        status={onboarding}
+        onChange={() => setReloadKey((k) => k + 1)}
+      />
+    )
+  }
+
   if (ws.loops.length === 0) {
     return <LoopEmpty loggedIn={!!ws.currentUser} onNew={() => ws.setNewLoopDialogOpen(true)} />
   }

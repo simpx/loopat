@@ -304,6 +304,11 @@ export interface LoopRuntimeExtra {
   showHistory: boolean
   /** Toggle showing pre-clear history. */
   toggleShowHistory: () => void
+  /** Slash commands advertised by CC at session init: built-ins ("init",
+   *  "clear"), user-tier skills ("loop", "schedule"), and plugin commands
+   *  ("loopat:onboarding"). Empty until the first init message arrives;
+   *  may include duplicates if CC ever reports them — caller should dedup. */
+  availableSlashCommands: string[]
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -337,6 +342,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   hasHistory: false,
   showHistory: false,
   toggleShowHistory: () => {},
+  availableSlashCommands: [],
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -365,6 +371,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
+  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -559,8 +566,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands],
   )
 
   useEffect(() => {
@@ -752,9 +759,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             setTaskVersion((v) => v + 1)
             return
           }
-          // system/init — start running
+          // system/init — start running; also cache the slash-command catalog
+          // advertised by CC (built-ins + skills + plugin commands like
+          // "loopat:onboarding").
           if (subtype === "init") {
             if (!loadingHistoryRef.current) setRunning(true)
+            const cmds = Array.isArray((m as any).slash_commands)
+              ? ((m as any).slash_commands as unknown[]).filter(
+                  (c): c is string => typeof c === "string",
+                )
+              : []
+            if (cmds.length > 0) setAvailableSlashCommands(cmds)
             return
           }
           return
