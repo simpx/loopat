@@ -47,7 +47,14 @@ build_arch() {
   local outdir="$2"
 
   echo "==> Building sandbox for $target..."
-  cargo zigbuild --manifest-path loopat-sandbox/Cargo.toml --release --target "$target"
+
+  # On macOS native we use cargo build directly (zigbuild is for Linux cross-compile).
+  # On Linux we use cargo zigbuild to cross-compile macOS binaries.
+  if [[ "$(uname)" == "Darwin" ]]; then
+    cargo build --manifest-path loopat-sandbox/Cargo.toml --release --target "$target"
+  else
+    cargo zigbuild --manifest-path loopat-sandbox/Cargo.toml --release --target "$target"
+  fi
 
   echo "==> Building server binary for $target..."
   local bun_target
@@ -67,6 +74,7 @@ build_arch() {
   bundle_claude_binary "$outdir" "$claude_pkg"
   # Bundle mise (per-loop toolchain manager) and git-crypt (encrypted vault secrets).
   bundle_mise_binary "$outdir" "$misc_arch"
+  # On macOS native, git-crypt can be installed via brew directly.
   bundle_git_crypt_binary "$outdir" "$target"
 
   echo "==> $outdir:"
@@ -156,6 +164,92 @@ bundle_git_crypt_binary() {
     return
   fi
 
+  echo "==> Bundling git-crypt..."
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    bundle_git_crypt_native "$outdir"
+  else
+    bundle_git_crypt_bottle "$outdir" "$target"
+  fi
+}
+
+# On macOS native: install git-crypt via brew directly and copy from Cellar.
+bundle_git_crypt_native() {
+  local outdir="$1"
+
+  if ! command -v brew &>/dev/null; then
+    echo "  WARNING: brew not found — git-crypt will not be bundled"
+    return
+  fi
+
+  echo "  Installing git-crypt and openssl@3 via brew..."
+  brew install git-crypt openssl@3 2>&1 | sed 's/^/  brew: /'
+
+  local gc_path
+  gc_path="$(brew --prefix git-crypt 2>/dev/null)/bin/git-crypt"
+  if [ ! -f "$gc_path" ]; then
+    gc_path="$(brew --cellar git-crypt 2>/dev/null)"
+    gc_path="$(ls -d "$gc_path"/*/bin/git-crypt 2>/dev/null | head -1)"
+  fi
+
+  if [ -z "$gc_path" ] || [ ! -f "$gc_path" ]; then
+    echo "  WARNING: git-crypt binary not found after brew install — will not be bundled"
+    return
+  fi
+
+  cp "$gc_path" "$outdir/git-crypt"
+  chmod 644 "$outdir/git-crypt"
+
+  # Patch dylib load path: /opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib
+  # or /usr/local/opt/openssl@3/lib/libcrypto.3.dylib → @loader_path/libcrypto.3.dylib
+  local ossl_lib
+  ossl_lib="$(brew --prefix openssl@3 2>/dev/null)/lib/libcrypto.3.dylib"
+  if [ ! -f "$ossl_lib" ]; then
+    echo "  WARNING: libcrypto.3.dylib not found — git-crypt may not work"
+    return
+  fi
+
+  node -e '
+    const fs = require("fs");
+    const p = "'"$outdir"'/git-crypt";
+    let buf = fs.readFileSync(p);
+    // Try both Homebrew prefixes (Apple Silicon and Intel)
+    const patterns = [
+      "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib",
+      "/usr/local/opt/openssl@3/lib/libcrypto.3.dylib",
+    ];
+    const next = "@loader_path/libcrypto.3.dylib";
+    let found = false;
+    for (const old of patterns) {
+      const idx = buf.indexOf(old);
+      if (idx !== -1) {
+        buf.fill(0, idx, idx + old.length);
+        buf.write(next, idx, "utf8");
+        found = true;
+        console.log("  Patched dylib load path");
+        break;
+      }
+    }
+    if (!found) {
+      console.error("  WARNING: openssl prefix pattern not found in git-crypt binary");
+      process.exit(1);
+    }
+    fs.writeFileSync(p, buf);
+  '
+  chmod 755 "$outdir/git-crypt"
+
+  cp "$ossl_lib" "$outdir/libcrypto.3.dylib"
+  chmod 755 "$outdir/libcrypto.3.dylib"
+
+  echo "  -> $outdir/git-crypt ($(du -h "$outdir/git-crypt" | cut -f1))"
+  echo "  -> $outdir/libcrypto.3.dylib ($(du -h "$outdir/libcrypto.3.dylib" | cut -f1))"
+}
+
+# On Linux: fetch macOS bottles and extract binaries (cross-compile path).
+bundle_git_crypt_bottle() {
+  local outdir="$1"
+  local target="$2"
+
   local bottle_suffix
   case "$target" in
     x86_64-apple-darwin)  bottle_suffix="sonoma" ;;
@@ -163,7 +257,7 @@ bundle_git_crypt_binary() {
     *) echo "  WARNING: unknown target $target for git-crypt"; return ;;
   esac
 
-  echo "==> Bundling git-crypt (${bottle_suffix} bottle)..."
+  echo "  Fetching ${bottle_suffix} bottles via brew..."
 
   # Fetch macOS bottles via Homebrew on Linux
   brew fetch --bottle-tag "$bottle_suffix" git-crypt 2>&1 | sed 's/^/  brew: /'
@@ -243,13 +337,19 @@ case "$ARCH" in
 
     echo "  Using binaries from $dist_src/"
 
-    # Ensure all server-side binaries exist before building the .app
+    # Auto-build native arch binaries if missing
     local required_bins=("loopat" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
+    local need_build=false
     for bin in "${required_bins[@]}"; do
       if [ ! -f "$dist_src/$bin" ]; then
-        echo "  WARNING: $dist_src/$bin not found — run 'bash scripts/build-macos.sh $([ "$native_arch" = arm64 ] && echo arm64 || echo x64)' first"
+        need_build=true
+        break
       fi
     done
+    if [ "$need_build" = true ]; then
+      echo "  Binaries missing in $dist_src/, building natively first..."
+      bash "$0" "$([ "$native_arch" = arm64 ] && echo arm64 || echo x64)"
+    fi
 
     # Build the .app bundle + .dmg
     cd src-tauri
