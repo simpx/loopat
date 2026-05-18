@@ -15,11 +15,13 @@ dist/
 dist-windows/
 dist-macos-arm64/
 dist-macos-x64/
+dist-macos-tauri/
 release/
 
 # Rust (loopat-sandbox, src-tauri build artifacts)
 loopat-sandbox/target/
 src-tauri/target/
+
 
 # Old prototype
 phase1-prototype/
