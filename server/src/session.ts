@@ -301,20 +301,27 @@ class LoopSession {
     const { enabledPlugins } = await composeLoopClaudeConfig(loopId, meta.createdBy)
     await writeLoopSettings(loopId, enabledPlugins)
 
-    // Nuke any stale `.claude/.credentials.json` that CC may have written in
-    // a previous spawn — that file is CC's *ephemeral* MCP OAuth state, and
-    // when present, CC prefers it over the Authorization headers we inject
-    // via mcpServers config. Stale entries (revoked / rotated / mismatched
-    // hashes) cause MCP connections to fail with needs-auth even when our
-    // injection is correct.
+    // Nuke CC's MCP-related cache files that linger across spawns:
+    //
+    //   `.credentials.json`        — CC's ephemeral OAuth state (mcpOAuth.<name>|<hash>).
+    //                                When present CC prefers it over Authorization
+    //                                headers we inject; stale entries cause needs-auth.
+    //   `mcp-needs-auth-cache.json` — CC's "I already know this server needs auth"
+    //                                short-circuit cache. If a server was marked
+    //                                needs-auth in a previous spawn, CC skips the
+    //                                connection attempt entirely on subsequent
+    //                                spawns — even when our injection now provides
+    //                                a valid header.
     //
     // loopat owns MCP auth now (Settings → MCP → Connect), tokens live in
-    // the vault, and they're applied per-spawn through mergeMcpTokens(). The
-    // sandbox-side credentials.json is no longer authoritative — delete it.
-    try {
-      const credPath = join(loopClaudeDir(loopId), ".credentials.json")
-      await rm(credPath, { force: true })
-    } catch {}
+    // the vault, and they're applied per-spawn through mergeMcpTokens(). CC
+    // has nothing to maintain in these files; clear them every spawn so
+    // header injection takes effect immediately.
+    for (const f of [".credentials.json", "mcp-needs-auth-cache.json"]) {
+      try {
+        await rm(join(loopClaudeDir(loopId), f), { force: true })
+      } catch {}
+    }
 
     // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
@@ -335,6 +342,20 @@ class LoopSession {
     const activeVault = meta.config?.vault?.trim() || "default"
     const userMcpTokens = await loadMcpTokens(meta.createdBy, activeVault)
     const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
+
+    // Diagnostic: log per-server "did we inject a header" without leaking the
+    // token itself. Helps users (and us) figure out why a connection landed
+    // needs-auth even when vault tokens exist.
+    {
+      const tag = loopId.slice(0, 8)
+      const summary = Object.entries(mcpServers ?? {}).map(([name, s]) => {
+        const hasAuth = !!(s as any).headers?.Authorization
+        const url = (s as any).url ?? `[${(s as any).type ?? "stdio"}]`
+        const tokLen = userMcpTokens[name]?.accessToken?.length
+        return `${name}:${hasAuth ? `inject(len=${tokLen})` : "no-token"}@${url}`
+      })
+      console.log(`[sdk:${tag}] mcpServers injection (vault=${activeVault}): ${summary.join(", ")}`)
+    }
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
