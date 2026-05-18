@@ -19,12 +19,17 @@
 import { readFile } from "node:fs/promises"
 import type { LoopMeta } from "./loops"
 import { bundledDoctrinePath } from "./paths"
+import { getEmbeddedTemplate } from "./web-assets"
 
 let cachedBundled: string | null = null
 
 async function loadBundled(): Promise<string> {
   if (cachedBundled !== null) return cachedBundled
-  cachedBundled = await readFile(bundledDoctrinePath(), "utf8")
+  // Try embedded first (works in compiled binary), fall back to filesystem
+  cachedBundled = getEmbeddedTemplate()
+  if (cachedBundled == null) {
+    cachedBundled = await readFile(bundledDoctrinePath(), "utf8")
+  }
   return cachedBundled
 }
 

@@ -4,8 +4,9 @@ import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promise
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
+import { loopClaudeDir, loopDir, loopWorkdir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
+import { resolveSandboxBinary } from "./sandbox-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { getLoop, patchLoopMeta } from "./loops"
@@ -14,6 +15,7 @@ import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
+const SANDBOX_BINARY = resolveSandboxBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
 
 /**
@@ -438,19 +440,20 @@ class LoopSession {
           // truncation (bun --filter, tools that elide). Path also printed
           // on non-zero exit.
           mkdirSync(loopDir(loopId), { recursive: true })
+          mkdirSync(loopWorkdir(loopId), { recursive: true })
           const stderrLogPath = join(loopDir(loopId), "stderr.log")
           const stderrFile = createWriteStream(stderrLogPath, { flags: "a" })
           stderrFile.write(`\n=== ${new Date().toISOString()} spawn ===\n`)
           stderrFile.write(`binary: ${command}\n`)
-          stderrFile.write(`bwrap argc: ${fullArgs.length}\n`)
+          stderrFile.write(`sandbox argc: ${fullArgs.length}\n`)
           if (DEBUG) {
-            const argvLine = `bwrap ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`
+            const argvLine = `${SANDBOX_BINARY} ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`
             console.error(`[sdk:${tag}] binary: ${command}`)
             console.error(`[sdk:${tag}] spawn cmd: ${argvLine}`)
             stderrFile.write(`argv: ${argvLine}\n`)
           }
 
-          const proc = nodeSpawn("bwrap", fullArgs, {
+          const proc = nodeSpawn(SANDBOX_BINARY, fullArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             signal,
           })

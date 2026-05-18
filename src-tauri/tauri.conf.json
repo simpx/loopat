@@ -1,0 +1,46 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicehash/tauri/main/core/tauri-config-schema/schema.json",
+  "productName": "loopat",
+  "version": "0.1.0",
+  "identifier": "ai.loopat.app",
+  "build": {
+    "devUrl": "http://localhost:7787",
+    "frontendDist": "../loading"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "loopat",
+        "width": 1280,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "visible": true,
+        "url": "/"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "msi",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "../dist-windows/loopat-wsl.tar.gz"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
+    }
+  }
+}

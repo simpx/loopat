@@ -218,6 +218,8 @@ export async function buildBwrapArgs(
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
+    // WSL: expose Windows drive mounts so sandbox can edit host files
+    "--bind-try", "/mnt", "/mnt",
   )
 
   // ── vault overlay ──
@@ -363,6 +365,9 @@ export async function buildBwrapArgs(
       args.push("--setenv", k, v)
     }
   }
+
+  // Ensure git SSH doesn't hang on host key prompt inside sandbox
+  args.push("--setenv", "GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null")
 
   for (const [k, v] of Object.entries(extraSetenv)) {
     args.push("--setenv", k, v)

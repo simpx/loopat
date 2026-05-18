@@ -12,6 +12,8 @@
     "dev:server": "bun --cwd server run dev",
     "dev:web": "bun --cwd web run dev",
     "dev:serve": "bun --cwd server run serve",
-    "build": "bun install && bun --cwd web run build"
+    "build": "bun install && bun --cwd web run build",
+    "build:binary": "bash scripts/build-binary.sh",
+    "build:sandbox": "cd loopat-sandbox && cargo build --release"
   }
 }

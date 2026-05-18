@@ -10,6 +10,17 @@ bun.lock
 server/src/*.js
 server/src/*.js.map
 
+# Build outputs
+dist/
+dist-windows/
+
+# Rust (loopat-sandbox, src-tauri build artifacts)
+loopat-sandbox/target/
+src-tauri/target/
+
+# Old prototype
+phase1-prototype/
+
 # Editor swap / temp files
 .*.swp
 .*.swo

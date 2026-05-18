@@ -157,10 +157,11 @@ async function isEmptyOrMissing(dir: string): Promise<boolean> {
 async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ cloned: boolean }> {
   if (url && (await isEmptyOrMissing(dir))) {
     try {
-      // remove the empty placeholder if it exists, git clone wants to create
-      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      try { await rm(dir, { recursive: true, force: true } ) } catch {}
       await mkdir(join(dir, ".."), { recursive: true })
-      await execFileP("git", ["clone", "--", url, dir])
+      await execFileP("git", ["clone", "--", url, dir], {
+        env: { ...process.env, GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null" },
+      })
       console.log(`[loopat] cloned ${url} → ${dir}`)
       return { cloned: true }
     } catch (e: any) {
@@ -178,7 +179,9 @@ async function ensureRepos(specs: RepoSpec[]) {
     if (existsSyncBase(dir)) continue
     try {
       await mkdir(workspaceReposDir(), { recursive: true })
-      await execFileP("git", ["clone", "--", r.git, dir])
+      await execFileP("git", ["clone", "--", r.git, dir], {
+        env: { ...process.env, GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null" },
+      })
       console.log(`[loopat] cloned ${r.git} → ${dir}`)
     } catch (e: any) {
       console.warn(`[loopat] repo clone failed (${r.git}): ${e?.stderr ?? e?.message ?? e}`)

@@ -4,9 +4,9 @@
  * works, just chat won't function until the user fills in what's missing.
  */
 import { existsSync } from "node:fs"
-import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { resolveClaudeBinary } from "./claude-binary"
+import { checkSandboxBinary } from "./sandbox-binary"
 import { configPath, type WorkspaceConfig } from "./config"
 import {
   WORKSPACE,
@@ -21,17 +21,8 @@ import { listUsers } from "./auth"
 
 type Check = { ok: boolean; label: string; hint?: string }
 
-function checkBwrap(): Check {
-  try {
-    execFileSync("bwrap", ["--version"], { stdio: "pipe" })
-    return { ok: true, label: "bwrap (sandbox)" }
-  } catch {
-    return {
-      ok: false,
-      label: "bwrap (sandbox)",
-      hint: "install with: sudo apt install bubblewrap   (Linux only)",
-    }
-  }
+function checkSandbox(): Check {
+  return checkSandboxBinary()
 }
 
 function checkClaudeBinary(): Check {
@@ -90,7 +81,7 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
     describeRepos(cfg),
     await checkUsers(),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
-    checkBwrap(),
+    checkSandbox(),
     checkClaudeBinary(),
   ]
 

@@ -44,7 +44,7 @@ export type SandboxEntry = {
  * Kept separate so mise.toml stays purely about runtime/tools.
  *
  * - `shell`: term spawn shell — bare name (PATH lookup against mise installs)
- *   or absolute path. Falls back to /bin/bash when undefined.
+ *   or absolute path. Falls back to /bin/bash (POSIX) / cmd.exe (Windows).
  *
  * Future: autostart services, hook scripts, etc.
  */

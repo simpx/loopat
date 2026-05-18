@@ -429,7 +429,10 @@ export async function addRepo(opts: { name: string; source: string }): Promise<{
   await mkdir(root, { recursive: true })
   if (isRepoUrl(source)) {
     try {
-      await execFileP("git", ["clone", source, target], { timeout: 300_000 })
+      await execFileP("git", ["clone", source, target], {
+        timeout: 300_000,
+        env: { ...process.env, GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null" },
+      })
       return { ok: true, name, kind: "clone" }
     } catch (e: any) {
       const msg = (e?.stderr || e?.stdout || e?.message || "clone failed").toString().trim()

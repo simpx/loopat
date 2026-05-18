@@ -1,0 +1,18 @@
+[package]
+name = "loopat-sandbox"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "loopat-sandbox"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+codegen-units = 1
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.29", features = ["sched", "mount", "signal", "process", "fs"] }
+libc = "0.2"

@@ -2105,24 +2105,33 @@ app.get("/ws/loop-status", upgradeWebSocket((c) => {
   }
 }))
 
-import { join } from "node:path"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { networkInterfaces } from "node:os"
-const webDist = join(import.meta.dir, "..", "..", "web", "dist")
-const indexHtml = join(webDist, "index.html")
+import { serveEmbedded } from "./web-assets"
+function binaryDir(): string {
+  if (!process.execPath.endsWith("bun") && !process.execPath.endsWith("bun.exe")) {
+    return dirname(process.execPath)
+  }
+  return import.meta.dir ?? dirname(fileURLToPath(import.meta.url))
+}
 
 app.get("*", async (c, next) => {
   const path = c.req.path
-  // Don't interfere with API / WS routes
   if (path.startsWith("/api/") || path.startsWith("/ws/")) return next()
-  // Try to serve the exact file
-  const file = Bun.file(join(webDist, path === "/" ? "index.html" : path))
+  // Try embedded assets first (bundled into binary via import.meta.glob)
+  const embedded = serveEmbedded(path)
+  if (embedded) return embedded
+  // Fallback: alongside the exe
+  const webDist = join(binaryDir(), "web", "dist")
+  const relPath = path === "/" ? "index.html" : path.replace(/^\//, "")
+  const file = Bun.file(join(webDist, relPath))
   if (await file.exists()) {
     return new Response(file, {
       headers: { "content-type": file.type },
     })
   }
-  // SPA fallback
-  return new Response(Bun.file(indexHtml), {
+  return new Response(Bun.file(join(webDist, "index.html")), {
     headers: { "content-type": "text/html" },
   })
 })

@@ -3,6 +3,21 @@ import { execSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { dirname, resolve, join } from "node:path"
 
+/**
+ * Get the directory containing the current binary.
+ * For `bun build --compile` binaries, process.execPath gives the real path;
+ * import.meta.url gives a virtual /$bunfs/root path that doesn't resolve
+ * to the real filesystem where bundled tools (claude, loopat-sandbox) live.
+ */
+function binaryDir(): string {
+  // In compiled mode, process.execPath points to the standalone binary
+  if (!process.execPath.endsWith("bun") && !process.execPath.endsWith("bun.exe")) {
+    return dirname(process.execPath)
+  }
+  // Dev mode: running via `bun run` — use source file location
+  return dirname(fileURLToPath(import.meta.url))
+}
+
 function detectIsMusl(): boolean {
   if (process.platform !== "linux") return false
   try {
@@ -26,9 +41,20 @@ function findWorkspaceRoot(start: string): string[] {
 }
 
 export function resolveClaudeBinary(): string {
+  // Env override highest priority
+  if (process.env.LOOPAT_CLAUDE_BINARY) {
+    const p = process.env.LOOPAT_CLAUDE_BINARY
+    if (existsSync(p)) return p
+    throw new Error(`LOOPAT_CLAUDE_BINARY=${p} not found`)
+  }
+
+  // Bundled alongside the compiled binary (dist/claude or claude.exe)
   const platform = process.platform
-  const arch = process.arch
   const ext = platform === "win32" ? ".exe" : ""
+  const bundled = join(binaryDir(), `claude${ext}`)
+  if (existsSync(bundled)) return bundled
+
+  const arch = process.arch
 
   const pkgs: string[] = []
   if (platform === "linux") {
