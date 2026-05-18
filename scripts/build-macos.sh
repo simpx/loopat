@@ -350,6 +350,12 @@ case "$ARCH" in
       bash "$0" "$([ "$native_arch" = arm64 ] && echo arm64 || echo x64)"
     fi
 
+    # Ensure cargo-tauri CLI is installed
+    if ! cargo tauri --version &>/dev/null; then
+      echo "  Installing tauri-cli..."
+      cargo install tauri-cli --version "^2"
+    fi
+
     # Build the .app bundle + .dmg
     cd src-tauri
     cargo tauri build --bundles dmg
