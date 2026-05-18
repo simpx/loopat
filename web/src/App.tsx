@@ -23,6 +23,7 @@ import { SettingsPage } from "./pages/SettingsPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { WelcomeCard } from "./components/WelcomeCard"
+import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
@@ -259,6 +260,17 @@ function LoopRedirect() {
   // falls through to Navigate(/loop/<first>) and we never see the Welcome card.
   if (ws.currentUser && (onboarding === null || personal === null)) {
     return null
+  }
+
+  // Pre-onboarding: no personal repo yet. Skip is a localStorage flag — the
+  // user can fall through to operate loopat with workspace-shared keys.
+  if (
+    ws.currentUser &&
+    personal &&
+    !personal.imported &&
+    !isSetupPersonalRepoDismissed()
+  ) {
+    return <SetupPersonalRepoCard onDismiss={() => setReloadKey((k) => k + 1)} />
   }
 
   if (
