@@ -32,6 +32,7 @@ import {
   workspaceLoopatSandboxMetaPath,
   workspaceLoopatSandboxesDir,
 } from "./paths"
+import { resolveMiseBinary } from "./mise-binary"
 
 const execFileP = promisify(execFile)
 
@@ -262,7 +263,7 @@ export async function lockSandbox(name: string): Promise<{ ok: boolean; error?: 
     MISE_LOCKFILE: "true",
   }
   try {
-    await execFileP("mise", ["install"], { env, cwd: sandboxDir })
+    await execFileP(resolveMiseBinary(), ["install"], { env, cwd: sandboxDir })
     return { ok: true }
   } catch (e: any) {
     if (e?.code === "ENOENT") {

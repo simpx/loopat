@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { execSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
-import { dirname, resolve, join } from "node:path"
+import { dirname, join } from "node:path"
 
 /**
  * Get the directory containing the current binary.
@@ -10,11 +10,9 @@ import { dirname, resolve, join } from "node:path"
  * to the real filesystem where bundled tools (claude, loopat-sandbox) live.
  */
 function binaryDir(): string {
-  // In compiled mode, process.execPath points to the standalone binary
   if (!process.execPath.endsWith("bun") && !process.execPath.endsWith("bun.exe")) {
     return dirname(process.execPath)
   }
-  // Dev mode: running via `bun run` — use source file location
   return dirname(fileURLToPath(import.meta.url))
 }
 
@@ -36,39 +34,47 @@ function findWorkspaceRoot(start: string): string[] {
     if (parent === cur) break
     cur = parent
   }
-  if (roots.length === 0) throw new Error("could not locate node_modules from " + start)
   return roots
 }
 
-export function resolveClaudeBinary(): string {
-  // Env override highest priority
+function isRegularFile(p: string): boolean {
+  try {
+    return statSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+export function resolveClaudeBinary(): string | null {
   if (process.env.LOOPAT_CLAUDE_BINARY) {
     const p = process.env.LOOPAT_CLAUDE_BINARY
-    if (existsSync(p)) return p
-    throw new Error(`LOOPAT_CLAUDE_BINARY=${p} not found`)
+    if (isRegularFile(p)) return p
+    if (existsSync(p)) {
+      console.warn(`[loopat] LOOPAT_CLAUDE_BINARY=${p} is not a regular file (directory?), falling back`)
+    } else {
+      console.warn(`[loopat] LOOPAT_CLAUDE_BINARY=${p} not found, falling back`)
+    }
+    return null
   }
 
-  // Bundled alongside the compiled binary (dist/claude or claude.exe)
   const platform = process.platform
   const ext = platform === "win32" ? ".exe" : ""
-  const bundled = join(binaryDir(), `claude${ext}`)
-  if (existsSync(bundled)) return bundled
+  const bundleDir = binaryDir()
+
+  // Bundled alongside the compiled binary (dist/claude or claude.exe)
+  const bundled = join(bundleDir, `claude${ext}`)
+  if (isRegularFile(bundled)) return bundled
 
   const arch = process.arch
+  const pkgs: string[] = platform === "linux"
+    ? (detectIsMusl()
+      ? [`claude-agent-sdk-linux-${arch}-musl`, `claude-agent-sdk-linux-${arch}`]
+      : [`claude-agent-sdk-linux-${arch}`, `claude-agent-sdk-linux-${arch}-musl`])
+    : [`claude-agent-sdk-${platform}-${arch}`]
 
-  const pkgs: string[] = []
-  if (platform === "linux") {
-    if (detectIsMusl()) {
-      pkgs.push(`claude-agent-sdk-linux-${arch}-musl`, `claude-agent-sdk-linux-${arch}`)
-    } else {
-      pkgs.push(`claude-agent-sdk-linux-${arch}`, `claude-agent-sdk-linux-${arch}-musl`)
-    }
-  } else {
-    pkgs.push(`claude-agent-sdk-${platform}-${arch}`)
-  }
-
-  const here = fileURLToPath(import.meta.url)
-  const roots = findWorkspaceRoot(dirname(here))
+  // Use binaryDir() instead of import.meta.url — import.meta.url is
+  // /$bunfs/root/ in compiled mode, which doesn't exist on the real FS.
+  const roots = findWorkspaceRoot(bundleDir)
   const candidates: string[] = []
   for (const root of roots) {
     for (const pkg of pkgs) {
@@ -88,7 +94,7 @@ export function resolveClaudeBinary(): string {
   }
 
   for (const c of candidates) {
-    if (existsSync(c)) return c
+    if (isRegularFile(c)) return c
   }
-  throw new Error(`claude binary not found; tried:\n${candidates.join("\n")}`)
+  return null
 }

@@ -10,11 +10,26 @@ import { fileURLToPath } from "node:url"
  */
 export const LOOPAT_HOME = process.env.LOOPAT_HOME ?? join(homedir(), ".loopat")
 
-// loopat code install dir (contains node_modules/, helper binaries the sandbox needs)
-// Computed from this file's path: server/src/paths.ts → loop/
 const __DIRNAME = dirname(fileURLToPath(import.meta.url))
-export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
-export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
+const SOURCE_ROOT_DIR = resolve(__DIRNAME, "../..")
+
+function isCompiledRuntime(): boolean {
+  const exe = basename(process.execPath)
+  return exe !== "bun" && exe !== "bun.exe"
+}
+
+// Real filesystem install dir (contains helper binaries like loopat-sandbox and
+// claude in compiled distributions). In `bun build --compile`, import.meta.url
+// points at Bun's virtual filesystem and may resolve to `/`, which must never be
+// passed to the sandbox as a bind source.
+export const LOOPAT_INSTALL_DIR = isCompiledRuntime()
+  ? dirname(process.execPath)
+  : SOURCE_ROOT_DIR
+
+// Templates are source assets. In compiled Bun builds this path can be virtual,
+// which is fine for readFile(), but it is intentionally not used for sandbox
+// binds.
+export const TEMPLATES_DIR = join(SOURCE_ROOT_DIR, "server", "templates")
 
 export const WORKSPACE = basename(LOOPAT_HOME).replace(/^\.+/, "") || "loopat"
 

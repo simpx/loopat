@@ -2122,15 +2122,13 @@ app.get("*", async (c, next) => {
   // Try embedded assets first (bundled into binary via import.meta.glob)
   const embedded = serveEmbedded(path)
   if (embedded) return embedded
-  // Fallback: alongside the exe
+  // SPA fallback: serve embedded index.html for all non-asset routes.
+  // The filesystem fallback (web/dist/) is not bundled in compiled
+  // macOS binaries, so embedded assets are the only reliable source.
+  const spaFallback = serveEmbedded("/")
+  if (spaFallback) return spaFallback
+  // Last resort: alongside the exe (dev mode with bun --watch)
   const webDist = join(binaryDir(), "web", "dist")
-  const relPath = path === "/" ? "index.html" : path.replace(/^\//, "")
-  const file = Bun.file(join(webDist, relPath))
-  if (await file.exists()) {
-    return new Response(file, {
-      headers: { "content-type": file.type },
-    })
-  }
   return new Response(Bun.file(join(webDist, "index.html")), {
     headers: { "content-type": "text/html" },
   })

@@ -26,15 +26,15 @@ function checkSandbox(): Check {
 }
 
 function checkClaudeBinary(): Check {
-  try {
-    const p = resolveClaudeBinary()
-    return { ok: true, label: `claude binary (${p.split("/").slice(-3).join("/")})` }
-  } catch (e: any) {
-    return {
-      ok: false,
-      label: "claude binary",
-      hint: "run `bun install` in the loopat repo root — SDK ships the binary as a platform-specific package",
-    }
+  const p = resolveClaudeBinary()
+  if (p) {
+    const label = p.split("/").slice(-3).join("/")
+    return { ok: true, label: `claude binary (${label})` }
+  }
+  return {
+    ok: false,
+    label: "claude binary",
+    hint: "set LOOPAT_CLAUDE_BINARY or place claude next to the loopat binary",
   }
 }
 

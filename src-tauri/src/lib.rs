@@ -297,16 +297,46 @@ fn setup_wsl(app: &tauri::App) -> Result<Child, String> {
 #[cfg(not(target_os = "windows"))]
 fn find_server_binary() -> Option<std::path::PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+
+    // Inside a macOS .app bundle: binary is in MacOS/, resources in Resources/
+    // Tauri v2 preserves relative resource paths, so binaries may be nested under
+    // a subdirectory (e.g. Resources/dist-macos-x64/loopat).
+    let resource_dir = exe_dir.parent()?.join("Resources");
+
+    // Search Resources/ recursively (Tauri may preserve resource subdirectory structure)
+    if resource_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&resource_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    for name in &["loopat-server", "loopat"] {
+                        let candidate = path.join(name);
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for name in &["loopat-server", "loopat"] {
+        // Bundled .app resource (flat path)
+        let candidate = resource_dir.join(name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        // Same directory as the Tauri binary (dev / non-bundle builds)
         let candidate = exe_dir.join(name);
         if candidate.exists() {
             return Some(candidate);
         }
     }
+    // Dev mode: lookup relative to project root
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let base = manifest.parent()?;
     for name in &["loopat-server", "loopat"] {
-        for dir in &["dist-windows", "dist"] {
+        for dir in &["dist-macos-x64", "dist-macos-arm64", "dist"] {
             let candidate = base.join(dir).join(name);
             if candidate.exists() {
                 return Some(candidate);

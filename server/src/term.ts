@@ -10,6 +10,7 @@ import { readSandboxMeta, readSandboxMetaFromPath } from "./sandboxes"
 import { loopDir, loopWorkdir, loopSandboxMetaPath } from "./paths"
 
 const isWin = process.platform === "win32"
+const isMac = process.platform === "darwin"
 
 type Term = {
   proc: IPty
@@ -68,10 +69,6 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       }, meta.config?.sandbox, meta.config?.vault)
       fullArgs = [...bwrapArgs, "--", innerShell]
     } else {
-      // Wrap inner shell with `script` so it gets a fresh controlling tty
-      // (without this, the bash-in-bash chain strips tty control).
-      const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
-
       // Fish (and other interactive shells) want to write to XDG_DATA_HOME
       // (history) and XDG_RUNTIME_DIR (notifier pipe). Both default to paths
       // (~/.local/share, /run/user/$UID) that are ro-bound in our sandbox.
@@ -94,7 +91,17 @@ async function getOrSpawn(loopId: string): Promise<Term> {
         XDG_DATA_HOME: fishData,
         XDG_RUNTIME_DIR: fishRuntime,
       }, meta.config?.sandbox, meta.config?.vault)
-      fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
+      if (isMac) {
+        // bun-pty already gives loopat-sandbox a controlling PTY on macOS.
+        // Avoid nesting BSD script(1) inside the sandbox: it creates another
+        // PTY via /dev/pty* and can be killed by the SBPL profile before the
+        // user shell starts.
+        fullArgs = [...bwrapArgs, "--", innerShell, "-i"]
+      } else {
+        // Wrap inner shell with `script` so it gets a fresh controlling tty
+        // (without this, the bash-in-bash chain strips tty control).
+        fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", `script -qfc "${innerShell} -i" /dev/null`]
+      }
     }
 
     console.error(`[term:${tag}] spawn ${sandboxBin} argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"}`)

@@ -31,7 +31,7 @@
 import { execFile } from "node:child_process"
 import { existsSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, isAbsolute, join } from "node:path"
 import { promisify } from "node:util"
 import {
   loopWorkdir,
@@ -52,6 +52,7 @@ import { resolveSandboxFile } from "./sandboxes"
 import { loadConfig, loadPersonalConfig } from "./config"
 import { DEFAULT_VAULT, resolveVaultRoot, walkVaultFiles } from "./vaults"
 import { personalVaultsDir } from "./paths"
+import { resolveMiseBinary } from "./mise-binary"
 
 const execFileP = promisify(execFile)
 
@@ -70,6 +71,7 @@ const execFileP = promisify(execFile)
  * fall back to a barren PATH; surface the error to the caller.
  */
 async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<string, string>> {
+  const misePath = resolveMiseBinary()
   const env = {
     ...process.env,
     // Trust this sandbox dir so `mise install` doesn't prompt.
@@ -77,7 +79,7 @@ async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<strin
     MISE_LOCKFILE: "true",
   }
   try {
-    await execFileP("mise", ["install"], { env, cwd: sandboxDirPath })
+    await execFileP(misePath, ["install"], { env, cwd: sandboxDirPath })
   } catch (e: any) {
     if (e?.code === "ENOENT") {
       throw new Error(
@@ -92,7 +94,7 @@ async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<strin
   }
   let stdout: string
   try {
-    const r = await execFileP("mise", ["env", "--json"], { env, cwd: sandboxDirPath })
+    const r = await execFileP(misePath, ["env", "--json"], { env, cwd: sandboxDirPath })
     stdout = r.stdout
   } catch (e: any) {
     throw new Error(`mise env failed for ${sandboxDirPath}: ${e?.stderr ?? e?.message ?? e}`)
@@ -216,11 +218,18 @@ export async function buildBwrapArgs(
     "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
     "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
-    // loopat install dir (claude binary lives here)
-    "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
     // WSL: expose Windows drive mounts so sandbox can edit host files
     "--bind-try", "/mnt", "/mnt",
   )
+
+  // loopat install dir (claude binary lives here). Never bind "/" even if a
+  // packaged runtime reports an unexpected install dir; that would void
+  // isolation on macOS and overexpose the host on Linux.
+  if (LOOPAT_INSTALL_DIR !== "/" && existsSync(LOOPAT_INSTALL_DIR)) {
+    args.push("--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR)
+  } else {
+    console.warn(`[loopat] skipping invalid install-dir sandbox bind: ${LOOPAT_INSTALL_DIR}`)
+  }
 
   // ── vault overlay ──
   // Personal is bound wholesale above (so memory/, .loopat/config.json, etc.
@@ -364,6 +373,14 @@ export async function buildBwrapArgs(
     for (const [k, v] of Object.entries(miseEnv)) {
       args.push("--setenv", k, v)
     }
+  }
+
+  const misePath = resolveMiseBinary()
+  if (isAbsolute(misePath) && existsSync(misePath)) {
+    const miseDir = dirname(misePath)
+    const basePath = String(miseEnv?.PATH ?? process.env.PATH ?? "")
+    args.push("--ro-bind-try", miseDir, miseDir)
+    args.push("--setenv", "PATH", `${miseDir}${basePath ? `:${basePath}` : ""}`)
   }
 
   // Ensure git SSH doesn't hang on host key prompt inside sandbox

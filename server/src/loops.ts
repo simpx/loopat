@@ -38,6 +38,7 @@ import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
+import { resolveGitCryptBinary } from "./git-crypt-binary"
 
 const execFileP = promisify(execFile)
 
@@ -433,9 +434,11 @@ async function autoInitGitCrypt(
   repoDir: string,
   userId: string,
 ): Promise<{ ok: true; cryptKey: string } | { ok: false; error: string }> {
+  const gcPath = resolveGitCryptBinary()
+
   // git-crypt must be on the host; check early with a useful error
   try {
-    await execFileP("git-crypt", ["--version"])
+    await execFileP(gcPath, ["--version"])
   } catch {
     return {
       ok: false,
@@ -452,7 +455,7 @@ async function autoInitGitCrypt(
   }
 
   try {
-    await execFileP("git-crypt", ["init"], { cwd: repoDir })
+    await execFileP(gcPath, ["init"], { cwd: repoDir })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
     return { ok: false, error: `git-crypt init failed: ${stderr || e?.message || e}` }
@@ -492,7 +495,7 @@ async function autoInitGitCrypt(
   let keyBuf: Buffer
   try {
     const exportPath = join(repoDir, ".git", "git-crypt-export.key")
-    await execFileP("git-crypt", ["export-key", exportPath], { cwd: repoDir })
+    await execFileP(gcPath, ["export-key", exportPath], { cwd: repoDir })
     keyBuf = await readFile(exportPath)
     cryptKeyB64 = keyBuf.toString("base64")
     await rm(exportPath, { force: true })
@@ -1028,7 +1031,7 @@ async function unlockWithCryptKey(
   }
   const keyPath = personalGitCryptKeyPath(userId)
   try {
-    await execFileP("git-crypt", ["unlock", keyPath], { cwd: repoDir })
+    await execFileP(resolveGitCryptBinary(), ["unlock", keyPath], { cwd: repoDir })
     return { ok: true }
   } catch (e: any) {
     if (await gitCryptKeyExists(userId)) {

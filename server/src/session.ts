@@ -3,7 +3,7 @@ import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { loopClaudeDir, loopDir, loopWorkdir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { resolveSandboxBinary } from "./sandbox-binary"
@@ -14,7 +14,11 @@ import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
 
-const CLAUDE_BINARY = resolveClaudeBinary()
+let _claudeBinary: string | null | undefined = undefined
+function getClaudeBinary(): string | null {
+  if (_claudeBinary === undefined) _claudeBinary = resolveClaudeBinary()
+  return _claudeBinary
+}
 const SANDBOX_BINARY = resolveSandboxBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
 
@@ -312,7 +316,7 @@ class LoopSession {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
-      console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${CLAUDE_BINARY}`)
+      console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${getClaudeBinary()}`)
     }
 
     this.q = query({
@@ -332,7 +336,7 @@ class LoopSession {
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
         mcpServers,
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
-        pathToClaudeCodeExecutable: CLAUDE_BINARY,
+        pathToClaudeCodeExecutable: getClaudeBinary(),
         canUseTool: async (toolName, input, { toolUseID, signal, title, displayName }) => {
           // ── AskUserQuestion: always broadcast to frontend ──
           if (toolName === "AskUserQuestion") {
@@ -434,7 +438,14 @@ class LoopSession {
         sandbox: { enabled: false },
         // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
-          const fullArgs = [...bwrapBase, "--", command, ...args]
+          // On macOS, sandbox-exec needs file-map-executable rules for the
+          // claude binary path. Bind its directory so the SBPL profile
+          // includes it in read_paths (and thus file-map-executable after the
+          // main.rs fix that unconditionally emits those rules).
+          const macBind = process.platform === "darwin" && command
+            ? ["--ro-bind-try", dirname(command), dirname(command)]
+            : []
+          const fullArgs = [...bwrapBase, ...macBind, "--", command, ...args]
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed

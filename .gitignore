@@ -13,6 +13,9 @@ server/src/*.js.map
 # Build outputs
 dist/
 dist-windows/
+dist-macos-arm64/
+dist-macos-x64/
+release/
 
 # Rust (loopat-sandbox, src-tauri build artifacts)
 loopat-sandbox/target/
