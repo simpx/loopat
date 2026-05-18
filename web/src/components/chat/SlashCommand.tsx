@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useComposerRuntime } from "@assistant-ui/react";
-import { Brain, Zap, Sparkles, Route, Eraser, BarChart3, Terminal, Puzzle } from "lucide-react";
+import { Brain, Zap, Sparkles, Route, Eraser, BarChart3, Terminal, Puzzle, Network } from "lucide-react";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { McpStatusPanel } from "../McpStatusPanel";
 import type { PermissionMode } from "./PlanModeToggle";
 
 /**
@@ -26,7 +27,7 @@ interface SlashCommand {
   prefix: string;
   toggleKey?: "permissionMode";
   /** Required when action === "command"; identifies which runtime action to fire. */
-  commandKey?: "clearContext" | "setMaxThinkingTokens" | "getContextUsage";
+  commandKey?: "clearContext" | "setMaxThinkingTokens" | "getContextUsage" | "openMcpPanel";
   /** Budget in tokens for setMaxThinkingTokens (null = unlimited). */
   tokens?: number | null;
   /** Show ON badge when true. */
@@ -100,6 +101,16 @@ const COMMANDS: SlashCommand[] = [
     prefix: "",
     commandKey: "clearContext",
   },
+  {
+    id: "mcp",
+    name: "MCP Servers",
+    description: "Show MCP servers + tools available to this loop",
+    icon: Network,
+    group: "quick",
+    action: "command",
+    prefix: "",
+    commandKey: "openMcpPanel",
+  },
 ];
 
 /** Header text + sort order for each group. Groups missing rows are hidden. */
@@ -127,6 +138,9 @@ export default function SlashCommand() {
   const [open, setOpen] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [filter, setFilter] = useState("");
+  // /mcp opens a floating panel anchored above the composer. Rendered
+  // alongside the slash-command dropdown but mutually independent.
+  const [mcpOpen, setMcpOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
   // Merge: built-in loopat quick-actions + commands reported by CC at init.
@@ -226,6 +240,9 @@ export default function SlashCommand() {
         } else if (cmd.commandKey === "getContextUsage") {
           getContextUsage();
           composerRuntime.setText("");
+        } else if (cmd.commandKey === "openMcpPanel") {
+          setMcpOpen(true);
+          composerRuntime.setText("");
         }
       } else if (cmd.action === "agent") {
         // CC-side command: fill the composer with `/<id> ` so the user can
@@ -272,14 +289,30 @@ export default function SlashCommand() {
     if (sel) sel.scrollIntoView({ block: "nearest" });
   }, [selectedIdx]);
 
-  if (!open || flatOrdered.length === 0) return null;
-
   // Build a flat index → so each row knows its position in flatOrdered for
   // selection highlighting + onClick.
   let runningIdx = -1;
 
+  // If only the MCP panel is open (no dropdown), render just it.
+  if (mcpOpen && (!open || flatOrdered.length === 0)) {
+    return (
+      <div className="relative">
+        <div className="absolute bottom-0 left-0 mb-1 w-[28rem] rounded-lg border border-gray-200 bg-white shadow-lg z-20">
+          <McpStatusPanel variant="popover" onClose={() => setMcpOpen(false)} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!open || flatOrdered.length === 0) return null;
+
   return (
     <div className="relative">
+      {mcpOpen && (
+        <div className="absolute bottom-0 left-0 mb-1 w-[28rem] rounded-lg border border-gray-200 bg-white shadow-lg z-30">
+          <McpStatusPanel variant="popover" onClose={() => setMcpOpen(false)} />
+        </div>
+      )}
       <div className="absolute bottom-0 left-0 mb-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg z-20">
         <div ref={listRef} className="max-h-72 overflow-y-auto py-1">
           {GROUPS.map((g) => {

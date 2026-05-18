@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
@@ -292,13 +292,20 @@ class LoopSession {
     // servers should keep their token in `env`/`headers` directly (only ever
     // commit OAuth-flow servers like `coop` to the workspace repo).
     const workspace = await loadWorkspaceClaudeJson()
-    // Inject per-user MCP OAuth tokens (Settings → MCP Auth) as
+    const personalClaude = await loadPersonalClaudeJson(meta.createdBy)
+    // Merge admin-tier + user-tier mcpServers (user wins on name collision —
+    // consistent with the skill/plugin compose model).
+    const mergedServers: Record<string, any> = {
+      ...(workspace.mcpServers ?? {}),
+      ...(personalClaude.mcpServers ?? {}),
+    }
+    // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
     // `Authorization: Bearer <token>` headers on matching servers. This is
     // the SDK-recommended pattern for headless MCP auth — CC sees pre-
     // authenticated transports and never triggers its own OAuth flow.
     const activeVault = meta.config?.vault?.trim() || "default"
     const userMcpTokens = await loadMcpTokens(meta.createdBy, activeVault)
-    const mcpServers = mergeMcpTokens(workspace.mcpServers, userMcpTokens)
+    const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.

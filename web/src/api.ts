@@ -1293,14 +1293,26 @@ export async function deleteMcpAuth(serverName: string, vault: string = "default
 
 /** Public-facing MCP server config (workspace-defined). Used by Settings → MCP Auth
  *  to know which servers are available to connect. */
-export type WorkspaceMcpServer = {
+export type McpServerEntry = {
   name: string
   type: "http" | "sse" | "stdio"
-  url?: string  // http/sse
+  url?: string
+  /** Personal-tier only: this entry shadows a same-named workspace entry. */
+  shadowsWorkspace?: boolean
 }
 
-export async function listWorkspaceMcpServers(): Promise<WorkspaceMcpServer[]> {
-  const r = await apiFetch("/api/workspace/mcp-servers")
-  if (!r.ok) return []
-  return (await r.json()) as WorkspaceMcpServer[]
+export type McpServerTier = {
+  id: "workspace" | "personal"
+  label: string
+  /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. */
+  path: string
+  servers: McpServerEntry[]
+}
+
+export type McpServerInventory = { tiers: McpServerTier[] }
+
+export async function listMcpServers(): Promise<McpServerInventory> {
+  const r = await apiFetch("/api/mcp-servers")
+  if (!r.ok) return { tiers: [] }
+  return (await r.json()) as McpServerInventory
 }
