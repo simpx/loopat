@@ -343,20 +343,6 @@ class LoopSession {
     const userMcpTokens = await loadMcpTokens(meta.createdBy, activeVault)
     const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
-    // Diagnostic: log per-server "did we inject a header" without leaking the
-    // token itself. Helps users (and us) figure out why a connection landed
-    // needs-auth even when vault tokens exist.
-    {
-      const tag = loopId.slice(0, 8)
-      const summary = Object.entries(mcpServers ?? {}).map(([name, s]) => {
-        const hasAuth = !!(s as any).headers?.Authorization
-        const url = (s as any).url ?? `[${(s as any).type ?? "stdio"}]`
-        const tokLen = userMcpTokens[name]?.accessToken?.length
-        return `${name}:${hasAuth ? `inject(len=${tokLen})` : "no-token"}@${url}`
-      })
-      console.log(`[sdk:${tag}] mcpServers injection (vault=${activeVault}): ${summary.join(", ")}`)
-    }
-
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
     //
