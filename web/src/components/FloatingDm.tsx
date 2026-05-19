@@ -128,8 +128,8 @@ export function FloatingDm({ me }: { me: string }) {
             ? { ...x, replyCount: x.replyCount + 1, lastReplyTs: m.ts }
             : x,
         ))
-      } else {
-        // not the active conv — bump unread + lastMessageTs for sort order.
+      } else if (m.author !== me) {
+        // not the active conv && not self — bump unread + lastMessageTs for sort order.
         setConvs((prev) => prev.map((c) =>
           c.id === m.convId
             ? { ...c, unread: c.unread + 1, lastMessageTs: m.ts }
@@ -142,7 +142,7 @@ export function FloatingDm({ me }: { me: string }) {
       setConvs((prev) => prev.filter((c) => c.id !== e.convId))
       if (activeRef.current === e.convId) setActiveConvId(null)
     }
-  }, [])
+  }, [me])
 
   const { subscribe, unsubscribe } = useChatWebSocket(onEvent)
   useEffect(() => {

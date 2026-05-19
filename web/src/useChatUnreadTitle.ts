@@ -17,7 +17,7 @@ import { listChatConversations } from "./api"
  * after calling markChatRead so we can zero the conv immediately without
  * waiting for a refetch / focus.
  */
-export function useChatUnreadTitle(workspaceName: string, enabled: boolean) {
+export function useChatUnreadTitle(workspaceName: string, enabled: boolean, me: string) {
   const [unreadByConv, setUnreadByConv] = useState<Record<string, number>>({})
   const wsRef = useRef<WebSocket | null>(null)
 
@@ -44,10 +44,12 @@ export function useChatUnreadTitle(workspaceName: string, enabled: boolean) {
         try {
           const msg = JSON.parse(e.data)
           if (msg.type === "message") {
-            setUnreadByConv((prev) => ({
-              ...prev,
-              [msg.message.convId]: (prev[msg.message.convId] ?? 0) + 1,
-            }))
+            if (msg.message.author !== me) {
+              setUnreadByConv((prev) => ({
+                ...prev,
+                [msg.message.convId]: (prev[msg.message.convId] ?? 0) + 1,
+              }))
+            }
           } else if (msg.type === "conv_created") {
             ws.send(JSON.stringify({ type: "subscribe", convId: msg.conv.id }))
           }
@@ -91,7 +93,7 @@ export function useChatUnreadTitle(workspaceName: string, enabled: boolean) {
       try { wsRef.current?.close() } catch {}
       wsRef.current = null
     }
-  }, [enabled])
+  }, [enabled, me])
 
   useEffect(() => {
     if (!enabled) return

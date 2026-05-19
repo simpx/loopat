@@ -76,7 +76,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     })
   }, [shareMode])
 
-  useChatUnreadTitle(workspaceName, loggedIn && !shareMode)
+  useChatUnreadTitle(workspaceName, loggedIn && !shareMode, me)
 
   useEffect(() => {
     if (shareMode) return
