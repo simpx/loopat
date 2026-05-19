@@ -113,11 +113,19 @@ export function ChatPage() {
   activeThreadRootIdRef.current = activeThreadRootId
 
   // ── render window: bottom-up progressive reveal ──
-  const RENDER_WINDOW_SIZE = 5
+  const RENDER_WINDOW_SIZE = 10
   const RENDER_WINDOW_BATCH = 20
   const [renderCount, setRenderCount] = useState(RENDER_WINDOW_SIZE)
   const visibleMessages = messages.slice(-renderCount)
   const hasOlderMessages = messages.length > renderCount
+
+  const loadMoreMessages = useCallback(() => {
+    setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
+  }, [])
+  const loadMoreRef = useRef(loadMoreMessages)
+  loadMoreRef.current = loadMoreMessages
+  const hasOlderRef = useRef(hasOlderMessages)
+  hasOlderRef.current = hasOlderMessages
 
   const active = useMemo(() => convs.find((c) => c.id === convId), [convs, convId])
   const channels = useMemo(() => convs.filter((c) => c.kind === "channel").sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")), [convs])
@@ -215,9 +223,9 @@ export function ChatPage() {
   }, [thread?.replies.length])
 
   // Bottom-up progressive reveal: start with RENDER_WINDOW_SIZE newest
-  // messages, then auto-load older batches so the viewport stays at bottom
-  // while the scrollbar grows.
+  // messages, then load older batches as the user scrolls to the top.
   const progressiveReadyRef = useRef(false)
+  const msgContainerRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     setRenderCount(RENDER_WINDOW_SIZE)
     progressiveReadyRef.current = false
@@ -226,31 +234,31 @@ export function ChatPage() {
   useEffect(() => {
     if (!convId || messages.length === 0 || convWithDataRef.current !== convId || progressiveReadyRef.current) return
     progressiveReadyRef.current = true
-    let cancelled = false
-    const tick = () => {
-      if (cancelled) return
-      setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
-      requestAnimationFrame(() => {
-        if (!cancelled) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
-      })
-    }
-    tick()
-    const interval = setInterval(() => {
-      if (cancelled) return
-      // Use a ref that's kept in sync so the interval always reads the latest length
-      const len = messages.length
-      setRenderCount((prev) => {
-        if (prev >= len) {
-          clearInterval(interval)
-          return prev
+    // First batch: immediately load 20 more for a smooth start
+    setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+    })
+    // Scroll-to-top triggers subsequent batches
+    const container = msgContainerRef.current
+    if (!container) return
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onScroll = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        if (container.scrollTop < 60 && hasOlderRef.current) {
+          loadMoreRef.current()
+          requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+          })
         }
-        return prev + RENDER_WINDOW_BATCH
-      })
-      requestAnimationFrame(() => {
-        if (!cancelled) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
-      })
-    }, 200)
-    return () => { cancelled = true; clearInterval(interval) }
+      }, 400)
+    }
+    container.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      container.removeEventListener("scroll", onScroll)
+      if (debounce) clearTimeout(debounce)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convId, messages])
 
@@ -573,7 +581,7 @@ export function ChatPage() {
               </div>
             </header>
 
-            <div className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3 chat-messages-container">
+            <div ref={msgContainerRef} className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3 chat-messages-container">
               {messages.length === 0 && (
                 <div className="text-[13px] text-gray-500">no messages yet — say hi</div>
               )}
