@@ -334,21 +334,14 @@ case "$ARCH" in
       *)       echo "Unknown arch: $native_arch"; exit 1 ;;
     esac
 
-    echo "  Using binaries from $dist_src/"
+    echo "  Building web frontend..."
+    (cd web && bun run build)
 
-    # Auto-build native arch binaries if missing
-    required_bins=("loopat-server" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh" "install-macos-app.sh")
-    need_build=false
-    for bin in "${required_bins[@]}"; do
-      if [ ! -f "$dist_src/$bin" ]; then
-        need_build=true
-        break
-      fi
-    done
-    if [ "$need_build" = true ]; then
-      echo "  Binaries missing in $dist_src/, building natively first..."
-      bash "$0" "$([ "$native_arch" = arm64 ] && echo arm64 || echo x64)"
-    fi
+    echo "  Regenerating web-assets.ts from web/dist/..."
+    bun scripts/build-web-assets.mjs
+
+    echo "  Building native arch binaries first..."
+    bash "$0" "$([ "$native_arch" = arm64 ] && echo arm64 || echo x64)"
 
     # Ensure cargo-tauri CLI is installed
     if ! cargo tauri --version &>/dev/null; then
