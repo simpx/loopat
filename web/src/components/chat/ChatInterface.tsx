@@ -56,7 +56,7 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }> } = {}) {
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
   const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
@@ -438,6 +438,22 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
                 className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
               >
                 Unarchive
+              </button>
+            )}
+          </div>
+        ) : rfdRequestedAt ? (
+          <div className="mx-3 md:mx-5 mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[12px] text-amber-800">
+            <span>✋</span>
+            <span className="flex-1">
+              Released for drive{rfdRequestedBy ? ` by ${rfdRequestedBy}` : ""} — no one can write until someone takes over.
+            </span>
+            {onTakeDrive && (
+              <button
+                type="button"
+                onClick={onTakeDrive}
+                className="rounded bg-amber-500 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-600"
+              >
+                Drive
               </button>
             )}
           </div>
