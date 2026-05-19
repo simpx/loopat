@@ -412,6 +412,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
               <ChatInterface
                 archived={meta.archived === true}
                 onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+                repo={meta.repo}
+                branch={meta.branch}
+                title={meta.title}
+                driver={meta.createdBy}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -433,6 +437,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 <ChatInterface
                   archived={meta.archived === true}
                   onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+                  repo={meta.repo}
+                  branch={meta.branch}
+                  title={meta.title}
+                  driver={meta.createdBy}
                 />
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
@@ -477,6 +485,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
               <ChatInterface
                 archived={meta.archived === true}
                 onUnarchive={() => ws.setLoopArchived(meta.id, false)}
+                repo={meta.repo}
+                branch={meta.branch}
+                title={meta.title}
+                driver={meta.createdBy}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
