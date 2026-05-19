@@ -121,7 +121,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   return (
     <div className="h-full w-full flex flex-col bg-gray-50 text-gray-900">
       <header className="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-2 md:px-4 gap-2 md:gap-4">
-        <div className="flex items-center gap-2 px-1 md:px-2 h-8 shrink-0" title={`workspace: ${workspaceName}`}>
+        <div className="flex items-center gap-2 px-1 md:px-2 h-8 shrink-0 cursor-pointer" title={`workspace: ${workspaceName}`} onClick={() => { window.location.href = "/" }}>
           <span className="text-lg leading-none">🧶</span>
           <span className="hidden md:inline text-sm text-gray-900 font-medium">{workspaceName}</span>
         </div>
