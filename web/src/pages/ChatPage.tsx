@@ -293,7 +293,7 @@ export function ChatPage() {
             }
           }
           markChatRead(m.convId, m.id).catch(() => {})
-        } else {
+        } else if (m.author !== me) {
           setConvs((prev) =>
             prev.map((c) =>
               c.id === m.convId
@@ -314,7 +314,7 @@ export function ChatPage() {
         }
       }
     },
-    [navigate],
+    [navigate, me],
   )
 
   const { subscribe, unsubscribe } = useChatWebSocket(onEvent)
