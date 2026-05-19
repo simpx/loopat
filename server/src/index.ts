@@ -933,8 +933,9 @@ app.post("/api/loops", requireAuth, async (c) => {
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
   const sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
+  const knowledgeRw = body.knowledge_rw === true
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault })
+    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault, knowledgeRw })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)

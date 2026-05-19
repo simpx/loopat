@@ -76,6 +76,11 @@ export type LoopMeta = {
      * existed; bwrap treats absent/null as "default" for backward compat.
      */
     vault?: string
+    /**
+     * If true, /loopat/context/knowledge/ is bound rw instead of ro. Set
+     * for loops that exist to distill notes into knowledge.
+     */
+    knowledge_rw?: boolean
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes
@@ -1146,6 +1151,7 @@ export async function createLoop(opts: {
   createdBy: string
   sandbox?: string
   vault?: string
+  knowledgeRw?: boolean
 }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
@@ -1161,6 +1167,9 @@ export async function createLoop(opts: {
   }
   if (opts.vault && opts.vault !== "default") {
     meta.config = { ...(meta.config ?? {}), vault: opts.vault }
+  }
+  if (opts.knowledgeRw) {
+    meta.config = { ...(meta.config ?? {}), knowledge_rw: true }
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
