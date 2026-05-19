@@ -1,0 +1,75 @@
+# Nodejs 应用 dockerfile 使用说明(阅读本文大概需要花费5分钟)
+阿里巴巴集团的 NodeJS 应用在 Aone 部署，有两个策略：
+1) 策略一：集团 NodeJS 框架 egg/midway 应用，可以使用框架默认提供的 dockerfile，如果有自定义需求，可以参考策略二
+策略一需要满足2个条件：
+    1.你采用了集团的框架 egg/midway
+    2.你的应用中没有"应用根目录/APP-META/docker-config"
+此时框架会在你的应用构建环节生成一次性的 dockerfile，并在构建结束后删除，所以你可以直接部署。
+begg说明：http://begg.alibaba-inc.com/zh-cn/aone/docker.html
+midway说明：https://lark.alipay.com/midwayjs/midway5/docker
+
+2) 策略二：非集团 NodeJS 框架 egg/midway 应用，或，需要自定义 dockerfile 的 egg/midway 应用(注：一旦采用这种策略二，策略一将失效)。
+策略二针对自己有 DevOps 能力，可以自我管控 dockerfile 的开发者，但使用前请先阅读：https://www.atatech.org/articles/98377?msgid=2009200，FROM务必使用 NodeJS 基础镜像。
+这种情况，通常你也只需要创建2个文件。
+2.1 项目根目录/APP-META/docker-config/environment/cai/conf/nginx-proxy.conf
+```
+server {
+    listen 80 default_server;
+    server_name _;
+    location / {
+        proxy_pass http://127.0.0.1:6001;
+        proxy_set_header Host            $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+    }
+}
+```
+2.2 项目根目录/APP-META/docker-config/Dockerfile
+```
+#7u2使用：
+FROM reg.docker.alibaba-inc.com/aone-base-global/alios7-nodejs:1.0
+#注意：appName修改为自己的应用名
+ENV APP_NAME ${appName}
+#Java + Node.js 应用，请写成ENV SCRIPT_ENTRY=appctl.sh
+ENV SCRIPT_ENTRY=nodejsctl
+#不用修改，拷贝启动脚本 start shell
+RUN mkdir -p /home/admin/cai/conf && \
+  mv /home/admin/appname/bin/start.sh /home/admin/
+#参考第1点，拷贝定制的nginx config
+COPY environment/cai/conf/nginx-proxy.conf /home/admin/cai/conf/apps/${APP_NAME}.conf
+VOLUME /home/admin/logs /home/admin/cai/logs /home/admin/${APP_NAME}/logs
+WORKDIR /home/admin/${APP_NAME}/bin
+COPY ${APP_NAME}.tgz /home/admin/${APP_NAME}/target/${APP_NAME}.tgz
+ENTRYPOINT ["/home/admin/start.sh"]
+```
+
+
+其他参考文档：
+
+1. Nodejs 基础镜像地址：
+http://gitlab.alibaba-inc.com/node/base-image
+参考ATA：https://www.atatech.org/articles/98377?msgid=2009200
+
+2. 针对不同环境配置 Dockerfile：
+如果每一个环境有不同配置，为每一个环境定义dockerfile请看规范https://lark.alipay.com/aone/docker/rm2g1d
+
+3. 常见问题咨询：
+使用docker常见问题可在这里查阅,不一定都能找到，可进入 docker 群提问:http://www.atatech.org/articles/53899
+
+4. 构建自己维护的基础镜像：
+  1)修改自己变更中的APP-META/docker-config/Dockerfile_base，请仔细阅读里面的备注。
+  2)访问https://aone.alibaba-inc.com/appcenter/overview -》查找具体应用进入概述页面-》点击基础镜像
+  3)创建基础镜像,填写第一步的变更仓库地址，成功创建基础镜像。
+  4)用基础镜像地址替换Dockerfile文件中From关键字后面的地址
+
+常见问题：
+1.Q: 为什么要创建基础镜像？
+A：把不常变化的内容(如基础RPM、启动脚本等)做成基础镜像，在应用发布的指定Dockerfile中FROM基础镜像，重复的内容不再执行，应用基础镜像被
+    推送到全部的构建机器，提高镜像构建速度，再也不用坐在那里干等构建了
+
+2.Q：依赖nodejs基础镜像后，基础镜像的变更如何同步到我的应用中？
+A：需要重新创建变更，走发布上线流程。目前基础镜像的1.0版本是持续迭代的稳定版，重新构建镜像时会对比镜像ID，拉取最新的基础镜像。
+
+3.Q：如何选择AliOS5/AliOS6/AliOS7？
+A：如果你的项目允许请尽量选择AliOS7，内核升级不单修复了bug，还有很多性能的提升。另外alinode后续将不再AliOS5再更新node版本了。如果你的项目可以迁移，也请尽快迁移到AliOS7上来。
+   集团的宿主机和构建机，都在向AliOS7迁移，如果你是新创建的应用请确认好宿主机版本。就项目迁移，也需要注意宿主机的内核版本。迁移的路径：https://lark.alipay.com/midwayjs/sandbox/vmmeg9。
+
