@@ -206,7 +206,12 @@ export function FloatingDm({ me }: { me: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed bottom-20 right-5 z-30 w-12 h-12 rounded-full bg-gray-700 text-white shadow-lg hover:bg-gray-500 flex items-center justify-center"
+          className={
+            "fixed bottom-20 right-5 z-30 w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors " +
+            (totalUnread > 0
+              ? "bg-gray-700 text-white animate-pulse"
+              : "bg-gray-700 text-white hover:bg-gray-500")
+          }
           title="direct messages"
         >
           <MessageCircle size={20} />

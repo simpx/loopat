@@ -93,6 +93,21 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     })
   }, [shareMode])
 
+  // On mobile, visualViewport shrinks when the virtual keyboard opens but
+  // CSS 100dvh/100% does not account for it. Subscribe to resize and set
+  // an inline height so the layout container actually shrinks, preventing
+  // extra gray scroll space below the footer.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const onResize = () => {
+      document.documentElement.style.height = `${vv.height}px`
+    }
+    vv.addEventListener("resize", onResize)
+    onResize()
+    return () => vv.removeEventListener("resize", onResize)
+  }, [])
+
   if (shareMode) {
     return (
       <div className="h-full w-full bg-white text-gray-900">
