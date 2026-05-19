@@ -26,7 +26,20 @@ export function useLoopStatus(loopIds: string[]) {
     }
 
     return () => {
-      ws.close()
+      if (ws) {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          // Don't close() a CONNECTING socket (WebKit logs a native error) —
+          // close it as soon as it actually connects.
+          ws.onopen = () => ws.close()
+          ws.onmessage = null
+          ws.onclose = null
+          ws.onerror = null
+        } else {
+          ws.onclose = null
+          ws.onerror = null
+          ws.close()
+        }
+      }
       wsRef.current = null
     }
   }, [loopIds.join(",")])
