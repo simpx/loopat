@@ -61,6 +61,7 @@ export function ContextPage() {
   const [searchParams] = useSearchParams()
   const active = (VALID.has(sub as SubId) ? sub : "knowledge") as SubId
   const initialFile = searchParams.get("file") || undefined
+  const initialEditing = searchParams.get("edit") === "1"
 
   return (
     <div className="flex flex-col h-full w-full">
@@ -82,7 +83,7 @@ export function ContextPage() {
       <div className="flex-1 min-h-0 min-w-0">
         {active === "repos" ? <ReposPane />
           : active === "sandboxes" ? <SandboxesPane />
-          : <VaultPane key={active} vault={active as VaultId} initialFile={initialFile} />}
+          : <VaultPane key={active} vault={active as VaultId} initialFile={initialFile} initialEditing={initialEditing} />}
       </div>
     </div>
   )
@@ -99,10 +100,23 @@ const VAULT_TAGLINE: Record<VaultId, string> = {
   repos: "registered code repos",
 }
 
-function VaultPane({ vault, initialFile }: { vault: VaultId; initialFile?: string }) {
+function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; initialFile?: string; initialEditing?: boolean }) {
   const [tree, setTree] = useState<VaultEntry[]>([])
   const [flat, setFlat] = useState<VaultEntry[]>([])
   const [pickedPath, setPickedPath] = useState<string | null>(initialFile ?? null)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Sync pickedPath to the URL so navigation is reflected in the address bar.
+  // Guard against loops: skip if URL already has the same file.
+  useEffect(() => {
+    const current = searchParams.get("file") ?? null
+    if (current === pickedPath) return
+    if (pickedPath) {
+      setSearchParams({ file: pickedPath }, { replace: true })
+    } else {
+      setSearchParams({}, { replace: true })
+    }
+  }, [pickedPath, searchParams, setSearchParams])
   const [reloadKey, setReloadKey] = useState(0)
   const [showNewFile, setShowNewFile] = useState(false)
   const [query, setQuery] = useState("")
@@ -359,6 +373,7 @@ function VaultPane({ vault, initialFile }: { vault: VaultId; initialFile?: strin
             path={pickedPath}
             onSelect={setPickedPath}
             onSaved={() => setReloadKey((k) => k + 1)}
+            initialEditing={initialEditing}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
@@ -508,17 +523,19 @@ function DocView({
   path,
   onSelect,
   onSaved,
+  initialEditing,
 }: {
   vault: VaultId
   path: string
   onSelect: (path: string) => void
   onSaved: () => void
+  initialEditing?: boolean
 }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
   const [original, setOriginal] = useState("")
   const [draft, setDraft] = useState("")
-  const [editing, setEditing] = useState(false)
+  const [editing, setEditing] = useState(initialEditing ?? false)
   const [saving, setSaving] = useState(false)
   const [backlinks, setBacklinks] = useState<Backlink[]>([])
   const [lastCommit, setLastCommit] = useState<string | null>(null)
@@ -529,8 +546,14 @@ function DocView({
   const [secretFromServer, setSecretFromServer] = useState(false)
   const isMobile = useIsMobile()
 
+  const initialEditingRef = useRef(initialEditing)
+
   useEffect(() => {
-    setEditing(false)
+    if (initialEditingRef.current) {
+      initialEditingRef.current = false
+    } else {
+      setEditing(false)
+    }
     setMilkdown(false)
     setLastCommit(null)
     setSecretFromServer(false)
