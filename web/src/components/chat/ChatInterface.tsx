@@ -66,7 +66,7 @@ function setDraft(loopId: string, text: string): void {
 /* ─── Chat Interface ─── */
 
 export default function ChatInterface({ archived = false, onUnarchive, readOnly = false }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean } = {}) {
-  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory } = useLoopRuntimeExtra();
+  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages } = useLoopRuntimeExtra();
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
 
@@ -84,6 +84,8 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
   hasHistoryRef.current = hasHistory;
   const showHistoryRef = useRef(showHistory);
   showHistoryRef.current = showHistory;
+  const hasOlderRef = useRef(hasOlderMessages);
+  hasOlderRef.current = hasOlderMessages;
 
   // Scroll-to-top history button — shows when user scrolls to the very top
   // and there is pre-clear history to reveal.
@@ -102,6 +104,22 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     }
     toggleShowHistory();
   }, [toggleShowHistory]);
+
+  // Scroll-anchor for load-more: preserve position when older messages appear above
+  const loadMoreAnchorRef = useRef({ oldScrollTop: 0, oldScrollHeight: 0, active: false });
+  const handleLoadMore = useCallback(() => {
+    const vp = vpRef.current;
+    if (vp) {
+      loadMoreAnchorRef.current = {
+        oldScrollTop: vp.scrollTop,
+        oldScrollHeight: vp.scrollHeight,
+        active: true,
+      };
+    }
+    loadMoreMessages();
+  }, [loadMoreMessages]);
+
+  const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
 
   // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
@@ -169,6 +187,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       }
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
       setShowHistoryButton(vp.scrollTop < 20 && hasHistoryRef.current);
+      setShowLoadMoreButton(vp.scrollTop < 20 && hasOlderRef.current);
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
 
@@ -235,6 +254,20 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     });
   }, [showHistory]);
 
+  // When loadMore increases renderCount, preserve scroll position so
+  // older messages appearing at top don't cause a jump.
+  useEffect(() => {
+    if (!loadMoreAnchorRef.current.active) return;
+    const vp = vpRef.current;
+    if (!vp) return;
+    const { oldScrollTop, oldScrollHeight } = loadMoreAnchorRef.current;
+    loadMoreAnchorRef.current.active = false;
+    requestAnimationFrame(() => {
+      const delta = vp.scrollHeight - oldScrollHeight;
+      vp.scrollTop = oldScrollTop + delta;
+    });
+  }, [hasOlderMessages]);
+
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
     : [];
@@ -267,6 +300,19 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
                 className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
               >
                 {showHistory ? "Collapse earlier messages" : "View earlier messages"}
+              </button>
+            </div>
+          )}
+
+          {/* Load earlier messages — appears when render window is smaller than total aggregated messages */}
+          {showLoadMoreButton && (
+            <div className="flex justify-center pb-2">
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
+              >
+                Load earlier messages
               </button>
             </div>
           )}

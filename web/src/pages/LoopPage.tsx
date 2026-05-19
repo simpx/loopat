@@ -37,6 +37,10 @@ export function LoopPage() {
   }
 
   const meta = ws.loops.find((l) => l.id === id)
+  // Wait for loops to finish loading before redirecting — prevents a race
+  // where ws.loops is still the initial empty array, causing an incorrect
+  // redirect to /loop → first loop.
+  if (ws.loopsLoading) return null
   if (!meta) {
     // Loop not in current filtered list. Most common cause: user just archived
     // it (and showArchived is off). Fall back to LoopRedirect, which jumps to

@@ -16,6 +16,7 @@ export type KanbanCreateCtx = { board: string; filename: string; cid: string }
 
 export type WorkspaceState = {
   loops: LoopMeta[]
+  loopsLoading: boolean
   showArchived: boolean
   setShowArchived: (b: boolean) => void
   refresh: () => Promise<void>
@@ -43,6 +44,7 @@ export type WorkspaceState = {
 
 export function useWorkspaceState(): WorkspaceState {
   const [loops, setLoops] = useState<LoopMeta[]>([])
+  const [loopsLoading, setLoopsLoading] = useState(true)
   const [showArchived, setShowArchived] = useState(false)
   const [newLoopDialogOpen, setNewLoopDialogOpenRaw] = useState(false)
   const [newLoopDialogTitle, setNewLoopDialogTitle] = useState("")
@@ -51,7 +53,9 @@ export function useWorkspaceState(): WorkspaceState {
   const [authLoading, setAuthLoading] = useState(true)
 
   const refresh = useCallback(async () => {
+    setLoopsLoading(true)
     setLoops(await listLoops(showArchived ? "all" : "active"))
+    setLoopsLoading(false)
   }, [showArchived])
 
   // bootstrap: who am I?
@@ -134,6 +138,7 @@ export function useWorkspaceState(): WorkspaceState {
 
   return {
     loops,
+    loopsLoading,
     showArchived,
     setShowArchived,
     refresh,
