@@ -1,0 +1,5 @@
+# 更多关于Release文件的规范和约定，请点击 https://yuque.antfin.com/aone/geh0qs/252891532
+
+# 构建源码语言类型
+build.language=python
+
