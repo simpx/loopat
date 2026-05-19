@@ -158,9 +158,12 @@ export function KanbanBoard({
       const collisionCenter = firstCollision?.data?.droppableRect
         ? firstCollision.data.droppableRect.left + firstCollision.data.droppableRect.width / 2
         : 0
-      // arrayMove's "to" is the final index — matches the indicator position
-      const targetIdx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
-      const clampedIdx = Math.max(0, Math.min(targetIdx, orderedFiles.length - 1))
+      // gapIdx is in gap-space (0..N) — same as the indicator position. arrayMove's
+      // `to` is the final element index; when moving forward, removing the source
+      // shifts subsequent indices, so the final index is gapIdx - 1.
+      const gapIdx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
+      const finalIdx = oldIdx < gapIdx ? gapIdx - 1 : gapIdx
+      const clampedIdx = Math.max(0, Math.min(finalIdx, orderedFiles.length - 1))
       if (clampedIdx === oldIdx) return
 
       const newOrder = arrayMove([...orderedFiles], oldIdx, clampedIdx)
