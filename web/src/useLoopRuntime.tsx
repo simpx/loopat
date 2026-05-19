@@ -884,7 +884,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       }
       const ws = wsRef.current
       wsRef.current = null
-      if (ws && ws.readyState === WebSocket.OPEN) ws.close()
+      if (ws) ws.close()
       setReconnecting(false)
       attemptsRef.current = 0
     }

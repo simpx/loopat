@@ -199,14 +199,9 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
         vp.style.scrollBehavior = prev;
-        // Only finalize initial-scroll phase when history is no longer loading.
-        // While loading, content-visibility underestimates scrollHeight, so we
-        // keep re-snapping on every resize until all messages are in.
-        if (!loadingHistoryRef.current) {
-          didInitialScroll.current = true;
-        }
+        didInitialScroll.current = true;
         userScrolledUp = false;
-      } else if (didInitialScroll.current) {
+      } else if (didInitialScroll.current && !loadingHistoryRef.current) {
         vp.scrollTop = vp.scrollHeight;
       }
     };
