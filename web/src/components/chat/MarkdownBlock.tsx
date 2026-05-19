@@ -113,7 +113,7 @@ const defaultComponents = memoizeMarkdownComponents({
   p: ({ className, ...props }: React.ComponentProps<"p">) => (
     <p
       className={cn(
-        "my-2.5 leading-normal first:mt-0 last:mb-0",
+        "my-1 leading-normal first:mt-0 last:mb-0",
         className,
       )}
       {...props}

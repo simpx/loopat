@@ -65,6 +65,15 @@ function LoopsList({ currentId }: { currentId: string }) {
   const loopIds = useMemo(() => ws.loops.map(l => l.id), [ws.loops])
   const statusMap = useLoopStatus(loopIds)
 
+  // Auto-mark the current loop as viewed when its status transitions to Done
+  // while the user is already on that page (prevents stale yellow dot).
+  useEffect(() => {
+    const entry = statusMap[currentId]
+    if (entry?.status === "Done" && entry?.viewed === false) {
+      markLoopViewed(currentId)
+    }
+  }, [statusMap, currentId])
+
   const userId = ws.currentUser?.id
   const filtered = useMemo(() => ws.loops.filter((loop) => {
     if (scope === "mine") return loop.createdBy === userId
@@ -180,7 +189,7 @@ function LoopsList({ currentId }: { currentId: string }) {
                   if (isOwner) ws.setLoopArchived(loop.id, !archived)
                 }}
                 className={
-                  "opacity-0 group-hover/row:opacity-100 transition-opacity w-7 flex items-center justify-center " +
+                  (isMobile ? "opacity-100" : "opacity-0 group-hover/row:opacity-100") + " transition-opacity w-7 flex items-center justify-center " +
                   (isOwner
                     ? "text-gray-400 hover:text-gray-700"
                     : "text-gray-300 cursor-not-allowed")
