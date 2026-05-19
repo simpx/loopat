@@ -17,6 +17,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useIsMobile } from "@/lib/useIsMobile";
 import TodoRenderer from "./TodoRenderer";
 import AgentRenderer from "./AgentRenderer";
 import PermissionPrompt from "./PermissionPrompt";
@@ -314,6 +315,7 @@ export default function ToolRenderer({
   const isRunning = status === "running";
   const isActionNeeded = status === "requires-action";
   const statusCfg = STATUS_CONFIG[status];
+  const isMobile = useIsMobile();
 
   const { permissionPrompt, answerPermission } = useLoopRuntimeExtra();
   const needsPermission = isActionNeeded || (permissionPrompt?.toolUseId === toolCallId);
@@ -451,7 +453,7 @@ export default function ToolRenderer({
           "data-[state=closed]:animate-collapsible-up",
         )}
       >
-        <div className="border-t border-gray-100 px-2 md:px-3 py-2">
+        <div className={cn("border-t border-gray-100 px-2 md:px-3 py-2", isMobile && "max-h-[60vh] overflow-y-auto")}>
           {/* Permission prompt — shown when this tool needs user approval */}
           {needsPermission && permissionPrompt && (
             <PermissionPrompt
