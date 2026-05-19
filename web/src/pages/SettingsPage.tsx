@@ -117,7 +117,7 @@ export function SettingsPage() {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => navigate("/context/personal?file=.loopat/config.json")}
+          onClick={() => navigate("/context/personal?file=.loopat/config.json&edit=1")}
           className="h-7 px-2.5 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-700 flex items-center gap-1.5"
           title="open raw config.json in Context tab"
         >
