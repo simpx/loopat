@@ -79,10 +79,7 @@ export function useChatWebSocket(onEvent: (e: ChatWsEvent) => void) {
   useEffect(() => {
     connect()
     return () => {
-      const ws = wsRef.current
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.close()
-      }
+      wsRef.current?.close()
       wsRef.current = null
     }
   }, [connect])
