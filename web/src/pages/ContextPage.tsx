@@ -148,10 +148,9 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     vaultList(vault).then((entries) => {
       setTree(entries)
       setPickedPath((prev) => {
-        if (prev) {
-          const entry = entries.find((e) => e.path === prev)
-          if (entry?.type === "file") return prev
-        }
+        // Keep the initial file from URL even if it's not in the listing
+        // (e.g. .loopat/config.json from Settings → "edit raw").
+        if (prev) return prev
         const first = entries.find((e) => e.type === "file" && e.path.endsWith(".md"))
         return first ? first.path : null
       })
