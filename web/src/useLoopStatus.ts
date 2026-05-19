@@ -26,7 +26,9 @@ export function useLoopStatus(loopIds: string[]) {
     }
 
     return () => {
-      ws.close()
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.close()
+      }
       wsRef.current = null
     }
   }, [loopIds.join(",")])

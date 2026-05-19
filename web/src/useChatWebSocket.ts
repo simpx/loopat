@@ -71,14 +71,18 @@ export function useChatWebSocket(onEvent: (e: ChatWsEvent) => void) {
     }
 
     ws.onerror = () => {
-      ws.close()
+      // onerror fires when the connection fails or close() is called on a
+      // CONNECTING socket (e.g. StrictMode unmount). Let onclose handle it.
     }
   }, [])
 
   useEffect(() => {
     connect()
     return () => {
-      wsRef.current?.close()
+      const ws = wsRef.current
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close()
+      }
       wsRef.current = null
     }
   }, [connect])
