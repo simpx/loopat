@@ -106,8 +106,7 @@ html, body {
 
 @layer base {
   * { box-sizing: border-box; }
-  html { height: -webkit-fill-available; margin: 0; padding: 0; }
-  body { min-height: -webkit-fill-available; overflow-y: auto; margin: 0; padding: 0; }
+  html, body { margin: 0; padding: 0; height: 100%; }
   #root { margin: 0; padding: 0; height: 100%; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
