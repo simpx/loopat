@@ -1,41 +1,96 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>loopat — 启动中</title>
+<title>loopat — starting</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
-.container{text-align:center;max-width:480px;padding:2rem}
+.container{text-align:center;max-width:500px;padding:2rem}
 .logo{font-size:3rem;margin-bottom:1rem;user-select:none}
 h1{font-size:1.5rem;font-weight:600;margin-bottom:.5rem}
-#status{color:#8b949e;font-size:.875rem;margin-bottom:1.5rem}
+#status{color:#8b949e;font-size:.875rem;margin-bottom:1.5rem;transition:opacity .3s}
+#debug{color:#6b7280;font-size:.75rem;margin-top:1rem;white-space:pre-wrap;word-break:break-all;max-height:240px;overflow-y:auto;font-family:ui-monospace,monospace;text-align:left;background:#161b22;padding:12px;border-radius:8px;display:none}
 .spinner{width:36px;height:36px;border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto}
 @keyframes spin{to{transform:rotate(360deg)}}
+.error{color:#f85149}
+.btn{display:inline-block;margin-top:1rem;padding:8px 20px;border-radius:8px;border:1px solid #30363d;color:#c9d1d9;font-size:.875rem;cursor:pointer;background:0 0;text-decoration:none;margin-right:8px}
+.btn:hover{background:#161b22}
 </style>
 </head>
 <body>
 <div class="container">
   <div class="logo">🧶</div>
   <h1>loopat 启动中</h1>
-  <p id="status">正在配置环境…</p>
-  <div class="spinner"></div>
+  <p id="status">正在启动服务…</p>
+  <div class="spinner" id="spinner"></div>
+  <div id="debug"></div>
+  <div id="error-actions" style="display:none;margin-top:1rem">
+    <button class="btn" onclick="openLog()">查看日志</button>
+    <button class="btn" onclick="location.reload()">重试</button>
+  </div>
 </div>
 <script>
-// Tauri will replace this page once the server is ready
-const el = document.getElementById('status')
-const messages = [
-  '正在配置环境…',
-  '正在导入 loopat 发行版…',
-  '正在启动 loopat 服务…',
-  '即将就绪…',
-]
-let i = 0
-setInterval(() => {
-  i = (i + 1) % messages.length
-  el.textContent = messages[i]
-}, 3000)
+const SERVER = 'http://localhost:7787'
+const STATUS = document.getElementById('status')
+const SPINNER = document.getElementById('spinner')
+const DEBUG = document.getElementById('debug')
+const ERR_ACTIONS = document.getElementById('error-actions')
+let attempts = 0
+let started = false
+
+function log(msg) {
+  DEBUG.style.display = 'block'
+  DEBUG.textContent += msg + '\n'
+}
+
+function setStatus(text, isError) {
+  STATUS.textContent = text
+  STATUS.style.color = isError ? '#f85149' : '#8b949e'
+}
+
+function openLog() {
+  var iframe = document.createElement('iframe')
+  iframe.style.display = 'none'
+  iframe.src = 'loopat://open-log'
+  document.body.appendChild(iframe)
+  setTimeout(function() { document.body.removeChild(iframe) }, 100)
+}
+
+function check() {
+  attempts++
+  var controller = new AbortController()
+  var timeout = setTimeout(function() { controller.abort() }, 5000)
+
+  fetch(SERVER + '/api/health', { signal: controller.signal, mode: 'cors' })
+    .then(function(r) {
+      clearTimeout(timeout)
+      if (!started) {
+        started = true
+        log('✅ server is ready, redirecting...')
+        window.location.href = SERVER
+      }
+    })
+    .catch(function(err) {
+      clearTimeout(timeout)
+      log('[' + attempts + '] not ready: ' + err.message)
+
+      if (attempts >= 30) {
+        setStatus('无法连接到服务', true)
+        SPINNER.style.display = 'none'
+        ERR_ACTIONS.style.display = 'block'
+        log('❌ 已放弃，请检查 server 是否正常运行')
+        return
+      }
+
+      setStatus('正在启动服务… (' + attempts + '/30)')
+      setTimeout(check, 5000)
+    })
+}
+
+setStatus('正在检测服务状态…')
+check()
 </script>
 </body>
 </html>

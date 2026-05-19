@@ -22,6 +22,7 @@ import { ChatPage } from "./pages/ChatPage"
 import { SettingsPage } from "./pages/SettingsPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
+import { SudoPasswordDialog } from "./components/SudoPasswordDialog"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
@@ -263,6 +264,7 @@ function LoopEmpty({ loggedIn, onNew }: { loggedIn: boolean; onNew: () => void }
 export function App() {
   return (
     <TooltipProvider>
+      <SudoPasswordDialog />
       <BrowserRouter>
         <Routes>
           <Route element={<Layout />}>

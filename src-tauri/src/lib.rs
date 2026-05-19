@@ -1,8 +1,111 @@
+use std::fs::OpenOptions;
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::Emitter;
 use tauri::Manager;
 
-struct ServerProcess(Mutex<Option<Child>>);
+struct ServerProcess {
+    child: Mutex<Option<Child>>,
+    stdin: Mutex<Option<std::process::ChildStdin>>,
+}
+
+struct StartupError(Mutex<Option<String>>);
+
+/// Write diagnostics to a file AND inject into the loading page.
+fn diag(app: &tauri::App, msg: &str) {
+    eprintln!("[loopat] {msg}");
+    // Write to diagnostics file
+    if let Some(path) = diag_path() {
+        let _ = std::fs::write(&path, format!("{}\n", msg));
+    }
+    // Inject into the loading page via eval
+    if let Some(window) = app.get_webview_window("main") {
+        let js = format!(
+            r#"
+(function(){{
+  var d=document.getElementById('debug');
+  var s=document.getElementById('status');
+  var sp=document.getElementById('spinner');
+  if(d){{d.style.display='block';d.textContent+=decodeURIComponent('{}')+'\n'}}
+  if(s){{s.textContent='❌ 启动失败';s.style.color='#f85149'}}
+  if(sp)sp.style.display='none';
+}})();
+"#,
+            // Escape the message as a URI component for safe injection
+            urlencoding(msg)
+        );
+        let _ = window.eval(&js);
+    }
+}
+
+fn urlencoding(s: &str) -> String {
+    s.bytes().map(|b| format!("%{:02X}", b)).collect::<String>()
+}
+
+/// Path to the diagnostics file.
+fn diag_path() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let dir = PathBuf::from(home).join("Library/Logs/loopat");
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir.join("startup.log"))
+}
+
+/// Write to the running server's stdin (e.g. sudo password).
+#[tauri::command]
+fn write_server_stdin(
+    state: tauri::State<ServerProcess>,
+    input: String,
+) -> Result<(), String> {
+    let mut guard = state.stdin.lock().map_err(|e| e.to_string())?;
+    if let Some(ref mut stdin) = *guard {
+        stdin.write_all(input.as_bytes()).map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open the server log in Terminal.app.
+#[tauri::command]
+fn show_server_console() -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let log_path = server_log_path();
+        let escaped = log_path.display().to_string()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        let script = format!(
+            r#"tell app "Terminal" to do script "tail -f {}""#,
+            escaped
+        );
+        Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Return the startup error message (if any).
+#[tauri::command]
+fn get_server_startup_error(state: tauri::State<StartupError>) -> Option<String> {
+    state.0.lock().ok()?.clone()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn server_log_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let dir = PathBuf::from(home).join("Library/Logs/loopat");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("server.log")
+}
+
+
 
 #[cfg(target_os = "windows")]
 const WSL_DISTRO: &str = "loopat";
@@ -169,12 +272,16 @@ fn wait_for_server() -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(ServerProcess(Mutex::new(None)))
+        .manage(ServerProcess {
+            child: Mutex::new(None),
+            stdin: Mutex::new(None),
+        })
+        .manage(StartupError(Mutex::new(None)))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 // Kill server on window close
                 if let Some(state) = window.try_state::<ServerProcess>() {
-                    if let Ok(mut guard) = state.0.lock() {
+                    if let Ok(mut guard) = state.child.lock() {
                         if let Some(ref mut child) = *guard {
                             let _ = child.kill();
                             let _ = child.wait();
@@ -192,14 +299,131 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let server = start_server(app);
+            // ── Menu ──
+            let show_console = MenuItemBuilder::with_id("show_console", "显示服务器日志")
+                .accelerator("CmdOrCtrl+Shift+L")
+                .build(app)?;
+            let window_menu = SubmenuBuilder::new(app, "窗口")
+                .item(&show_console)
+                .build()?;
+            let menu = MenuBuilder::new(app)
+                .item(&window_menu)
+                .build()?;
+            app.set_menu(menu)?;
+
+            // ── Server ──
+            diag(app, "正在查找 loopat-server…");
+            let (server, server_stdin) = start_server(app);
             let server_started = server.is_some();
             if let Some(guard) = app.try_state::<ServerProcess>() {
-                if let Ok(mut g) = guard.0.lock() {
+                if let Ok(mut g) = guard.child.lock() {
                     *g = server;
                 }
+                if let Ok(mut g) = guard.stdin.lock() {
+                    *g = server_stdin;
+                }
             }
-            if server_started && wait_for_server() {
+
+            let server_ready = if server_started {
+                diag(app, "server 已启动，等待端口就绪…");
+                let ready = wait_for_server();
+                if ready {
+                    diag(app, "端口就绪，正在跳转…");
+                } else {
+                    diag(app, "等待超时（60s），server 未响应");
+                    diag(app, "请检查 server 日志: 菜单 > 窗口 > 显示服务器日志");
+                }
+                ready
+            } else {
+                // Collect resource directory contents for diagnostics
+                let exe = std::env::current_exe().ok();
+                let exe_dir = exe.as_ref().and_then(|p| p.parent().map(|p| p.to_path_buf()));
+                let mut detail = String::from("找不到 loopat-server\n\n搜索路径：\n");
+                if let Some(ref d) = exe_dir {
+                    detail += &format!("exe_dir:  {}\n", d.display());
+                    if let Some(parent) = d.parent() {
+                        let r = parent.join("Resources");
+                        detail += &format!("Resources: {} (exists={})\n", r.display(), r.exists());
+                        if r.exists() {
+                            if let Ok(entries) = std::fs::read_dir(&r) {
+                                for entry in entries.flatten() {
+                                    let p = entry.path();
+                                    detail += &format!("  {}\n", p.display());
+                                    if p.is_dir() {
+                                        if let Ok(sub) = std::fs::read_dir(&p) {
+                                            for s in sub.flatten() {
+                                                detail += &format!("    {}\n", s.path().display());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Ok(rd) = app.path().resource_dir() {
+                    detail += &format!("\nTauri resource_dir(): {} (exists={})\n",
+                        rd.display(), rd.exists());
+                    if rd.exists() {
+                        if let Ok(entries) = std::fs::read_dir(&rd) {
+                            for entry in entries.flatten() {
+                                detail += &format!("  {}\n", entry.path().display());
+                            }
+                        }
+                    }
+                }
+                diag(app, &detail);
+                false
+            };
+
+            if server_ready {
+                // ── Password-prompt watcher ──
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let log_path = server_log_path();
+                    let app_handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        use std::io::{BufRead, Seek, SeekFrom};
+                        let mut last_size = 0u64;
+                        loop {
+                            std::thread::sleep(std::time::Duration::from_secs(1));
+                            if let Ok(meta) = std::fs::metadata(&log_path) {
+                                let size = meta.len();
+                                if size == last_size || size == 0 {
+                                    last_size = size;
+                                    continue;
+                                }
+                                // File was truncated (server restart)
+                                if size < last_size {
+                                    last_size = 0;
+                                    continue;
+                                }
+                                if let Ok(file) = std::fs::File::open(&log_path) {
+                                    let mut reader = std::io::BufReader::new(file);
+                                    if reader.seek(SeekFrom::Start(last_size)).is_ok() {
+                                        let mut line = String::new();
+                                        while reader.read_line(&mut line).is_ok()
+                                            && !line.is_empty()
+                                        {
+                                            let lc = line.to_lowercase();
+                                            if lc.contains("[sudo]")
+                                                || lc.trim().contains("password:")
+                                            {
+                                                let _ = app_handle.emit(
+                                                    "server-password-prompt",
+                                                    (),
+                                                );
+                                            }
+                                            line.clear();
+                                        }
+                                    }
+                                }
+                                last_size = size;
+                            }
+                        }
+                    });
+                }
+
                 if let Some(window) = app.get_webview_window("main") {
                     let url = format!("http://localhost:{SERVER_PORT}");
                     let _ = window.navigate(url.parse().unwrap());
@@ -209,37 +433,97 @@ pub fn run() {
             }
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![
+            write_server_stdin,
+            get_server_startup_error,
+            show_server_console,
+        ])
+        .on_menu_event(|_app, event| {
+            if event.id() == "show_console" {
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let log_path = server_log_path();
+                    let escaped = log_path.display().to_string()
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"");
+                    let script = format!(
+                        r#"tell app "Terminal" to do script "tail -f {}""#,
+                        escaped
+                    );
+                    let _ = Command::new("osascript")
+                        .arg("-e")
+                        .arg(&script)
+                        .spawn();
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = Command::new("cmd")
+                        .args(["/c", "start", "powershell", "-NoExit",
+                            "-Command", "Get-Content -Wait \"$env:LOCALAPPDATA/loopat/server.log\""])
+                        .spawn();
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
-fn start_server(_app: &tauri::App) -> Option<Child> {
+fn start_server(app: &tauri::App) -> (Option<Child>, Option<std::process::ChildStdin>) {
     #[cfg(target_os = "windows")]
     {
-        match setup_wsl(_app) {
-            Ok(child) => return Some(child),
+        match setup_wsl(app) {
+            Ok(child) => return (Some(child), None),
             Err(e) => {
                 eprintln!("[loopat] WSL setup error: {e}");
-                return None;
+                return (None, None);
             }
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        find_server_binary().and_then(|path| {
-            eprintln!("[loopat] starting server binary: {}", path.display());
-            let mut cmd = Command::new(path);
-            cmd.stdin(Stdio::null());
-            cmd.stdout(Stdio::inherit());
-            cmd.stderr(Stdio::inherit());
-            match cmd.spawn() {
-                Ok(child) => Some(child),
-                Err(e) => {
-                    eprintln!("[loopat] failed to start server binary: {e}");
-                    None
+        let path = match find_server_binary(app) {
+            Some(p) => p,
+            None => return (None, None),
+        };
+        eprintln!("[loopat] starting server binary: {}", path.display());
+        let log_path = server_log_path();
+        if let Ok(log_file) = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&log_path)
+        {
+            if let Ok(log_clone) = log_file.try_clone() {
+                let mut cmd = Command::new(&path);
+                cmd.stdin(Stdio::piped());
+                cmd.stdout(log_file);
+                cmd.stderr(log_clone);
+                match cmd.spawn() {
+                    Ok(mut child) => {
+                        let stdin = child.stdin.take();
+                        eprintln!("[loopat] server started, log: {}",
+                            log_path.display());
+                        return (Some(child), stdin);
+                    }
+                    Err(e) => eprintln!("[loopat] failed to start server binary: {e}"),
                 }
             }
-        })
+        }
+        // Fallback: piped stdin + inherit stdio
+        let mut cmd = Command::new(&path);
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let stdin = child.stdin.take();
+                (Some(child), stdin)
+            }
+            Err(e) => {
+                eprintln!("[loopat] failed to start server binary: {e}");
+                (None, None)
+            }
+        }
     }
 }
 
@@ -325,58 +609,128 @@ fn setup_wsl(app: &tauri::App) -> Result<Child, String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn find_server_binary() -> Option<std::path::PathBuf> {
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+fn find_server_binary(app: &tauri::App) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok();
+    eprintln!("[loopat] current_exe: {:?}", exe.as_ref().map(|p| p.display()));
 
-    // Inside a macOS .app bundle: binary is in MacOS/, resources in Resources/
-    // Tauri v2 preserves relative resource paths, so binaries may be nested under
-    // a subdirectory (e.g. Resources/dist-macos-tauri/loopat-server).
-    let resource_dir = exe_dir.parent()?.join("Resources");
-
-    // Search Resources/ recursively (Tauri may preserve resource subdirectory structure).
-    // Prefer loopat-server to avoid colliding with the Tauri GUI executable named loopat.
-    if resource_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&resource_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    for name in &["loopat-server", "loopat"] {
-                        let candidate = path.join(name);
-                        if candidate.exists() {
-                            return Some(candidate);
+    // 1) Search backward from executable path (macOS .app bundle structure)
+    if let Some(exe_dir) = exe.as_ref().and_then(|p| p.parent()) {
+        eprintln!("[loopat] exe_dir: {}", exe_dir.display());
+        let resource_dir = exe_dir.parent().map(|p| p.join("Resources"));
+        if let Some(ref r) = resource_dir {
+            eprintln!("[loopat] resource_dir: {}  exists={}", r.display(), r.exists());
+            // Recursive search (up to 3 levels deep for nested resource paths)
+            if r.exists() {
+                if let Ok(entries) = std::fs::read_dir(r) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        eprintln!("[loopat]   scanning: {}", path.display());
+                        // Search this directory and up to 2 more levels deep
+                        let mut dirs: Vec<PathBuf> = vec![path.clone()];
+                        let mut next: Vec<PathBuf> = Vec::new();
+                        for _level in 0..3 {
+                            for d in dirs.drain(..) {
+                                if d.is_dir() {
+                                    if let Ok(sub) = std::fs::read_dir(&d) {
+                                        for s in sub.flatten() {
+                                            let p = s.path();
+                                            if p.is_dir() {
+                                                next.push(p.clone());
+                                            }
+                                            for name in &["loopat-server", "loopat"] {
+                                                let candidate = if p.is_dir() {
+                                                    p.join(name)
+                                                } else {
+                                                    p.clone()
+                                                };
+                                                let exists = candidate.exists();
+                                                if !exists && p.is_dir() { continue; }
+                                                let mode = std::fs::metadata(&candidate).ok()
+                                                    .map(|m| format!("{:o}", m.permissions().mode()));
+                                                eprintln!("[loopat]     {} exists={} mode={:?}",
+                                                    candidate.display(), exists, mode);
+                                                if exists && (candidate.file_name().map_or(false, |n| n == "loopat-server" || n == "loopat")) {
+                                                    return Some(candidate);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            std::mem::swap(&mut dirs, &mut next);
                         }
                     }
+                }
+            }
+            // Flat in Resources/
+            for name in &["loopat-server", "loopat"] {
+                let candidate = r.join(name);
+                let exists = candidate.exists();
+                eprintln!("[loopat]   flat: {}  exists={}", candidate.display(), exists);
+                if exists { return Some(candidate); }
+            }
+        }
+        // Next to executable
+        let candidate = exe_dir.join("loopat-server");
+        let exists = candidate.exists();
+        eprintln!("[loopat]   exe_dir: {}  exists={}", candidate.display(), exists);
+        if exists { return Some(candidate); }
+    }
+
+    // 2) Try Tauri's resource_dir() API
+    if let Ok(rd) = app.path().resource_dir() {
+        eprintln!("[loopat] Tauri resource_dir(): {}  exists={}", rd.display(), rd.exists());
+        if rd.exists() {
+            // Recursive (up to 3 levels)
+            if let Ok(entries) = std::fs::read_dir(&rd) {
+                let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+                let mut next: Vec<PathBuf> = Vec::new();
+                for _level in 0..3 {
+                    for d in dirs.drain(..) {
+                        eprintln!("[loopat]   scanning: {}", d.display());
+                        if let Ok(sub) = std::fs::read_dir(&d) {
+                            for s in sub.flatten() {
+                                let p = s.path();
+                                if p.is_dir() {
+                                    next.push(p.clone());
+                                }
+                                for name in &["loopat-server", "loopat"] {
+                                    let candidate = if p.is_dir() { p.join(name) } else { p.clone() };
+                                    if candidate.exists()
+                                        && candidate.file_name().map_or(false, |n| n == "loopat-server" || n == "loopat")
+                                    {
+                                        eprintln!("[loopat]     FOUND: {}", candidate.display());
+                                        return Some(candidate);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    std::mem::swap(&mut dirs, &mut next);
+                }
+            }
+            // Flat
+            for name in &["loopat-server", "loopat"] {
+                let candidate = rd.join(name);
+                if candidate.exists() {
+                    eprintln!("[loopat]     FOUND (flat): {}", candidate.display());
+                    return Some(candidate);
                 }
             }
         }
     }
 
-    for name in &["loopat-server", "loopat"] {
-        // Bundled .app resource (flat path)
-        let candidate = resource_dir.join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
-    }
-    // Dev / non-bundle builds: only accept the explicit server name here.
-    // Never fall back to exe_dir/loopat, because that is the Tauri GUI binary
-    // in packaged apps and causes recursive window launches.
-    let candidate = exe_dir.join("loopat-server");
-    if candidate.exists() {
-        return Some(candidate);
-    }
-
-    // Dev mode: lookup relative to project root
+    // 3) Dev mode
     let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let base = manifest.parent()?;
     for name in &["loopat-server", "loopat"] {
         for dir in &["dist-macos-x64", "dist-macos-arm64", "dist"] {
             let candidate = base.join(dir).join(name);
-            if candidate.exists() {
-                return Some(candidate);
-            }
+            let exists = candidate.exists();
+            eprintln!("[loopat]   dev: {}  exists={}", candidate.display(), exists);
+            if exists { return Some(candidate); }
         }
     }
-    eprintln!("loopat server binary not found");
+    eprintln!("[loopat] server binary not found");
     None
 }
