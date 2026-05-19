@@ -271,11 +271,14 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean }): Promise<LoopMeta> {
+  const { knowledgeRw, ...rest } = opts
+  const body: Record<string, unknown> = { ...rest }
+  if (knowledgeRw) body.knowledge_rw = true
   const r = await apiFetch("/api/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
+    body: JSON.stringify(body),
   })
   return (await r.json()) as LoopMeta
 }

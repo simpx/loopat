@@ -617,7 +617,7 @@ function DocView({
   }
 
   const startDistill = async () => {
-    const m = await ws.createLoop({ title: `distill ${path} → knowledge` })
+    const m = await ws.createLoop({ title: `distill ${path} → knowledge`, knowledgeRw: true })
     navigate(`/loop/${m.id}`)
   }
 

@@ -174,6 +174,7 @@ export async function buildBwrapArgs(
   extraSetenv: SandboxExtraEnv = {},
   sandboxName?: string,
   vaultName?: string,
+  knowledgeRw?: boolean,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -211,7 +212,7 @@ export async function buildBwrapArgs(
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
-    "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
+    knowledgeRw ? "--bind" : "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
     "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // loopat install dir (claude binary lives here)
