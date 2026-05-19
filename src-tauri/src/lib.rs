@@ -268,9 +268,18 @@ fn wait_for_server() -> bool {
     false
 }
 
+fn kill_server_process(state: &ServerProcess) {
+    if let Ok(mut guard) = state.child.lock() {
+        if let Some(ref mut child) = *guard {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(ServerProcess {
             child: Mutex::new(None),
@@ -279,14 +288,8 @@ pub fn run() {
         .manage(StartupError(Mutex::new(None)))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                // Kill server on window close
                 if let Some(state) = window.try_state::<ServerProcess>() {
-                    if let Ok(mut guard) = state.child.lock() {
-                        if let Some(ref mut child) = *guard {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                        }
-                    }
+                    kill_server_process(&state);
                 }
                 #[cfg(target_os = "windows")]
                 {
@@ -433,11 +436,6 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            write_server_stdin,
-            get_server_startup_error,
-            show_server_console,
-        ])
         .on_menu_event(|_app, event| {
             if event.id() == "show_console" {
                 #[cfg(not(target_os = "windows"))]
@@ -464,8 +462,32 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .invoke_handler(tauri::generate_handler![
+            write_server_stdin,
+            get_server_startup_error,
+            show_server_console,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|_app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            // Kill server before app exits (handles Cmd+Q, Dock Quit, etc.)
+            if let Some(state) = _app_handle.try_state::<ServerProcess>() {
+                kill_server_process(&state);
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = Command::new(WSL_EXE)
+                    .args(["-d", WSL_DISTRO, "--", "pkill", "-f", "loopat-server"])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
+            }
+            // Keep the event loop running until cleanup completes
+            api.prevent_exit();
+        }
+    });
 }
 
 fn start_server(app: &tauri::App) -> (Option<Child>, Option<std::process::ChildStdin>) {
