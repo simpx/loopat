@@ -337,7 +337,7 @@ case "$ARCH" in
     echo "  Using binaries from $dist_src/"
 
     # Auto-build native arch binaries if missing
-    required_bins=("loopat-server" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh")
+    required_bins=("loopat-server" "loopat-sandbox" "claude" "mise" "git-crypt" "libcrypto.3.dylib" "install.sh" "install-macos-app.sh")
     need_build=false
     for bin in "${required_bins[@]}"; do
       if [ ! -f "$dist_src/$bin" ]; then
@@ -366,6 +366,7 @@ case "$ARCH" in
        "$dist_src/git-crypt" \
        "$dist_src/libcrypto.3.dylib" \
        dist-macos-tauri/
+    cp scripts/install-macos-app.sh dist-macos-tauri/
 
     tauri_config='{"bundle":{"resources":["../dist-macos-tauri/loopat-server","../dist-macos-tauri/loopat-sandbox","../dist-macos-tauri/claude","../dist-macos-tauri/mise","../dist-macos-tauri/git-crypt","../dist-macos-tauri/libcrypto.3.dylib"]}}'
 
@@ -374,6 +375,45 @@ case "$ARCH" in
     cargo tauri build --bundles dmg --config "$tauri_config"
     echo "==> Tauri bundle: src-tauri/target/release/bundle/dmg/"
     cd ..
+
+    # Add install-macos-app.sh alongside the .app in the DMG
+    dmg_path="src-tauri/target/release/bundle/dmg/loopat_*.dmg"
+    dmg_file=$(ls $dmg_path 2>/dev/null | head -1)
+    if [ -n "$dmg_file" ]; then
+      echo "==> Adding install-macos-app.sh to DMG..."
+      rw_dmg="/tmp/loopat_rw.dmg"
+      mount_point="/tmp/loopat_dmg_mount"
+      vol_name="loopat"
+      rm -f "$rw_dmg"
+      hdiutil convert "$dmg_file" -format UDRW -o "$rw_dmg"
+      # Attach without auto-opening in Finder
+      hdiutil attach "$rw_dmg" -mountpoint "$mount_point" -nobrowse -noautoopen
+      cp scripts/install-macos-app.sh "$mount_point/install-macos-app.sh"
+
+      # Arrange icons via AppleScript: app at top, script below, taller window
+      osascript \
+        -e "set targetPath to POSIX file \"$mount_point\" as alias" \
+        -e "tell application \"Finder\"" \
+        -e "  open targetPath" \
+        -e "  delay 0.5" \
+        -e "  set win to window of targetPath" \
+        -e "  set current view of win to icon view" \
+        -e "  set toolbar visible of win to false" \
+        -e "  set statusbar visible of win to false" \
+        -e "  set the bounds of win to {100, 100, 520, 420}" \
+        -e "  set iconViewOptions to icon view options of win" \
+        -e "  set arrangement of iconViewOptions to not arranged" \
+        -e "  set position of item \"loopat.app\" of win to {180, 80}" \
+        -e "  set position of item \"install-macos-app.sh\" of win to {180, 200}" \
+        -e "  close win" \
+        -e "end tell" || echo "  (icon arrangement skipped — osascript failed)"
+
+      hdiutil detach "$mount_point"
+      mv "$dmg_file" "${dmg_file}.bak"
+      hdiutil convert "$rw_dmg" -format UDZO -o "$dmg_file"
+      rm -f "$rw_dmg" "${dmg_file}.bak"
+      echo "  -> $dmg_file (updated with install-macos-app.sh)"
+    fi
 
     ;;
   *)

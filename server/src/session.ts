@@ -277,7 +277,8 @@ class LoopSession {
       meta.config?.default_model,
     ], true)
     if (!resolved) {
-      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${meta.createdBy}/.loopat/vaults/${meta.config?.vault ?? "default"}/provider-keys/`)
+      console.warn(`[loopat] no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — skipping SDK session`)
+      return
     }
     const providerName = resolved.name
     const provider = resolved.provider
@@ -819,7 +820,15 @@ class LoopSession {
         try { await this.q.setPermissionMode(permissionMode) } catch {}
       }
     }
-    await this.ensureStarted()
+    try {
+      await this.ensureStarted()
+    } catch (e: any) {
+      const err = { type: "error", message: e?.message ?? String(e) }
+      this.history.push(err as any)
+      this.persist(err)
+      this.broadcast(err)
+      return
+    }
     const userMsg: SDKUserMessage = {
       type: "user",
       message: { role: "user", content: text },
