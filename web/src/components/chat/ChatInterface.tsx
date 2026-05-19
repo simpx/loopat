@@ -33,6 +33,17 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+/* ─── History loading spinner ─── */
+
+const HistoryLoading: FC = () => {
+  return (
+    <div className="my-auto flex grow flex-col items-center justify-center gap-3">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+      <p className="text-sm text-gray-400">Loading history…</p>
+    </div>
+  );
+};
+
 /* ─── Composer draft cache ─── */
 
 const DRAFT_STORAGE_KEY = "loopat:composer:drafts";
@@ -286,6 +297,11 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         className="relative flex-1 overflow-x-auto overflow-y-scroll scroll-smooth"
       >
         <div ref={containerRef} className="mx-auto flex w-full min-h-full flex-col px-2 md:px-3 pt-3 md:pt-4">
+          {/* Loading state — show skeleton while history is being replayed */}
+          {loadingHistory && (
+            <HistoryLoading />
+          )}
+
           {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
           <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
             <ThreadWelcome />
