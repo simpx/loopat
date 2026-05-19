@@ -101,7 +101,7 @@ export function FloatingDm({ me }: { me: string }) {
   }, [activeConvId])
 
   useEffect(() => {
-    if (open && active) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (open && active) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
   }, [messages, open, active])
 
   // ── ws ──

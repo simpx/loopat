@@ -112,6 +112,13 @@ export function ChatPage() {
   const activeThreadRootIdRef = useRef<number | null>(null)
   activeThreadRootIdRef.current = activeThreadRootId
 
+  // ── render window: bottom-up progressive reveal ──
+  const RENDER_WINDOW_SIZE = 5
+  const RENDER_WINDOW_BATCH = 20
+  const [renderCount, setRenderCount] = useState(RENDER_WINDOW_SIZE)
+  const visibleMessages = messages.slice(-renderCount)
+  const hasOlderMessages = messages.length > renderCount
+
   const active = useMemo(() => convs.find((c) => c.id === convId), [convs, convId])
   const channels = useMemo(() => convs.filter((c) => c.kind === "channel").sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")), [convs])
   const dms = useMemo(
@@ -141,13 +148,18 @@ export function ChatPage() {
 
   // On URL convId change → fetch messages, mark read, optimistically zero
   // unread. Also close any open thread panel — threads are conv-scoped.
+  const convWithDataRef = useRef<string | null>(null)
   useEffect(() => {
     if (!convId) return
     setActiveThreadRootId(null)
     setThread(null)
+    setRenderCount(RENDER_WINDOW_SIZE)
+    convWithDataRef.current = null
+    progressiveReadyRef.current = false
     let cancelled = false
     listChatMessages(convId, { limit: 100 }).then((msgs) => {
       if (cancelled) return
+      convWithDataRef.current = convId
       setMessages(msgs)
       // mark-read up to the latest message
       const last = msgs[msgs.length - 1]
@@ -192,12 +204,55 @@ export function ChatPage() {
   }, [convId, convs, channels, navigate])
 
   // Auto-scroll on new messages (main feed + open thread panel)
+  // Initial scroll uses "auto" (no animation); live WS arrivals use "smooth".
+  const initialScrollDoneRef = useRef(false)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: initialScrollDoneRef.current ? "smooth" : "auto" })
+    initialScrollDoneRef.current = true
+  }, [messages, renderCount])
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [thread?.replies.length])
+
+  // Bottom-up progressive reveal: start with RENDER_WINDOW_SIZE newest
+  // messages, then auto-load older batches so the viewport stays at bottom
+  // while the scrollbar grows.
+  const progressiveReadyRef = useRef(false)
+  useEffect(() => {
+    setRenderCount(RENDER_WINDOW_SIZE)
+    progressiveReadyRef.current = false
+  }, [convId])
+
+  useEffect(() => {
+    if (!convId || messages.length === 0 || convWithDataRef.current !== convId || progressiveReadyRef.current) return
+    progressiveReadyRef.current = true
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
+      requestAnimationFrame(() => {
+        if (!cancelled) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+      })
+    }
+    tick()
+    const interval = setInterval(() => {
+      if (cancelled) return
+      // Use a ref that's kept in sync so the interval always reads the latest length
+      const len = messages.length
+      setRenderCount((prev) => {
+        if (prev >= len) {
+          clearInterval(interval)
+          return prev
+        }
+        return prev + RENDER_WINDOW_BATCH
+      })
+      requestAnimationFrame(() => {
+        if (!cancelled) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+      })
+    }, 200)
+    return () => { cancelled = true; clearInterval(interval) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId, messages])
 
   // ── websocket ──
 
@@ -518,11 +573,11 @@ export function ChatPage() {
               </div>
             </header>
 
-            <div className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3">
+            <div className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3 chat-messages-container">
               {messages.length === 0 && (
                 <div className="text-[13px] text-gray-500">no messages yet — say hi</div>
               )}
-              {messages.map((m) => (
+              {visibleMessages.map((m) => (
                 <MessageRow
                   key={m.id}
                   message={m}
