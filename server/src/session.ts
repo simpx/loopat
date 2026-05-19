@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
-import { buildLoopatAppend } from "./system-prompt"
+import { buildLoopatAppend, buildSessionContextBlock } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { getLoop, patchLoopMeta } from "./loops"
@@ -292,7 +292,7 @@ class LoopSession {
     const providerName = resolved.name
     const provider = resolved.provider
 
-    const loopatAppend = await buildLoopatAppend(meta)
+    const loopatAppend = await buildLoopatAppend()
     const loopId = this.id
 
     // Compose multi-tier claude config (skills + plugins) into the loop's
@@ -568,6 +568,23 @@ class LoopSession {
         ...(shouldContinue ? { continue: true } : {}),
       },
     })
+    // Fresh session — inject per-loop runtime context as a synthetic
+    // (isSynthetic, shouldQuery: false) user message. This keeps the
+    // system prompt append purely static (cache-friendly) while still
+    // giving the model session-specific info.
+    if (!shouldContinue) {
+      const ctxMsg: SDKUserMessage = {
+        type: "user",
+        message: { role: "user", content: buildSessionContextBlock(meta) },
+        parent_tool_use_id: null,
+        uuid: randomUUID(),
+        isSynthetic: true,
+        shouldQuery: false,
+      }
+      this.input.push(ctxMsg)
+      this.history.push(ctxMsg)
+      this.persist(ctxMsg)
+    }
     this.consume(this.q)
   }
 

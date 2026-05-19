@@ -29,6 +29,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession, restartSession } from "./session"
+import { checkUserInput } from "./injection-guard"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
@@ -2159,6 +2160,12 @@ app.get(
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data as ArrayBuffer)
           const msg = JSON.parse(data)
           if (msg?.type === "user" && typeof msg.text === "string") {
+            // ── Prompt injection guard ──
+            const guard = checkUserInput(msg.text)
+            if (!guard.valid) {
+              try { ws.send(JSON.stringify({ type: "error", message: guard.reason })) } catch {}
+              return
+            }
             // Validate against SDK PermissionMode values
             const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
             const pm = msg.permissionMode
