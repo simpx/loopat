@@ -194,20 +194,25 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     let timer: ReturnType<typeof setTimeout> | null = null;
     const scroll = () => {
       if (didInitialScroll.current && userScrolledUp) return;
+      const prev = vp.style.scrollBehavior;
+      vp.style.scrollBehavior = "auto";
       if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
-        const prev = vp.style.scrollBehavior;
-        vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
-        vp.style.scrollBehavior = prev;
-        didInitialScroll.current = true;
+        if (!loadingHistoryRef.current) {
+          didInitialScroll.current = true;
+        }
         userScrolledUp = false;
       } else if (didInitialScroll.current && !loadingHistoryRef.current) {
         vp.scrollTop = vp.scrollHeight;
       }
+      vp.style.scrollBehavior = prev;
     };
     scroll();
     const ro = new ResizeObserver(() => {
       if (timer) return;
+      // During history loading content-visibility underestimates scrollHeight;
+      // skip re-snapping — the loadingHistory change effect does one final scroll.
+      if (loadingHistoryRef.current) return;
       timer = setTimeout(() => { timer = null; scroll(); }, 80);
     });
     ro.observe(inner);
@@ -224,7 +229,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
   useEffect(() => {
     if (prevLoading.current && !loadingHistory) {
       const vp = vpRef.current;
-      if (vp && !didInitialScroll.current) {
+      if (vp) {
         const prev = vp.style.scrollBehavior;
         vp.style.scrollBehavior = "auto";
         vp.scrollTop = vp.scrollHeight;
