@@ -386,6 +386,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const reconnectTimerRef = useRef<number | null>(null)
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
+  const replayBufRef = useRef<any[]>([])
 
   // Tool progress (tool_progress messages) keyed by tool_use_id
   const toolProgressRef = useRef<Map<string, ToolProgress>>(new Map())
@@ -614,6 +615,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setContextUsage(null)
       setThinkingBudget(null)
       setThinkingOpen(false)
+      replayBufRef.current = []
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -644,19 +646,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }, delay)
       }
       ws.onerror = () => setConnected(false)
-      ws.onmessage = (e) => {
-        let m: any
-        try {
-          m = JSON.parse(e.data)
-        } catch {
-          return
-        }
-        if (m?.type === "history_end") {
-          loadingHistoryRef.current = false
-          setLoadingHistory(false)
-          setRunning(false)
-          return
-        }
+      const dispatchMsg = (m: any) => {
         if (m?.type === "viewers") {
           setViewers(typeof m.count === "number" ? m.count : 0)
           return
@@ -871,6 +861,37 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             },
           ])
         }
+      }
+      ws.onmessage = (e) => {
+        let m: any
+        try {
+          m = JSON.parse(e.data)
+        } catch {
+          return
+        }
+        // During history replay: buffer everything, process on history_end.
+        // This avoids partial/intermediate state during loading.
+        if (loadingHistoryRef.current) {
+          if (m?.type === "history_end") {
+            for (const bufMsg of replayBufRef.current) {
+              dispatchMsg(bufMsg)
+            }
+            loadingHistoryRef.current = false
+            setLoadingHistory(false)
+            setRunning(false)
+          } else {
+            replayBufRef.current.push(m)
+          }
+          return
+        }
+        // Live messages: process immediately
+        if (m?.type === "history_end") {
+          loadingHistoryRef.current = false
+          setLoadingHistory(false)
+          setRunning(false)
+          return
+        }
+        dispatchMsg(m)
       }
     }
 
