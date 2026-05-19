@@ -4,7 +4,7 @@ import {
   useAuiState,
   useComposerRuntime,
 } from "@assistant-ui/react";
-import { ArrowDownIcon } from "lucide-react";
+import { ArrowDownIcon, GitBranch } from "lucide-react";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import Composer from "./Composer";
@@ -56,8 +56,9 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean } = {}) {
-  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages } = useLoopRuntimeExtra();
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string } = {}) {
+  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
+  const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
@@ -351,6 +352,61 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
             </div>
           </ErrorBoundary>
         )}
+
+        {/* Empty-state info & settings — repo info + thinking depth */}
+        {isEmpty && (
+          <div className="mb-4 space-y-2 px-4">
+            <div className="flex items-baseline gap-3">
+              {title && (
+                <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
+              )}
+              {driver && (
+                <span className="text-xs text-gray-400">driver: {driver}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-gray-400">
+              {repo && (
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <GitBranch className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  <span className="font-mono truncate">{repo}{branch ? <span className="text-gray-300"> · {branch}</span> : ""}</span>
+                </span>
+              )}
+              <span className="ml-auto flex gap-0.5">
+                  {[
+                    { label: "Normal", tokens: null, mode: "normal" },
+                    { label: "Think", tokens: 16000, mode: "think" },
+                    { label: "Hard", tokens: 32000, mode: "hard" },
+                    { label: "Ultrathink", tokens: null, mode: "ultra" },
+                  ].map((opt) => {
+                    const active = opt.mode === "normal"
+                      ? thinkingBudget === null && thinkingNullMode === "normal"
+                      : opt.mode === "ultra"
+                        ? thinkingBudget === null && thinkingNullMode === "ultra"
+                        : thinkingBudget === opt.tokens
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => {
+                          setThinkingNullMode(opt.mode === "normal" ? "normal" : opt.mode === "ultra" ? "ultra" : "normal")
+                          setMaxThinkingTokens(opt.tokens)
+                        }}
+                        className={
+                          "px-1.5 py-0.5 text-[11px] rounded transition-colors " +
+                          (active
+                            ? "bg-gray-200 text-gray-700 font-medium"
+                            : "text-gray-400 hover:text-gray-600 hover:bg-gray-100")
+                        }
+                      >
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </span>
+            </div>
+          </div>
+        )}
+
         {archived ? (
           <div className="mx-3 md:mx-5 mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[12px] text-amber-800">
             <span>📦</span>
