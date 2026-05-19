@@ -182,7 +182,11 @@ export function CardDetailDialog({
           </Field>
 
           {card.loopId && (
-            <div className="text-[11px] text-gray-400">Loop: <button onClick={() => navigate(`/loop/${card.loopId}`)} className="text-blue-700 hover:underline font-mono">{card.loopId.slice(0, 8)}</button></div>
+            <div className="text-[11px] text-gray-400">Loop: <button onClick={() => {
+              const id = card.loopId!
+              const full = ws.loops.find((l) => l.id === id || l.id.startsWith(id))?.id ?? id
+              navigate(`/loop/${full}`)
+            }} className="text-blue-700 hover:underline font-mono">{card.loopId.slice(0, 8)}</button></div>
           )}
         </div>
 
