@@ -24,16 +24,6 @@ import { getChatHistory, appendChatHistory } from "@/api";
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
 
-function estimateTokens(messages: readonly unknown[]): number {
-  let chars = 0;
-  for (const m of messages) {
-    if (typeof m === "object" && m !== null) {
-      chars += JSON.stringify(m).length;
-    }
-  }
-  return Math.round(chars / 3.5);
-}
-
 export default function Composer() {
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const hasInput = useAuiState(
@@ -41,9 +31,8 @@ export default function Composer() {
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const messagesArray = useAuiState((s) => s.thread.messages);
-  const usedTokens = estimateTokens(messagesArray);
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, estimatedTokens } = useLoopRuntimeExtra();
+  const usedTokens = estimatedTokens;
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();

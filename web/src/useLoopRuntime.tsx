@@ -313,6 +313,8 @@ export interface LoopRuntimeExtra {
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
   loadMoreMessages: () => void
+  /** Token estimate based on the full aggregated conversation (not just visible window). */
+  estimatedTokens: number
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -349,6 +351,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   availableSlashCommands: [],
   hasOlderMessages: false,
   loadMoreMessages: () => {},
+  estimatedTokens: 0,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -588,9 +591,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     setShowHistory((v) => !v)
   }, [])
 
+  const estimatedTokens = useMemo(() => {
+    let chars = 0
+    for (const m of aggregated) {
+      chars += JSON.stringify(m).length
+    }
+    return Math.round(chars / 3.5)
+  }, [aggregated])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens],
   )
 
   useEffect(() => {
