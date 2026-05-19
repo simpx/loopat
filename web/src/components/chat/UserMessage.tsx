@@ -42,10 +42,7 @@ export default function UserMessage() {
       >
         <div
           ref={measureRef}
-          className={cn(
-            "break-words text-gray-800",
-            !expanded && "whitespace-pre-wrap",
-          )}
+          className="whitespace-pre-wrap break-words text-gray-800"
         >
           <MessagePrimitive.Parts
             components={{
