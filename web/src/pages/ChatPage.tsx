@@ -112,6 +112,21 @@ export function ChatPage() {
   const activeThreadRootIdRef = useRef<number | null>(null)
   activeThreadRootIdRef.current = activeThreadRootId
 
+  // ── render window: bottom-up progressive reveal ──
+  const RENDER_WINDOW_SIZE = 10
+  const RENDER_WINDOW_BATCH = 20
+  const [renderCount, setRenderCount] = useState(RENDER_WINDOW_SIZE)
+  const visibleMessages = messages.slice(-renderCount)
+  const hasOlderMessages = messages.length > renderCount
+
+  const loadMoreMessages = useCallback(() => {
+    setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
+  }, [])
+  const loadMoreRef = useRef(loadMoreMessages)
+  loadMoreRef.current = loadMoreMessages
+  const hasOlderRef = useRef(hasOlderMessages)
+  hasOlderRef.current = hasOlderMessages
+
   const active = useMemo(() => convs.find((c) => c.id === convId), [convs, convId])
   const channels = useMemo(() => convs.filter((c) => c.kind === "channel").sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")), [convs])
   const dms = useMemo(
@@ -141,13 +156,18 @@ export function ChatPage() {
 
   // On URL convId change → fetch messages, mark read, optimistically zero
   // unread. Also close any open thread panel — threads are conv-scoped.
+  const convWithDataRef = useRef<string | null>(null)
   useEffect(() => {
     if (!convId) return
     setActiveThreadRootId(null)
     setThread(null)
+    setRenderCount(RENDER_WINDOW_SIZE)
+    convWithDataRef.current = null
+    progressiveReadyRef.current = false
     let cancelled = false
     listChatMessages(convId, { limit: 100 }).then((msgs) => {
       if (cancelled) return
+      convWithDataRef.current = convId
       setMessages(msgs)
       // mark-read up to the latest message
       const last = msgs[msgs.length - 1]
@@ -192,12 +212,55 @@ export function ChatPage() {
   }, [convId, convs, channels, navigate])
 
   // Auto-scroll on new messages (main feed + open thread panel)
+  // Initial scroll uses "auto" (no animation); live WS arrivals use "smooth".
+  const initialScrollDoneRef = useRef(false)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: initialScrollDoneRef.current ? "smooth" : "auto" })
+    initialScrollDoneRef.current = true
+  }, [messages, renderCount])
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [thread?.replies.length])
+
+  // Bottom-up progressive reveal: start with RENDER_WINDOW_SIZE newest
+  // messages, then load older batches as the user scrolls to the top.
+  const progressiveReadyRef = useRef(false)
+  const msgContainerRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    setRenderCount(RENDER_WINDOW_SIZE)
+    progressiveReadyRef.current = false
+  }, [convId])
+
+  useEffect(() => {
+    if (!convId || messages.length === 0 || convWithDataRef.current !== convId || progressiveReadyRef.current) return
+    progressiveReadyRef.current = true
+    // First batch: immediately load 20 more for a smooth start
+    setRenderCount((prev) => prev + RENDER_WINDOW_BATCH)
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+    })
+    // Scroll-to-top triggers subsequent batches
+    const container = msgContainerRef.current
+    if (!container) return
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const onScroll = () => {
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => {
+        if (container.scrollTop < 60 && hasOlderRef.current) {
+          loadMoreRef.current()
+          requestAnimationFrame(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
+          })
+        }
+      }, 400)
+    }
+    container.addEventListener("scroll", onScroll, { passive: true })
+    return () => {
+      container.removeEventListener("scroll", onScroll)
+      if (debounce) clearTimeout(debounce)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId, messages])
 
   // ── websocket ──
 
@@ -230,7 +293,7 @@ export function ChatPage() {
             }
           }
           markChatRead(m.convId, m.id).catch(() => {})
-        } else {
+        } else if (m.author !== me) {
           setConvs((prev) =>
             prev.map((c) =>
               c.id === m.convId
@@ -251,7 +314,7 @@ export function ChatPage() {
         }
       }
     },
-    [navigate],
+    [navigate, me],
   )
 
   const { subscribe, unsubscribe } = useChatWebSocket(onEvent)
@@ -518,11 +581,11 @@ export function ChatPage() {
               </div>
             </header>
 
-            <div className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3">
+            <div ref={msgContainerRef} className="flex-1 min-h-0 overflow-auto px-5 py-4 flex flex-col gap-3 chat-messages-container">
               {messages.length === 0 && (
                 <div className="text-[13px] text-gray-500">no messages yet — say hi</div>
               )}
-              {messages.map((m) => (
+              {visibleMessages.map((m) => (
                 <MessageRow
                   key={m.id}
                   message={m}

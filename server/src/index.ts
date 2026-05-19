@@ -5,6 +5,9 @@ import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote } from "./loops"
+import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
+import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
+import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
 import {
   initChat,
   listChannels,
@@ -25,7 +28,7 @@ import { join as pathJoin, dirname } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
-import { getSession, destroySession as destroyLoopSession } from "./session"
+import { getSession, destroySession as destroyLoopSession, restartSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
@@ -41,7 +44,7 @@ import {
   loopHistoryPath,
   loopChatHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, type ProviderConfig, type ConfigValue } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -422,6 +425,180 @@ app.post("/api/settings/personal/value", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
+// ── onboarding (auth required) ──
+// Welcome-card state machine for new users. See server/src/onboarding.ts.
+
+app.get("/api/onboarding", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const status = await getOnboardingStatus(userId)
+  // If state says "started" but the loop has since been deleted, fall back to
+  // "fresh" so the user can re-start instead of staring at a dead link.
+  if (status.state === "started" && status.loopId) {
+    if (!(await loopExists(status.loopId))) {
+      return c.json({ state: "fresh" })
+    }
+  }
+  return c.json(status)
+})
+
+app.post("/api/onboarding/start", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  try {
+    const r = await startOnboardingLoop(userId)
+    return c.json({ ok: true, loopId: r.loopId })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "start failed" }, 500)
+  }
+})
+
+app.post("/api/onboarding/done", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  await markOnboardingDone(userId)
+  return c.json({ ok: true })
+})
+
+// ── MCP OAuth (auth required) ──
+// loopat owns the OAuth dance entirely: discovery + DCR + auth code + PKCE
+// + token exchange happen server-side. Sandboxed CC sees pre-authenticated
+// transports via header injection at spawn (see session.ts / mcp-tokens.ts).
+// Tokens are persisted per-(user, vault) inside the vault tree, so they're
+// auto-encrypted by git-crypt and isolated across vaults.
+
+const VAULT_RE = /^[a-zA-Z0-9_-]+$/
+
+/** Best-effort recovery of the public URL the user's browser is hitting us
+ *  on. Order: LOOPAT_PUBLIC_URL env → X-Forwarded-* headers → request Host
+ *  header. The OAuth `redirect_uri` is built from this and must match what
+ *  we register with DCR. */
+function publicBaseUrl(c: any): string {
+  if (process.env.LOOPAT_PUBLIC_URL) return process.env.LOOPAT_PUBLIC_URL.replace(/\/+$/, "")
+  const xfHost = c.req.header("x-forwarded-host")
+  const xfProto = c.req.header("x-forwarded-proto")
+  const host = xfHost ?? c.req.header("host")
+  const proto = xfProto ?? (c.req.url.startsWith("https") ? "https" : "http")
+  return `${proto}://${host}`
+}
+
+// Lists MCP servers declared at every tier visible to this user, grouped by
+// source. Each tier reports its config-file path even when empty, so the UI
+// can tell users "add servers here if you want a personal-tier one".
+// Personal-tier shadows workspace-tier on name collision (matches spawn merge).
+app.get("/api/mcp-servers", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const ws = await loadWorkspaceClaudeJson()
+  const ps = await loadPersonalClaudeJson(userId)
+
+  const shape = (srv: any) => ({
+    type: (srv?.type ?? "stdio") as string,
+    ...(srv?.url ? { url: srv.url as string } : {}),
+  })
+
+  const workspaceTier = Object.entries(ws.mcpServers ?? {}).map(([name, srv]) => ({
+    name,
+    ...shape(srv),
+  }))
+  const personalTier = Object.entries(ps.mcpServers ?? {}).map(([name, srv]) => ({
+    name,
+    ...shape(srv),
+    /** Same-name in workspace will be shadowed by this entry at spawn time. */
+    shadowsWorkspace: !!ws.mcpServers?.[name],
+  }))
+
+  return c.json({
+    tiers: [
+      {
+        id: "workspace",
+        label: "Workspace MCPs (team-shared, admin-pushed)",
+        path: "context/knowledge/.loopat/claude/claude.json",
+        servers: workspaceTier,
+      },
+      {
+        id: "personal",
+        label: "Personal MCPs (per-user, your overrides)",
+        path: `personal/${userId}/.loopat/claude/claude.json`,
+        servers: personalTier,
+      },
+    ],
+  })
+})
+
+app.get("/api/mcp-auth", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const vault = c.req.query("vault") || "default"
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault name" }, 400)
+  const tokens = await loadMcpTokens(userId, vault)
+  // Mask values; report status only.
+  const summary: Record<string, { connected: boolean; expiresAt?: number; scope?: string }> = {}
+  for (const [name, t] of Object.entries(tokens)) {
+    summary[name] = {
+      connected: !!t.accessToken,
+      ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
+      ...(t.scope ? { scope: t.scope } : {}),
+    }
+  }
+  return c.json(summary)
+})
+
+app.post("/api/mcp-auth/start", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const serverName = typeof body.serverName === "string" ? body.serverName.trim() : ""
+  const vault = typeof body.vault === "string" && body.vault ? body.vault.trim() : "default"
+  if (!serverName || !VAULT_RE.test(serverName)) return c.json({ error: "invalid serverName" }, 400)
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
+  const r = await startMcpAuth({
+    user: userId,
+    vault,
+    serverName,
+    publicBaseUrl: publicBaseUrl(c),
+  })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ authorizationUrl: r.authorizationUrl })
+})
+
+// OAuth provider redirects the browser here after the user authorizes. We
+// finish the token exchange and bounce back to the Settings UI with the
+// outcome in the query string — no JSON, browser-friendly redirect.
+app.get("/api/mcp-auth/callback", async (c) => {
+  const state = c.req.query("state") ?? ""
+  const code = c.req.query("code") ?? ""
+  const errParam = c.req.query("error")
+  if (errParam) {
+    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(errParam)}`)
+  }
+  if (!state || !code) {
+    return c.redirect(`/settings/mcp?status=error&reason=missing_state_or_code`)
+  }
+  const r = await completeMcpAuth({ state, code })
+  if (!r.ok) {
+    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(r.error)}`)
+  }
+  return c.redirect(`/settings/mcp?status=ok&server=${encodeURIComponent(r.serverName)}`)
+})
+
+// Restart the in-memory LoopSession for a loop (interrupt the running
+// query(), so the next user message re-spawns CC and re-injects mcpServers
+// + vault tokens + provider env). Conversation history is preserved via
+// the SDK's --continue. Auth: must be the loop's createdBy.
+app.post("/api/loops/:id/restart-session", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const id = c.req.param("id")
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "loop not found" }, 404)
+  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
+  const restarted = restartSession(id)
+  return c.json({ ok: true, restarted })
+})
+
+app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const server = c.req.param("server")
+  const vault = c.req.query("vault") || "default"
+  if (!VAULT_RE.test(server) || !VAULT_RE.test(vault)) return c.json({ error: "invalid name" }, 400)
+  await deleteMcpToken(userId, vault, server)
+  return c.json({ ok: true })
+})
+
 app.get("/api/settings/workspace", requireAuth, async (c) => {
   const cfg = await loadConfig()
   const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }> = {}
@@ -756,8 +933,9 @@ app.post("/api/loops", requireAuth, async (c) => {
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
   const sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
+  const knowledgeRw = body.knowledge_rw === true
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault })
+    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault, knowledgeRw })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)

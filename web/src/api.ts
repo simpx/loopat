@@ -271,11 +271,14 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string }): Promise<LoopMeta> {
+export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean }): Promise<LoopMeta> {
+  const { knowledgeRw, ...rest } = opts
+  const body: Record<string, unknown> = { ...rest }
+  if (knowledgeRw) body.knowledge_rw = true
   const r = await apiFetch("/api/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
+    body: JSON.stringify(body),
   })
   return (await r.json()) as LoopMeta
 }
@@ -1234,4 +1237,98 @@ export async function spawnLoopFromThread(
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { error: j.error ?? `spawn failed (${r.status})` }
   return { loopId: j.loopId, seedPrompt: j.seedPrompt, messageCount: j.messageCount }
+}
+
+// ── onboarding ──
+
+export type OnboardingStatus = { state: "fresh" | "started" | "done"; loopId?: string }
+
+export async function getOnboarding(): Promise<OnboardingStatus> {
+  const r = await apiFetch("/api/onboarding")
+  if (!r.ok) return { state: "fresh" }
+  return (await r.json()) as OnboardingStatus
+}
+
+export async function startOnboarding(): Promise<{ loopId?: string; error?: string }> {
+  const r = await apiFetch("/api/onboarding/start", { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? "start failed" }
+  return { loopId: j.loopId }
+}
+
+export async function markOnboardingDone(): Promise<boolean> {
+  const r = await apiFetch("/api/onboarding/done", { method: "POST" })
+  return r.ok
+}
+
+// ── MCP auth ──
+
+export type McpAuthStatus = Record<string, { connected: boolean; expiresAt?: number; scope?: string }>
+
+/** List the user's MCP auth state for a given vault. */
+export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStatus> {
+  const r = await apiFetch(`/api/mcp-auth?vault=${encodeURIComponent(vault)}`)
+  if (!r.ok) return {}
+  return (await r.json()) as McpAuthStatus
+}
+
+/** Begin OAuth flow. Returns the authorizationUrl the browser should navigate to. */
+export async function startMcpAuth(
+  serverName: string,
+  vault: string = "default",
+): Promise<{ authorizationUrl?: string; error?: string }> {
+  const r = await apiFetch("/api/mcp-auth/start", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serverName, vault }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? "start failed" }
+  return { authorizationUrl: j.authorizationUrl }
+}
+
+export async function deleteMcpAuth(serverName: string, vault: string = "default"): Promise<boolean> {
+  const r = await apiFetch(`/api/mcp-auth/${encodeURIComponent(serverName)}?vault=${encodeURIComponent(vault)}`, {
+    method: "DELETE",
+  })
+  return r.ok
+}
+
+/** Public-facing MCP server config (workspace-defined). Used by Settings → MCP Auth
+ *  to know which servers are available to connect. */
+export type McpServerEntry = {
+  name: string
+  type: "http" | "sse" | "stdio"
+  url?: string
+  /** Personal-tier only: this entry shadows a same-named workspace entry. */
+  shadowsWorkspace?: boolean
+}
+
+export type McpServerTier = {
+  id: "workspace" | "personal"
+  label: string
+  /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. */
+  path: string
+  servers: McpServerEntry[]
+}
+
+export type McpServerInventory = { tiers: McpServerTier[] }
+
+export async function listMcpServers(): Promise<McpServerInventory> {
+  const r = await apiFetch("/api/mcp-servers")
+  if (!r.ok) return { tiers: [] }
+  return (await r.json()) as McpServerInventory
+}
+
+/** Restart a loop's in-memory SDK session — interrupt the current query()
+ *  so the next user message re-spawns CC and re-reads mcpServers + tokens.
+ *  Used by the /mcp popover's "Reload" button after the user connects a new
+ *  MCP server. Conversation history is preserved by the SDK. */
+export async function restartLoopSession(loopId: string): Promise<{ restarted: boolean; error?: string }> {
+  const r = await apiFetch(`/api/loops/${encodeURIComponent(loopId)}/restart-session`, {
+    method: "POST",
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { restarted: false, error: j.error ?? `restart failed (${r.status})` }
+  return { restarted: !!j.restarted }
 }

@@ -25,9 +25,11 @@ import {
   type PersonalEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
+import { McpStatusPanel } from "../components/McpStatusPanel"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
+import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell"
+type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
@@ -35,6 +37,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
   { id: "envs",          label: "Environment Variables", gated: true,  description: "Env vars injected into every loop sandbox." },
   { id: "mounts",        label: "Sandbox Mounts",         gated: true,  description: "Expose personal files / dirs into loop sandboxes." },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
+  { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -114,7 +117,7 @@ export function SettingsPage() {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => navigate("/context/personal?file=.loopat/config.json")}
+          onClick={() => navigate("/context/personal?file=.loopat/config.json&edit=1")}
           className="h-7 px-2.5 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-700 flex items-center gap-1.5"
           title="open raw config.json in Context tab"
         >
@@ -219,6 +222,9 @@ export function SettingsPage() {
                   )}
                   {active === "shell" && (
                     <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
+                  )}
+                  {active === "mcp" && (
+                    <McpSection disabled={isGatedAndLocked} />
                   )}
                 </div>
               </>
@@ -880,6 +886,50 @@ function ShellSection({ disk, onChanged, disabled }: {
           {saving ? "saving…" : "save shell"}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MCP section — thin wrapper over the shared McpStatusPanel. Adds the
+// "auth completed" flash for the OAuth redirect-back, since this is the
+// landing page after a successful /api/mcp-auth/callback round-trip.
+// ────────────────────────────────────────────────────────────────────────────
+
+function McpSection({ disabled }: { disabled: boolean }) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null)
+
+  useEffect(() => {
+    const s = searchParams.get("status")
+    if (!s) return
+    if (s === "ok") {
+      const server = searchParams.get("server") ?? ""
+      setFlash({ kind: "ok", text: `Connected to ${server} ✓` })
+    } else if (s === "error") {
+      const reason = searchParams.get("reason") ?? "unknown error"
+      setFlash({ kind: "error", text: `Auth failed: ${reason}` })
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete("status"); next.delete("server"); next.delete("reason")
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className={disabled ? "pointer-events-none opacity-50" : ""}>
+      {flash && (
+        <div
+          className={`mb-3 rounded px-3 py-2 text-[12px] ${
+            flash.kind === "ok"
+              ? "bg-green-50 text-green-800 border border-green-200"
+              : "bg-red-50 text-red-800 border border-red-200"
+          }`}
+        >
+          {flash.text}
+        </div>
+      )}
+      <McpStatusPanel variant="settings" />
     </div>
   )
 }

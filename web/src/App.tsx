@@ -23,7 +23,9 @@ import { SettingsPage } from "./pages/SettingsPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { SudoPasswordDialog } from "./components/SudoPasswordDialog"
-import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop } from "./api"
+import { WelcomeCard } from "./components/WelcomeCard"
+import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
+import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 
 const TABS = [
@@ -75,7 +77,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     })
   }, [shareMode])
 
-  useChatUnreadTitle(workspaceName, loggedIn && !shareMode)
+  useChatUnreadTitle(workspaceName, loggedIn && !shareMode, me)
 
   useEffect(() => {
     if (shareMode) return
@@ -120,7 +122,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   return (
     <div className="h-full w-full flex flex-col bg-gray-50 text-gray-900">
       <header className="h-12 shrink-0 border-b border-gray-200 bg-white flex items-center px-2 md:px-4 gap-2 md:gap-4">
-        <div className="flex items-center gap-2 px-1 md:px-2 h-8 shrink-0" title={`workspace: ${workspaceName}`}>
+        <div className="flex items-center gap-2 px-1 md:px-2 h-8 shrink-0 cursor-pointer" title={`workspace: ${workspaceName}`} onClick={() => { window.location.href = "/" }}>
           <span className="text-lg leading-none">🧶</span>
           <span className="hidden md:inline text-sm text-gray-900 font-medium">{workspaceName}</span>
         </div>
@@ -236,7 +238,59 @@ function Shell({ ws }: { ws: WorkspaceState }) {
 }
 
 function LoopRedirect() {
+  // Use the SHARED workspace context, not a fresh useWorkspaceState() — the
+  // latter creates an independent state instance that double-bootstraps auth
+  // and races against Layout's, sometimes returning currentUser=null on the
+  // first render. With the context, authLoading is already false (Layout
+  // gates Shell on it) so currentUser is final when this mounts.
   const ws = useWorkspace()
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
+  const [personal, setPersonal] = useState<PersonalStatus | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  useEffect(() => {
+    if (!ws.currentUser) return
+    Promise.all([getOnboarding(), getPersonalStatus()]).then(([o, p]) => {
+      setOnboarding(o)
+      setPersonal(p)
+    })
+  }, [ws.currentUser, reloadKey])
+
+  // For logged-in users, wait until both fetches resolve before deciding the
+  // route. Otherwise the very first render (currentUser set, fetches pending)
+  // falls through to Navigate(/loop/<first>) and we never see the Welcome card.
+  if (ws.currentUser && (onboarding === null || personal === null)) {
+    return null
+  }
+
+  // Wait for loops to load before checking length or redirecting
+  if (ws.loopsLoading) return null
+
+  // Pre-onboarding: no personal repo yet. Skip is a localStorage flag — the
+  // user can fall through to operate loopat with workspace-shared keys.
+  if (
+    ws.currentUser &&
+    personal &&
+    !personal.imported &&
+    !isSetupPersonalRepoDismissed()
+  ) {
+    return <SetupPersonalRepoCard onDismiss={() => setReloadKey((k) => k + 1)} />
+  }
+
+  if (
+    ws.currentUser &&
+    onboarding &&
+    onboarding.state !== "done" &&
+    personal?.imported
+  ) {
+    return (
+      <WelcomeCard
+        status={onboarding}
+        onChange={() => setReloadKey((k) => k + 1)}
+      />
+    )
+  }
+
   if (ws.loops.length === 0) {
     return <LoopEmpty loggedIn={!!ws.currentUser} onNew={() => ws.setNewLoopDialogOpen(true)} />
   }

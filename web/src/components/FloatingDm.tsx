@@ -101,7 +101,7 @@ export function FloatingDm({ me }: { me: string }) {
   }, [activeConvId])
 
   useEffect(() => {
-    if (open && active) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    if (open && active) messagesEndRef.current?.scrollIntoView({ behavior: "auto" })
   }, [messages, open, active])
 
   // ── ws ──
@@ -128,8 +128,8 @@ export function FloatingDm({ me }: { me: string }) {
             ? { ...x, replyCount: x.replyCount + 1, lastReplyTs: m.ts }
             : x,
         ))
-      } else {
-        // not the active conv — bump unread + lastMessageTs for sort order.
+      } else if (m.author !== me) {
+        // not the active conv && not self — bump unread + lastMessageTs for sort order.
         setConvs((prev) => prev.map((c) =>
           c.id === m.convId
             ? { ...c, unread: c.unread + 1, lastMessageTs: m.ts }
@@ -142,7 +142,7 @@ export function FloatingDm({ me }: { me: string }) {
       setConvs((prev) => prev.filter((c) => c.id !== e.convId))
       if (activeRef.current === e.convId) setActiveConvId(null)
     }
-  }, [])
+  }, [me])
 
   const { subscribe, unsubscribe } = useChatWebSocket(onEvent)
   useEffect(() => {
@@ -206,7 +206,12 @@ export function FloatingDm({ me }: { me: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed bottom-20 right-5 z-30 w-12 h-12 rounded-full bg-gray-700 text-white shadow-lg hover:bg-gray-500 flex items-center justify-center"
+          className={
+            "fixed bottom-20 right-5 z-30 w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors " +
+            (totalUnread > 0
+              ? "bg-gray-700 text-white animate-pulse"
+              : "bg-gray-700 text-white hover:bg-gray-500")
+          }
           title="direct messages"
         >
           <MessageCircle size={20} />
@@ -219,7 +224,7 @@ export function FloatingDm({ me }: { me: string }) {
       )}
 
       {open && (
-        <div className="fixed bottom-20 right-5 z-30 w-[22rem] max-w-[calc(100vw-2.5rem)] h-[32rem] max-h-[calc(100vh-2.5rem)] bg-white rounded-lg shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed bottom-20 right-5 z-30 w-[22rem] max-w-[calc(100vw-2.5rem)] h-[32rem] max-h-[calc(100dvh-2.5rem)] bg-white rounded-lg shadow-2xl border border-gray-200 flex flex-col overflow-hidden">
           <header className="h-10 shrink-0 border-b border-gray-200 px-2 flex items-center gap-1">
             {active ? (
               <button

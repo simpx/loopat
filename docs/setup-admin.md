@@ -1,0 +1,262 @@
+# Admin setup — provision a workspace
+
+> Audience: you've just installed loopat and need to make it usable for
+> a team. This guide is the **post-install** checklist — workspace
+> config, knowledge repo, notes repo, sandboxes, MCP. Solo users can
+> skim it; almost everything is optional and loopat will run with
+> empty defaults.
+
+If loopat isn't installed yet, do that first — see
+[install.md](install.md). This guide picks up after `bun run dev`
+prints its bootstrap banner.
+
+---
+
+## TL;DR
+
+| Step | What | File / location | Optional? |
+|---|---|---|---|
+| 1 | Workspace config | `~/.loopat/config.json` | required if you want shared repos |
+| 2 | Knowledge repo | `context/knowledge/` (cloned from remote) | optional, recommended |
+| 3 | Notes repo | `context/notes/` (cloned from remote) | optional, recommended |
+| 4 | Team CLAUDE.md / skills / MCP | `knowledge/.loopat/claude/` | optional |
+| 5 | Sandboxes | `knowledge/.loopat/sandboxes/<name>/` | optional |
+| 6 | Operator mounts | `config.json` `mounts[]` | optional |
+| 7 | Activate users | UI → `/admin` | once members register |
+
+You are the **first** user that registers — first registration auto-
+promotes to `role: admin`, status `active`. Every subsequent user
+lands as `member`, status `pending` and waits for you to activate them.
+
+---
+
+## 1. Workspace `config.json`
+
+`~/.loopat/config.json` is the workspace-shared root. Templates with
+empty fields after first run. Fill it in:
+
+```jsonc
+{
+  "knowledge": { "git": "git@github.com:your-team/loopat-knowledge.git" },
+  "notes":     { "git": "git@github.com:your-team/loopat-notes.git" },
+  "repos": [
+    { "name": "app",   "git": "git@github.com:your-team/app.git" },
+    { "name": "infra", "git": "git@github.com:your-team/infra.git" }
+  ],
+  "mounts": [
+    { "src": "$HOME/.cache", "dst": "$HOME/.cache", "rw": true }
+  ]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `knowledge.git` | clone URL for team-shared knowledge repo. Empty → local-only dir. |
+| `notes.git`     | clone URL for team-shared notes repo. Empty → local-only dir with `git init`. |
+| `repos[]`       | each entry → cloned to `context/repos/<name>/`. Loops spawn against these. |
+| `mounts[]`      | **operator-level** mounts; `src` is any host path. Shared by every loop on this workspace. See §6. |
+
+Provider config (`apiKey`, `model`, `baseUrl`) is **not** here — that
+lives per-user under `personal/<user>/.loopat/config.json`. Admins
+don't pre-fill API keys for the team.
+
+Restart `bun run dev` after editing. The banner clones any new
+remotes and reports `✓ knowledge / ✓ notes / ✓ repos`.
+
+---
+
+## 2. Knowledge repo
+
+`knowledge/` is **read-only** inside sandboxes. Anything you commit
+here is visible to every loop on the workspace and forms the team's
+durable context layer.
+
+Layout once provisioned:
+
+```
+context/knowledge/
+├── .loopat/                       ← reserved namespace (loopat-aware)
+│   ├── claude/
+│   │   ├── CLAUDE.md              (optional)  team prompt supplement
+│   │   ├── claude.json            (optional)  MCP servers
+│   │   └── skills/                (optional)  team Claude Code skills
+│   └── sandboxes/
+│       └── <name>/                (optional)  one dir per sandbox
+│           ├── mise.toml          toolchain spec
+│           └── sandbox.json       loopat metadata (e.g. shell override)
+└── ... your team's prose docs (anything else)
+```
+
+Bootstrap clones the remote on first run. If the remote is private and
+the clone fails, the banner shows `✗ knowledge` with a hint — fix SSH /
+HTTPS access, `rm -rf context/knowledge`, restart.
+
+---
+
+## 3. Notes repo
+
+Same shape as knowledge: empty git repo, `notes.git` URL in
+`config.json`. On first clone loopat seeds:
+
+- `notes/inbox.md` — append-only team scratchpad (loops write here)
+- `notes/memory/` — team memory (`MEMORY.md` index + per-fact files)
+
+Unlike knowledge, **notes is read-write** in sandboxes. Loops auto-
+commit and push every write. Do **not** branch-protect main on this
+repo — auto-push will fail.
+
+---
+
+## 4. Team Claude config — CLAUDE.md / skills / MCP
+
+All three live under `knowledge/.loopat/claude/`. Loopat ro-binds the
+whole tree into each loop's `$CLAUDE_CONFIG_DIR/`, so Claude Code
+discovers them natively as if they were `~/.claude/` on a normal host.
+
+### Team CLAUDE.md
+
+Workspace conventions everyone agrees on — directory layout, how to
+run tests, what never to touch, doc pointers. Concatenated into every
+loop's user-tier prompt. Keep it static so prompt cache stays warm.
+
+### Skills
+
+`SKILL.md` folders under `skills/`. Each folder becomes an invocable
+slash-skill inside loops. Use these for repeatable team procedures
+(release flow, on-call triage, repo-specific lint fix).
+
+### MCP servers
+
+```json
+// knowledge/.loopat/claude/claude.json
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer ghp_team_shared_token" }
+    }
+  }
+}
+```
+
+`claude.json` is team-shared — only commit tokens that **everyone on
+the team is allowed to use**. For per-user tokens (oauth, personal
+PATs), leave them out and let each member set them via personal config.
+
+Details on the full injection model: [claude-config.md](claude-config.md).
+
+---
+
+## 5. Sandboxes
+
+A sandbox = a named toolchain + shell that loops can opt into. Each
+sandbox is a directory:
+
+```
+knowledge/.loopat/sandboxes/
+├── node/
+│   ├── mise.toml          [tools] node = "20", bun = "1.2"
+│   └── sandbox.json       { "shell": "/usr/bin/bash" }
+├── python/
+│   ├── mise.toml          [tools] python = "3.12", uv = "latest"
+│   └── sandbox.json
+└── go/
+    ├── mise.toml
+    └── sandbox.json
+```
+
+When a user spawns a loop and selects sandbox `node`, the server runs
+`mise install` on the host (cached at `~/.local/share/mise/installs/`)
+and binds the result into the sandbox. Toolchain reuses across loops,
+identical across machines.
+
+A loop with **no** sandbox skips mise entirely — works for pure-prose
+loops that don't need a runtime.
+
+`sandbox.json` carries loopat-side metadata that doesn't belong in
+`mise.toml`:
+
+```json
+{ "shell": "/usr/bin/bash" }
+```
+
+Only `shell` is read today; the file leaves room for future fields
+(MCP overrides, AGENTS.md, …).
+
+---
+
+## 6. Operator mounts
+
+The workspace `mounts[]` field exposes **host** paths into every
+loop's sandbox. Use this for caches you want shared globally or for
+trust roots:
+
+```jsonc
+"mounts": [
+  { "src": "$HOME/.cache",       "dst": "$HOME/.cache",       "rw": true },
+  { "src": "$HOME/.bun",         "dst": "$HOME/.bun",         "rw": true },
+  { "src": "/etc/pki/ca-trust",  "dst": "/etc/pki/ca-trust" }
+]
+```
+
+- `src` — any host path (`$HOME/...`, `~/...`, absolute `/...`)
+- `dst` — must be sandbox-rooted (`$HOME/...`, `~/...`, `/...`)
+- `rw` — defaults to false (read-only). Set true if loops need to write.
+
+Operator mounts apply to **every** loop on this workspace. For per-
+user mounts (private ssh keys, individual gh tokens), users add them
+in their personal config — see [setup-user.md](setup-user.md).
+
+> **Why this layer exists** — the three mount layers (operator /
+> admin / member) map directly to filesystem ownership: operator owns
+> the host, admin pushes to `knowledge/`, member writes their own
+> `personal/`. Whoever owns the directory owns that layer's mount
+> decisions. Details: [sandbox.md §三层 mount 权责](sandbox.md).
+
+---
+
+## 7. Activate users
+
+When a new member registers, they land as `status: pending` and can't
+log in until you activate them.
+
+Open `http://<your-host>:7787/admin` (admin-only route) and flip the
+status to `active`. The user can now log in and start their own
+[user setup flow](setup-user.md).
+
+---
+
+## Verify
+
+After the dust settles, the banner should be all green:
+
+```
+────────────────────────────────────────────────────────────
+  loopat bootstrap — loopat (user=admin)
+────────────────────────────────────────────────────────────
+  ✓  workspace: /home/admin/.loopat
+  ✓  workspace supplement: knowledge/.loopat/claude/CLAUDE.md (present)
+  ✓  knowledge: git@…/loopat-knowledge.git
+  ✓  notes:     git@…/loopat-notes.git
+  ✓  repos:     app, infra
+  ✓  users:     1 (admin)
+  ✓  config: /home/admin/.loopat/config.json
+  ✓  bwrap (sandbox)
+  ✓  claude binary (…/claude)
+  ready. open http://localhost:7787
+```
+
+Share the URL with your team and point them at
+[setup-user.md](setup-user.md).
+
+---
+
+## See also
+
+- [install.md](install.md) — host install, system deps, env vars
+- [setup-user.md](setup-user.md) — member-side companion to this guide
+- [architecture.md](architecture.md) — read/write paths, context layers
+- [claude-config.md](claude-config.md) — exact CLAUDE.md / skills / MCP wiring
+- [sandbox.md](sandbox.md) — bwrap mechanics, three-tier mount authority
+- [troubleshoot.md](troubleshoot.md) — banner errors, common pitfalls

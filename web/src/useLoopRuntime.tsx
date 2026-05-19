@@ -304,6 +304,17 @@ export interface LoopRuntimeExtra {
   showHistory: boolean
   /** Toggle showing pre-clear history. */
   toggleShowHistory: () => void
+  /** Slash commands advertised by CC at session init: built-ins ("init",
+   *  "clear"), user-tier skills ("loop", "schedule"), and plugin commands
+   *  ("loopat:onboarding"). Empty until the first init message arrives;
+   *  may include duplicates if CC ever reports them — caller should dedup. */
+  availableSlashCommands: string[]
+  /** True when aggregated messages exceed the render window. */
+  hasOlderMessages: boolean
+  /** Load and render the next batch of older messages. */
+  loadMoreMessages: () => void
+  /** Token estimate based on the full aggregated conversation (not just visible window). */
+  estimatedTokens: number
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -337,6 +348,10 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   hasHistory: false,
   showHistory: false,
   toggleShowHistory: () => {},
+  availableSlashCommands: [],
+  hasOlderMessages: false,
+  loadMoreMessages: () => {},
+  estimatedTokens: 0,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -365,6 +380,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
+  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>([])
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -373,6 +389,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const reconnectTimerRef = useRef<number | null>(null)
   const attemptsRef = useRef(0)
   const aliveRef = useRef(true)
+  const replayBufRef = useRef<any[]>([])
 
   // Tool progress (tool_progress messages) keyed by tool_use_id
   const toolProgressRef = useRef<Map<string, ToolProgress>>(new Map())
@@ -529,6 +546,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     }
   }, [raw, showHistory])
 
+  const RENDER_WINDOW_SIZE = 20
+  const RENDER_WINDOW_BATCH = 20
+
+  const [renderCount, setRenderCount] = useState(RENDER_WINDOW_SIZE)
+
+  useEffect(() => {
+    setRenderCount(RENDER_WINDOW_SIZE)
+  }, [loopId])
+
+  const hasOlderMessages = aggregated.length > renderCount
+  const visibleMessages = hasOlderMessages ? aggregated.slice(-renderCount) : aggregated
+
+  const loadMoreMessages = useCallback(() => {
+    setRenderCount(prev => prev + RENDER_WINDOW_BATCH)
+  }, [])
+
   const onCancel = useCallback(async () => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -558,9 +591,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     setShowHistory((v) => !v)
   }, [])
 
+  const estimatedTokens = useMemo(() => {
+    let chars = 0
+    for (const m of aggregated) {
+      chars += JSON.stringify(m).length
+    }
+    return Math.round(chars / 3.5)
+  }, [aggregated])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens],
   )
 
   useEffect(() => {
@@ -585,6 +626,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setContextUsage(null)
       setThinkingBudget(null)
       setThinkingOpen(false)
+      replayBufRef.current = []
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -615,19 +657,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }, delay)
       }
       ws.onerror = () => setConnected(false)
-      ws.onmessage = (e) => {
-        let m: any
-        try {
-          m = JSON.parse(e.data)
-        } catch {
-          return
-        }
-        if (m?.type === "history_end") {
-          loadingHistoryRef.current = false
-          setLoadingHistory(false)
-          setRunning(false)
-          return
-        }
+      const dispatchMsg = (m: any) => {
         if (m?.type === "viewers") {
           setViewers(typeof m.count === "number" ? m.count : 0)
           return
@@ -752,9 +782,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             setTaskVersion((v) => v + 1)
             return
           }
-          // system/init — start running
+          // system/init — start running; also cache the slash-command catalog
+          // advertised by CC (built-ins + skills + plugin commands like
+          // "loopat:onboarding").
           if (subtype === "init") {
             if (!loadingHistoryRef.current) setRunning(true)
+            const cmds = Array.isArray((m as any).slash_commands)
+              ? ((m as any).slash_commands as unknown[]).filter(
+                  (c): c is string => typeof c === "string",
+                )
+              : []
+            if (cmds.length > 0) setAvailableSlashCommands(cmds)
             return
           }
           return
@@ -835,6 +873,37 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           ])
         }
       }
+      ws.onmessage = (e) => {
+        let m: any
+        try {
+          m = JSON.parse(e.data)
+        } catch {
+          return
+        }
+        // During history replay: buffer everything, process on history_end.
+        // This avoids partial/intermediate state during loading.
+        if (loadingHistoryRef.current) {
+          if (m?.type === "history_end") {
+            for (const bufMsg of replayBufRef.current) {
+              dispatchMsg(bufMsg)
+            }
+            loadingHistoryRef.current = false
+            setLoadingHistory(false)
+            setRunning(false)
+          } else {
+            replayBufRef.current.push(m)
+          }
+          return
+        }
+        // Live messages: process immediately
+        if (m?.type === "history_end") {
+          loadingHistoryRef.current = false
+          setLoadingHistory(false)
+          setRunning(false)
+          return
+        }
+        dispatchMsg(m)
+      }
     }
 
     connect()
@@ -846,8 +915,19 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         reconnectTimerRef.current = null
       }
       const ws = wsRef.current
+      if (ws) {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close()
+          ws.onmessage = null
+          ws.onclose = null
+          ws.onerror = null
+        } else {
+          ws.onclose = null
+          ws.onerror = null
+          ws.close()
+        }
+      }
       wsRef.current = null
-      if (ws) ws.close()
       setReconnecting(false)
       attemptsRef.current = 0
     }
@@ -878,7 +958,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const runtime = useExternalStoreRuntime({
-    messages: aggregated,
+    messages: visibleMessages,
     convertMessage: safeConvert,
     isRunning: running,
     onNew,

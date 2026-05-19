@@ -66,7 +66,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       bwrapArgs = await buildBwrapArgs(loopId, meta.createdBy, {
         ...(personalCfg.envs ?? {}),
         TERM: "xterm-256color",
-      }, meta.config?.sandbox, meta.config?.vault)
+      }, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
       fullArgs = [...bwrapArgs, "--", innerShell]
     } else {
       // Fish (and other interactive shells) want to write to XDG_DATA_HOME
@@ -90,7 +90,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
         TERM: "xterm-256color",
         XDG_DATA_HOME: fishData,
         XDG_RUNTIME_DIR: fishRuntime,
-      }, meta.config?.sandbox, meta.config?.vault)
+      }, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
       if (isMac) {
         // bun-pty already gives loopat-sandbox a controlling PTY on macOS.
         // Avoid nesting BSD script(1) inside the sandbox: it creates another

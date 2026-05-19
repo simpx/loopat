@@ -1,14 +1,16 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
-import { appendFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises"
+import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { dirname, join } from "node:path"
 import { loopClaudeDir, loopDir, loopWorkdir, loopHistoryPath } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { resolveSandboxBinary } from "./sandbox-binary"
-import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
+import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
+import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
@@ -244,13 +246,27 @@ class LoopSession {
    */
   setProvider(name: string | null) {
     this.providerOverride = name
+    this.restartOnNextMessage()
+    return true
+  }
+
+  /**
+   * Interrupt the current `query()` and clear `this.q`, so the next user
+   * message triggers a fresh `ensureStarted()` — picking up changes to env
+   * vars, provider config, **mcpServers**, etc. Conversation history is
+   * preserved because the SDK reads its session JSONL from disk on respawn
+   * (`continue: true` when `hasPriorSdkSession` is true).
+   *
+   * Idempotent: calling on a session that doesn't currently hold a query is
+   * a no-op. Fire-and-forget; the interrupt runs in the background.
+   */
+  restartOnNextMessage() {
     if (this.q) {
       const dying = this.q
       this.q = null
       this.input = pushIterable<SDKUserMessage>()
       dying.interrupt().catch(() => {})
     }
-    return true
   }
 
   private async loadHistoryFromDisk() {
@@ -285,12 +301,54 @@ class LoopSession {
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
+
+    // Compose multi-tier claude config (skills + plugins) into the loop's
+    // private .claude/. Re-run every spawn so newly-added workspace/personal
+    // entries show up at next session start.
+    const { enabledPlugins } = await composeLoopClaudeConfig(loopId, meta.createdBy)
+    await writeLoopSettings(loopId, enabledPlugins)
+
+    // Nuke CC's MCP-related cache files that linger across spawns:
+    //
+    //   `.credentials.json`        — CC's ephemeral OAuth state (mcpOAuth.<name>|<hash>).
+    //                                When present CC prefers it over Authorization
+    //                                headers we inject; stale entries cause needs-auth.
+    //   `mcp-needs-auth-cache.json` — CC's "I already know this server needs auth"
+    //                                short-circuit cache. If a server was marked
+    //                                needs-auth in a previous spawn, CC skips the
+    //                                connection attempt entirely on subsequent
+    //                                spawns — even when our injection now provides
+    //                                a valid header.
+    //
+    // loopat owns MCP auth now (Settings → MCP → Connect), tokens live in
+    // the vault, and they're applied per-spawn through mergeMcpTokens(). CC
+    // has nothing to maintain in these files; clear them every spawn so
+    // header injection takes effect immediately.
+    for (const f of [".credentials.json", "mcp-needs-auth-cache.json"]) {
+      try {
+        await rm(join(loopClaudeDir(loopId), f), { force: true })
+      } catch {}
+    }
+
     // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
     // servers should keep their token in `env`/`headers` directly (only ever
     // commit OAuth-flow servers like `coop` to the workspace repo).
     const workspace = await loadWorkspaceClaudeJson()
-    const mcpServers = workspace.mcpServers
+    const personalClaude = await loadPersonalClaudeJson(meta.createdBy)
+    // Merge admin-tier + user-tier mcpServers (user wins on name collision —
+    // consistent with the skill/plugin compose model).
+    const mergedServers: Record<string, any> = {
+      ...(workspace.mcpServers ?? {}),
+      ...(personalClaude.mcpServers ?? {}),
+    }
+    // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
+    // `Authorization: Bearer <token>` headers on matching servers. This is
+    // the SDK-recommended pattern for headless MCP auth — CC sees pre-
+    // authenticated transports and never triggers its own OAuth flow.
+    const activeVault = meta.config?.vault?.trim() || "default"
+    const userMcpTokens = await loadMcpTokens(meta.createdBy, activeVault)
+    const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
     // spawnClaudeCodeProcess callback can run synchronously.
@@ -312,7 +370,7 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox, meta.config?.vault)
+    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
@@ -446,7 +504,16 @@ class LoopSession {
           const macBind = process.platform === "darwin" && command
             ? ["--ro-bind-try", dirname(command), dirname(command)]
             : []
-          const fullArgs = [...bwrapBase, ...macBind, "--", command, ...args]
+          // CC's --plugin-dir flag points at a SINGLE plugin's root (uses the
+          // dir's basename as the plugin name), not a parent directory of
+          // multiple plugins. So enumerate the composed cache and pass one
+          // flag per plugin. Empty enabledPlugins → no extra flags.
+          const pluginDirArgs = (enabledPlugins ?? []).flatMap((name) => [
+            "--plugin-dir",
+            `${V_LOOP_CLAUDE(loopId)}/plugins/cache/${name}`,
+          ])
+          const augmentedArgs = [...args, ...pluginDirArgs]
+          const fullArgs = [...bwrapBase, ...macBind, "--", command, ...augmentedArgs]
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed
@@ -1073,6 +1140,24 @@ export function destroySession(id: string): boolean {
   const s = sessions.get(id)
   if (!s) return false
   s.destroy()
+  return true
+}
+
+/**
+ * Restart the in-memory LoopSession for one loop, if it exists.
+ *
+ * "Restart" means: interrupt the current `query()` so the next user message
+ * re-runs `ensureStarted` — which re-reads vault tokens, `mcpServers`,
+ * provider env, etc. The SDK reads its session JSONL on respawn
+ * (`continue: true`), so conversation history is preserved.
+ *
+ * Returns true if a session was restarted, false if the loop had no active
+ * session (no-op).
+ */
+export function restartSession(id: string): boolean {
+  const s = sessions.get(id)
+  if (!s) return false
+  s.restartOnNextMessage()
   return true
 }
 

@@ -40,7 +40,6 @@ import {
   loopSandboxPath,
   loopContextChatDir,
   workspaceKnowledgeDir,
-  workspaceLoopatSkillsDir,
   workspaceLoopatSandboxDir,
   workspaceNotesDir,
   workspaceReposDir,
@@ -152,7 +151,6 @@ function isValidMountDst(s: unknown): s is string {
 export const V_LOOP = (id: string) => `/loopat/loop/${id}`
 export const V_LOOP_WORKDIR = (id: string) => `/loopat/loop/${id}/workdir`
 export const V_LOOP_CLAUDE = (id: string) => `/loopat/loop/${id}/.claude`
-export const V_LOOP_CLAUDE_SKILLS = (id: string) => `/loopat/loop/${id}/.claude/skills`
 export const V_CONTEXT_KNOWLEDGE = "/loopat/context/knowledge"
 export const V_CONTEXT_NOTES = "/loopat/context/notes"
 export const V_CONTEXT_NOTES_MEMORY = "/loopat/context/notes/memory"
@@ -178,6 +176,7 @@ export async function buildBwrapArgs(
   extraSetenv: SandboxExtraEnv = {},
   sandboxName?: string,
   vaultName?: string,
+  knowledgeRw?: boolean,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -215,7 +214,7 @@ export async function buildBwrapArgs(
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
-    "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
+    knowledgeRw ? "--bind" : "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
     "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // WSL: expose Windows drive mounts so sandbox can edit host files
@@ -255,12 +254,11 @@ export async function buildBwrapArgs(
     console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
   }
 
-  // workspace skills: nested ro-bind over .claude/ so Claude Code discovers them
-  // as user-tier skills (CLAUDE_CONFIG_DIR/skills). Only mount if populated.
-  const skillsSrc = workspaceLoopatSkillsDir()
-  if (existsSync(skillsSrc)) {
-    args.push("--ro-bind", skillsSrc, V_LOOP_CLAUDE_SKILLS(loopId))
-  }
+  // skills + plugins: composed into loops/<id>/.claude/{skills,plugins/cache}/
+  // by `composeLoopClaudeConfig()` (see compose.ts) BEFORE this argv is built.
+  // The whole .claude/ dir is already rw-bound above (V_LOOP_CLAUDE), so the
+  // composed symlinks are visible inside the sandbox without further binds.
+  // Plugin loading: spawn callback passes `--plugin-dir=.../plugins/cache`.
 
   // workspace CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
   // Code natively loads it as user-tier (settingSources includes "user").
@@ -270,14 +268,17 @@ export async function buildBwrapArgs(
     args.push("--ro-bind", workspaceClaudeMd, join(V_LOOP_CLAUDE(loopId), "CLAUDE.md"))
   }
 
-  // Claude Code's OAuth credentials for MCP servers (coop / yuque / aone-* …)
-  // live at `~/.claude/.credentials.json` on the host. ro-bind into the
-  // sandbox's CLAUDE_CONFIG_DIR so MCPs that use OAuth flow reuse the host
-  // driver's tokens. Refresh-on-expiry will fail (ro), needs separate flow.
-  const credsSrc = join(home, ".claude", ".credentials.json")
-  if (existsSync(credsSrc)) {
-    args.push("--ro-bind", credsSrc, join(V_LOOP_CLAUDE(loopId), ".credentials.json"))
-  }
+  // We used to ro-bind `~/.claude/.credentials.json` here, intending to share
+  // MCP OAuth tokens — but that file only ever contains `claudeAiOauth` (the
+  // host driver's Anthropic subscription token), not MCP server OAuth state.
+  // Binding it in caused the sandboxed CC to consume the refresh token (which
+  // rotates per-refresh) without being able to write the new one back through
+  // a RO mount; the host's CC then sees a stale token and gets logged out.
+  //
+  // loopat is BYO-API-key by design (ANTHROPIC_API_KEY env injected per
+  // sandbox), so the sandboxed CC never needs the host's subscription token.
+  // If we ever ship per-loop MCP OAuth, the right home is a loop-private
+  // credentials file under the sandbox's CLAUDE_CONFIG_DIR, not a host bind.
 
   // repos: bind at the virtual path (for AI / user) AND re-bind at the host
   // absolute path (for git internals — worktree `.git` files store absolute

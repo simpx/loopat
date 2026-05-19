@@ -9,6 +9,7 @@ import {
   personalVaultDir,
   workspaceDir,
   workspaceClaudeJsonPath,
+  personalClaudeJsonPath,
 } from "./paths"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
@@ -157,6 +158,20 @@ export type WorkspaceConfig = {
  *   - `mounts[].src` is `PathRef` (string = personal-relative,
  *     `{vault}` = active-vault-relative).
  */
+/**
+ * Onboarding state per user. Used by the Welcome card on Loops list to
+ * decide whether to show "start onboarding" / "continue" / nothing.
+ *
+ *   - `started`: a loop was spawned, but the user hasn't marked finished
+ *     (`loopId` points at the in-progress onboarding loop).
+ *   - `done`: user clicked skip/complete OR finished naturally. Card hides.
+ */
+export type OnboardingState = {
+  status: "started" | "done"
+  loopId?: string
+  at: string
+}
+
 export type PersonalConfigDisk = {
   /** Mixed: "default" key is a string, all other keys are providers. */
   providers: Record<string, ProviderConfigDisk | string>
@@ -166,6 +181,8 @@ export type PersonalConfigDisk = {
   mounts?: Mount[]
   /** PTY shell override (highest precedence; beats sandbox.json's shell). */
   shell?: string
+  /** Optional. Missing = "fresh" (user hasn't started or dismissed yet). */
+  onboarding?: OnboardingState
 }
 
 export type PersonalConfig = {
@@ -176,6 +193,7 @@ export type PersonalConfig = {
   envs?: Record<string, string>
   mounts?: Mount[]
   shell?: string
+  onboarding?: OnboardingState
 }
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
@@ -376,6 +394,7 @@ export async function loadPersonalConfig(
     ...(envs ? { envs } : {}),
     ...(disk.mounts ? { mounts: disk.mounts } : {}),
     ...(disk.shell ? { shell: disk.shell } : {}),
+    ...(disk.onboarding ? { onboarding: disk.onboarding } : {}),
   }
   personalCache.set(cacheKey, { cfg, configMtimeMs, refMtimes })
   return cfg
@@ -399,6 +418,22 @@ export async function loadWorkspaceClaudeJson(): Promise<WorkspaceClaudeJson> {
     return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
   } catch (e: any) {
     console.warn(`[loopat] workspace claude.json malformed at ${p}: ${e?.message ?? e}`)
+    return {}
+  }
+}
+
+/**
+ * Per-user Claude config. Same JSON shape as workspace claude.json. Personal
+ * `mcpServers[<name>]` entries shadow workspace entries by name (user-tier
+ * wins over admin-tier — consistent with the skill/plugin compose model).
+ */
+export async function loadPersonalClaudeJson(user: string): Promise<WorkspaceClaudeJson> {
+  const p = personalClaudeJsonPath(user)
+  if (!existsSync(p)) return {}
+  try {
+    return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
+  } catch (e: any) {
+    console.warn(`[loopat] personal claude.json malformed at ${p}: ${e?.message ?? e}`)
     return {}
   }
 }
