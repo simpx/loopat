@@ -64,6 +64,7 @@ function LoopsList({ currentId }: { currentId: string }) {
   const ws = useWorkspace()
   const navigate = useNavigate()
   const [scope, setScope] = useState<"mine" | "all" | "rfd">("mine")
+  const [search, setSearch] = useState("")
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("loopat:loopsList:collapsed") === "1")
   const isMobile = useIsMobile()
   const loopIds = useMemo(() => ws.loops.map(l => l.id), [ws.loops])
@@ -79,11 +80,15 @@ function LoopsList({ currentId }: { currentId: string }) {
   }, [statusMap, currentId])
 
   const userId = ws.currentUser?.id
-  const filtered = useMemo(() => ws.loops.filter((loop) => {
-    if (scope === "mine") return loop.createdBy === userId
-    if (scope === "rfd") return false // RFD tab
-    return true // "all"
-  }), [ws.loops, scope, userId])
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim()
+    return ws.loops.filter((loop) => {
+      if (scope === "mine" && loop.createdBy !== userId) return false
+      if (scope === "rfd") return false
+      if (q && !loop.title.toLowerCase().includes(q) && !loop.id.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [ws.loops, scope, userId, search])
 
   const setCollapsedPersist = (v: boolean) => {
     setCollapsed(v)
@@ -92,46 +97,55 @@ function LoopsList({ currentId }: { currentId: string }) {
 
   const sidebarContent = (
     <aside className="w-60 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
-      <div className="px-2 h-10 flex items-center gap-1 border-b border-gray-200">
-        {(["mine", "all", "rfd"] as const).map((s) => (
+      <div className="px-2 pt-1.5 pb-1 space-y-1 border-b border-gray-200">
+        <div className="flex items-center gap-1">
+          {(["mine", "all", "rfd"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setScope(s)}
+              className={
+                scope === s
+                  ? s === "rfd"
+                    ? "px-2 h-6 rounded text-[11px] flex items-center gap-1 bg-amber-600 text-white"
+                    : "px-2 h-6 rounded text-[11px] bg-gray-900 text-white"
+                  : s === "rfd"
+                    ? "px-2 h-6 rounded text-[11px] flex items-center gap-1 text-amber-700 hover:bg-amber-50"
+                    : "px-2 h-6 rounded text-[11px] text-gray-500 hover:bg-gray-100"
+              }
+            >
+              {s === "mine" ? "mine" : s === "all" ? "all" : "RFD"}
+            </button>
+          ))}
+          <span className="text-[11px] text-gray-400 ml-auto pr-1">{filtered.length}</span>
           <button
-            key={s}
             type="button"
-            onClick={() => setScope(s)}
+            onClick={() => ws.setShowArchived(!ws.showArchived)}
             className={
-              scope === s
-                ? s === "rfd"
-                  ? "px-2 h-6 rounded text-[11px] flex items-center gap-1 bg-amber-600 text-white"
-                  : "px-2 h-6 rounded text-[11px] bg-gray-900 text-white"
-                : s === "rfd"
-                  ? "px-2 h-6 rounded text-[11px] flex items-center gap-1 text-amber-700 hover:bg-amber-50"
-                  : "px-2 h-6 rounded text-[11px] text-gray-500 hover:bg-gray-100"
+              ws.showArchived
+                ? "w-6 h-6 flex items-center justify-center text-gray-700 bg-gray-100 rounded"
+                : "w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
             }
+            title={ws.showArchived ? "hide archived" : "show archived"}
           >
-            {s === "mine" ? "mine" : s === "all" ? "all" : "RFD"}
+            <Archive size={13} />
           </button>
-        ))}
-        <span className="text-[11px] text-gray-400 ml-auto pr-1">{filtered.length}</span>
-        <button
-          type="button"
-          onClick={() => ws.setShowArchived(!ws.showArchived)}
-          className={
-            ws.showArchived
-              ? "w-6 h-6 flex items-center justify-center text-gray-700 bg-gray-100 rounded"
-              : "w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
-          }
-          title={ws.showArchived ? "hide archived" : "show archived"}
-        >
-          <Archive size={13} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setCollapsedPersist(true)}
-          className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
-          title="collapse sidebar"
-        >
-          <PanelLeftClose size={14} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setCollapsedPersist(true)}
+            className="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded"
+            title="collapse sidebar"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        </div>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="search loops…"
+          className="w-full h-6 rounded px-1.5 text-[11px] bg-gray-100 border border-transparent focus:border-gray-300 focus:bg-white focus:outline-none text-gray-600 placeholder-gray-400"
+        />
       </div>
       <div className="flex-1 min-h-0 overflow-auto py-2">
         {filtered.map((loop) => {
