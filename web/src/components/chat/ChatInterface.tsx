@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type FC } from "react";
 import {
   ThreadPrimitive,
-  AuiIf,
   useAuiState,
   useComposerRuntime,
 } from "@assistant-ui/react";
@@ -13,25 +12,6 @@ import AskUserQuestionRenderer from "./AskUserQuestionRenderer";
 
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 import ErrorBoundary from "./ErrorBoundary";
-
-/* ─── Welcome screen ─── */
-
-const ThreadWelcome: FC = () => {
-  return (
-    <div className="my-auto flex grow flex-col">
-      <div className="flex w-full grow flex-col items-center justify-center">
-        <div className="flex size-full flex-col justify-center px-4">
-          <h1 className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both font-semibold text-xl md:text-2xl text-gray-900 duration-200">
-            Hello there!
-          </h1>
-          <p className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-gray-500 text-lg md:text-xl delay-75 duration-200">
-            How can I help you today?
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 /* ─── History loading spinner ─── */
 
@@ -78,6 +58,7 @@ function setDraft(loopId: string, text: string): void {
 
 export default function ChatInterface({ archived = false, onUnarchive, readOnly = false }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages } = useLoopRuntimeExtra();
+  const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
   const containerRef = useRef<HTMLDivElement>(null);
   const vpRef = useRef<HTMLElement | null>(null);
 
@@ -294,18 +275,13 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
-        className="relative flex-1 overflow-x-auto overflow-y-scroll scroll-smooth"
+        className={isEmpty ? "hidden" : "relative flex-1 overflow-x-auto overflow-y-scroll scroll-smooth"}
       >
         <div ref={containerRef} className="mx-auto flex w-full min-h-full flex-col px-2 md:px-3 pt-3 md:pt-4">
           {/* Loading state — show skeleton while history is being replayed */}
           {loadingHistory && (
             <HistoryLoading />
           )}
-
-          {/* Empty state — matches thread.tsx: only show when truly empty & idle */}
-          <AuiIf condition={(s) => s.thread.isEmpty && !s.thread.isRunning}>
-            <ThreadWelcome />
-          </AuiIf>
 
           {/* View/collapse earlier messages — appears when scrolled to top and there is pre-clear history */}
           {showHistoryButton && (
@@ -349,8 +325,10 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         </div>
       </ThreadPrimitive.Viewport>
 
-      {/* Footer — outside viewport so it stays fixed, never scrolls */}
-      <div className="shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-1 md:pt-2 pb-3 md:pb-6">
+      {/* Footer — outside viewport so it stays fixed, never scrolls.
+          When thread is empty the footer fills the page and is centered. */}
+      <div className={isEmpty ? "flex-1 flex items-center justify-center px-2 md:px-3 pb-3 md:pb-6" : "shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-1 md:pt-2 pb-3 md:pb-6"}>
+        <div className={isEmpty ? "w-full max-w-[36rem]" : ""}>
         {/* Pending questions (AskUserQuestion tool) — fixed above input */}
         {questionEntries.length > 0 && (
           <ErrorBoundary name="QuestionsPanel">
@@ -390,6 +368,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         ) : readOnly ? null : (
           <Composer />
         )}
+        </div>
       </div>
 
       {/* Scroll-to-bottom button — bottom-right, outside viewport so it isn't clipped */}

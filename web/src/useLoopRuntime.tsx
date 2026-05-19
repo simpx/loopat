@@ -915,8 +915,19 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         reconnectTimerRef.current = null
       }
       const ws = wsRef.current
+      if (ws) {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close()
+          ws.onmessage = null
+          ws.onclose = null
+          ws.onerror = null
+        } else {
+          ws.onclose = null
+          ws.onerror = null
+          ws.close()
+        }
+      }
       wsRef.current = null
-      if (ws) ws.close()
       setReconnecting(false)
       attemptsRef.current = 0
     }
