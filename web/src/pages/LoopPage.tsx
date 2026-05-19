@@ -523,7 +523,8 @@ function LoopHeader({
   toggleMode: (m: RightMode) => void
   onShareWork: () => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const isMobile = useIsMobile()
+  const [collapsed, setCollapsed] = useState(isMobile)
   const modeBtn = (label: string, m: RightMode) => (
     <button
       key={m}
