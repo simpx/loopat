@@ -309,6 +309,10 @@ export interface LoopRuntimeExtra {
    *  ("loopat:onboarding"). Empty until the first init message arrives;
    *  may include duplicates if CC ever reports them — caller should dedup. */
   availableSlashCommands: string[]
+  /** True when aggregated messages exceed the render window. */
+  hasOlderMessages: boolean
+  /** Load and render the next batch of older messages. */
+  loadMoreMessages: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -343,6 +347,8 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   showHistory: false,
   toggleShowHistory: () => {},
   availableSlashCommands: [],
+  hasOlderMessages: false,
+  loadMoreMessages: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -536,6 +542,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     }
   }, [raw, showHistory])
 
+  const RENDER_WINDOW_SIZE = 20
+  const RENDER_WINDOW_BATCH = 20
+
+  const [renderCount, setRenderCount] = useState(RENDER_WINDOW_SIZE)
+
+  useEffect(() => {
+    setRenderCount(RENDER_WINDOW_SIZE)
+  }, [loopId])
+
+  const hasOlderMessages = aggregated.length > renderCount
+  const visibleMessages = hasOlderMessages ? aggregated.slice(-renderCount) : aggregated
+
+  const loadMoreMessages = useCallback(() => {
+    setRenderCount(prev => prev + RENDER_WINDOW_BATCH)
+  }, [])
+
   const onCancel = useCallback(async () => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -566,8 +588,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages],
   )
 
   useEffect(() => {
@@ -862,7 +884,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       }
       const ws = wsRef.current
       wsRef.current = null
-      if (ws) ws.close()
+      if (ws && ws.readyState === WebSocket.OPEN) ws.close()
       setReconnecting(false)
       attemptsRef.current = 0
     }
@@ -893,7 +915,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [])
 
   const runtime = useExternalStoreRuntime({
-    messages: aggregated,
+    messages: visibleMessages,
     convertMessage: safeConvert,
     isRunning: running,
     onNew,

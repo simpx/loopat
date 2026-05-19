@@ -262,6 +262,9 @@ function LoopRedirect() {
     return null
   }
 
+  // Wait for loops to load before checking length or redirecting
+  if (ws.loopsLoading) return null
+
   // Pre-onboarding: no personal repo yet. Skip is a localStorage flag — the
   // user can fall through to operate loopat with workspace-shared keys.
   if (
