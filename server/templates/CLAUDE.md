@@ -10,8 +10,8 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 
 - `/loopat/loop/<id>/workdir/`      — the workdir (rw). cwd lives here. For code-repo loops, contents = git worktree of one repo in `context/repos/`.
 - `/loopat/loop/<id>/.claude/`      — internal SDK session state (rw). Don't poke unless debugging.
-- `/loopat/context/knowledge/`      — workspace's distilled docs (**ro**). Tree of markdown.
-- `/loopat/context/notes/`          — workspace prose layer (rw). `inbox.md`, `focus.md`, plus `memory/` (team memory).
+- `/loopat/context/knowledge/`      — workspace's distilled docs. **Your private git worktree** on branch `loop/<id>`. Read-only by default; rw if the loop opted in. Other loops see your edits only after you publish (see below).
+- `/loopat/context/notes/`          — workspace prose layer (rw). **Your private git worktree** on branch `loop/<id>`. `inbox.md`, `focus.md`, plus `memory/` (team memory). Other loops see your edits only after you publish.
 - `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory), `.loopat/config.json` (per-user config), and `.loopat/vault/` (this loop's active credential set — see below).
 - `/loopat/context/repos/<name>/`   — workspace repos (rw). All repos registered in this workspace. The current loop's workdir is typically a worktree of one of them.
 - `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/personal/.loopat/vault/` (e.g. `.ssh`) appear at expected $HOME paths.
@@ -30,6 +30,25 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
 - `/loopat/context/personal/.loopat/vault/` — this loop's active **vault**: tokens, keys, ssh, etc. for the credentials the user picked at spawn time (e.g. `dev` / `test` / `prod`). Only one vault is bound per loop; other named vaults the user maintains are not visible here. **Never echo file contents to chat** (even one line counts as exfiltration). Reference by filename / env var.
 - `/loopat/context/repos/<name>/` — rw, but **don't commit directly** into a main repo. Commits go through the workdir worktree (which sits on a `loop/<slug>-<id6>` branch). Reading other repos is encouraged for cross-repo work.
 - Cross-doc references use wikilink `[[basename]]` (no `.md`), Obsidian-style. The Context tab UI renders these clickable + builds backlinks.
+
+## publishing context edits
+
+`notes/` and `knowledge/` are per-loop git worktrees. Your edits stay on branch `loop/<id>` until you publish them. To publish:
+
+    cd /loopat/context/notes        # or knowledge
+    git add -A && git commit -m "..."
+    git merge <trunk>               # pull in concurrent edits from other loops
+    git push . HEAD:<trunk>         # ff-push; rejected if trunk moved out from under you
+
+`<trunk>` is the trunk branch name (typically `main` or `master`) — your runtime context block lists it.
+
+If `git push` is rejected with `non-fast-forward`, the trunk moved while you were merging. Run `git merge <trunk>` again, resolve any new conflicts, push again. The retry loop converges.
+
+**On conflict** during merge: edit the conflicted files (markers are visible), `git add`, `git commit` to finish the merge. You're the merge agent — resolve semantically. Concurrent loops likely added context, not contradicted you. To abandon a merge cleanly: `git merge --abort`.
+
+**When to publish**: when an edit is genuinely meant for the workspace, not on every save. Working notes / scratch can live unpublished as long as the loop lives.
+
+**Runtime never auto-publishes.** If you don't push, your edits stay in the worktree and persist as long as the loop does.
 
 ## claude config tiers
 
@@ -58,7 +77,7 @@ For team memory: when an insight is genuinely team-relevant (a convention everyo
 
 ## behavior
 
-- **Edit/Write directly** for `/loopat/loop/<id>/workdir/*`, `/loopat/context/notes/*`, `/loopat/context/personal/*`, and `/loopat/context/repos/*` (when explicitly working in another repo). Each save in notes/personal triggers an auto-commit on the host side (not your concern; it just happens).
+- **Edit/Write directly** for `/loopat/loop/<id>/workdir/*`, `/loopat/context/notes/*`, `/loopat/context/personal/*`, and `/loopat/context/repos/*` (when explicitly working in another repo). Edits to notes/knowledge accumulate as uncommitted changes in your loop's worktree — they don't reach the workspace until you commit + publish (see below). Edits to personal still auto-commit on the host side as before.
 - **Don't edit `/loopat/context/knowledge/`** directly — wrong tier, propose user-driven flow instead.
 - **Confirm files exist before referencing** them across docs (Glob or Read first).
 - **Grep `/loopat/context/knowledge/`** when the user asks about a concept you don't recognize.
