@@ -168,8 +168,8 @@ LOOPAT_HOME/
 ├── config.json                                       # workspace runtime config (knowledge/notes/repos)
 ├── personal/<user>/.loopat/
 │   ├── config.json                                   # per-user config (providers, default, mounts, shell)
-│   └── secrets/
-│       ├── provider-keys/<provider-name>             # loopat reads → provider.apiKey
+│   └── vaults/<name>/                                # one or more named credential bundles (default, dev, prod, ...)
+│       ├── provider-keys/<provider-name>             # loopat reads → provider.apiKey (active vault only)
 │       └── <service>/<VAR>                           # user-owned tokens (filename = env-var name)
 └── context/knowledge/
     └── .loopat/claude/                               # team-shared Claude config
@@ -190,11 +190,15 @@ Rules:
   Per-user fields (providers, default, mounts, shell) live in
   `personal/<user>/.loopat/config.json`. Member `mounts` have `src` relative
   to `personal/<user>/` (RO); `dst` must be sandbox-rooted (`$HOME/...`,
-  `~/...`, or `/...`). Encrypted dotfiles live under `.loopat/secrets/...`
+  `~/...`, or `/...`). Encrypted dotfiles live under `.loopat/vaults/<name>/...`
   and get bind-mounted via mounts pointing at that path. Operator `mounts`
   live in workspace `config.json` and can name any host path.
-- `personal/<user>/.loopat/secrets/<service>/<VAR>` follows the ccx convention:
-  filename = env-var name, file body = value.
+- `personal/<user>/.loopat/vaults/<name>/<service>/<VAR>` follows the ccx convention:
+  filename = env-var name, file body = value. Each loop picks one active vault
+  (`meta.config.vault`, default `"default"`); the sandbox surfaces it as a
+  symlink at `/loopat/context/vault → personal/.loopat/vaults/<active>/`.
+- Legacy `personal/<user>/.loopat/secrets/` (pre-vault layout) is auto-promoted
+  to an implicit "default" vault when no `vaults/` subdir exists.
 
 ### Five injection paths
 
