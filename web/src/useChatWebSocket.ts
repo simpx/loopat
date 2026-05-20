@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react"
 import type { ChatConversation, ChatMessage } from "./api"
+import { getVersion, getBuildInfo } from "./api"
 
 export type ChatWsEvent =
   | { type: "message"; message: ChatMessage }
@@ -52,6 +53,13 @@ export function useChatWebSocket(onEvent: (e: ChatWsEvent) => void) {
       for (const cid of subsRef.current) {
         try { ws.send(JSON.stringify({ type: "subscribe", convId: cid })) } catch {}
       }
+      // Check if server version differs from the frontend build
+      getVersion().then((v) => {
+        const build = getBuildInfo()
+        if (v.commit !== "unknown" && build.commit !== "unknown" && v.commit !== build.commit) {
+          window.dispatchEvent(new CustomEvent("loopat:version-mismatch", { detail: { commit: v.commit } }))
+        }
+      }).catch(() => {})
     }
 
     ws.onmessage = (e) => {
