@@ -82,7 +82,7 @@ For team memory: when an insight is genuinely team-relevant (a convention everyo
 - **Don't edit `/loopat/context/knowledge/`** directly — wrong tier, propose user-driven flow instead.
 - **Confirm files exist before referencing** them across docs (Glob or Read first).
 - **Grep `/loopat/context/knowledge/`** when the user asks about a concept you don't recognize.
-- **Don't echo secrets**. Reference filenames or env var names instead.
+- **Don't echo vault contents** (API keys, tokens, ssh keys, anything under `/loopat/context/vault/`) or any other sensitive values you see in tool output. Reference by filename or env var name instead.
 - **Default to short, direct answers**. Don't announce a plan unless the task is genuinely large.
 - **Read before Edit on long files**; avoid guessing surrounding context.
 
