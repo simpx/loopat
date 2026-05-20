@@ -259,6 +259,20 @@ export async function ensureWorkspaceDirs() {
   if (!n.cloned) await gitInitIfMissing(workspaceNotesDir())
   // suppress unused warning for k.cloned (kept for symmetry / future use)
   void k
+
+  // Per-loop worktrees push back here via `git push . HEAD:<trunk>`. Allow
+  // pushing to the currently checked-out branch (ref-only update; primary
+  // wd goes stale but no one reads it). `updateInstead` would race on the
+  // primary worktree under concurrent pushes — verified empirically.
+  for (const dir of [workspaceNotesDir(), workspaceKnowledgeDir()]) {
+    if (existsSyncBase(join(dir, ".git"))) {
+      try {
+        await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
+      } catch (e: any) {
+        console.warn(`[loopat] failed to set denyCurrentBranch on ${dir}: ${e?.message ?? e}`)
+      }
+    }
+  }
 }
 
 /**
@@ -1102,10 +1116,35 @@ async function ensureSymlink(link: string, target: string) {
   }
 }
 
+/**
+ * Idempotently materialize a per-loop git worktree of `repo` at `path` on
+ * branch `branchName`. If the path already holds a worktree, no-op. If the
+ * source isn't a git repo (e.g., knowledge without a remote), fall back to
+ * a symlink so the path still resolves — those loops can't publish, but
+ * read access still works.
+ */
+async function ensureContextWorktree(repo: string, path: string, branchName: string) {
+  let stats: Awaited<ReturnType<typeof lstat>> | null = null
+  try { stats = await lstat(path) } catch {}
+  // Real dir with .git → already a worktree, leave it alone.
+  if (stats?.isDirectory() && existsSyncBase(join(path, ".git"))) return
+
+  // Source isn't a git repo — fall back to symlink (legacy shape).
+  if (!existsSyncBase(join(repo, ".git"))) {
+    try { await rm(path, { recursive: true, force: true }) } catch {}
+    await ensureSymlink(path, repo)
+    return
+  }
+
+  // Stale state (old symlink, empty dir, leftover from manual cleanup) → wipe + create.
+  try { await rm(path, { recursive: true, force: true }) } catch {}
+  await execFileP("git", ["-C", repo, "worktree", "add", "-b", branchName, path])
+}
+
 export async function ensureContextMounts(id: string, createdBy: string) {
   await mkdir(loopContextDir(id), { recursive: true })
-  await ensureSymlink(loopContextKnowledge(id), workspaceKnowledgeDir())
-  await ensureSymlink(loopContextNotes(id), workspaceNotesDir())
+  await ensureContextWorktree(workspaceKnowledgeDir(), loopContextKnowledge(id), `loop/${id}`)
+  await ensureContextWorktree(workspaceNotesDir(), loopContextNotes(id), `loop/${id}`)
   await ensureSymlink(loopContextPersonal(id), personalDir(createdBy))
   await ensureSymlink(loopContextRepos(id), workspaceReposDir())
 }

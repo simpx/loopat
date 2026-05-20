@@ -17,8 +17,12 @@
  * the loop runs inside the outer bwrap sandbox and that's what Claude sees.
  */
 import { readFile } from "node:fs/promises"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { effectiveDriver, type LoopMeta } from "./loops"
-import { bundledDoctrinePath } from "./paths"
+import { bundledDoctrinePath, workspaceNotesDir, workspaceKnowledgeDir } from "./paths"
+
+const execFileP = promisify(execFile)
 
 let cachedBundled: string | null = null
 
@@ -32,8 +36,21 @@ export function invalidateDoctrineCache(): void {
   cachedBundled = null
 }
 
-function buildRuntimeBlock(loop: LoopMeta): string {
+async function detectTrunkBranch(repoDir: string): Promise<string> {
+  try {
+    const { stdout } = await execFileP("git", ["-C", repoDir, "symbolic-ref", "--short", "HEAD"])
+    return stdout.trim() || "main"
+  } catch {
+    return "main"
+  }
+}
+
+async function buildRuntimeBlock(loop: LoopMeta): Promise<string> {
   const repoLine = loop.repo ? `${loop.repo} (branch ${loop.branch ?? "main"})` : "(no repo bound — empty workdir)"
+  const [notesTrunk, knowledgeTrunk] = await Promise.all([
+    detectTrunkBranch(workspaceNotesDir()),
+    detectTrunkBranch(workspaceKnowledgeDir()),
+  ])
   return `## Runtime context (this loop)
 
 - title: ${loop.title}
@@ -41,12 +58,13 @@ function buildRuntimeBlock(loop: LoopMeta): string {
 - driver: ${effectiveDriver(loop)}
 - workdir: /loopat/loop/${loop.id}/workdir
 - repo: ${repoLine}
+- context worktrees: notes on branch \`loop/${loop.id}\` (trunk \`${notesTrunk}\`), knowledge on branch \`loop/${loop.id}\` (trunk \`${knowledgeTrunk}\`)
 - created: ${loop.createdAt}
 `.trim()
 }
 
 export async function buildLoopatAppend(loop: LoopMeta): Promise<string> {
   const bundled = await loadBundled()
-  const runtime = buildRuntimeBlock(loop)
+  const runtime = await buildRuntimeBlock(loop)
   return `${bundled}\n\n${runtime}\n`.trim()
 }
