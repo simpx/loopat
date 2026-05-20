@@ -43,14 +43,15 @@ import {
   workspaceLoopatSandboxDir,
   workspaceNotesDir,
   workspaceReposDir,
+  loopContextKnowledge,
+  loopContextNotes,
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
 } from "./paths"
 import { resolveSandboxFile } from "./sandboxes"
 import { loadConfig, loadPersonalConfig } from "./config"
-import { DEFAULT_VAULT, resolveVaultRoot, walkVaultFiles } from "./vaults"
-import { personalVaultsDir } from "./paths"
+import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
 const execFileP = promisify(execFile)
 
@@ -156,6 +157,7 @@ export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
 export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
 export const V_CONTEXT_REPOS = "/loopat/context/repos"
 export const V_CONTEXT_CHAT = "/loopat/context/chat"
+export const V_CONTEXT_VAULT = "/loopat/context/vault"
 
 export type SandboxExtraEnv = Record<string, string>
 
@@ -212,33 +214,33 @@ export async function buildBwrapArgs(
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
-    knowledgeRw ? "--bind" : "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
-    "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
+    // notes/knowledge: bind the per-loop worktree (not the shared repo)
+    // so concurrent loops don't trample each other. Publish flow goes through
+    // `git push . HEAD:<trunk>` from within the worktree.
+    knowledgeRw ? "--bind" : "--ro-bind", loopContextKnowledge(loopId), V_CONTEXT_KNOWLEDGE,
+    "--bind", loopContextNotes(loopId), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
-  // ── vault overlay ──
-  // Personal is bound wholesale above (so memory/, .loopat/config.json, etc.
-  // are visible). Now narrow what's exposed for credentials:
-  //   - Hide host-side `.loopat/vaults/` (the multi-vault catalog) — AI
-  //     doesn't need to know which named vaults exist.
-  //   - Expose the selected vault's contents at `.loopat/vault/` (singular).
-  //     Inside the sandbox there's only ever ONE active vault.
-  const vault = vaultName && vaultName.trim() ? vaultName.trim() : DEFAULT_VAULT
-  const hostVaultsDir = personalVaultsDir(createdBy)
-  const V_PERSONAL_VAULTS = `${V_CONTEXT_PERSONAL}/.loopat/vaults`
-  const V_PERSONAL_VAULT = `${V_CONTEXT_PERSONAL}/.loopat/vault`
-  if (existsSync(hostVaultsDir)) {
-    args.push("--tmpfs", V_PERSONAL_VAULTS)
-  }
+  // ── vault symlink ──
+  // Personal is bound wholesale above, so all named vaults under
+  // .loopat/vaults/ are visible inside the sandbox (no isolation between
+  // named vaults — they're per-user, not per-loop). Convenience symlink for
+  // the AI: it accesses the selected loop's credentials through
+  // /loopat/context/vault, not by digging into personal/.loopat/vaults/.
+  // Doctrine tells the AI to stick to this entrypoint and ignore the other
+  // vaults present in personal/.
+  //
+  // History: we previously per-file-bound each vault file into a sandbox-side
+  // `.loopat/vault/` dir, but bwrap creates an empty stub on the host at each
+  // bind target. Those stubs accumulated in personal repo and got committed.
+  // A symlink avoids any host-side file creation.
+  const vault = vaultName?.trim() || DEFAULT_VAULT
   const vaultRoot = resolveVaultRoot(createdBy, vault)
   if (vaultRoot) {
-    for await (const entry of walkVaultFiles(createdBy, vaultRoot)) {
-      // rw-bind so credential helpers can refresh a key in place if needed.
-      args.push("--bind", entry.realpath, `${V_PERSONAL_VAULT}/${entry.rel}`)
-    }
+    args.push("--symlink", `${V_CONTEXT_PERSONAL}/.loopat/vaults/${vault}`, V_CONTEXT_VAULT)
   } else {
     console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
   }
@@ -277,6 +279,19 @@ export async function buildBwrapArgs(
   if (existsSync(reposDir)) {
     args.push("--bind", reposDir, V_CONTEXT_REPOS)
     args.push("--bind", reposDir, reposDir)
+  }
+
+  // notes/knowledge main repos: re-bind at host absolute path so the
+  // per-loop worktree's `.git` file (which stores the absolute gitdir path)
+  // resolves inside the sandbox. Same trick as repos above. Notes is always
+  // RW (gitdir writes during publish). Knowledge follows the rw flag.
+  const notesRepo = workspaceNotesDir()
+  if (existsSync(notesRepo)) {
+    args.push("--bind", notesRepo, notesRepo)
+  }
+  const knowledgeRepo = workspaceKnowledgeDir()
+  if (existsSync(knowledgeRepo)) {
+    args.push(knowledgeRw ? "--bind" : "--ro-bind", knowledgeRepo, knowledgeRepo)
   }
 
   // chat snapshots (per-loop). Each conv that seeded this loop drops a jsonl

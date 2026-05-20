@@ -5,12 +5,12 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand, FlaskConical } from "lucide-react"
 import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, getLoopSandbox, refreshLoopSandbox, type ContextMount, type LoopSandboxInfo, type LoopMeta, markLoopViewed } from "../api"
+import { getContext, getLoopSandbox, refreshLoopSandbox, distillLoop, type ContextMount, type LoopSandboxInfo, type LoopMeta, markLoopViewed } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { useLoopStatus } from "../useLoopStatus"
@@ -570,7 +570,19 @@ function LoopHeader({
   onShareWork: () => void
 }) {
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(isMobile)
+  const [distilling, setDistilling] = useState(false)
+  const onDistill = async () => {
+    if (distilling) return
+    setDistilling(true)
+    try {
+      const child = await distillLoop(meta.id)
+      if (child) navigate(`/loop/${child.id}`)
+    } finally {
+      setDistilling(false)
+    }
+  }
   const modeBtn = (label: string, m: RightMode) => (
     <button
       key={m}
@@ -623,6 +635,16 @@ function LoopHeader({
           </span>
         )}
         <div className="flex-1" />
+        <button
+          type="button"
+          onClick={onDistill}
+          disabled={distilling}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border bg-white text-violet-700 border-violet-300 hover:bg-violet-50 disabled:opacity-50"
+          title="Spawn a child loop seeded with this loop's conversation, for sedimenting reusable insights into knowledge/"
+        >
+          <FlaskConical size={11} />
+          {distilling ? "Distilling…" : "Distill"}
+        </button>
         <button
           onClick={onShareWork}
           className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${meta.shareEnabled ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"}`}
