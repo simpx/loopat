@@ -150,16 +150,15 @@ export default function SlashCommand() {
   //   - bare id, not local  → group:"skill"   (CC built-ins + workspace/personal loose skills)
   //   - local id            → already group:"quick" from COMMANDS
   const allCommands = useMemo<SlashCommand[]>(() => {
-    const fromAgent: SlashCommand[] = (availableSlashCommands as any[])
-      .map((c) => (typeof c === "string" ? { name: c, description: "" } : c))
-      .filter((c) => c && typeof c.name === "string" && !LOCAL_IDS.has(c.name))
-      .map(({ name, description }) => {
-        const isPlugin = name.includes(":");
-        const pluginName = isPlugin ? name.split(":", 1)[0] : undefined;
+    const fromAgent: SlashCommand[] = availableSlashCommands
+      .filter((cmd) => !LOCAL_IDS.has(cmd.name))
+      .map((cmd) => {
+        const isPlugin = cmd.name.includes(":");
+        const pluginName = isPlugin ? cmd.name.split(":", 1)[0] : undefined;
         return {
-          id: name,
-          name,
-          description: description || (isPlugin ? `from ${pluginName} plugin` : "skill"),
+          id: cmd.name,
+          name: cmd.name,
+          description: cmd.description || (isPlugin ? `from ${pluginName} plugin` : "skill"),
           icon: isPlugin ? Puzzle : Terminal,
           group: isPlugin ? ("plugin" as const) : ("skill" as const),
           action: "agent" as const,
