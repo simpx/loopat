@@ -110,11 +110,31 @@ fi
 
 # Build an HTTPS push URL that embeds the user/token. We don't modify the
 # remote permanently — auth is supplied only for this single push.
+# Use pure bash parameter expansion so special chars in the token (&, \,
+# /, etc.) are never re-interpreted by sed.
 ORIGIN_URL=$(git remote get-url --push origin)
-PUSH_URL=$(printf '%s' "$ORIGIN_URL" | sed -E \
-  -e 's|^git@([^:]+):|https://\1/|' \
-  -e 's|^https://[^@]*@|https://|' \
-  -e "s|^https://|https://${CI_BOT_NAME}:${CI_BOT_TOKEN}@|")
+
+# Normalize SSH -> HTTPS:  git@host:path  ->  https://host/path
+case "$ORIGIN_URL" in
+  git@*)
+    _stripped="${ORIGIN_URL#git@}"     # host:path
+    ORIGIN_URL="https://${_stripped/://}"
+    ;;
+esac
+
+# Strip any existing inline credentials:  https://x:y@host/...  ->  https://host/...
+case "$ORIGIN_URL" in
+  https://*@*)
+    ORIGIN_URL="https://${ORIGIN_URL#https://*@}"
+    ;;
+esac
+
+PUSH_URL="https://${CI_BOT_NAME}:${CI_BOT_TOKEN}@${ORIGIN_URL#https://}"
+
+# Sanity log (token is auto-masked by Aone CI in logs).
+log "CI_BOT_NAME='${CI_BOT_NAME}' len=${#CI_BOT_NAME}"
+log "CI_BOT_TOKEN len=${#CI_BOT_TOKEN}"
+log "origin URL (no creds): ${ORIGIN_URL}"
 
 log "pushing HEAD to refs/for/${TARGET_BRANCH}/${TOPIC}"
 git push "${PUSH_OPTS[@]}" "$PUSH_URL" "HEAD:refs/for/${TARGET_BRANCH}/${TOPIC}"
