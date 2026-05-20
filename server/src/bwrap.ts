@@ -182,6 +182,7 @@ export async function buildBwrapArgs(
   sandboxName?: string,
   vaultName?: string,
   knowledgeRw?: boolean,
+  homeOverlay: boolean = true,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -214,12 +215,14 @@ export async function buildBwrapArgs(
   args.push(
     // /tmp shared (writable, for socat / mktemp / IPC sockets)
     "--bind", "/tmp", "/tmp",
-    // host home → overlayfs merged dir. The outer unshare wrapper (see
-    // buildSandboxSpawnArgv below) mounts overlay at loopHomeMerged(loopId);
-    // bwrap binds that merged view at the sandbox's $HOME. Writes go through
-    // overlay → upper (loops/<id>/home-upper/), persistent across restarts.
+    // host home → either overlayfs merged dir (if homeOverlay) or tmpfs.
+    // Overlay needs the unshare wrapper + bwrap ≥ 0.9 nested-userns uid drop;
+    // on envs where that fails (e.g. bwrap 0.4.0 on some cloud images), we
+    // fall back to a per-spawn tmpfs (no persistence, but works everywhere).
     // operator/member mounts go back on top below.
-    "--bind", loopHomeMerged(loopId), home,
+    ...(homeOverlay
+      ? (["--bind", loopHomeMerged(loopId), home] as const)
+      : (["--tmpfs", home] as const)),
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
@@ -422,6 +425,45 @@ export type SandboxOverlayPaths = {
   upper: string
   work: string
   merged: string
+}
+
+// Probe (once per server lifetime) whether the unshare + bwrap-nested-userns
+// uid drop combination actually works on this host. bwrap 0.9 supports it;
+// 0.4 (still shipped on some Aliyun/EL8-derivative images) fails with
+// "bwrap: unable to drop root uid: Invalid argument" because the nested
+// userns uid_map semantics differ. When unsupported, callers must skip the
+// unshare wrapper entirely and use --tmpfs $HOME instead of the overlay.
+let _homeOverlayProbe: Promise<boolean> | null = null
+export function isHomeOverlaySupported(): Promise<boolean> {
+  if (process.env.LOOPAT_NO_HOME_OVERLAY === "1") return Promise.resolve(false)
+  if (!_homeOverlayProbe) {
+    _homeOverlayProbe = (async () => {
+      const uid = String(process.getuid?.() ?? 0)
+      const gid = String(process.getgid?.() ?? 0)
+      try {
+        await execFileP(
+          "unshare",
+          [
+            "-Umr", "--",
+            "bwrap", "--unshare-user", "--uid", uid, "--gid", gid,
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            "--", "/bin/true",
+          ],
+          { timeout: 5000 },
+        )
+        return true
+      } catch (e: any) {
+        const msg = e?.stderr?.toString?.() || e?.message || String(e)
+        console.warn(
+          `[loopat] $HOME overlay disabled — host bwrap can't drop uid via nested userns ` +
+          `(likely bwrap < 0.9). Falling back to --tmpfs $HOME (no per-loop persistence). ` +
+          `Probe error: ${msg.trim()}`,
+        )
+        return false
+      }
+    })()
+  }
+  return _homeOverlayProbe
 }
 
 /** Idempotently mkdir the four dirs the overlay mount needs. */
