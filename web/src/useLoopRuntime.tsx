@@ -7,23 +7,43 @@ import { getVersion, getBuildInfo } from "@/api"
 // Persists the last known slash commands per loopId so they're available
 // immediately on reconnect, before CC's system/init message arrives.
 
+type SlashCommandInfo = { name: string; description: string }
+
+function normalizeSlashCommands(cmds: unknown[]): SlashCommandInfo[] {
+  const result: SlashCommandInfo[] = []
+  for (const c of cmds) {
+    if (typeof c === "string") {
+      result.push({ name: c, description: "" })
+    } else if (typeof c === "object" && c !== null && "name" in c) {
+      const obj = c as Record<string, unknown>
+      result.push({
+        name: String(obj.name),
+        description: typeof obj.description === "string" ? obj.description : "",
+      })
+    }
+  }
+  return result
+}
+
 const SLASH_CACHE_KEY = "loopat:slash-commands"
 
-function loadCachedSlashCommands(loopId: string): string[] {
+function loadCachedSlashCommands(loopId: string): SlashCommandInfo[] {
   try {
     const raw = localStorage.getItem(SLASH_CACHE_KEY)
     if (!raw) return []
-    const cache = JSON.parse(raw) as Record<string, string[]>
-    return cache[loopId] ?? []
+    const parsed = JSON.parse(raw)
+    const cache: Record<string, unknown[]> = typeof parsed === "object" && parsed !== null ? parsed : {}
+    const entry = cache[loopId]
+    return Array.isArray(entry) ? normalizeSlashCommands(entry) : []
   } catch {
     return []
   }
 }
 
-function saveCachedSlashCommands(loopId: string, cmds: string[]) {
+function saveCachedSlashCommands(loopId: string, cmds: SlashCommandInfo[]) {
   try {
     const raw = localStorage.getItem(SLASH_CACHE_KEY)
-    const cache: Record<string, string[]> = raw ? JSON.parse(raw) : {}
+    const cache: Record<string, SlashCommandInfo[]> = raw ? JSON.parse(raw) : {}
     cache[loopId] = cmds
     localStorage.setItem(SLASH_CACHE_KEY, JSON.stringify(cache))
   } catch {
@@ -337,7 +357,7 @@ export interface LoopRuntimeExtra {
    *  "clear"), user-tier skills ("loop", "schedule"), and plugin commands
    *  ("loopat:onboarding"). Empty until the first init message arrives;
    *  may include duplicates if CC ever reports them — caller should dedup. */
-  availableSlashCommands: string[]
+  availableSlashCommands: SlashCommandInfo[]
   /** True when aggregated messages exceed the render window. */
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
@@ -413,14 +433,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   // arrives, the list is replaced with the actual reported commands.
   // On first-ever open (no cache), seed with known CC built-in commands
   // so the / menu is useful immediately.
-  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>(
+  const [availableSlashCommands, setAvailableSlashCommands] = useState<SlashCommandInfo[]>(
     () => {
       if (!loopId) return []
       const cached = loadCachedSlashCommands(loopId)
       if (cached.length > 0) return cached
       // Default CC built-in commands — always available once CC starts.
       // These get replaced by the real list when system/init arrives.
-      return ["help", "model", "compress", "review", "init", "foxtrot"]
+      return ["help", "model", "compress", "review", "init", "foxtrot"].map(name => ({ name, description: "" }))
     },
   )
   const wsRef = useRef<WebSocket | null>(null)
@@ -836,11 +856,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           // "loopat:onboarding").
           if (subtype === "init") {
             if (!loadingHistoryRef.current) setRunning(true)
-            const cmds = Array.isArray((m as any).slash_commands)
-              ? ((m as any).slash_commands as unknown[]).filter(
-                  (c): c is string => typeof c === "string",
-                )
-              : []
+            const raw = (m as any).slash_commands
+            const cmds = Array.isArray(raw) ? normalizeSlashCommands(raw) : []
             if (cmds.length > 0) {
               setAvailableSlashCommands(cmds)
               saveCachedSlashCommands(loopId, cmds)
@@ -937,8 +954,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         if (loadingHistoryRef.current) {
           if (m?.type === "history_end") {
             // Seed slash commands from server (best-effort before CC starts).
-            const seedCmds = m.slash_commands
-            if (Array.isArray(seedCmds) && seedCmds.length > 0) {
+            const raw = (m as any).slash_commands
+            if (Array.isArray(raw) && raw.length > 0) {
+              const seedCmds = normalizeSlashCommands(raw)
               setAvailableSlashCommands(seedCmds)
               saveCachedSlashCommands(loopId, seedCmds)
             }
@@ -955,8 +973,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }
         // Live messages: process immediately
         if (m?.type === "history_end") {
-          const seedCmds = m.slash_commands
-          if (Array.isArray(seedCmds) && seedCmds.length > 0) {
+          const raw = (m as any).slash_commands
+          if (Array.isArray(raw) && raw.length > 0) {
+            const seedCmds = normalizeSlashCommands(raw)
             setAvailableSlashCommands(seedCmds)
             saveCachedSlashCommands(loopId, seedCmds)
           }

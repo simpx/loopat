@@ -151,14 +151,14 @@ export default function SlashCommand() {
   //   - local id            → already group:"quick" from COMMANDS
   const allCommands = useMemo<SlashCommand[]>(() => {
     const fromAgent: SlashCommand[] = availableSlashCommands
-      .filter((id) => !LOCAL_IDS.has(id))
-      .map((id) => {
-        const isPlugin = id.includes(":");
-        const pluginName = isPlugin ? id.split(":", 1)[0] : undefined;
+      .filter((cmd) => !LOCAL_IDS.has(cmd.name))
+      .map((cmd) => {
+        const isPlugin = cmd.name.includes(":");
+        const pluginName = isPlugin ? cmd.name.split(":", 1)[0] : undefined;
         return {
-          id,
-          name: id,
-          description: isPlugin ? `from ${pluginName} plugin` : "skill",
+          id: cmd.name,
+          name: cmd.name,
+          description: cmd.description || (isPlugin ? `from ${pluginName} plugin` : "skill"),
           icon: isPlugin ? Puzzle : Terminal,
           group: isPlugin ? ("plugin" as const) : ("skill" as const),
           action: "agent" as const,
