@@ -4,7 +4,7 @@ import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/pro
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
+import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
@@ -760,6 +760,40 @@ class LoopSession {
     }
   }
 
+  /** Read subdirectory names from a path — silently returns [] if missing. */
+  private async listDirNames(dir: string): Promise<string[]> {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Build a best-effort list of slash commands from the loop's workspace /
+   * personal config. Used to seed the frontend before CC's real init arrives.
+   * Includes well-known CC builtins + skill names from knowledge/personal dirs.
+   * Plugin names are excluded because we don't know their sub-commands without
+   * reading manifests — CC will report the full list when it starts.
+   */
+  private async buildInitialSlashCommands(user: string): Promise<string[]> {
+    const cmds = new Set<string>()
+    // CC built-in commands (always available after CC starts)
+    for (const c of ["help", "model", "clear", "compress", "review", "init", "foxtrot"]) {
+      cmds.add(c)
+    }
+    // Workspace skills
+    for (const name of await this.listDirNames(workspaceLoopatSkillsDir())) {
+      cmds.add(name)
+    }
+    // Personal skills (higher precedence — same dedup behavior as compose)
+    for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
+      cmds.add(name)
+    }
+    return [...cmds].sort()
+  }
+
   async attach(ws: WSContext) {
     await this.historyLoaded
     const state: SubscriberState = { pending: [] }
@@ -813,17 +847,25 @@ class LoopSession {
       }
       state.pending = null
     }
-    try {
-      ws.send(JSON.stringify({ type: "history_end" }))
-    } catch {}
-    // If the server is mid-generation right now, the frontend needs a
-    // synthetic init to show the running status bar. The original init
-    // was replayed during history (and ignored because loadingHistory
-    // was true). After history_end, loadingHistory is false, so this
-    // one will take effect.
+    // history_end — signals the frontend that replay is done.
+    // When not generating, also embed a best-effort slash-command list
+    // so the / menu works immediately (before CC starts). CC's real
+    // system/init replaces this with the accurate list later.
+    const meta = await getLoop(this.id)
     if (this.generating) {
       try {
+        ws.send(JSON.stringify({ type: "history_end" }))
+      } catch {}
+      // The frontend also needs a synthetic init to show running status
+      // (the history-replayed init was ignored during loadingHistory).
+      try {
         ws.send(JSON.stringify({ type: "system", subtype: "init" }))
+      } catch {}
+    } else {
+      const user = meta?.createdBy
+      const slashCommands = user ? await this.buildInitialSlashCommands(user) : undefined
+      try {
+        ws.send(JSON.stringify({ type: "history_end", slash_commands: slashCommands }))
       } catch {}
     }
     // Re-broadcast active permission prompts that survived history replay

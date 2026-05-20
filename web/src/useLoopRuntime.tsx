@@ -2,6 +2,34 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 import type { PermissionMode } from "@/components/chat/PlanModeToggle"
 
+// ── Slash-commands cache ──
+// Persists the last known slash commands per loopId so they're available
+// immediately on reconnect, before CC's system/init message arrives.
+
+const SLASH_CACHE_KEY = "loopat:slash-commands"
+
+function loadCachedSlashCommands(loopId: string): string[] {
+  try {
+    const raw = localStorage.getItem(SLASH_CACHE_KEY)
+    if (!raw) return []
+    const cache = JSON.parse(raw) as Record<string, string[]>
+    return cache[loopId] ?? []
+  } catch {
+    return []
+  }
+}
+
+function saveCachedSlashCommands(loopId: string, cmds: string[]) {
+  try {
+    const raw = localStorage.getItem(SLASH_CACHE_KEY)
+    const cache: Record<string, string[]> = raw ? JSON.parse(raw) : {}
+    cache[loopId] = cmds
+    localStorage.setItem(SLASH_CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // ignore storage errors
+  }
+}
+
 type RawMsg = {
   id: string
   role: "user" | "assistant"
@@ -380,7 +408,20 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
-  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>([])
+  // Start with cached commands (or empty). When CC's real system/init
+  // arrives, the list is replaced with the actual reported commands.
+  // On first-ever open (no cache), seed with known CC built-in commands
+  // so the / menu is useful immediately.
+  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>(
+    () => {
+      if (!loopId) return []
+      const cached = loadCachedSlashCommands(loopId)
+      if (cached.length > 0) return cached
+      // Default CC built-in commands — always available once CC starts.
+      // These get replaced by the real list when system/init arrives.
+      return ["help", "model", "compress", "review", "init", "foxtrot"]
+    },
+  )
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -792,7 +833,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
                   (c): c is string => typeof c === "string",
                 )
               : []
-            if (cmds.length > 0) setAvailableSlashCommands(cmds)
+            if (cmds.length > 0) {
+              setAvailableSlashCommands(cmds)
+              saveCachedSlashCommands(loopId, cmds)
+            }
             return
           }
           return
@@ -884,6 +928,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         // This avoids partial/intermediate state during loading.
         if (loadingHistoryRef.current) {
           if (m?.type === "history_end") {
+            // Seed slash commands from server (best-effort before CC starts).
+            const seedCmds = m.slash_commands
+            if (Array.isArray(seedCmds) && seedCmds.length > 0) {
+              setAvailableSlashCommands(seedCmds)
+              saveCachedSlashCommands(loopId, seedCmds)
+            }
             for (const bufMsg of replayBufRef.current) {
               dispatchMsg(bufMsg)
             }
@@ -897,6 +947,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }
         // Live messages: process immediately
         if (m?.type === "history_end") {
+          const seedCmds = m.slash_commands
+          if (Array.isArray(seedCmds) && seedCmds.length > 0) {
+            setAvailableSlashCommands(seedCmds)
+            saveCachedSlashCommands(loopId, seedCmds)
+          }
           loadingHistoryRef.current = false
           setLoadingHistory(false)
           setRunning(false)
