@@ -33,6 +33,7 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
+import { mkdir } from "node:fs/promises"
 import {
   loopWorkdir,
   loopClaudeDir,
@@ -48,6 +49,10 @@ import {
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
+  loopHomeUpper,
+  loopHomeWork,
+  loopHomeMerged,
+  workspaceHomeSkelDir,
 } from "./paths"
 import { resolveSandboxFile } from "./sandboxes"
 import { loadConfig, loadPersonalConfig } from "./config"
@@ -209,8 +214,12 @@ export async function buildBwrapArgs(
   args.push(
     // /tmp shared (writable, for socat / mktemp / IPC sockets)
     "--bind", "/tmp", "/tmp",
-    // host home: tmpfs; operator/member mounts go back on top below
-    "--tmpfs", home,
+    // host home → overlayfs merged dir. The outer unshare wrapper (see
+    // buildSandboxSpawnArgv below) mounts overlay at loopHomeMerged(loopId);
+    // bwrap binds that merged view at the sandbox's $HOME. Writes go through
+    // overlay → upper (loops/<id>/home-upper/), persistent across restarts.
+    // operator/member mounts go back on top below.
+    "--bind", loopHomeMerged(loopId), home,
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
@@ -385,4 +394,69 @@ export async function buildBwrapArgs(
   }
 
   return args
+}
+
+// ── docker-style $HOME overlay ─────────────────────────────────────────────
+// bwrap 0.9.0 (Ubuntu noble) ships without overlay support compiled in. We
+// achieve docker container-layer semantics for $HOME by wrapping bwrap in an
+// outer `unshare -Umr`: unshare gives us a user+mount NS where we can mount
+// overlayfs (kernel ≥ 5.11 supports it unprivileged); bwrap then inherits
+// that mount NS and binds the overlay's merged dir at the sandbox $HOME.
+//
+//   Image (lower) = workspaceHomeSkelDir() — shared, immutable, typically empty
+//   Container layer (upper) = loops/<id>/home-upper/ — per-loop, persistent
+//   Workdir = loops/<id>/home-work/ — overlayfs scratch
+//   Merged mount point = loops/<id>/home-merged/ — bwrap binds this at $HOME
+//
+// On bwrap exit, the unshare NS dies and the overlay mount auto-unmounts.
+// The upper dir persists on host disk; next spawn sees previous writes.
+
+export type SandboxOverlayPaths = {
+  lower: string
+  upper: string
+  work: string
+  merged: string
+}
+
+/** Idempotently mkdir the four dirs the overlay mount needs. */
+export async function prepareSandboxOverlay(loopId: string): Promise<SandboxOverlayPaths> {
+  const lower = workspaceHomeSkelDir()
+  const upper = loopHomeUpper(loopId)
+  const work = loopHomeWork(loopId)
+  const merged = loopHomeMerged(loopId)
+  await Promise.all([
+    mkdir(lower, { recursive: true }),
+    mkdir(upper, { recursive: true }),
+    mkdir(work, { recursive: true }),
+    mkdir(merged, { recursive: true }),
+  ])
+  return { lower, upper, work, merged }
+}
+
+// Script body executed in the unshare NS: mount overlay using $1..$4 as
+// lower/upper/work/merged, then shift those off and exec the remainder
+// ($5+ = "bwrap" plus its argv, ending with "--", command, command args).
+const SANDBOX_SPAWN_SCRIPT =
+  'mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3" "$4" && shift 4 && exec "$@"'
+
+/**
+ * Build the argv for `unshare` that wraps bwrap + overlay mount. Caller
+ * spawns the binary "unshare" with the returned args (NOT "bwrap" directly).
+ * Sync: caller must `await prepareSandboxOverlay(loopId)` beforehand so the
+ * mount points exist.
+ */
+export function buildSandboxSpawnArgv(
+  overlay: SandboxOverlayPaths,
+  bwrapArgs: string[],
+  command: string,
+  commandArgs: string[],
+): string[] {
+  return [
+    "-Umr",
+    "--",
+    "bash", "-c", SANDBOX_SPAWN_SCRIPT,
+    "_", // $0 placeholder (unused inside script)
+    overlay.lower, overlay.upper, overlay.work, overlay.merged, // $1..$4
+    "bwrap", ...bwrapArgs, "--", command, ...commandArgs, // $5+ → exec'd after shift
+  ]
 }

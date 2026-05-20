@@ -15,7 +15,7 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 - `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory), `.loopat/config.json` (per-user config), and `.loopat/vaults/<name>/` (the user's credential catalogs — see `/loopat/context/vault` below).
 - `/loopat/context/vault`           — symlink to this loop's active vault under `personal/.loopat/vaults/<active>/`. Use this path to access credentials — do not read other vaults directly under `personal/.loopat/vaults/`.
 - `/loopat/context/repos/<name>/`   — workspace repos (rw). All repos registered in this workspace. The current loop's workdir is typically a worktree of one of them.
-- `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/vault/` (e.g. `.ssh`) appear at expected $HOME paths.
+- `$HOME` (`/home/$USER`)           — per-loop overlayfs (docker container-layer semantics). Persistent across sandbox restarts; pip/npm installs, shell history, dotfiles survive. Personal-deps you've symlinked from `/loopat/context/vault/` (e.g. `.ssh`) overlay on top.
 
 Network is open (host network is shared). Use it for API calls, git fetch, package installs, etc.
 
