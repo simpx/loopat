@@ -11,6 +11,11 @@
 # Required env:
 #   UPSTREAM_URL        GitHub clone URL  (e.g. https://github.com/simpx/loopat.git)
 #
+# Required for the refs/for/ push (the auto-injected ciToken does not work
+# for refs/for/ pushes — Aone Code expects a real account):
+#   CI_BOT_NAME    GitLab username that owns the token (e.g. your 花名)
+#   CI_BOT_TOKEN   Personal access token (PAT)
+#
 # Optional env:
 #   TARGET_BRANCH       branch to sync                       (default: main)
 #   REVIEWERS           comma-separated "name1,id1,name2,id2" (default: empty)
@@ -21,6 +26,8 @@
 set -euo pipefail
 
 : "${UPSTREAM_URL:?UPSTREAM_URL is required}"
+: "${CI_BOT_NAME:?CI_BOT_NAME is required (configure via vars.CI_BOT_NAME)}"
+: "${CI_BOT_TOKEN:?CI_BOT_TOKEN is required (configure via secrets.CI_BOT_TOKEN)}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
 
 log() { printf '[sync-upstream] %s\n' "$*"; }
@@ -101,6 +108,14 @@ if [ -n "${REVIEWERS:-}" ]; then
   PUSH_OPTS+=( -o "reviewer=${REVIEWERS}" )
 fi
 
+# Build an HTTPS push URL that embeds the user/token. We don't modify the
+# remote permanently — auth is supplied only for this single push.
+ORIGIN_URL=$(git remote get-url --push origin)
+PUSH_URL=$(printf '%s' "$ORIGIN_URL" | sed -E \
+  -e 's|^git@([^:]+):|https://\1/|' \
+  -e 's|^https://[^@]*@|https://|' \
+  -e "s|^https://|https://${CI_BOT_NAME}:${CI_BOT_TOKEN}@|")
+
 log "pushing HEAD to refs/for/${TARGET_BRANCH}/${TOPIC}"
-git push "${PUSH_OPTS[@]}" origin "HEAD:refs/for/${TARGET_BRANCH}/${TOPIC}"
+git push "${PUSH_OPTS[@]}" "$PUSH_URL" "HEAD:refs/for/${TARGET_BRANCH}/${TOPIC}"
 log "done"
