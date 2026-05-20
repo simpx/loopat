@@ -31,7 +31,7 @@ export default function Composer() {
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, estimatedTokens } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, estimatedTokens, suppressSlashRef } = useLoopRuntimeExtra();
   const usedTokens = estimatedTokens;
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
@@ -84,6 +84,11 @@ export default function Composer() {
     if ((e.nativeEvent as any).isComposing || e.keyCode === 229) {
       return;
     }
+    // Reset slash-suppression on any printable keystroke so the / menu
+    // reappears once the user actually starts typing again.
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      suppressSlashRef.current = false;
+    }
     if (e.key === "Enter" && !e.shiftKey && isRunning) {
       e.preventDefault();
       handleEnqueue();
@@ -92,6 +97,7 @@ export default function Composer() {
     if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       if (history.length === 0) return;
       e.preventDefault();
+      suppressSlashRef.current = true;
       if (historyIdx === -1) {
         pendingDraftRef.current = textRef.current;
         setHistoryIdx(history.length - 1);
@@ -106,6 +112,7 @@ export default function Composer() {
     if (e.key === "ArrowDown" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       if (historyIdx === -1) return;
       e.preventDefault();
+      suppressSlashRef.current = true;
       if (historyIdx < history.length - 1) {
         const nextIdx = historyIdx + 1;
         setHistoryIdx(nextIdx);
