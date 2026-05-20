@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 import type { PermissionMode } from "@/components/chat/PlanModeToggle"
+import { getVersion, getBuildInfo } from "@/api"
 
 // ── Slash-commands cache ──
 // Persists the last known slash commands per loopId so they're available
@@ -680,6 +681,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           clearTimeout(reconnectTimerRef.current)
           reconnectTimerRef.current = null
         }
+        // Check if server version differs from the frontend build
+        getVersion().then((v) => {
+          const build = getBuildInfo()
+          if (v.commit !== "unknown" && build.commit !== "unknown" && v.commit !== build.commit) {
+            window.dispatchEvent(new CustomEvent("loopat:version-mismatch", { detail: { commit: v.commit } }))
+          }
+        }).catch(() => {})
       }
       ws.onclose = () => {
         setConnected(false)
