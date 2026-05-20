@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>loopat — self-hosted AI workspace</title>
-<meta name="description" content="Self-hosted AI workspace built around context management. Loop = context + AI + workdir, sandboxed per-loop with bubblewrap.">
+<title>loopat — 自托管的 AI 协作工作台</title>
+<meta name="description" content="围绕上下文管理构建的自托管 AI 工作台。Loop = 上下文 + AI + 工作目录，每个循环在 bubblewrap 沙箱中隔离运行。">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧶</text></svg>">
 <style>
   :root {
@@ -33,7 +33,7 @@
     scroll-behavior: smooth;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", system-ui, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "Helvetica Neue", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
     font-size: 16px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
@@ -109,7 +109,7 @@
     cursor: pointer;
     transition: all 0.2s;
     font-family: inherit;
-    text-decoration: none;
+    margin-left: 8px;
   }
   .lang-toggle:hover { border-color: var(--text-dim); color: var(--text); }
 
@@ -192,7 +192,7 @@
     color: var(--text-muted);
     max-width: 580px;
     margin: 0 auto 36px;
-    line-height: 1.7;
+    line-height: 1.85;
   }
   .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
   .btn {
@@ -242,7 +242,7 @@
     font-size: 1.0625rem;
     color: var(--text-muted);
     max-width: 600px;
-    line-height: 1.7;
+    line-height: 1.85;
   }
 
   /* ── Features ─────────────────────────── */
@@ -291,7 +291,7 @@
   .feature-card p {
     font-size: 0.875rem;
     color: var(--text-dim);
-    line-height: 1.65;
+    line-height: 1.75;
   }
 
   /* ── Architecture ─────────────────────── */
@@ -353,7 +353,7 @@
     margin-bottom: 12px;
   }
   .layer-card h4 { font-size: 0.875rem; font-weight: 600; margin-bottom: 4px; }
-  .layer-card p { font-size: 0.75rem; color: var(--text-dim); line-height: 1.5; }
+  .layer-card p { font-size: 0.75rem; color: var(--text-dim); line-height: 1.6; }
 
   /* ── Principles ──────────────────────── */
   #principles .section-inner { text-align: center; }
@@ -379,7 +379,7 @@
     margin-bottom: 12px;
   }
   .principle-card h3 { font-size: 0.9375rem; font-weight: 600; margin-bottom: 8px; }
-  .principle-card p { font-size: 0.875rem; color: var(--text-dim); line-height: 1.6; }
+  .principle-card p { font-size: 0.875rem; color: var(--text-dim); line-height: 1.75; }
 
   /* ── Quick Start ──────────────────────── */
   #quickstart .section-inner { text-align: center; }
@@ -506,15 +506,15 @@
       <span>loopat</span>
     </a>
     <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#architecture">Architecture</a>
-      <a href="#compare">Compare</a>
-      <a href="#quickstart">Quick Start</a>
+      <a href="#features">功能</a>
+      <a href="#architecture">架构</a>
+      <a href="#compare">对比</a>
+      <a href="#quickstart">快速开始</a>
       <a class="nav-gh" href="https://github.com/simpx/loopat" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         GitHub
       </a>
-      <a href="index.zh.html" class="lang-toggle">中文</a>
+      <a href="index.html" class="lang-toggle">EN</a>
     </div>
   </div>
 </nav>
@@ -522,7 +522,7 @@
 <!-- Hero -->
 <section class="hero">
   <div class="hero-badge">
-    <span class="dot"></span> Apache 2.0 — open source
+    <span class="dot"></span> Apache 2.0 — 开源软件
   </div>
   <h1>
     <span class="gradient">loopat</span>
@@ -531,21 +531,21 @@
   <div class="formula">
     <span class="kw">Loop</span>
     <span>=</span>
-    <span>context</span>
+    <span>上下文</span>
     <span>+</span>
     <span class="co">AI</span>
     <span>+</span>
-    <span>workdir</span>
+    <span>工作目录</span>
   </div>
   <p>
-    A self-hosted AI workspace built around context management.<br>
-    Works solo, scales to teams. Every loop runs in its own sandbox with versioned toolchain and pinned credentials.
+    一个围绕上下文管理构建的自托管 AI 协作工作台。<br>
+    单人可用，团队可扩展。每个循环在独立沙箱中运行，配备版本化的工具链和隔离的凭据。
   </p>
   <div class="hero-actions">
-    <a href="#quickstart" class="btn btn-primary">Get Started</a>
+    <a href="#quickstart" class="btn btn-primary">快速开始</a>
     <a href="https://github.com/simpx/loopat" class="btn btn-secondary" target="_blank" rel="noopener">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-      View on GitHub
+      GitHub 仓库
     </a>
   </div>
 </section>
@@ -553,41 +553,41 @@
 <!-- Features -->
 <section id="features">
   <div class="section-inner">
-    <div class="section-label">Features</div>
-    <h2 class="section-title">Everything you need to<br>collaborate with AI</h2>
+    <div class="section-label">核心功能</div>
+    <h2 class="section-title">与 AI 高效协作<br>所需的一切</h2>
     <p class="section-desc">
-      loopat combines a web-based workspace, Claude-powered agent loops, and filesystem-level sandboxing into a single process you run locally.
+      loopat 将 Web 工作台、Claude 驱动的智能体循环和文件系统级沙箱集成为一个本地运行的单一进程。
     </p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🧶</div>
-        <h3>Sandboxed Loops</h3>
-        <p>Each AI session runs in its own bubblewrap mount namespace. Isolated filesystem, shared context — the best of both worlds.</p>
+        <h3>沙箱化循环</h3>
+        <p>每个 AI 会话在独立的 bubblewrap 挂载命名空间中运行。文件系统隔离 + 共享上下文 — 两全其美。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💬</div>
-        <h3>Collaborative Chat</h3>
-        <p>WebSocket-powered real-time chat with Claude. Multiple browser tabs can share the same loop session simultaneously.</p>
+        <h3>多人协作聊天</h3>
+        <p>基于 WebSocket 的实时 Claude 对话。多个浏览器标签页可同时加入同一个循环会话。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📋</div>
-        <h3>Kanban Boards</h3>
-        <p>Built-in Kanban with drag-and-drop, real-time sync across subscribers. Manage tasks alongside your AI agent.</p>
+        <h3>看板</h3>
+        <p>内置看板，支持拖拽排序、多人在线实时同步。与 AI 智能体配合管理任务。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💻</div>
-        <h3>Web Terminal</h3>
-        <p>Full PTY terminal inside the sandbox. Shared across loop subscribers — everyone sees the same bash session.</p>
+        <h3>Web 终端</h3>
+        <p>沙箱内的完整 PTY 终端。所有循环订阅者共享同一个 bash 会话。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">📁</div>
-        <h3>File Tree &amp; Editor</h3>
-        <p>Browse and edit files inside the sandbox from the web UI. Git integration with commit and log views.</p>
+        <h3>文件树与编辑器</h3>
+        <p>通过 Web UI 浏览和编辑沙箱内的文件。集成 Git 提交和历史查看。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🧠</div>
-        <h3>Persistent Memory</h3>
-        <p>Two-tier memory system — personal and team-shared. Auto-recalled across sessions so context is never lost.</p>
+        <h3>持久化记忆</h3>
+        <p>双层记忆体系 — 个人记忆与团队共享记忆。跨会话自动召回，上下文永不丢失。</p>
       </div>
     </div>
   </div>
@@ -596,56 +596,56 @@
 <!-- Architecture -->
 <section id="architecture">
   <div class="section-inner">
-    <div class="section-label">Architecture</div>
-    <h2 class="section-title">One loop, one sandbox</h2>
+    <div class="section-label">架构</div>
+    <h2 class="section-title">一个循环，一个沙箱</h2>
     <p class="section-desc">
-      Every loop bundles its own context, AI agent, and working directory inside a Linux mount namespace. Portable, reproducible, and secure by default.
+      每个循环将上下文、AI 智能体和工作目录打包在 Linux 挂载命名空间中。可移植、可复现、默认安全。
     </p>
     <div class="arch-diagram">
       <div class="arch-box">
         <div class="emoji">📚</div>
-        <h4>Context</h4>
-        <p>Knowledge + Notes + Memory</p>
+        <h4>上下文</h4>
+        <p>知识 + 笔记 + 记忆</p>
       </div>
       <span class="arch-plus">+</span>
       <div class="arch-box">
         <div class="emoji">🤖</div>
-        <h4>AI Agent</h4>
-        <p>Claude CLI in bwrap</p>
+        <h4>AI 智能体</h4>
+        <p>bwrap 中的 Claude CLI</p>
       </div>
       <span class="arch-plus">+</span>
       <div class="arch-box">
         <div class="emoji">📂</div>
-        <h4>Workdir</h4>
-        <p>Git worktree per loop</p>
+        <h4>工作目录</h4>
+        <p>每个循环独立 Git 工作树</p>
       </div>
       <span class="arch-equals">=</span>
       <div class="arch-box arch-result">
         <div class="emoji">🧶</div>
-        <h4>Sandboxed Loop</h4>
-        <p>Isolated &amp; reproducible</p>
+        <h4>沙箱化循环</h4>
+        <p>隔离 &amp; 可复现</p>
       </div>
     </div>
     <div class="sandbox-layers">
       <div class="layer-card">
         <div class="layer-num">1</div>
-        <h4>URL Routing</h4>
-        <p>Hono router binds requests to loop IDs via closures</p>
+        <h4>URL 路由</h4>
+        <p>Hono 路由器通过闭包绑定请求到循环 ID</p>
       </div>
       <div class="layer-card">
         <div class="layer-num">2</div>
-        <h4>Map Partitioning</h4>
-        <p>Per-loop session maps prevent cross-loop broadcast</p>
+        <h4>Map 分区</h4>
+        <p>每个循环独立的会话映射，防止跨循环广播</p>
       </div>
       <div class="layer-card">
         <div class="layer-num">3</div>
-        <h4>Process Isolation</h4>
-        <p>Each loop spawns independent Claude CLI subprocess</p>
+        <h4>进程隔离</h4>
+        <p>每个循环启动独立的 Claude CLI 子进程</p>
       </div>
       <div class="layer-card">
         <div class="layer-num">4</div>
-        <h4>Mount Namespace</h4>
-        <p>Kernel-enforced filesystem isolation via bubblewrap</p>
+        <h4>挂载命名空间</h4>
+        <p>通过 bubblewrap 实现内核级文件系统隔离</p>
       </div>
     </div>
   </div>
@@ -654,10 +654,10 @@
 <!-- Compare -->
 <section id="compare">
   <div class="section-inner">
-    <div class="section-label">How It Compares</div>
-    <h2 class="section-title">Built for teams, not just individuals</h2>
+    <div class="section-label">对比竞品</div>
+    <h2 class="section-title">为团队协作而设计</h2>
     <p class="section-desc">
-      Most AI coding tools optimize the single-player experience. loopat layers team context management, credential isolation, and reproducible sandboxes on top.
+      大多数 AI 编程工具优化单人体验。loopat 在此基础上增加了团队上下文管理、凭据隔离和可复现的沙箱。
     </p>
     <div class="table-wrap">
       <table>
@@ -668,28 +668,28 @@
         </thead>
         <tbody>
           <tr>
-            <td>Form factor</td><td>CLI</td><td>IDE</td><td>TUI</td><td>Web (hosted)</td><td>Web (self-hosted)</td>
+            <td>产品形态</td><td>CLI</td><td>IDE</td><td>TUI</td><td>Web（托管）</td><td>Web（自托管）</td>
           </tr>
           <tr>
-            <td>License</td><td>proprietary</td><td>proprietary</td><td>MIT</td><td>proprietary</td><td>Apache 2.0</td>
+            <td>许可证</td><td>专有</td><td>专有</td><td>MIT</td><td>专有</td><td>Apache 2.0</td>
           </tr>
           <tr>
-            <td>Team IM integration</td><td>manual paste</td><td>manual paste</td><td>manual paste</td><td>manual paste</td><td><span class="ch">built-in</span></td>
+            <td>团队 IM 集成</td><td>手动粘贴</td><td>手动粘贴</td><td>手动粘贴</td><td>手动粘贴</td><td><span class="ch">内置集成</span></td>
           </tr>
           <tr>
-            <td>Shared team knowledge</td><td>individual config</td><td>individual config</td><td>individual config</td><td>individual config</td><td><span class="ch">git-synced</span></td>
+            <td>共享团队知识</td><td>个人配置</td><td>个人配置</td><td>个人配置</td><td>个人配置</td><td><span class="ch">Git 同步</span></td>
           </tr>
           <tr>
-            <td>Per-session sandbox</td><td>process-level</td><td>process-level</td><td>process-level</td><td>managed</td><td><span class="ch">bwrap + Docker</span></td>
+            <td>会话沙箱</td><td>进程级</td><td>进程级</td><td>进程级</td><td>平台管理</td><td><span class="ch">bwrap + Docker</span></td>
           </tr>
           <tr>
-            <td>Credential isolation</td><td>shared env</td><td>shared sub</td><td>shared env</td><td>acct-managed</td><td><span class="ch">per-loop vault</span></td>
+            <td>凭据隔离</td><td>共享环境变量</td><td>共享订阅</td><td>共享环境变量</td><td>账户管理</td><td><span class="ch">每循环独立 Vault</span></td>
           </tr>
           <tr>
-            <td>Data location</td><td>local files</td><td>cloud</td><td>local files</td><td>OpenAI servers</td><td>git repos you control</td>
+            <td>数据存储</td><td>本地文件</td><td>云端</td><td>本地文件</td><td>OpenAI 服务器</td><td>你控制的 Git 仓库</td>
           </tr>
           <tr>
-            <td>Agent engine</td><td>Anthropic</td><td>multi-model</td><td>pluggable</td><td>OpenAI</td><td>Claude Agent SDK</td>
+            <td>智能体引擎</td><td>Anthropic</td><td>多模型</td><td>可插拔</td><td>OpenAI</td><td>Claude Agent SDK</td>
           </tr>
         </tbody>
       </table>
@@ -700,26 +700,26 @@
 <!-- Design Principles -->
 <section id="principles">
   <div class="section-inner">
-    <div class="section-label" style="text-align:center">Design Principles</div>
-    <h2 class="section-title" style="text-align:center">Filesystem-first, portable, transparent</h2>
+    <div class="section-label" style="text-align:center">设计原则</div>
+    <h2 class="section-title" style="text-align:center">文件系统优先、可移植、透明</h2>
     <p class="section-desc" style="text-align:center;margin:0 auto 48px;">
-      No database. Everything is a file. rsync your workspace to another machine and pick up exactly where you left off.
+      没有数据库，一切都是文件。rsync 你的工作区到另一台机器，完美衔接刚才的工作。
     </p>
     <div class="principles-grid">
       <div class="principle-card">
         <div class="num">01</div>
-        <h3>Sandbox = Directory</h3>
-        <p>Sandbox permissions arenʼt hidden in config files. Theyʼre derived from the physical structure of <code>loops/&lt;id&gt;/</code> — run <code>ls -laR</code> to see the full access scope.</p>
+        <h3>沙箱即目录</h3>
+        <p>沙箱权限不会隐藏在配置文件中。它们源自 <code>loops/&lt;id&gt;/</code> 的物理目录结构 — 运行 <code>ls -laR</code> 就能看到完整的访问范围。</p>
       </div>
       <div class="principle-card">
         <div class="num">02</div>
-        <h3>Machine-Independent</h3>
-        <p>rsync <code>$LOOPAT_HOME</code> to any machine, restart the server, and everything works — chat history, sessions, memory, sandbox views. All paths are virtual.</p>
+        <h3>机器无关</h3>
+        <p>rsync <code>$LOOPAT_HOME</code> 到任意机器，重启服务，一切正常 — 聊天记录、会话、记忆、沙箱视图。所有路径都是虚拟的。</p>
       </div>
       <div class="principle-card">
         <div class="num">03</div>
-        <h3>Opt-in Secrets</h3>
-        <p>Sandbox canʼt see <code>~/.ssh</code>, <code>~/.aws</code>, or <code>~/.config/gh</code> by default. Expose only what you need via explicit symlinks in <code>personal/</code>.</p>
+        <h3>按需授权</h3>
+        <p>沙箱默认无法访问 <code>~/.ssh</code>、<code>~/.aws</code> 或 <code>~/.config/gh</code>。只通过 <code>personal/</code> 中的显式软链接暴露需要的凭据。</p>
       </div>
     </div>
   </div>
@@ -728,25 +728,25 @@
 <!-- Quick Start -->
 <section id="quickstart">
   <div class="section-inner">
-    <div class="section-label">Quick Start</div>
-    <h2 class="section-title">Up and running in seconds</h2>
+    <div class="section-label">快速开始</div>
+    <h2 class="section-title">几秒钟内启动运行</h2>
     <p class="section-desc">
-      One command to start. Works on any Linux machine. macOS via Docker.
+      一个命令即可启动。适用于任意 Linux 机器。macOS 可通过 Docker 运行。
     </p>
     <div class="code-block-wrapper">
-      <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-      <div class="code-block"><span class="c"># 1. Install system dependencies</span>
+      <button class="copy-btn" onclick="copyCode(this)">复制</button>
+      <div class="code-block"><span class="c"># 1. 安装系统依赖</span>
 <span class="p">sudo apt install</span> bubblewrap openssh-client mise
 
-<span class="c"># 2. Install Bun</span>
+<span class="c"># 2. 安装 Bun</span>
 <span class="p">curl -fsSL</span> https://bun.sh/install <span class="p">|</span> bash
 
-<span class="c"># 3. Clone &amp; start</span>
+<span class="c"># 3. 克隆并启动</span>
 <span class="p">git clone</span> git@github.com:simpx/loopat.git
 <span class="p">cd</span> loopat
 <span class="p">bun run dev</span>
 
-<span class="c"># Open http://localhost:7787</span></div>
+<span class="c"># 浏览器打开 http://localhost:7787</span></div>
     </div>
   </div>
 </section>
@@ -755,10 +755,10 @@
 <footer>
   <div class="footer-inner">
     <div class="footer-text">
-      <a href="https://github.com/simpx/loopat" target="_blank" rel="noopener">loopat</a> — self-hosted AI workspace built around context management.
+      <a href="https://github.com/simpx/loopat" target="_blank" rel="noopener">loopat</a> — 围绕上下文管理构建的自托管 AI 协作工作台。
     </div>
     <div class="footer-text">
-      Built with <a href="https://bun.sh" target="_blank" rel="noopener">Bun</a> ·
+      基于 <a href="https://bun.sh" target="_blank" rel="noopener">Bun</a> ·
       <a href="https://hono.dev" target="_blank" rel="noopener">Hono</a> ·
       <a href="https://react.dev" target="_blank" rel="noopener">React</a> ·
       <a href="https://github.com/anthropics/claude-agent-sdk" target="_blank" rel="noopener">Claude Agent SDK</a>
@@ -770,10 +770,10 @@
   function copyCode(btn) {
     const code = btn.nextElementSibling.innerText;
     navigator.clipboard.writeText(code).then(() => {
-      btn.textContent = 'Copied!';
+      btn.textContent = '已复制！';
       btn.classList.add('copied');
       setTimeout(() => {
-        btn.textContent = 'Copy';
+        btn.textContent = '复制';
         btn.classList.remove('copied');
       }, 2000);
     });
