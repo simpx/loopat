@@ -134,6 +134,7 @@ export default function SlashCommand() {
     setMaxThinkingTokens,
     getContextUsage,
     availableSlashCommands,
+    suppressSlashRef,
     loopId,
   } = useLoopRuntimeExtra();
   const [open, setOpen] = useState(false);
@@ -170,10 +171,16 @@ export default function SlashCommand() {
   }, [availableSlashCommands]);
 
   const textTrimmed = typeof text === "string" ? text.trimStart() : text;
-  const showDropdown =
+  let showDropdown =
     typeof textTrimmed === "string" &&
     textTrimmed.startsWith("/") &&
     !textTrimmed.includes(" ");
+  // Suppress dropdown when text was set by history browsing (ArrowUp/Down)
+  // so the menu doesn't interrupt the history-browsing experience.
+  // The flag is reset by Composer on the next user keystroke.
+  if (showDropdown && suppressSlashRef.current) {
+    showDropdown = false;
+  }
 
   const query = showDropdown ? textTrimmed.slice(1).toLowerCase() : "";
 
@@ -283,10 +290,11 @@ export default function SlashCommand() {
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, [open, flatOrdered, selectedIdx, composerRuntime, executeCommand]);
 
-  // Scroll selected into view
+  // Scroll selected into view — use data attribute because listRef.children
+  // includes group header divs, so the index doesn't match flatOrdered.
   useEffect(() => {
     if (!listRef.current) return;
-    const sel = listRef.current.children[selectedIdx] as HTMLElement | undefined;
+    const sel = listRef.current.querySelector(`[data-slash-idx="${selectedIdx}"]`) as HTMLElement | undefined;
     if (sel) sel.scrollIntoView({ block: "nearest" });
   }, [selectedIdx]);
 
@@ -339,6 +347,7 @@ export default function SlashCommand() {
                     <button
                       key={cmd.id}
                       type="button"
+                      data-slash-idx={myIdx}
                       onMouseEnter={() => setSelectedIdx(myIdx)}
                       onMouseDown={(e) => {
                         e.preventDefault(); // prevent blur on textarea
