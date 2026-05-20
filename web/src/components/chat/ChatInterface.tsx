@@ -185,31 +185,39 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     vp.addEventListener("scroll", onScroll, { passive: true });
 
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let suppressScroll = false;
     const scroll = () => {
       if (didInitialScroll.current && userScrolledUp) return;
+      // After a programmatic scroll, briefly suppress re-triggers to break
+      // the cycle: scrollTop change → content-visibility renders →
+      // layout shift → ResizeObserver → scroll → ...
+      if (suppressScroll) return;
+      if (!didInitialScroll.current && vp.scrollHeight <= vp.clientHeight + 10) return;
       const prev = vp.style.scrollBehavior;
       vp.style.scrollBehavior = "auto";
-      if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
-        vp.scrollTop = vp.scrollHeight;
+      vp.scrollTop = vp.scrollHeight;
+      vp.style.scrollBehavior = prev;
+      if (!didInitialScroll.current) {
         if (!loadingHistoryRef.current) {
           didInitialScroll.current = true;
         }
         userScrolledUp = false;
-      } else if (didInitialScroll.current && !loadingHistoryRef.current) {
-        vp.scrollTop = vp.scrollHeight;
       }
-      vp.style.scrollBehavior = prev;
+      // Suppress ResizeObserver callbacks for 120ms after a programmatic
+      // scroll to let content-visibility settle without re-triggering.
+      suppressScroll = true;
+      requestAnimationFrame(() => {
+        setTimeout(() => { suppressScroll = false; }, 120);
+      });
     };
     scroll();
     const ro = new ResizeObserver(() => {
       if (timer) return;
-      // During history loading content-visibility underestimates scrollHeight;
-      // skip re-snapping — the loadingHistory change effect does one final scroll.
       if (loadingHistoryRef.current) return;
+      if (suppressScroll) return;
       timer = setTimeout(() => { timer = null; scroll(); }, 80);
     });
     ro.observe(inner);
-    ro.observe(vp);
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);
