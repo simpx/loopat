@@ -79,6 +79,11 @@ export default function Composer() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ignore Enter during IME composition (e.g. Chinese input method
+    // confirmation) to avoid prematurely sending unfinished text.
+    if ((e.nativeEvent as any).isComposing || e.keyCode === 229) {
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && isRunning) {
       e.preventDefault();
       handleEnqueue();
