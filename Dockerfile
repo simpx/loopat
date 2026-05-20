@@ -3,7 +3,7 @@ FROM oven/bun:1-slim AS base
 RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources \
   && sed -i 's|http://security.debian.org|http://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
   && apt-get update && apt-get install -y --no-install-recommends \
-  bubblewrap openssh-client git git-crypt ca-certificates fish vim sudo \
+  bubblewrap openssh-client git git-crypt ca-certificates fish vim sudo curl \
   && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r loopat \
@@ -12,6 +12,9 @@ RUN groupadd -r loopat \
   && chmod 0440 /etc/sudoers.d/loopat
 
 RUN chmod u+s /usr/bin/bwrap
+
+# Install mise (dev tool version manager)
+RUN curl -fsSL https://mise.run | MISE_INSTALL_DIR=/usr/local/bin sh
 
 WORKDIR /app
 
