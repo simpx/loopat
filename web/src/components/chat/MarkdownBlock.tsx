@@ -164,13 +164,15 @@ const defaultComponents = memoizeMarkdownComponents({
     />
   ),
   table: ({ className, ...props }: React.ComponentProps<"table">) => (
-    <table
-      className={cn(
-        "my-2 w-full border-separate border-spacing-0 overflow-y-auto",
-        className,
-      )}
-      {...props}
-    />
+    <div className="my-2 overflow-x-auto">
+      <table
+        className={cn(
+          "min-w-full border-separate border-spacing-0",
+          className,
+        )}
+        {...props}
+      />
+    </div>
   ),
   th: ({ className, ...props }: React.ComponentProps<"th">) => (
     <th

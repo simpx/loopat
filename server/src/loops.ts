@@ -46,7 +46,39 @@ export type LoopMeta = {
   title: string
   createdAt: string
   createdBy: string
+  /**
+   * Active driver. New loops set this to `createdBy` on creation. Legacy
+   * loops created before drivers existed may omit it; callers should use
+   * `effectiveDriver()` rather than reading this field directly.
+   *
+   * The driver is the user whose personal config (apiKey, vault, env) the
+   * sandbox runs under, and the only user permitted to write (send messages,
+   * change provider, write terminal, etc.). Non-driver users are read-only —
+   * same set of writes blocked by `archived`. See request-for-drive flow.
+   */
   driver?: string
+  /**
+   * Chronological log of driver assignments. First entry is creation time
+   * (driver = createdBy). Each subsequent entry is a successful handoff via
+   * POST /api/loops/:id/drive. Used by the chat UI to splice "driving by X
+   * since <ts>" markers into the message timeline. Legacy loops may omit
+   * this; on the next handoff a fresh history starts from there.
+   */
+  driverHistory?: Array<{ driver: string; since: string }>
+  /**
+   * RFD ("Request For Drive") state. When set, the current driver has
+   * released control: the sandbox is torn down, and any authenticated user
+   * may take over via POST /api/loops/:id/drive. Cleared when someone drives.
+   */
+  rfdRequestedAt?: string
+  rfdRequestedBy?: string
+  /**
+   * One-shot flag written by POST /api/loops/:id/drive, consumed by the next
+   * sendUserText. While set, the next user message is prefixed with a
+   * handoff preamble so the model knows the user it's talking to has just
+   * changed. Cleared atomically when consumed.
+   */
+  pendingDriverNote?: { from: string; to: string; at: string }
   repo?: string
   branch?: string
   config?: {
@@ -133,6 +165,20 @@ operational fact, a non-obvious gotcha). Routine observations belong in
 \`/loopat/context/personal/memory/\` instead.
 
 `
+
+/**
+ * Who is currently driving this loop — `meta.driver` if set, else the
+ * creator. Use this everywhere "whose credentials/permissions" matters.
+ * Reserve direct `meta.createdBy` reads for "who owns this loop forever"
+ * (archive, public toggle).
+ */
+export function effectiveDriver(meta: { createdBy: string; driver?: string }): string {
+  return meta.driver ?? meta.createdBy
+}
+
+export function isDriver(meta: { createdBy: string; driver?: string }, userId: string): boolean {
+  return effectiveDriver(meta) === userId
+}
 
 async function gitInitIfMissing(dir: string) {
   if (existsSyncBase(join(dir, ".git"))) return
@@ -1155,11 +1201,14 @@ export async function createLoop(opts: {
 }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
+  const createdAt = new Date().toISOString()
   const meta: LoopMeta = {
     id,
     title: opts.title.trim() || "untitled",
-    createdAt: new Date().toISOString(),
+    createdAt,
     createdBy: opts.createdBy,
+    driver: opts.createdBy,
+    driverHistory: [{ driver: opts.createdBy, since: createdAt }],
   }
   if (opts.sandbox) {
     const version = await snapshotSandboxIntoLoop(id, opts.sandbox)
@@ -1202,7 +1251,7 @@ export async function createLoop(opts: {
     await mkdir(loopWorkdir(id), { recursive: true })
   }
 
-  await ensureContextMounts(id, meta.createdBy)
+  await ensureContextMounts(id, effectiveDriver(meta))
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta
 }
@@ -1244,7 +1293,7 @@ export async function backfillAllMounts(): Promise<number> {
           console.warn(`[loopat] loop ${id}: meta missing createdBy — skipping mount backfill`)
           continue
         }
-        await ensureContextMounts(id, meta.createdBy)
+        await ensureContextMounts(id, effectiveDriver(meta))
         count++
       } catch {}
     }

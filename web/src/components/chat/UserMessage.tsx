@@ -32,7 +32,6 @@ export default function UserMessage() {
     <MessagePrimitive.Root
       data-role="user"
       className="group relative"
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 4.5rem" }}
     >
       {/* Gray-bordered box */}
       <div

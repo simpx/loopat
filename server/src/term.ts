@@ -3,7 +3,7 @@ import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { buildBwrapArgs } from "./bwrap"
-import { getLoop } from "./loops"
+import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
 import { readSandboxMeta, readSandboxMetaFromPath } from "./sandboxes"
 import { loopSandboxMetaPath } from "./paths"
@@ -39,7 +39,8 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     // chain strips tty control).
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
-    const personalCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
+    const driver = effectiveDriver(meta)
+    const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     // Shell resolution (highest precedence first):
     //   1. personal config `shell` — user's per-user override
     //   2. sandbox.json `shell` — sandbox author's choice (prefer loop snapshot
@@ -68,7 +69,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     await mkdir(fishRuntime, { recursive: true })
     await chmod(fishRuntime, 0o700).catch(() => {})
 
-    const bwrapArgs = await buildBwrapArgs(loopId, meta.createdBy, {
+    const bwrapArgs = await buildBwrapArgs(loopId, driver, {
       // User envs go first so platform-managed vars below can't be clobbered.
       ...(personalCfg.envs ?? {}),
       TERM: "xterm-256color",
