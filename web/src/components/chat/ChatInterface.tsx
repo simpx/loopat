@@ -109,10 +109,13 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         active: true,
       };
     }
+    setLoadingMore(true);
     loadMoreMessages();
   }, [loadMoreMessages]);
 
-  const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  loadingMoreRef.current = loadingMore;
 
   // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
@@ -180,7 +183,10 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       }
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
       setShowHistoryButton(vp.scrollTop < 20 && hasHistoryRef.current);
-      setShowLoadMoreButton(vp.scrollTop < 20 && hasOlderRef.current);
+      // Auto-load when scrolled near top
+      if (vp.scrollTop < 40 && hasOlderRef.current && !loadingMoreRef.current) {
+        handleLoadMore();
+      }
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
 
@@ -269,6 +275,13 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     });
   }, [hasOlderMessages]);
 
+  // Reset loading spinner after messages render.
+  useEffect(() => {
+    if (!loadingMore) return;
+    const timer = setTimeout(() => setLoadingMore(false), 200);
+    return () => clearTimeout(timer);
+  }, [loadingMore, hasOlderMessages]);
+
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
     : [];
@@ -305,16 +318,10 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
             </div>
           )}
 
-          {/* Load earlier messages — appears when render window is smaller than total aggregated messages */}
-          {showLoadMoreButton && (
-            <div className="flex justify-center pb-2">
-              <button
-                type="button"
-                onClick={handleLoadMore}
-                className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
-              >
-                Load earlier messages
-              </button>
+          {/* Loading spinner — shown briefly while older messages render */}
+          {loadingMore && (
+            <div className="flex justify-center py-2">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500" />
             </div>
           )}
 
