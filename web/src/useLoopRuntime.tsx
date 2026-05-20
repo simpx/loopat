@@ -358,6 +358,10 @@ export interface LoopRuntimeExtra {
    *  ("loopat:onboarding"). Empty until the first init message arrives;
    *  may include duplicates if CC ever reports them — caller should dedup. */
   availableSlashCommands: SlashCommandInfo[]
+  /** Set by Composer before navigating history with ArrowUp/ArrowDown.
+   *  SlashCommand reads it to suppress the dropdown so it doesn't pop up
+   *  when the history entry happens to start with "/". */
+  suppressSlashRef: React.MutableRefObject<boolean>
   /** True when aggregated messages exceed the render window. */
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
@@ -398,6 +402,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   showHistory: false,
   toggleShowHistory: () => {},
   availableSlashCommands: [],
+  suppressSlashRef: { current: false },
   hasOlderMessages: false,
   loadMoreMessages: () => {},
   estimatedTokens: 0,
@@ -443,6 +448,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       return ["help", "model", "compress", "review", "init", "foxtrot"].map(name => ({ name, description: "" }))
     },
   )
+  const suppressSlashRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -662,7 +668,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [aggregated])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens }),
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, estimatedTokens }),
     [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens],
   )
 
