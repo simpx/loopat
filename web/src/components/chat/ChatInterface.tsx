@@ -56,7 +56,7 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string } = {}) {
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }> } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
   const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
@@ -307,6 +307,26 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
               >
                 Load earlier messages
               </button>
+            </div>
+          )}
+
+          {/* Driver handoff timeline. First entry is the creator at creation
+              time — drop it; subsequent entries are real handoffs and the
+              ones worth surfacing. Anchored at the top of the viewport so
+              users skimming the conversation see who's been driving and when
+              control changed hands. Timestamps stay explicit so handoffs can
+              be correlated with nearby messages. */}
+          {(driverHistory ?? []).length > 1 && (
+            <div className="flex flex-col gap-1 pb-2">
+              {(driverHistory ?? []).slice(1).map((h) => (
+                <div key={h.since} className="flex items-center gap-2 text-[11px] text-gray-500">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-gray-600">
+                    <span className="text-amber-600">▸</span>{" "}driving by <span className="text-gray-900 font-medium">{h.driver}</span> since {new Date(h.since).toLocaleString()}
+                  </span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+              ))}
             </div>
           )}
 
