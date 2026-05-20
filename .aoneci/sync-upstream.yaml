@@ -1,0 +1,49 @@
+name: Sync upstream
+
+# 每天 08:00 和 17:00 把 github upstream/main 的新提交以 Code Review 的
+# 形式推送到 origin/main。所有合并到 main 都必须走 CR —— 本 pipeline 仅
+# 通过 git push refs/for/ 触发 CR，不会直接 push 到 main。
+# 也支持在 Aone CI 页面手动触发（手动触发对所有 Pipeline 默认开启）。
+
+triggers:
+  schedule:
+    - cron: "0 8 * * *"
+      branches:
+        - main
+      always: true
+    - cron: "0 17 * * *"
+      branches:
+        - main
+      always: true
+
+strategy:
+  fast-fail: true
+  concurrency:
+    group: sync-upstream
+    parallelism: 1
+    cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Fetch upstream and open sync CR
+    runs-on: [ aone-hosted, linux, amd64 ]
+    timeout: 30m
+    envs:
+      UPSTREAM_URL: "https://github.com/simpx/loopat.git"
+      TARGET_BRANCH: "main"
+      GIT_AUTHOR_NAME: "aone-ci-bot"
+      GIT_AUTHOR_EMAIL: "aone-ci-bot@alibaba-inc.com"
+      # 取自仓库变量 vars.REVIEWERS，格式为 "花名1,工号1,花名2,工号2"
+      # 配置方式：a1 ci variable set REVIEWERS "垂虹,167900,小明,123456"
+      REVIEWERS: "${{vars.REVIEWERS ?: ''}}"
+    steps:
+      - name: Checkout origin
+        uses: checkout
+        with:
+          fetch-depth: 0
+
+      - name: Enable GitHub access
+        uses: setup-github-proxy
+
+      - name: Sync upstream and open CR
+        run: bash ./scripts/sync-upstream.sh
