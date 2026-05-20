@@ -410,6 +410,12 @@ export async function buildBwrapArgs(
 //
 // On bwrap exit, the unshare NS dies and the overlay mount auto-unmounts.
 // The upper dir persists on host disk; next spawn sees previous writes.
+//
+// `unshare -Umr` maps host_uid → 0 inside the userns so we can mount overlay
+// (requires CAP_SYS_ADMIN, granted by being uid 0). But claude refuses to run
+// with `--dangerously-skip-permissions` when uid==0. Fix: bwrap creates a
+// nested userns via `--unshare-user --uid <host_uid>` and maps back to the
+// original uid for the sandboxed process.
 
 export type SandboxOverlayPaths = {
   lower: string
@@ -451,12 +457,19 @@ export function buildSandboxSpawnArgv(
   command: string,
   commandArgs: string[],
 ): string[] {
+  // Drop bwrap back to the host uid/gid via a nested userns. Outer `-Umr` is
+  // uid 0 in userns A; bwrap's `--unshare-user --uid X` creates userns B where
+  // inner_uid X maps to outer_userns_uid 0 (which is the host uid). Without
+  // this, claude sees uid==0 and refuses `--dangerously-skip-permissions`.
+  const hostUid = process.getuid?.() ?? 0
+  const hostGid = process.getgid?.() ?? 0
+  const uidDrop = ["--unshare-user", "--uid", String(hostUid), "--gid", String(hostGid)]
   return [
     "-Umr",
     "--",
     "bash", "-c", SANDBOX_SPAWN_SCRIPT,
     "_", // $0 placeholder (unused inside script)
     overlay.lower, overlay.upper, overlay.work, overlay.merged, // $1..$4
-    "bwrap", ...bwrapArgs, "--", command, ...commandArgs, // $5+ → exec'd after shift
+    "bwrap", ...uidDrop, ...bwrapArgs, "--", command, ...commandArgs, // $5+ → exec'd after shift
   ]
 }
