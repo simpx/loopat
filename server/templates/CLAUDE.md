@@ -12,9 +12,10 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 - `/loopat/loop/<id>/.claude/`      — internal SDK session state (rw). Don't poke unless debugging.
 - `/loopat/context/knowledge/`      — workspace's distilled docs. **Your private git worktree** on branch `loop/<id>`. Read-only by default; rw if the loop opted in. Other loops see your edits only after you publish (see below).
 - `/loopat/context/notes/`          — workspace prose layer (rw). **Your private git worktree** on branch `loop/<id>`. `inbox.md`, `focus.md`, plus `memory/` (team memory). Other loops see your edits only after you publish.
-- `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory), `.loopat/config.json` (per-user config), and `.loopat/vault/` (this loop's active credential set — see below).
+- `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory), `.loopat/config.json` (per-user config), and `.loopat/vaults/<name>/` (the user's credential catalogs — see `/loopat/context/vault` below).
+- `/loopat/context/vault`           — symlink to this loop's active vault under `personal/.loopat/vaults/<active>/`. Use this path to access credentials — do not read other vaults directly under `personal/.loopat/vaults/`.
 - `/loopat/context/repos/<name>/`   — workspace repos (rw). All repos registered in this workspace. The current loop's workdir is typically a worktree of one of them.
-- `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/personal/.loopat/vault/` (e.g. `.ssh`) appear at expected $HOME paths.
+- `$HOME` (`/home/$USER`)           — mostly tmpfs; only personal-deps you've symlinked from `/loopat/context/vault/` (e.g. `.ssh`) appear at expected $HOME paths.
 
 Network is open (host network is shared). Use it for API calls, git fetch, package installs, etc.
 
@@ -27,7 +28,7 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
   - Reading is fine and encouraged.
 - `/loopat/context/notes/inbox.md` — workspace scratch prose. Format: one bullet per line, `- xxx`. Append freely.
 - `/loopat/context/notes/focus.md` — `## pinned` and `## listed` sections name the workspace's current foci. Edit when user asks.
-- `/loopat/context/personal/.loopat/vault/` — this loop's active **vault**: tokens, keys, ssh, etc. for the credentials the user picked at spawn time (e.g. `dev` / `test` / `prod`). Only one vault is bound per loop; other named vaults the user maintains are not visible here. **Never echo file contents to chat** (even one line counts as exfiltration). Reference by filename / env var.
+- `/loopat/context/vault` — symlink to this loop's active **vault**: tokens, keys, ssh, etc. for the credentials the user picked at spawn time (e.g. `dev` / `test` / `prod`). The symlink target lives under `personal/.loopat/vaults/<active>/`; edits flow into the personal repo as usual. Other named vaults the user maintains are also physically present under `personal/.loopat/vaults/<other>/` — **do not read or write them**; treat the symlink as the only credential entrypoint. **Never echo vault file contents to chat** (even one line counts as exfiltration). Reference by filename / env var.
 - `/loopat/context/repos/<name>/` — rw, but **don't commit directly** into a main repo. Commits go through the workdir worktree (which sits on a `loop/<slug>-<id6>` branch). Reading other repos is encouraged for cross-repo work.
 - Cross-doc references use wikilink `[[basename]]` (no `.md`), Obsidian-style. The Context tab UI renders these clickable + builds backlinks.
 

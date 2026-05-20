@@ -119,8 +119,9 @@ export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir
 export const loopComposedSkillsDir = (id: string) => join(loopDir(id), ".claude", "skills")
 export const loopComposedPluginsCacheDir = (id: string) => join(loopDir(id), ".claude", "plugins", "cache")
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
-/** Sandbox-internal path where the active vault's contents land. */
-export const sandboxVaultMountPoint = () => "/loopat/context/personal/.loopat/vault"
+/** Sandbox-internal path: symlink to the active vault's real dir under
+ *  personal/.loopat/vaults/<active>/. AI is taught to use this entrypoint. */
+export const sandboxVaultMountPoint = () => "/loopat/context/vault"
 /** Provider apiKey file inside a specific vault. */
 export const personalProviderKeyPath = (user: string, vault: string, providerName: string) =>
   join(personalVaultDir(user, vault), "provider-keys", providerName)
