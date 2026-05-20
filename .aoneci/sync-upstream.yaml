@@ -37,7 +37,7 @@ jobs:
       # 配置：a1 ci variable set CI_BOT_NAME  "<花名>"
       #       a1 ci secret   set CI_BOT_TOKEN "<personal access token>"
       CI_BOT_NAME:  "${{vars.CI_BOT_NAME ?: ''}}"
-      CI_BOT_TOKEN: ${{secrets.CI_BOT_TOKEN}}
+      CI_BOT_TOKEN: "${{secrets.CI_BOT_TOKEN}}"
       # 取自仓库变量 vars.REVIEWERS，格式为 "花名1,工号1,花名2,工号2"
       # 配置方式：a1 ci variable set REVIEWERS "垂虹,167900,小明,123456"
       REVIEWERS: "${{vars.REVIEWERS ?: ''}}"
