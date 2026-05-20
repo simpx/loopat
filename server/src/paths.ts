@@ -91,6 +91,12 @@ export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 // can shadow them by name. See server/src/compose.ts.
 export const builtinPluginsDir = () => join(TEMPLATES_DIR, "plugins")
 
+// Per-loop-kind templates (distill, future: review, plan, etc.). Each kind
+// has its own dir; createLoop / distillLoop copies the kind's CLAUDE.md into
+// the new loop's workdir as the L2++ project-tier doctrine.
+export const loopKindTemplateDir = (kind: string) => join(TEMPLATES_DIR, "loop-kinds", kind)
+export const loopKindClaudePath = (kind: string) => join(loopKindTemplateDir(kind), "CLAUDE.md")
+
 // Personal `.loopat/` reserved namespace: per-user loopat config + vaults.
 // Mirrors `knowledge/.loopat/` as the personal counterpart.
 //

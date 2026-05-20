@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
 import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
@@ -940,6 +940,22 @@ app.post("/api/loops", requireAuth, async (c) => {
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
+  }
+})
+
+// Distill: spawn a child loop seeded with the source's conversation snapshot
+// and a distill-kind project-tier CLAUDE.md. Any authenticated user may call;
+// the source is read-only here.
+app.post("/api/loops/:id/distill", requireAuth, async (c) => {
+  const sourceId = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  try {
+    const child = await distillLoop(sourceId, userId)
+    return c.json(child)
+  } catch (e: any) {
+    const msg = e?.message ?? "distill failed"
+    const code = /not found/i.test(msg) ? 404 : 400
+    return c.json({ error: msg }, code)
   }
 })
 

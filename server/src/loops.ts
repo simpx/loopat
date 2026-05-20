@@ -33,6 +33,9 @@ import {
   workspaceMemoryDir,
   hostDeployKeyPath,
   personalGitCryptKeyPath,
+  loopHistoryPath,
+  loopChatHistoryPath,
+  loopKindClaudePath,
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
@@ -1293,6 +1296,47 @@ export async function createLoop(opts: {
   await ensureContextMounts(id, effectiveDriver(meta))
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta
+}
+
+/**
+ * Spawn a child "distill loop" from a source loop. The child's workdir gets
+ * a point-in-time snapshot of the source's conversation files plus a
+ * project-tier CLAUDE.md telling the AI it's a distill loop. Knowledge is
+ * rw so the child can publish sedimented insights. The source is not
+ * touched. Any authenticated user may distill any loop — distill is a
+ * read-only relationship.
+ */
+export async function distillLoop(sourceId: string, byUser: string): Promise<LoopMeta> {
+  const source = await getLoop(sourceId)
+  if (!source) throw new Error(`source loop ${sourceId} not found`)
+
+  const shortId = source.id.slice(0, 6)
+  const child = await createLoop({
+    title: `distill: ${shortId} ${source.title}`,
+    createdBy: byUser,
+    knowledgeRw: true,
+  })
+
+  // Snapshot the source's conversation into the child's workdir.
+  const sourceDir = join(loopWorkdir(child.id), "source")
+  await mkdir(sourceDir, { recursive: true })
+  for (const [from, to] of [
+    [loopHistoryPath(sourceId), join(sourceDir, "messages.jsonl")],
+    [loopChatHistoryPath(sourceId), join(sourceDir, "chat_history.jsonl")],
+  ]) {
+    if (existsSyncBase(from)) {
+      await copyFile(from, to)
+    }
+  }
+
+  // Drop the distill kind's project-tier CLAUDE.md into the workdir. Claude
+  // Code auto-loads <workdir>/CLAUDE.md (settingSources includes "project").
+  const tmpl = loopKindClaudePath("distill")
+  if (existsSyncBase(tmpl)) {
+    await copyFile(tmpl, join(loopWorkdir(child.id), "CLAUDE.md"))
+  }
+
+  return child
 }
 
 export async function getLoop(id: string): Promise<LoopMeta | null> {
