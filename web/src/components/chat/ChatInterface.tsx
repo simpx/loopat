@@ -350,6 +350,30 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
               }
             </ThreadPrimitive.Messages>
             <div ref={bottomRef} />
+
+            {/* Pending questions (AskUserQuestion tool) — inside scroll,
+                rendered as part of the message list so they don't cover history. */}
+            {questionEntries.length > 0 && (
+              <ErrorBoundary name="QuestionsPanel">
+                <div className="space-y-3 w-full pt-2">
+                  {questionEntries.map(([toolUseId, qs]) =>
+                    Array.isArray(qs) && qs.length > 0 ? (
+                      <div
+                        key={toolUseId}
+                        className="rounded-lg border border-violet-100 bg-violet-50/30 p-4 shadow-sm"
+                      >
+                        <AskUserQuestionRenderer
+                          questions={qs}
+                          toolUseId={toolUseId}
+                          onAnswers={sendAnswers}
+                          onDismiss={(id) => sendAnswers(id, {})}
+                        />
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              </ErrorBoundary>
+            )}
           </div>
         </div>
       </ThreadPrimitive.Viewport>
@@ -358,29 +382,6 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
           When thread is empty the footer fills the page and is centered. */}
       <div className={isEmpty ? "flex-1 flex items-center justify-center px-2 md:px-3 pb-3 md:pb-6" : "shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-1 md:pt-2 pb-3 md:pb-6"}>
         <div className={isEmpty ? "w-full max-w-[36rem]" : ""}>
-        {/* Pending questions (AskUserQuestion tool) — fixed above input */}
-        {questionEntries.length > 0 && (
-          <ErrorBoundary name="QuestionsPanel">
-            <div className="mb-3 space-y-3 max-w-[44rem] mx-auto w-full">
-              {questionEntries.map(([toolUseId, qs]) =>
-                Array.isArray(qs) && qs.length > 0 ? (
-                  <div
-                    key={toolUseId}
-                    className="rounded-lg border border-violet-100 bg-violet-50/30 p-4 shadow-sm"
-                  >
-                    <AskUserQuestionRenderer
-                      questions={qs}
-                      toolUseId={toolUseId}
-                      onAnswers={sendAnswers}
-                      onDismiss={(id) => sendAnswers(id, {})}
-                    />
-                  </div>
-                ) : null,
-              )}
-            </div>
-          </ErrorBoundary>
-        )}
-
         {/* Empty-state info & settings — repo info + thinking depth */}
         {isEmpty && (
           <div className="mb-4 space-y-2 px-4">
