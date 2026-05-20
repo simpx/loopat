@@ -5,7 +5,7 @@
  * LOOPAT_HOME, server-side).
  */
 import { useEffect, useState } from "react"
-import { MessageCircle } from "lucide-react"
+import { MessageCircle, RefreshCw, X } from "lucide-react"
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
@@ -51,6 +51,9 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false)
+  const [newVersionCommit, setNewVersionCommit] = useState("")
+  const [newVersionTime, setNewVersionTime] = useState("")
   const me = ws.currentUser?.id ?? ""
   const isAdmin = ws.currentUser?.role === "admin"
   const loggedIn = !!ws.currentUser
@@ -77,6 +80,25 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   }, [shareMode])
 
   useChatUnreadTitle(workspaceName, loggedIn && !shareMode, me)
+
+  const DISMISSED_KEY = "loopat:version-dismissed"
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const commit = (e as CustomEvent).detail?.commit as string | undefined
+      if (!commit) return
+      // Don't show if this version was already dismissed or clicked
+      try {
+        const dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]") as string[]
+        if (dismissed.includes(commit)) return
+      } catch {}
+      setNewVersionCommit(commit)
+      setNewVersionTime(new Date().toLocaleString())
+      setShowUpdateBanner(true)
+    }
+    window.addEventListener("loopat:version-mismatch", handler)
+    return () => window.removeEventListener("loopat:version-mismatch", handler)
+  }, [])
 
   useEffect(() => {
     if (shareMode) return
@@ -216,6 +238,46 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           )}
         </div>
       </header>
+      {showUpdateBanner && (
+        <div className="shrink-0 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-200 flex items-center px-4 py-2.5 gap-2.5">
+          <RefreshCw className="w-4 h-4 text-blue-500 shrink-0" />
+          <span className="text-sm text-blue-700">
+            New version available
+            <span className="text-blue-400 ml-1 text-xs">
+              ({newVersionCommit.slice(0, 7)} {newVersionTime})
+            </span>
+          </span>
+          <button
+            type="button"
+            className="text-xs font-medium px-2.5 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 cursor-pointer shrink-0"
+            onClick={() => {
+              try {
+                const dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]") as string[]
+                dismissed.push(newVersionCommit)
+                localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed))
+              } catch {}
+              window.location.reload()
+            }}
+          >
+            Update
+          </button>
+          <button
+            type="button"
+            className="ml-auto p-0.5 rounded hover:bg-blue-100 text-blue-400 hover:text-blue-600 cursor-pointer shrink-0"
+            onClick={() => {
+              try {
+                const dismissed = JSON.parse(localStorage.getItem(DISMISSED_KEY) || "[]") as string[]
+                dismissed.push(newVersionCommit)
+                localStorage.setItem(DISMISSED_KEY, JSON.stringify(dismissed))
+              } catch {}
+              setShowUpdateBanner(false)
+            }}
+            aria-label="关闭"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       <main className="flex-1 min-h-0 min-w-0 overflow-hidden">
         <Outlet />
       </main>

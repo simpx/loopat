@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
 import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
@@ -585,7 +585,8 @@ app.post("/api/loops/:id/restart-session", requireAuth, async (c) => {
   const id = c.req.param("id")
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "loop not found" }, 404)
-  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const restarted = restartSession(id)
   return c.json({ ok: true, restarted })
 })
@@ -1002,6 +1003,56 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   return c.json(updated)
 })
 
+// Request For Drive: current driver releases control. Sandbox + terminal are
+// torn down (on-disk history kept), and `rfdRequestedAt` is set so any other
+// authenticated user can claim the loop via POST /:id/drive.
+app.post("/api/loops/:id/request-drive", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (!isDriver(meta, userId)) return c.json({ error: "forbidden" }, 403)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "already requested for drive" }, 409)
+  const updated = await patchLoopMeta(id, {
+    rfdRequestedAt: new Date().toISOString(),
+    rfdRequestedBy: userId,
+  })
+  // Tear down what's running. .claude/, messages.jsonl, sandbox snapshot all
+  // stay — the next driver resumes via --continue when they send a message.
+  destroyLoopSession(id)
+  killTerm(id)
+  return c.json(updated)
+})
+
+// Drive: any authenticated user takes over an RFD'd loop. Lazy spawn — the
+// sandbox respawns under the new driver's personal config on the next user
+// message (ensureStarted picks up effectiveDriver). `pendingDriverNote` lets
+// the model know about the handoff on the first message.
+app.post("/api/loops/:id/drive", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (!meta.rfdRequestedAt) return c.json({ error: "not up for drive" }, 409)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  const now = new Date().toISOString()
+  const previous = effectiveDriver(meta)
+  const history = [...(meta.driverHistory ?? []), { driver: userId, since: now }]
+  const updated = await patchLoopMeta(id, {
+    driver: userId,
+    driverHistory: history,
+    rfdRequestedAt: undefined,
+    rfdRequestedBy: undefined,
+    pendingDriverNote: { from: previous, to: userId, at: now },
+  })
+  // Repoint the personal mount before the next spawn. Idempotent.
+  try { await ensureContextMounts(id, userId) } catch (e: any) {
+    console.warn(`[loopat] /drive: ensureContextMounts failed for ${id}: ${e?.message ?? e}`)
+  }
+  return c.json(updated)
+})
+
 // Strip thinking blocks from the SDK jsonl history (used before switching
 // to a provider that can't validate the existing thinking signatures).
 app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
@@ -1009,8 +1060,9 @@ app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
-  if (meta.createdBy !== userId) return c.json({ error: "forbidden" }, 403)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const session = getSession(id)
   const r = await session.stripThinkingBlocks()
   return c.json(r)
@@ -1044,9 +1096,12 @@ app.get("/api/loops/:id/sandbox", requireAuth, async (c) => {
 // and PTY so next reconnect picks up the new lockfile.
 app.post("/api/loops/:id/sandbox/refresh", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived" }, 403)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   if (!meta.config?.sandbox) return c.json({ error: "loop has no sandbox" }, 400)
   try {
     const version = await refreshLoopSandbox(id)
@@ -1079,9 +1134,12 @@ app.get("/api/loops/:id/file", requireAuth, async (c) => {
 
 app.put("/api/loops/:id/file", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
   const body = await c.req.json().catch(() => ({}))
@@ -1093,9 +1151,12 @@ app.put("/api/loops/:id/file", requireAuth, async (c) => {
 
 app.post("/api/loops/:id/upload", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const formData = await c.req.formData()
   const file = formData.get("file")
   if (!(file instanceof File)) return c.json({ error: "file required" }, 400)
@@ -1112,9 +1173,12 @@ app.post("/api/loops/:id/upload", requireAuth, async (c) => {
 
 app.delete("/api/loops/:id/file", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
   const ok = await deleteWorkdirFile(id, path)
@@ -1124,9 +1188,12 @@ app.delete("/api/loops/:id/file", requireAuth, async (c) => {
 
 app.post("/api/loops/:id/folder", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
   const ok = await createWorkdirFolder(id, body.path)
@@ -1151,9 +1218,12 @@ app.get("/api/loops/:id/chat-history", requireAuth, async (c) => {
 
 app.post("/api/loops/:id/chat-history", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
+  const userId = c.get("userId") as string
   const meta = await getLoop(id)
   if (!meta) return c.json({ error: "not found" }, 404)
   if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.text !== "string" || !body.text.trim()) return c.json({ error: "text required" }, 400)
   const path = loopChatHistoryPath(id)
@@ -1285,7 +1355,12 @@ app.get("/api/loops/:id/git-diff", async (c) => {
 
 app.post("/api/loops/:id/git-stage", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
-  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const body = await c.req.json().catch(() => ({}))
   const files: string[] = Array.isArray(body.files) ? body.files : []
   const unstage = body.unstage === true
@@ -1303,7 +1378,12 @@ app.post("/api/loops/:id/git-stage", requireAuth, async (c) => {
 
 app.post("/api/loops/:id/git-commit", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
-  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const body = await c.req.json().catch(() => ({}))
   const message = typeof body.message === "string" && body.message.trim() ? body.message.trim() : ""
   if (!message) return c.json({ error: "commit message required" }, 400)
@@ -1355,7 +1435,12 @@ app.get("/api/loops/:id/git-log", async (c) => {
 
 app.post("/api/loops/:id/git-discard", requireAuth, async (c) => {
   const id = c.req.param("id") ?? ""
-  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const userId = c.get("userId") as string
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (meta.archived) return c.json({ error: "loop is archived (read-only)" }, 409)
+  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
+  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
   const body = await c.req.json().catch(() => ({}))
   const file: string = typeof body.file === "string" ? body.file : ""
   if (!file) return c.json({ error: "file required" }, 400)
@@ -2095,6 +2180,14 @@ app.get(
             try { ws.send(JSON.stringify({ type: "error", message: "loop is archived (read-only)" })) } catch {}
             return
           }
+          if (meta?.rfdRequestedAt) {
+            try { ws.send(JSON.stringify({ type: "error", message: "loop is in RFD state — click Drive to take over" })) } catch {}
+            return
+          }
+          if (meta && userId && !isDriver(meta, userId)) {
+            try { ws.send(JSON.stringify({ type: "error", message: `only driver (${effectiveDriver(meta)}) can write` })) } catch {}
+            return
+          }
           if (msg?.type === "data" && typeof msg.data === "string") writeTerm(id, msg.data)
         } catch (e) {
           console.error("term ws parse", e)
@@ -2153,6 +2246,14 @@ app.get(
         const meta = await getLoop(id)
         if (meta?.archived) {
           try { ws.send(JSON.stringify({ type: "error", message: "loop is archived (read-only)" })) } catch {}
+          return
+        }
+        if (meta?.rfdRequestedAt) {
+          try { ws.send(JSON.stringify({ type: "error", message: "loop is in RFD state — click Drive to take over" })) } catch {}
+          return
+        }
+        if (meta && userId && !isDriver(meta, userId)) {
+          try { ws.send(JSON.stringify({ type: "error", message: `only driver (${effectiveDriver(meta)}) can write` })) } catch {}
           return
         }
         try {

@@ -1,8 +1,40 @@
 import { useState } from "react"
 import { useSortable } from "@dnd-kit/sortable"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { updateKanbanCard, type KanbanCard } from "../../api"
 import { TopicChip } from "../TopicChip"
 import { useNavigate } from "react-router-dom"
+
+function InlineMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        p: ({ children }) => <>{children}</>,
+        strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        a: ({ href, children }) => (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="text-blue-700 hover:underline"
+          >
+            {children}
+          </a>
+        ),
+        code: ({ children }) => (
+          <code className="bg-gray-100 text-gray-800 rounded px-1 font-mono text-[11px]">{children}</code>
+        ),
+      }}
+    >
+      {text}
+    </ReactMarkdown>
+  )
+}
 
 function getAssignees(card: KanbanCard): string[] {
   if (!card.assignee) return []
@@ -23,7 +55,7 @@ export function KanbanCardStatic({ card }: { card: KanbanCard }) {
     <div className={`text-left rounded-lg border bg-white px-3 py-2.5 w-full shadow-lg ${card.done ? "opacity-60" : "border-gray-300"}`}>
       <div className="flex items-start gap-2">
         <span className={`shrink-0 mt-0.5 w-4 h-4 rounded border border-gray-300 flex items-center justify-center text-xs ${card.done ? "bg-emerald-50 border-emerald-400" : ""}`}>{card.done ? "✓" : ""}</span>
-        <h4 className={`text-[13px] font-medium flex-1 min-w-0 ${card.done ? "text-gray-400 line-through" : "text-gray-900"}`}>{card.text}</h4>
+        <h4 className={`text-[13px] font-medium flex-1 min-w-0 ${card.done ? "text-gray-400 line-through" : "text-gray-900"}`}><InlineMarkdown text={card.text} /></h4>
         {card.priority && <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 border ${PRIO_CLASS[card.priority] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>{card.priority.toUpperCase()}</span>}
       </div>
       {(assignees.length > 0 || card.due) && (
@@ -92,7 +124,7 @@ export function KanbanCardView({
             <h4 className={`text-[13px] font-medium flex-1 min-w-0 cursor-text ${card.done ? "text-gray-400 line-through" : "text-gray-900"}`}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); setTitleText(card.text); setEditingTitle(true) }}>
-              {card.text}
+              <InlineMarkdown text={card.text} />
             </h4>
           )}
           {card.priority && <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 border ${PRIO_CLASS[card.priority] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>{card.priority.toUpperCase()}</span>}

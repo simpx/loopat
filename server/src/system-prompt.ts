@@ -17,7 +17,7 @@
  * the loop runs inside the outer bwrap sandbox and that's what Claude sees.
  */
 import { readFile } from "node:fs/promises"
-import type { LoopMeta } from "./loops"
+import { effectiveDriver, type LoopMeta } from "./loops"
 import { bundledDoctrinePath } from "./paths"
 
 let cachedBundled: string | null = null
@@ -38,7 +38,7 @@ function buildRuntimeBlock(loop: LoopMeta): string {
 
 - title: ${loop.title}
 - id: ${loop.id}
-- driver: ${loop.createdBy}
+- driver: ${effectiveDriver(loop)}
 - workdir: /loopat/loop/${loop.id}/workdir
 - repo: ${repoLine}
 - created: ${loop.createdAt}

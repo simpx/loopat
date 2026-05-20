@@ -4,13 +4,13 @@ import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/pro
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopDir, loopHistoryPath } from "./paths"
+import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
-import { getLoop, patchLoopMeta } from "./loops"
+import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
@@ -201,8 +201,8 @@ class LoopSession {
    *    2. personal config's `default` field
    *    3. workspace config's `default` field
    *    4. enumeration of all providers (personal first, then workspace) */
-  private async resolveProvider(meta: { createdBy: string; config?: { vault?: string } }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
-    const pCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
+  private async resolveProvider(meta: { createdBy: string; driver?: string; config?: { vault?: string } }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
+    const pCfg = await loadPersonalConfig(effectiveDriver(meta), meta.config?.vault)
     const wCfg = await loadConfig()
     const names = [
       ...candidateNames,
@@ -282,12 +282,16 @@ class LoopSession {
     if (!meta) {
       throw new Error(`loop ${this.id} meta missing`)
     }
+    // Effective driver — credentials, plugins, vault, env, personal mount
+    // all follow this user, not the immutable createdBy. Updated by the
+    // /api/loops/:id/drive handoff endpoint; next spawn picks it up here.
+    const driver = effectiveDriver(meta)
     const resolved = await this.resolveProvider(meta, [
       this.providerOverride,
       meta.config?.default_model,
     ], true)
     if (!resolved) {
-      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${meta.createdBy}/.loopat/vaults/${meta.config?.vault ?? "default"}/provider-keys/`)
+      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${driver}/.loopat/vaults/${meta.config?.vault ?? "default"}/provider-keys/`)
     }
     const providerName = resolved.name
     const provider = resolved.provider
@@ -298,7 +302,7 @@ class LoopSession {
     // Compose multi-tier claude config (skills + plugins) into the loop's
     // private .claude/. Re-run every spawn so newly-added workspace/personal
     // entries show up at next session start.
-    const { enabledPlugins } = await composeLoopClaudeConfig(loopId, meta.createdBy)
+    const { enabledPlugins } = await composeLoopClaudeConfig(loopId, driver)
     await writeLoopSettings(loopId, enabledPlugins)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
@@ -328,7 +332,7 @@ class LoopSession {
     // servers should keep their token in `env`/`headers` directly (only ever
     // commit OAuth-flow servers like `coop` to the workspace repo).
     const workspace = await loadWorkspaceClaudeJson()
-    const personalClaude = await loadPersonalClaudeJson(meta.createdBy)
+    const personalClaude = await loadPersonalClaudeJson(driver)
     // Merge admin-tier + user-tier mcpServers (user wins on name collision —
     // consistent with the skill/plugin compose model).
     const mergedServers: Record<string, any> = {
@@ -340,7 +344,7 @@ class LoopSession {
     // the SDK-recommended pattern for headless MCP auth — CC sees pre-
     // authenticated transports and never triggers its own OAuth flow.
     const activeVault = meta.config?.vault?.trim() || "default"
-    const userMcpTokens = await loadMcpTokens(meta.createdBy, activeVault)
+    const userMcpTokens = await loadMcpTokens(driver, activeVault)
     const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
@@ -349,7 +353,7 @@ class LoopSession {
     // User-defined envs from personal config go in first so the platform-
     // controlled vars below (provider creds, CLAUDE_CONFIG_DIR) can't be
     // accidentally clobbered by a stray `ANTHROPIC_API_KEY` in envs.
-    const personalCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
+    const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     const extraEnv: Record<string, string> = {
       ...(personalCfg.envs ?? {}),
       ANTHROPIC_API_KEY: provider.apiKey,
@@ -363,7 +367,7 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildBwrapArgs(loopId, meta.createdBy, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
+    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
@@ -756,6 +760,40 @@ class LoopSession {
     }
   }
 
+  /** Read subdirectory names from a path — silently returns [] if missing. */
+  private async listDirNames(dir: string): Promise<string[]> {
+    try {
+      const entries = await readdir(dir, { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Build a best-effort list of slash commands from the loop's workspace /
+   * personal config. Used to seed the frontend before CC's real init arrives.
+   * Includes well-known CC builtins + skill names from knowledge/personal dirs.
+   * Plugin names are excluded because we don't know their sub-commands without
+   * reading manifests — CC will report the full list when it starts.
+   */
+  private async buildInitialSlashCommands(user: string): Promise<string[]> {
+    const cmds = new Set<string>()
+    // CC built-in commands (always available after CC starts)
+    for (const c of ["help", "model", "clear", "compress", "review", "init", "foxtrot"]) {
+      cmds.add(c)
+    }
+    // Workspace skills
+    for (const name of await this.listDirNames(workspaceLoopatSkillsDir())) {
+      cmds.add(name)
+    }
+    // Personal skills (higher precedence — same dedup behavior as compose)
+    for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
+      cmds.add(name)
+    }
+    return [...cmds].sort()
+  }
+
   async attach(ws: WSContext) {
     await this.historyLoaded
     const state: SubscriberState = { pending: [] }
@@ -809,17 +847,25 @@ class LoopSession {
       }
       state.pending = null
     }
-    try {
-      ws.send(JSON.stringify({ type: "history_end" }))
-    } catch {}
-    // If the server is mid-generation right now, the frontend needs a
-    // synthetic init to show the running status bar. The original init
-    // was replayed during history (and ignored because loadingHistory
-    // was true). After history_end, loadingHistory is false, so this
-    // one will take effect.
+    // history_end — signals the frontend that replay is done.
+    // When not generating, also embed a best-effort slash-command list
+    // so the / menu works immediately (before CC starts). CC's real
+    // system/init replaces this with the accurate list later.
+    const meta = await getLoop(this.id)
     if (this.generating) {
       try {
+        ws.send(JSON.stringify({ type: "history_end" }))
+      } catch {}
+      // The frontend also needs a synthetic init to show running status
+      // (the history-replayed init was ignored during loadingHistory).
+      try {
         ws.send(JSON.stringify({ type: "system", subtype: "init" }))
+      } catch {}
+    } else {
+      const user = meta?.createdBy
+      const slashCommands = user ? await this.buildInitialSlashCommands(user) : undefined
+      try {
+        ws.send(JSON.stringify({ type: "history_end", slash_commands: slashCommands }))
       } catch {}
     }
     // Re-broadcast active permission prompts that survived history replay
@@ -871,6 +917,17 @@ class LoopSession {
       if (this.q) {
         try { await this.q.setPermissionMode(permissionMode) } catch {}
       }
+    }
+    // Driver-handoff preamble: if POST /api/loops/:id/drive set a one-shot
+    // pendingDriverNote, prepend a system-style line to this user message so
+    // the model knows the human it's talking to has just changed. Cleared
+    // atomically before ensureStarted so a transient crash doesn't leak it
+    // into a second message.
+    const meta = await getLoop(this.id)
+    if (meta?.pendingDriverNote) {
+      const { from, to, at } = meta.pendingDriverNote
+      text = `[loopat] Driver handoff: this loop was previously driven by ${from}; from now on the active driver is ${to} (handoff at ${at}). The user you're now talking to may differ from the one who started the conversation.\n\n${text}`
+      await patchLoopMeta(this.id, { pendingDriverNote: undefined }).catch(() => {})
     }
     await this.ensureStarted()
     const userMsg: SDKUserMessage = {
