@@ -435,6 +435,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 title={meta.title}
                 driver={meta.driver ?? meta.createdBy}
                 driverHistory={meta.driverHistory}
+                rfdRequestedAt={meta.rfdRequestedAt}
+                rfdRequestedBy={meta.rfdRequestedBy}
+                onTakeDrive={() => ws.takeDrive(meta.id)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -461,6 +464,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                   title={meta.title}
                   driver={meta.driver ?? meta.createdBy}
                   driverHistory={meta.driverHistory}
+                  rfdRequestedAt={meta.rfdRequestedAt}
+                  rfdRequestedBy={meta.rfdRequestedBy}
+                  onTakeDrive={() => ws.takeDrive(meta.id)}
                 />
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
@@ -510,6 +516,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 title={meta.title}
                 driver={meta.driver ?? meta.createdBy}
                 driverHistory={meta.driverHistory}
+                rfdRequestedAt={meta.rfdRequestedAt}
+                rfdRequestedBy={meta.rfdRequestedBy}
+                onTakeDrive={() => ws.takeDrive(meta.id)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
