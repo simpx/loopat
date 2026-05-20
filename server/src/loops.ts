@@ -41,6 +41,7 @@ import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
+import { pickDefaultSandbox } from "./sandboxes"
 
 const execFileP = promisify(execFile)
 
@@ -1315,6 +1316,7 @@ export async function distillLoop(sourceId: string, byUser: string): Promise<Loo
     title: `distill: ${shortId} ${source.title}`,
     createdBy: byUser,
     knowledgeRw: true,
+    sandbox: await pickDefaultSandbox(),
   })
 
   // Snapshot the source's conversation into the child's workdir.

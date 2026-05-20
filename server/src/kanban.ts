@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/pro
 import { join, basename } from "node:path"
 import { workspaceNotesDir } from "./paths"
 import { createLoop, patchLoopMeta, type LoopMeta } from "./loops"
+import { pickDefaultSandbox } from "./sandboxes"
 
 // ── types ──
 
@@ -558,7 +559,11 @@ export async function createLoopFromCard(
   const card = col?.cards.find((c) => c.cid === cid)
   if (!card) return { ok: false }
 
-  const loop = await createLoop({ title: card.text, createdBy: userId })
+  const loop = await createLoop({
+    title: card.text,
+    createdBy: userId,
+    sandbox: await pickDefaultSandbox(),
+  })
   // Set driver to the creating user
   await patchLoopMeta(loop.id, { driver: userId } as Partial<LoopMeta>)
 

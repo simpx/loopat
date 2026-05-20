@@ -31,7 +31,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 import { getSession, destroySession as destroyLoopSession, restartSession } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
-import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
+import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, pickDefaultSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -2038,7 +2038,7 @@ app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
     : defaultTitle
   let meta
   try {
-    meta = await createLoop({ title, createdBy: userId })
+    meta = await createLoop({ title, createdBy: userId, sandbox: await pickDefaultSandbox() })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "loop create failed" }, 400)
   }
