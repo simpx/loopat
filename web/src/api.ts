@@ -344,6 +344,15 @@ export async function takeDrive(id: string): Promise<LoopMeta | null> {
   return (await r.json()) as LoopMeta
 }
 
+/** Spawn a distill child loop from `id`. Server seeds the child's workdir
+ *  with a snapshot of the source's conversation files plus a distill-kind
+ *  CLAUDE.md. Returns the new loop meta. Any authed user may call. */
+export async function distillLoop(id: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}/distill`, { method: "POST" })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
 export async function getLoopMeta(id: string): Promise<LoopMeta | null> {
   const r = await apiFetch(`/api/loops/${id}`)
   if (!r.ok) return null
