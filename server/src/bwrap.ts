@@ -43,6 +43,8 @@ import {
   workspaceLoopatSandboxDir,
   workspaceNotesDir,
   workspaceReposDir,
+  loopContextKnowledge,
+  loopContextNotes,
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
@@ -212,8 +214,11 @@ export async function buildBwrapArgs(
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
-    knowledgeRw ? "--bind" : "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
-    "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
+    // notes/knowledge: bind the per-loop worktree (not the shared repo)
+    // so concurrent loops don't trample each other. Publish flow goes through
+    // `git push . HEAD:<trunk>` from within the worktree.
+    knowledgeRw ? "--bind" : "--ro-bind", loopContextKnowledge(loopId), V_CONTEXT_KNOWLEDGE,
+    "--bind", loopContextNotes(loopId), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // loopat install dir (claude binary lives here)
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
@@ -277,6 +282,19 @@ export async function buildBwrapArgs(
   if (existsSync(reposDir)) {
     args.push("--bind", reposDir, V_CONTEXT_REPOS)
     args.push("--bind", reposDir, reposDir)
+  }
+
+  // notes/knowledge main repos: re-bind at host absolute path so the
+  // per-loop worktree's `.git` file (which stores the absolute gitdir path)
+  // resolves inside the sandbox. Same trick as repos above. Notes is always
+  // RW (gitdir writes during publish). Knowledge follows the rw flag.
+  const notesRepo = workspaceNotesDir()
+  if (existsSync(notesRepo)) {
+    args.push("--bind", notesRepo, notesRepo)
+  }
+  const knowledgeRepo = workspaceKnowledgeDir()
+  if (existsSync(knowledgeRepo)) {
+    args.push(knowledgeRw ? "--bind" : "--ro-bind", knowledgeRepo, knowledgeRepo)
   }
 
   // chat snapshots (per-loop). Each conv that seeded this loop drops a jsonl
