@@ -538,8 +538,8 @@
     <span>workdir</span>
   </div>
   <p>
-    A self-hosted AI workspace built around context management.<br>
-    Works solo, scales to teams. Every loop runs in its own sandbox with versioned toolchain and pinned credentials.
+    A self-hosted AI workspace built around context management &mdash; works solo, scales to teams.<br>
+    What makes loopat different is the <strong>context architecture</strong>: chat, code, memory, and knowledge interlock so context doesn't get lost across sessions or teammates.
   </p>
   <div class="hero-actions">
     <a href="#quickstart" class="btn btn-primary">Get Started</a>
@@ -554,15 +554,15 @@
 <section id="features">
   <div class="section-inner">
     <div class="section-label">Features</div>
-    <h2 class="section-title">Everything you need to<br>collaborate with AI</h2>
+    <h2 class="section-title">End-to-end context management<br>for humans and AI</h2>
     <p class="section-desc">
-      loopat combines a web-based workspace, Claude-powered agent loops, and filesystem-level sandboxing into a single process you run locally.
+      When humans collaborate with AI, three things only humans can bring: <strong>drive</strong>, <strong>attention</strong>, and <strong>entropy reduction</strong>. loopat builds these in as first-class concepts &mdash; Loop, Focus, and Context &mdash; with Chat coordinating the team on the sync axis.
     </p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🧶</div>
-        <h3>Sandboxed Loops</h3>
-        <p>Each AI session runs in its own bubblewrap mount namespace. Isolated filesystem, shared context — the best of both worlds.</p>
+        <h3>Reproducible Loops</h3>
+        <p>Every loop runs in its own sandbox with a versioned toolchain and pinned credential vault. Same state tomorrow, different machine.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💬</div>
@@ -587,7 +587,7 @@
       <div class="feature-card">
         <div class="feature-icon">🧠</div>
         <h3>Persistent Memory</h3>
-        <p>Two-tier memory system — personal and team-shared. Auto-recalled across sessions so context is never lost.</p>
+        <p>Two-tier memory system &mdash; personal (<code>personal/memory</code>) and team-shared (<code>context/notes/memory</code>). Auto-recalled across sessions so context is never lost.</p>
       </div>
     </div>
   </div>
@@ -655,9 +655,9 @@
 <section id="compare">
   <div class="section-inner">
     <div class="section-label">How It Compares</div>
-    <h2 class="section-title">Built for teams, not just individuals</h2>
+    <h2 class="section-title">Works solo, scales to teams</h2>
     <p class="section-desc">
-      Most AI coding tools optimize the single-player experience. loopat layers team context management, credential isolation, and reproducible sandboxes on top.
+      Same workspace whether you're alone or onboarding teammates. Solo, it's a personal AI workspace; with a team, shared knowledge and notes repos sync across members.
     </p>
     <div class="table-wrap">
       <table>
@@ -718,8 +718,8 @@
       </div>
       <div class="principle-card">
         <div class="num">03</div>
-        <h3>Opt-in Secrets</h3>
-        <p>Sandbox canʼt see <code>~/.ssh</code>, <code>~/.aws</code>, or <code>~/.config/gh</code> by default. Expose only what you need via explicit symlinks in <code>personal/</code>.</p>
+        <h3>Self-hosted, data you own</h3>
+        <p>All artifacts live in plain git repos you fully control; vault secrets are git-crypt encrypted. BYO API key &mdash; nothing leaves your machine except the model API call itself.</p>
       </div>
     </div>
   </div>

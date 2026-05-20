@@ -538,8 +538,8 @@
     <span>工作目录</span>
   </div>
   <p>
-    一个围绕上下文管理构建的自托管 AI 协作工作台。<br>
-    单人可用，团队可扩展。每个循环在独立沙箱中运行，配备版本化的工具链和隔离的凭据。
+    一个围绕上下文管理构建的自托管 AI 协作工作台 &mdash; 单人可用，团队可扩展。<br>
+    loopat 的独特之处在于其 <strong>上下文架构</strong>：聊天、代码、记忆和知识环环相扣，上下文不会在会话或团队成员之间丢失。
   </p>
   <div class="hero-actions">
     <a href="#quickstart" class="btn btn-primary">快速开始</a>
@@ -554,15 +554,15 @@
 <section id="features">
   <div class="section-inner">
     <div class="section-label">核心功能</div>
-    <h2 class="section-title">与 AI 高效协作<br>所需的一切</h2>
+    <h2 class="section-title">为人与 AI 协作打造的<br>端到端上下文管理</h2>
     <p class="section-desc">
-      loopat 将 Web 工作台、Claude 驱动的智能体循环和文件系统级沙箱集成为一个本地运行的单一进程。
+      当人与 AI 协作时，有三件事只有人类才能做到：<strong>驱动</strong>、<strong>注意力</strong>和<strong>熵减</strong>。loopat 将它们构建为第一等概念 &mdash; 循环、专注和上下文 &mdash; 而聊天则协调团队的同步。
     </p>
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🧶</div>
-        <h3>沙箱化循环</h3>
-        <p>每个 AI 会话在独立的 bubblewrap 挂载命名空间中运行。文件系统隔离 + 共享上下文 — 两全其美。</p>
+        <h3>可复现的循环</h3>
+        <p>每个循环在独立沙箱中运行，配备版本化的工具链和隔离的凭据 Vault。明天换台机器，同样的初始状态。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">💬</div>
@@ -587,7 +587,7 @@
       <div class="feature-card">
         <div class="feature-icon">🧠</div>
         <h3>持久化记忆</h3>
-        <p>双层记忆体系 — 个人记忆与团队共享记忆。跨会话自动召回，上下文永不丢失。</p>
+        <p>双层记忆体系 &mdash; 个人记忆（<code>personal/memory</code>）与团队共享记忆（<code>context/notes/memory</code>）。跨会话自动召回，上下文永不丢失。</p>
       </div>
     </div>
   </div>
@@ -655,9 +655,9 @@
 <section id="compare">
   <div class="section-inner">
     <div class="section-label">对比竞品</div>
-    <h2 class="section-title">为团队协作而设计</h2>
+    <h2 class="section-title">单人可用，团队可扩展</h2>
     <p class="section-desc">
-      大多数 AI 编程工具优化单人体验。loopat 在此基础上增加了团队上下文管理、凭据隔离和可复现的沙箱。
+      无论是一个人工作还是团队协作，都是同一个工作台。单人使用时，它是个人 AI 工作区；加入团队后，共享的知识和笔记仓库会在成员之间同步。
     </p>
     <div class="table-wrap">
       <table>
@@ -718,8 +718,8 @@
       </div>
       <div class="principle-card">
         <div class="num">03</div>
-        <h3>按需授权</h3>
-        <p>沙箱默认无法访问 <code>~/.ssh</code>、<code>~/.aws</code> 或 <code>~/.config/gh</code>。只通过 <code>personal/</code> 中的显式软链接暴露需要的凭据。</p>
+        <h3>自托管，数据自有</h3>
+        <p>所有产物都保存在你完全掌控的纯 Git 仓库中；Vault 凭据经 git-crypt 加密。自带 API key &mdash; 除了调用模型 API 本身之外，没有任何数据离开你的机器。</p>
       </div>
     </div>
   </div>
