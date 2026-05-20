@@ -226,10 +226,9 @@ export default function AssistantMessage() {
     <MessagePrimitive.Root
       data-role="assistant"
       className="relative pl-6 md:pl-8"
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 200px" }}
     >
-      {/* Vertical line gutter — dot sits on the line. Extends past bounds to bridge gap-2 between messages */}
-      <div className="absolute left-[5px] -top-1 -bottom-1 w-[2px] bg-gray-200" />
+      {/* Vertical line gutter — dot sits on the line. Extends past bounds to bridge gap between messages */}
+      <div className="absolute left-[5px] -top-2 -bottom-2 w-[2px] bg-gray-200" />
 
       {/* Dot indicator — positioned per first-content-type */}
       <div
