@@ -368,6 +368,12 @@ export interface LoopRuntimeExtra {
   loadMoreMessages: () => void
   /** Token estimate based on the full aggregated conversation (not just visible window). */
   estimatedTokens: number
+  /** Current-turn streaming tokens (resets each turn). */
+  streamingTokenCount: number
+  /** Precise context-window token count (last result input+output). */
+  contextTokens: number
+  /** Precise cumulative tokens from model turns + agent tasks + live streaming. */
+  cumulativeTokens: number
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -406,6 +412,9 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   hasOlderMessages: false,
   loadMoreMessages: () => {},
   estimatedTokens: 0,
+  streamingTokenCount: 0,
+  contextTokens: 0,
+  cumulativeTokens: 0,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -465,6 +474,25 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   // Task state (task_started / task_updated / task_progress / task_notification) keyed by task_id
   const taskRef = useRef<Map<string, TaskState>>(new Map())
   const [taskVersion, setTaskVersion] = useState(0)
+  // Accumulated token usage from result messages (main model turns).
+  // Reset on reconnect; incremented in dispatchMsg.
+  const tokenUsageRef = useRef(0)
+  const [tokenUsageVersion, setTokenUsageVersion] = useState(0)
+  // Live token tracking from stream events during the current model turn.
+  // input: from message_start, output: estimated from content_block_delta chars
+  // or precise from message_delta usage. Reset when result arrives.
+  const streamingInputRef = useRef(0)
+  const streamingOutputCharsRef = useRef(0)
+  const streamingTokensRef = useRef(0)
+  const [streamingTokensVersion, setStreamingTokensVersion] = useState(0)
+  // Precise context-window size snapshot from the last main-model result
+  // (input_tokens + output_tokens). Reset on clear-boundary / reconnect.
+  // Output-only counter for ClaudeStatus display. Resets on result, grows
+  // from 0 during streaming (not reset on message_start).
+  const streamingOutputRef = useRef(0)
+  const [streamingOutputVersion, setStreamingOutputVersion] = useState(0)
+  const contextInputRef = useRef(0)
+  const [contextInputVersion, setContextInputVersion] = useState(0)
 
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
@@ -659,17 +687,46 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     setShowHistory((v) => !v)
   }, [])
 
+  // Context-window estimate from visible messages (for pie chart fallback).
   const estimatedTokens = useMemo(() => {
     let chars = 0
     for (const m of aggregated) {
       chars += JSON.stringify(m).length
     }
+    for (const [, children] of childMessagesByAgentId) {
+      for (const m of children) {
+        chars += JSON.stringify(m).length
+      }
+    }
     return Math.round(chars / 3.5)
-  }, [aggregated])
+  }, [aggregated, childMessagesByAgentId])
+
+  // Current-turn output tokens only. Grows from 0 during streaming,
+  // resets on result — no reset on message_start. For ClaudeStatus.
+  const streamingTokenCount = useMemo(() => streamingOutputRef.current, [streamingOutputVersion])
+
+  // Precise context-window token count (for pie chart). Uses last result's
+  // input+output as the snapshot; during streaming prefers the live estimate.
+  const contextTokens = useMemo(() => {
+    if (streamingTokensRef.current > 0) return streamingTokensRef.current
+    return contextInputRef.current
+  }, [contextInputVersion, streamingTokensVersion])
+
+  // Cumulative precise count from result + task + streaming events (for status bar).
+  const cumulativeTokens = useMemo(() => {
+    let total = tokenUsageRef.current + streamingTokensRef.current
+    for (const [, task] of taskRef.current) {
+      const u = task.usage
+      if (u && typeof u.total_tokens === "number") {
+        total += u.total_tokens
+      }
+    }
+    return total
+  }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, estimatedTokens }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens],
   )
 
   useEffect(() => {
@@ -689,6 +746,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setToolProgressVersion((v) => v + 1)
       taskRef.current = new Map()
       setTaskVersion((v) => v + 1)
+      tokenUsageRef.current = 0
+      setTokenUsageVersion((v) => v + 1)
+      streamingInputRef.current = 0
+      streamingOutputCharsRef.current = 0
+      streamingTokensRef.current = 0
+      setStreamingTokensVersion((v) => v + 1)
+      streamingOutputRef.current = 0
+      setStreamingOutputVersion((v) => v + 1)
+      contextInputRef.current = 0
+      setContextInputVersion((v) => v + 1)
       setQuestionsObj({})
       setPermissionPrompt(null)
       setContextUsage(null)
@@ -875,6 +942,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
 
         if (m?.type === "result") {
           if (!loadingHistoryRef.current) setRunning(false)
+          // Only accumulate main-model results; agent tokens are tracked via
+          // task_notification messages and counted from taskRef.
+          if (!m.parent_tool_use_id) {
+            const u = m.usage
+            if (u && typeof u.input_tokens === "number" && typeof u.output_tokens === "number") {
+              tokenUsageRef.current += u.input_tokens + u.output_tokens
+              setTokenUsageVersion((v) => v + 1)
+              // Snapshot the precise context-window size after this turn.
+              contextInputRef.current = u.input_tokens + u.output_tokens
+              setContextInputVersion((v) => v + 1)
+            }
+            // Reset live streaming counters — the turn is complete.
+            streamingInputRef.current = 0
+            streamingTokensRef.current = 0
+            setStreamingTokensVersion((v) => v + 1)
+          }
           return
         }
 
@@ -926,6 +1009,41 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           } catch {}
         } else if (m?.type === "stream_event") {
           try { handleStreamEvent(m, setRaw) } catch {}
+          // Only track main-model streams; agent stream events have
+          // parent_tool_use_id and would overwrite the main counters.
+          if (m.parent_tool_use_id) return
+          // Track live token usage from streaming events.
+          // message_delta only fires at stream end, so we estimate from
+          // content_block_delta text/thinking growth for real-time updates.
+          const ev = m?.event
+          if (ev?.type === "message_start") {
+            streamingInputRef.current = ev?.message?.usage?.input_tokens ?? 0
+            streamingOutputCharsRef.current = 0
+            streamingTokensRef.current = streamingInputRef.current
+            setStreamingTokensVersion((v) => v + 1)
+          } else if (ev?.type === "message_delta") {
+            const u = ev?.usage
+            if (u && typeof u.output_tokens === "number") {
+              streamingTokensRef.current = streamingInputRef.current + u.output_tokens
+              setStreamingTokensVersion((v) => v + 1)
+              streamingOutputRef.current = u.output_tokens
+              setStreamingOutputVersion((v) => v + 1)
+            }
+          } else if (ev?.type === "content_block_delta") {
+            const d = ev?.delta
+            if (d?.type === "text_delta" && typeof d.text === "string") {
+              streamingOutputCharsRef.current += d.text.length
+            } else if (d?.type === "thinking_delta" && typeof d.thinking === "string") {
+              streamingOutputCharsRef.current += d.thinking.length
+            } else if (d?.type === "input_json_delta" && typeof d.partial_json === "string") {
+              streamingOutputCharsRef.current += d.partial_json.length
+            }
+            const estimated = Math.round(streamingOutputCharsRef.current / 3.5)
+            streamingTokensRef.current = streamingInputRef.current + estimated
+            setStreamingTokensVersion((v) => v + 1)
+            streamingOutputRef.current = estimated
+            setStreamingOutputVersion((v) => v + 1)
+          }
         } else if (m?.type === "error") {
           setRaw((prev) => [
             ...prev,
@@ -933,6 +1051,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           ])
           if (!loadingHistoryRef.current) setRunning(false)
         } else if (m?.type === "clear-boundary") {
+          // Context dropped — reset the context-window snapshot.
+          contextInputRef.current = 0
+          setContextInputVersion((v) => v + 1)
           // Server signals: SDK context dropped at this point. We push a
           // synthetic assistant message whose only content part is a custom
           // `clear-divider`; AssistantMessage detects that part type and

@@ -34,8 +34,6 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
   const [displayTokens, setDisplayTokens] = useState(0);
   const [ellipsis, setEllipsis] = useState("");
 
-  const startTokensRef = useRef(0);
-
   // Elapsed timer + ellipsis cycle
   useEffect(() => {
     if (!isLoading) {
@@ -59,18 +57,11 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
 
   // Keep target in sync so the rAF loop reads latest without re-subscribing
   const targetRef = useRef(0);
-  if (isLoading && startTokensRef.current === 0) {
-    startTokensRef.current = tokenCount;
-  }
-  targetRef.current = Math.max(0, tokenCount - startTokensRef.current);
+  targetRef.current = tokenCount;
 
-  // Smooth easing rAF loop — only restarts on isLoading change
+  // Smooth easing rAF loop
   useEffect(() => {
-    if (!isLoading) {
-      startTokensRef.current = 0;
-      targetRef.current = 0;
-      return;
-    }
+    if (!isLoading) return;
 
     let raf: number;
     const step = () => {
@@ -91,6 +82,9 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
 
   const statusText =
     ACTION_WORDS[Math.floor(elapsedTime / 3) % ACTION_WORDS.length];
+
+  // ↑ uploading (request sent, no response yet), ↓ streaming (tokens coming in)
+  const arrow = tokenCount > 0 ? "↓" : "↑";
 
   const budgetLabel =
     thinkingBudget === null
@@ -129,9 +123,9 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
           {formatElapsedTime(elapsedTime)}
         </span>
 
-        {/* Token count — new tokens this turn, eased toward real value */}
+        {/* Token count — this turn's streaming tokens, eased toward real value */}
         <span className="tabular-nums text-gray-600 font-medium">
-          ↓{formatTokens(displayTokens)} tk
+          {arrow}{formatTokens(displayTokens)} tk
         </span>
       </div>
     </div>

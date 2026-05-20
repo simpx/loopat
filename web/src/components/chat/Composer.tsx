@@ -31,8 +31,7 @@ export default function Composer() {
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, estimatedTokens, suppressSlashRef } = useLoopRuntimeExtra();
-  const usedTokens = estimatedTokens;
+  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, streamingTokenCount, suppressSlashRef } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
@@ -144,7 +143,7 @@ export default function Composer() {
   return (
     <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
       {/* Claude Status bar */}
-      <ClaudeStatus isLoading={isRunning} tokenCount={usedTokens} />
+      <ClaudeStatus isLoading={isRunning} tokenCount={streamingTokenCount} />
 
       {/* Queue: inline items with per-item remove */}
       {queue.length > 0 && (
@@ -189,9 +188,8 @@ export default function Composer() {
           <div className="flex items-center justify-between gap-0.5 border-t border-gray-100 pt-2 overflow-hidden">
             <div className="flex items-center gap-0.5 min-w-0">
               <TokenUsagePie
-                used={Math.min(usedTokens, contextWindow)}
+                used={Math.min(contextTokens, contextWindow)}
                 total={contextWindow}
-                contextUsage={contextUsage}
               />
 
               <ModelSelector />
