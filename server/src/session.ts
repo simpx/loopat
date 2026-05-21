@@ -217,19 +217,23 @@ class LoopSession {
    *  return the first matching provider. If requireKey is true, skip providers
    *  with an empty apiKey and keep searching. Returns null if nothing matches.
    *
-   *  Selection order:
+   *  Selection order — any personal provider beats any workspace provider, so
+   *  configuring a personal provider implicitly overrides the workspace default
+   *  even when no personal `default` is set:
    *    1. explicit candidates (caller-supplied: WS override, loop.meta.config)
    *    2. personal config's `default` field
-   *    3. workspace config's `default` field
-   *    4. enumeration of all providers (personal first, then workspace) */
+   *    3. enumeration of personal providers (implicit personal default)
+   *    4. workspace config's `default` field
+   *    5. enumeration of workspace providers */
   private async resolveProvider(meta: { createdBy: string; driver?: string; config?: { vault?: string } }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
     const pCfg = await loadPersonalConfig(effectiveDriver(meta), meta.config?.vault)
     const wCfg = await loadConfig()
     const names = [
       ...candidateNames,
       pCfg.default ? parseDefault(pCfg.default).providerName : undefined,
-      wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
       ...Object.keys(pCfg.providers),
+      wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
+      wCfg.default,
       ...Object.keys(wCfg.providers ?? {}),
     ].filter(Boolean) as string[]
     const seen = new Set<string>()
@@ -1342,4 +1346,3 @@ export function restartSession(id: string): boolean {
   s.restartOnNextMessage()
   return true
 }
-
