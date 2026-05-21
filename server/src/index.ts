@@ -168,6 +168,9 @@ app.get("/api/serve/alias-check", requireAuth, async (c) => {
 // ── providers (auth required) ──
 // Merges personal + workspace configs. Personal providers take precedence
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
+// `active` mirrors session.ts resolveProvider order: any personal provider
+// beats workspace default, so a personal provider without an explicit
+// `default` still surfaces as the active one.
 app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
   const providers: Record<string, { models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean; hasKey: boolean }> = {}
@@ -177,7 +180,6 @@ app.get("/api/providers", requireAuth, async (c) => {
       providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "workspace", enabled: hasKey ? p.enabled : false, hasKey }
     }
   }
-  // Overlay personal providers (they take precedence)
   let active = wCfg.default ?? ""
   const userId = c.get("userId") as string
   try {
@@ -186,7 +188,7 @@ app.get("/api/providers", requireAuth, async (c) => {
       const hasKey = typeof p.apiKey === "string" && p.apiKey.length > 0
       providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: hasKey ? p.enabled : false, hasKey }
     }
-    active = pCfg.default || active
+    active = pCfg.default || Object.keys(pCfg.providers)[0] || active
   } catch {}
   return c.json({ providers, default: active })
 })
@@ -2215,7 +2217,7 @@ app.get("/api/topics", requireAuth, async (c) => {
   return c.json({ topics: await listTopics(titles) })
 })
 
-// ── Chat ──────────────────────────────────────────────────────────────────
+// ── Chat ────────────────────────────────────────────────────────────────────────
 //
 // SQLite-backed channels + 1:1 DMs. Real-time fanout via /ws/chat with
 // per-conversation subscriber sets. When a loop is spawned from a chat
@@ -2415,7 +2417,7 @@ app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
   return c.json({ loopId: meta.id, seedPrompt, messageCount: snapshot.messageCount })
 })
 
-// ── Chat WebSocket ────────────────────────────────────────────────────────
+// ── Chat WebSocket ─────────────────────────────────────────────────────────────────
 
 app.get(
   "/ws/chat",
