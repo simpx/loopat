@@ -2451,6 +2451,12 @@ import "./serve"
 const serveHost = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
 const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
 
+// Probe $HOME overlay support up front so the first user-facing spawn
+// doesn't pay for it (and the warning lands in boot logs, not mid-session).
+import { isHomeOverlaySupported } from "./bwrap"
+const overlayOk = await isHomeOverlaySupported()
+console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled (tmpfs fallback)"}`)
+
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
 console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
 
