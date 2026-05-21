@@ -83,6 +83,19 @@ export const loopSandboxDir = (id: string) => join(loopDir(id), "sandbox")
 export const loopSandboxPath = (id: string) => join(loopSandboxDir(id), "mise.toml")
 export const loopSandboxLockPath = (id: string) => join(loopSandboxDir(id), "mise.lock")
 export const loopSandboxMetaPath = (id: string) => join(loopSandboxDir(id), "sandbox.json")
+
+// Per-loop $HOME overlay (docker container layer for home). The sandbox's
+// $HOME is an overlayfs mount: lower = workspaceHomeSkelDir (shared skeleton,
+// typically empty), upper = home-upper (per-loop persistent diff), work =
+// home-work (overlayfs internal scratch). merged is the mount point that
+// bwrap binds into the sandbox at $HOME. Persists across loop restarts; AI's
+// pip/npm installs and shell history survive.
+export const loopHomeUpper = (id: string) => join(loopDir(id), "home-upper")
+export const loopHomeWork = (id: string) => join(loopDir(id), "home-work")
+export const loopHomeMerged = (id: string) => join(loopDir(id), "home-merged")
+// Workspace-shared base layer for the home overlay. User can drop default
+// dotfiles in here; left empty by default.
+export const workspaceHomeSkelDir = () => join(LOOPAT_HOME, "sandbox-home-skel")
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 

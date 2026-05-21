@@ -2,7 +2,7 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { buildBwrapArgs } from "./bwrap"
+import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv } from "./bwrap"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
 import { readSandboxMeta, readSandboxMetaFromPath } from "./sandboxes"
@@ -76,9 +76,12 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
     }, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
-    const fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
-    console.error(`[term:${tag}] spawn bwrap argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"}`)
-    const proc = spawn("bwrap", fullArgs, {
+    // Wrap bwrap in `unshare -Umr` + overlay mount on $HOME for docker-style
+    // container-layer persistence. See bwrap.ts buildSandboxSpawnArgv.
+    const overlay = await prepareSandboxOverlay(loopId)
+    const fullArgs = buildSandboxSpawnArgv(overlay, bwrapArgs, "/bin/bash", ["-c", innerCmd])
+    console.error(`[term:${tag}] spawn unshare argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"}`)
+    const proc = spawn("unshare", fullArgs, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
