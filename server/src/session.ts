@@ -18,6 +18,22 @@ import { updateLoopStatus } from "./loop-status"
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
 
+function parseSkillDescription(content: string): string | undefined {
+  const fm = content.match(/^---\s*\n([\s\S]*?)\n---/)
+  if (!fm) return undefined
+  const desc = fm[1].match(/^description:\s*(.+)$/m)
+  return desc ? desc[1].trim() : undefined
+}
+
+async function readSkillDescription(skillsDir: string, skillName: string): Promise<string> {
+  try {
+    const content = await readFile(join(skillsDir, skillName, "SKILL.md"), "utf-8")
+    return parseSkillDescription(content) ?? ""
+  } catch {
+    return ""
+  }
+}
+
 /**
  * Mirror cli's ff(): explicit override wins; otherwise [1m] tag → 1M;
  * any claude opus-4-7/4-6/sonnet-4/sonnet-4-6 → still defaults to 200K
@@ -777,21 +793,25 @@ class LoopSession {
    * Plugin names are excluded because we don't know their sub-commands without
    * reading manifests — CC will report the full list when it starts.
    */
-  private async buildInitialSlashCommands(user: string): Promise<string[]> {
-    const cmds = new Set<string>()
-    // CC built-in commands (always available after CC starts)
+  private async buildInitialSlashCommands(user: string): Promise<{ name: string; description: string }[]> {
+    const map = new Map<string, string>()
+    // CC built-in commands (descriptions handled by frontend's local COMMANDS)
     for (const c of ["help", "model", "clear", "compress", "review", "init", "foxtrot"]) {
-      cmds.add(c)
+      if (!map.has(c)) map.set(c, "")
     }
     // Workspace skills
     for (const name of await this.listDirNames(workspaceLoopatSkillsDir())) {
-      cmds.add(name)
+      if (!map.has(name)) {
+        map.set(name, await readSkillDescription(workspaceLoopatSkillsDir(), name))
+      }
     }
-    // Personal skills (higher precedence — same dedup behavior as compose)
+    // Personal skills (higher precedence)
     for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
-      cmds.add(name)
+      map.set(name, await readSkillDescription(personalLoopatSkillsDir(user), name))
     }
-    return [...cmds].sort()
+    return [...map.entries()]
+      .map(([name, description]) => ({ name, description }))
+      .sort((a, b) => a.name.localeCompare(b.name))
   }
 
   async attach(ws: WSContext) {

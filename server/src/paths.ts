@@ -91,6 +91,12 @@ export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 // can shadow them by name. See server/src/compose.ts.
 export const builtinPluginsDir = () => join(TEMPLATES_DIR, "plugins")
 
+// Per-loop-kind templates (distill, future: review, plan, etc.). Each kind
+// has its own dir; createLoop / distillLoop copies the kind's CLAUDE.md into
+// the new loop's workdir as the L2++ project-tier doctrine.
+export const loopKindTemplateDir = (kind: string) => join(TEMPLATES_DIR, "loop-kinds", kind)
+export const loopKindClaudePath = (kind: string) => join(loopKindTemplateDir(kind), "CLAUDE.md")
+
 // Personal `.loopat/` reserved namespace: per-user loopat config + vaults.
 // Mirrors `knowledge/.loopat/` as the personal counterpart.
 //
@@ -119,8 +125,9 @@ export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir
 export const loopComposedSkillsDir = (id: string) => join(loopDir(id), ".claude", "skills")
 export const loopComposedPluginsCacheDir = (id: string) => join(loopDir(id), ".claude", "plugins", "cache")
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
-/** Sandbox-internal path where the active vault's contents land. */
-export const sandboxVaultMountPoint = () => "/loopat/context/personal/.loopat/vault"
+/** Sandbox-internal path: symlink to the active vault's real dir under
+ *  personal/.loopat/vaults/<active>/. AI is taught to use this entrypoint. */
+export const sandboxVaultMountPoint = () => "/loopat/context/vault"
 /** Provider apiKey file inside a specific vault. */
 export const personalProviderKeyPath = (user: string, vault: string, providerName: string) =>
   join(personalVaultDir(user, vault), "provider-keys", providerName)

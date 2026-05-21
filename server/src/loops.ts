@@ -33,6 +33,9 @@ import {
   workspaceMemoryDir,
   hostDeployKeyPath,
   personalGitCryptKeyPath,
+  loopHistoryPath,
+  loopChatHistoryPath,
+  loopKindClaudePath,
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
@@ -259,6 +262,20 @@ export async function ensureWorkspaceDirs() {
   if (!n.cloned) await gitInitIfMissing(workspaceNotesDir())
   // suppress unused warning for k.cloned (kept for symmetry / future use)
   void k
+
+  // Per-loop worktrees push back here via `git push . HEAD:<trunk>`. Allow
+  // pushing to the currently checked-out branch (ref-only update; primary
+  // wd goes stale but no one reads it). `updateInstead` would race on the
+  // primary worktree under concurrent pushes — verified empirically.
+  for (const dir of [workspaceNotesDir(), workspaceKnowledgeDir()]) {
+    if (existsSyncBase(join(dir, ".git"))) {
+      try {
+        await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
+      } catch (e: any) {
+        console.warn(`[loopat] failed to set denyCurrentBranch on ${dir}: ${e?.message ?? e}`)
+      }
+    }
+  }
 }
 
 /**
@@ -1102,10 +1119,35 @@ async function ensureSymlink(link: string, target: string) {
   }
 }
 
+/**
+ * Idempotently materialize a per-loop git worktree of `repo` at `path` on
+ * branch `branchName`. If the path already holds a worktree, no-op. If the
+ * source isn't a git repo (e.g., knowledge without a remote), fall back to
+ * a symlink so the path still resolves — those loops can't publish, but
+ * read access still works.
+ */
+async function ensureContextWorktree(repo: string, path: string, branchName: string) {
+  let stats: Awaited<ReturnType<typeof lstat>> | null = null
+  try { stats = await lstat(path) } catch {}
+  // Real dir with .git → already a worktree, leave it alone.
+  if (stats?.isDirectory() && existsSyncBase(join(path, ".git"))) return
+
+  // Source isn't a git repo — fall back to symlink (legacy shape).
+  if (!existsSyncBase(join(repo, ".git"))) {
+    try { await rm(path, { recursive: true, force: true }) } catch {}
+    await ensureSymlink(path, repo)
+    return
+  }
+
+  // Stale state (old symlink, empty dir, leftover from manual cleanup) → wipe + create.
+  try { await rm(path, { recursive: true, force: true }) } catch {}
+  await execFileP("git", ["-C", repo, "worktree", "add", "-b", branchName, path])
+}
+
 export async function ensureContextMounts(id: string, createdBy: string) {
   await mkdir(loopContextDir(id), { recursive: true })
-  await ensureSymlink(loopContextKnowledge(id), workspaceKnowledgeDir())
-  await ensureSymlink(loopContextNotes(id), workspaceNotesDir())
+  await ensureContextWorktree(workspaceKnowledgeDir(), loopContextKnowledge(id), `loop/${id}`)
+  await ensureContextWorktree(workspaceNotesDir(), loopContextNotes(id), `loop/${id}`)
   await ensureSymlink(loopContextPersonal(id), personalDir(createdBy))
   await ensureSymlink(loopContextRepos(id), workspaceReposDir())
 }
@@ -1254,6 +1296,47 @@ export async function createLoop(opts: {
   await ensureContextMounts(id, effectiveDriver(meta))
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta
+}
+
+/**
+ * Spawn a child "distill loop" from a source loop. The child's workdir gets
+ * a point-in-time snapshot of the source's conversation files plus a
+ * project-tier CLAUDE.md telling the AI it's a distill loop. Knowledge is
+ * rw so the child can publish sedimented insights. The source is not
+ * touched. Any authenticated user may distill any loop — distill is a
+ * read-only relationship.
+ */
+export async function distillLoop(sourceId: string, byUser: string): Promise<LoopMeta> {
+  const source = await getLoop(sourceId)
+  if (!source) throw new Error(`source loop ${sourceId} not found`)
+
+  const shortId = source.id.slice(0, 6)
+  const child = await createLoop({
+    title: `distill: ${shortId} ${source.title}`,
+    createdBy: byUser,
+    knowledgeRw: true,
+  })
+
+  // Snapshot the source's conversation into the child's workdir.
+  const sourceDir = join(loopWorkdir(child.id), "source")
+  await mkdir(sourceDir, { recursive: true })
+  for (const [from, to] of [
+    [loopHistoryPath(sourceId), join(sourceDir, "messages.jsonl")],
+    [loopChatHistoryPath(sourceId), join(sourceDir, "chat_history.jsonl")],
+  ]) {
+    if (existsSyncBase(from)) {
+      await copyFile(from, to)
+    }
+  }
+
+  // Drop the distill kind's project-tier CLAUDE.md into the workdir. Claude
+  // Code auto-loads <workdir>/CLAUDE.md (settingSources includes "project").
+  const tmpl = loopKindClaudePath("distill")
+  if (existsSyncBase(tmpl)) {
+    await copyFile(tmpl, join(loopWorkdir(child.id), "CLAUDE.md"))
+  }
+
+  return child
 }
 
 export async function getLoop(id: string): Promise<LoopMeta | null> {

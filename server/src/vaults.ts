@@ -2,8 +2,11 @@
  * Vault catalog & resolution.
  *
  * A vault is a named bundle of credentials owned by one user. Each loop
- * selects one vault at spawn time; only that vault's contents land in the
- * sandbox under `/loopat/context/personal/.loopat/vault/`.
+ * selects one vault at spawn time and gets a sandbox-side symlink at
+ * `/loopat/context/vault` pointing to that vault's real dir under
+ * `/loopat/context/personal/.loopat/vaults/<active>/`. AI is taught (via
+ * doctrine) to use the symlink and ignore other vaults visible under
+ * `personal/.loopat/vaults/`.
  *
  * Filesystem:
  *   personal/<user>/.loopat/vaults/<name>/...
