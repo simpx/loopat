@@ -33,6 +33,7 @@ import { existsSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
 import { promisify } from "node:util"
+import { mkdir } from "node:fs/promises"
 import {
   loopWorkdir,
   loopClaudeDir,
@@ -43,14 +44,19 @@ import {
   workspaceLoopatSandboxDir,
   workspaceNotesDir,
   workspaceReposDir,
+  loopContextKnowledge,
+  loopContextNotes,
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
+  loopHomeUpper,
+  loopHomeWork,
+  loopHomeMerged,
+  workspaceHomeSkelDir,
 } from "./paths"
 import { resolveSandboxFile } from "./sandboxes"
 import { loadConfig, loadPersonalConfig } from "./config"
-import { DEFAULT_VAULT, resolveVaultRoot, walkVaultFiles } from "./vaults"
-import { personalVaultsDir } from "./paths"
+import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 import { resolveMiseBinary } from "./mise-binary"
 
 const execFileP = promisify(execFile)
@@ -158,6 +164,7 @@ export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
 export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
 export const V_CONTEXT_REPOS = "/loopat/context/repos"
 export const V_CONTEXT_CHAT = "/loopat/context/chat"
+export const V_CONTEXT_VAULT = "/loopat/context/vault"
 
 export type SandboxExtraEnv = Record<string, string>
 
@@ -177,6 +184,7 @@ export async function buildBwrapArgs(
   sandboxName?: string,
   vaultName?: string,
   knowledgeRw?: boolean,
+  homeOverlay: boolean = true,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -209,47 +217,44 @@ export async function buildBwrapArgs(
   args.push(
     // /tmp shared (writable, for socat / mktemp / IPC sockets)
     "--bind", "/tmp", "/tmp",
-    // host home: tmpfs; operator/member mounts go back on top below
-    "--tmpfs", home,
+    // host home → either overlayfs merged dir (if homeOverlay) or tmpfs.
+    // Overlay needs the unshare wrapper + bwrap ≥ 0.9 nested-userns uid drop;
+    // on envs where that fails (e.g. bwrap 0.4.0 on some cloud images), we
+    // fall back to a per-spawn tmpfs (no persistence, but works everywhere).
+    // operator/member mounts go back on top below.
+    ...(homeOverlay
+      ? (["--bind", loopHomeMerged(loopId), home] as const)
+      : (["--tmpfs", home] as const)),
     // virtual mount points: bind directly. bwrap auto-creates parents.
     "--bind", loopWorkdir(loopId), V_LOOP_WORKDIR(loopId),
     "--bind", loopClaudeDir(loopId), V_LOOP_CLAUDE(loopId),
-    knowledgeRw ? "--bind" : "--ro-bind", workspaceKnowledgeDir(), V_CONTEXT_KNOWLEDGE,
-    "--bind", workspaceNotesDir(), V_CONTEXT_NOTES,
+    // notes/knowledge: bind the per-loop worktree (not the shared repo)
+    // so concurrent loops don't trample each other. Publish flow goes through
+    // `git push . HEAD:<trunk>` from within the worktree.
+    knowledgeRw ? "--bind" : "--ro-bind", loopContextKnowledge(loopId), V_CONTEXT_KNOWLEDGE,
+    "--bind", loopContextNotes(loopId), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
     // WSL: expose Windows drive mounts so sandbox can edit host files
     "--bind-try", "/mnt", "/mnt",
   )
 
-  // loopat install dir (claude binary lives here). Never bind "/" even if a
-  // packaged runtime reports an unexpected install dir; that would void
-  // isolation on macOS and overexpose the host on Linux.
-  if (LOOPAT_INSTALL_DIR !== "/" && existsSync(LOOPAT_INSTALL_DIR)) {
-    args.push("--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR)
-  } else {
-    console.warn(`[loopat] skipping invalid install-dir sandbox bind: ${LOOPAT_INSTALL_DIR}`)
-  }
-
-  // ── vault overlay ──
-  // Personal is bound wholesale above (so memory/, .loopat/config.json, etc.
-  // are visible). Now narrow what's exposed for credentials:
-  //   - Hide host-side `.loopat/vaults/` (the multi-vault catalog) — AI
-  //     doesn't need to know which named vaults exist.
-  //   - Expose the selected vault's contents at `.loopat/vault/` (singular).
-  //     Inside the sandbox there's only ever ONE active vault.
-  const vault = vaultName && vaultName.trim() ? vaultName.trim() : DEFAULT_VAULT
-  const hostVaultsDir = personalVaultsDir(createdBy)
-  const V_PERSONAL_VAULTS = `${V_CONTEXT_PERSONAL}/.loopat/vaults`
-  const V_PERSONAL_VAULT = `${V_CONTEXT_PERSONAL}/.loopat/vault`
-  if (existsSync(hostVaultsDir)) {
-    args.push("--tmpfs", V_PERSONAL_VAULTS)
-  }
+  // ── vault symlink ──
+  // Personal is bound wholesale above, so all named vaults under
+  // .loopat/vaults/ are visible inside the sandbox (no isolation between
+  // named vaults — they're per-user, not per-loop). Convenience symlink for
+  // the AI: it accesses the selected loop's credentials through
+  // /loopat/context/vault, not by digging into personal/.loopat/vaults/.
+  // Doctrine tells the AI to stick to this entrypoint and ignore the other
+  // vaults present in personal/.
+  //
+  // History: we previously per-file-bound each vault file into a sandbox-side
+  // `.loopat/vault/` dir, but bwrap creates an empty stub on the host at each
+  // bind target. Those stubs accumulated in personal repo and got committed.
+  // A symlink avoids any host-side file creation.
+  const vault = vaultName?.trim() || DEFAULT_VAULT
   const vaultRoot = resolveVaultRoot(createdBy, vault)
   if (vaultRoot) {
-    for await (const entry of walkVaultFiles(createdBy, vaultRoot)) {
-      // rw-bind so credential helpers can refresh a key in place if needed.
-      args.push("--bind", entry.realpath, `${V_PERSONAL_VAULT}/${entry.rel}`)
-    }
+    args.push("--symlink", `${V_CONTEXT_PERSONAL}/.loopat/vaults/${vault}`, V_CONTEXT_VAULT)
   } else {
     console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
   }
@@ -288,6 +293,19 @@ export async function buildBwrapArgs(
   if (existsSync(reposDir)) {
     args.push("--bind", reposDir, V_CONTEXT_REPOS)
     args.push("--bind", reposDir, reposDir)
+  }
+
+  // notes/knowledge main repos: re-bind at host absolute path so the
+  // per-loop worktree's `.git` file (which stores the absolute gitdir path)
+  // resolves inside the sandbox. Same trick as repos above. Notes is always
+  // RW (gitdir writes during publish). Knowledge follows the rw flag.
+  const notesRepo = workspaceNotesDir()
+  if (existsSync(notesRepo)) {
+    args.push("--bind", notesRepo, notesRepo)
+  }
+  const knowledgeRepo = workspaceKnowledgeDir()
+  if (existsSync(knowledgeRepo)) {
+    args.push(knowledgeRw ? "--bind" : "--ro-bind", knowledgeRepo, knowledgeRepo)
   }
 
   // chat snapshots (per-loop). Each conv that seeded this loop drops a jsonl
@@ -392,4 +410,121 @@ export async function buildBwrapArgs(
   }
 
   return args
+}
+
+// ── docker-style $HOME overlay ─────────────────────────────────────────────
+// bwrap 0.9.0 (Ubuntu noble) ships without overlay support compiled in. We
+// achieve docker container-layer semantics for $HOME by wrapping bwrap in an
+// outer `unshare -Umr`: unshare gives us a user+mount NS where we can mount
+// overlayfs (kernel ≥ 5.11 supports it unprivileged); bwrap then inherits
+// that mount NS and binds the overlay's merged dir at the sandbox $HOME.
+//
+//   Image (lower) = workspaceHomeSkelDir() — shared, immutable, typically empty
+//   Container layer (upper) = loops/<id>/home-upper/ — per-loop, persistent
+//   Workdir = loops/<id>/home-work/ — overlayfs scratch
+//   Merged mount point = loops/<id>/home-merged/ — bwrap binds this at $HOME
+//
+// On bwrap exit, the unshare NS dies and the overlay mount auto-unmounts.
+// The upper dir persists on host disk; next spawn sees previous writes.
+//
+// `unshare -Umr` maps host_uid → 0 inside the userns so we can mount overlay
+// (requires CAP_SYS_ADMIN, granted by being uid 0). But claude refuses to run
+// with `--dangerously-skip-permissions` when uid==0. Fix: bwrap creates a
+// nested userns via `--unshare-user --uid <host_uid>` and maps back to the
+// original uid for the sandboxed process.
+
+export type SandboxOverlayPaths = {
+  lower: string
+  upper: string
+  work: string
+  merged: string
+}
+
+// Probe (once per server lifetime) whether the unshare + bwrap-nested-userns
+// uid drop combination actually works on this host. bwrap 0.9 supports it;
+// 0.4 (still shipped on some Aliyun/EL8-derivative images) fails with
+// "bwrap: unable to drop root uid: Invalid argument" because the nested
+// userns uid_map semantics differ. When unsupported, callers must skip the
+// unshare wrapper entirely and use --tmpfs $HOME instead of the overlay.
+let _homeOverlayProbe: Promise<boolean> | null = null
+export function isHomeOverlaySupported(): Promise<boolean> {
+  if (process.env.LOOPAT_NO_HOME_OVERLAY === "1") return Promise.resolve(false)
+  if (!_homeOverlayProbe) {
+    _homeOverlayProbe = (async () => {
+      const uid = String(process.getuid?.() ?? 0)
+      const gid = String(process.getgid?.() ?? 0)
+      try {
+        await execFileP(
+          "unshare",
+          [
+            "-Umr", "--",
+            "bwrap", "--unshare-user", "--uid", uid, "--gid", gid,
+            "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
+            "--", "/bin/true",
+          ],
+          { timeout: 5000 },
+        )
+        return true
+      } catch (e: any) {
+        const msg = e?.stderr?.toString?.() || e?.message || String(e)
+        console.warn(
+          `[loopat] $HOME overlay disabled — host bwrap can't drop uid via nested userns ` +
+          `(likely bwrap < 0.9). Falling back to --tmpfs $HOME (no per-loop persistence). ` +
+          `Probe error: ${msg.trim()}`,
+        )
+        return false
+      }
+    })()
+  }
+  return _homeOverlayProbe
+}
+
+/** Idempotently mkdir the four dirs the overlay mount needs. */
+export async function prepareSandboxOverlay(loopId: string): Promise<SandboxOverlayPaths> {
+  const lower = workspaceHomeSkelDir()
+  const upper = loopHomeUpper(loopId)
+  const work = loopHomeWork(loopId)
+  const merged = loopHomeMerged(loopId)
+  await Promise.all([
+    mkdir(lower, { recursive: true }),
+    mkdir(upper, { recursive: true }),
+    mkdir(work, { recursive: true }),
+    mkdir(merged, { recursive: true }),
+  ])
+  return { lower, upper, work, merged }
+}
+
+// Script body executed in the unshare NS: mount overlay using $1..$4 as
+// lower/upper/work/merged, then shift those off and exec the remainder
+// ($5+ = "bwrap" plus its argv, ending with "--", command, command args).
+const SANDBOX_SPAWN_SCRIPT =
+  'mount -t overlay overlay -o "lowerdir=$1,upperdir=$2,workdir=$3" "$4" && shift 4 && exec "$@"'
+
+/**
+ * Build the argv for `unshare` that wraps bwrap + overlay mount. Caller
+ * spawns the binary "unshare" with the returned args (NOT "bwrap" directly).
+ * Sync: caller must `await prepareSandboxOverlay(loopId)` beforehand so the
+ * mount points exist.
+ */
+export function buildSandboxSpawnArgv(
+  overlay: SandboxOverlayPaths,
+  bwrapArgs: string[],
+  command: string,
+  commandArgs: string[],
+): string[] {
+  // Drop bwrap back to the host uid/gid via a nested userns. Outer `-Umr` is
+  // uid 0 in userns A; bwrap's `--unshare-user --uid X` creates userns B where
+  // inner_uid X maps to outer_userns_uid 0 (which is the host uid). Without
+  // this, claude sees uid==0 and refuses `--dangerously-skip-permissions`.
+  const hostUid = process.getuid?.() ?? 0
+  const hostGid = process.getgid?.() ?? 0
+  const uidDrop = ["--unshare-user", "--uid", String(hostUid), "--gid", String(hostGid)]
+  return [
+    "-Umr",
+    "--",
+    "bash", "-c", SANDBOX_SPAWN_SCRIPT,
+    "_", // $0 placeholder (unused inside script)
+    overlay.lower, overlay.upper, overlay.work, overlay.merged, // $1..$4
+    "bwrap", ...uidDrop, ...bwrapArgs, "--", command, ...commandArgs, // $5+ → exec'd after shift
+  ]
 }

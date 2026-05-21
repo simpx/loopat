@@ -3,6 +3,19 @@ export type LoopMeta = {
   title: string
   createdAt: string
   createdBy: string
+  /** Active driver. Use `loop.driver ?? loop.createdBy` everywhere "who is
+   *  currently in charge" matters (filters, headers, button visibility).
+   *  Non-drivers are read-only — server enforces the same way as `archived`. */
+  driver?: string
+  /** Chronological log of driver assignments. First entry = creation
+   *  (driver = createdBy). Used by ChatInterface to splice "driving by X
+   *  since <ts>" markers into the agent chat timeline. */
+  driverHistory?: Array<{ driver: string; since: string }>
+  /** RFD ("Request For Drive") state. When set, current driver released
+   *  control: sandbox is torn down, and any authed user can claim via
+   *  POST /api/loops/:id/drive. */
+  rfdRequestedAt?: string
+  rfdRequestedBy?: string
   repo?: string
   branch?: string
   archived?: boolean
@@ -311,6 +324,42 @@ export async function setLoopPublic(id: string, isPublic: boolean): Promise<Loop
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ public: isPublic }),
   })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+/** Rename the loop. Server allows only meta.createdBy to patch. */
+export async function setLoopTitle(id: string, title: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+/** Current driver releases control. Sandbox + PTY are torn down server-side;
+ *  any authed user can then claim via takeDrive(). */
+export async function requestDrive(id: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}/request-drive`, { method: "POST" })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+/** Take over a loop in RFD state. Sandbox respawns lazily on next message
+ *  using the new driver's personal config. */
+export async function takeDrive(id: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}/drive`, { method: "POST" })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
+/** Spawn a distill child loop from `id`. Server seeds the child's workdir
+ *  with a snapshot of the source's conversation files plus a distill-kind
+ *  CLAUDE.md. Returns the new loop meta. Any authed user may call. */
+export async function distillLoop(id: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}/distill`, { method: "POST" })
   if (!r.ok) return null
   return (await r.json()) as LoopMeta
 }

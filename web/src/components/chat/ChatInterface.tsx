@@ -56,7 +56,7 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string } = {}) {
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
   const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
@@ -109,10 +109,13 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         active: true,
       };
     }
+    setLoadingMore(true);
     loadMoreMessages();
   }, [loadMoreMessages]);
 
-  const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadingMoreRef = useRef(false);
+  loadingMoreRef.current = loadingMore;
 
   // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
@@ -180,36 +183,47 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       }
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
       setShowHistoryButton(vp.scrollTop < 20 && hasHistoryRef.current);
-      setShowLoadMoreButton(vp.scrollTop < 20 && hasOlderRef.current);
+      // Auto-load when scrolled near top
+      if (vp.scrollTop < 40 && hasOlderRef.current && !loadingMoreRef.current) {
+        handleLoadMore();
+      }
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
 
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let suppressScroll = false;
     const scroll = () => {
       if (didInitialScroll.current && userScrolledUp) return;
+      // After a programmatic scroll, briefly suppress re-triggers to break
+      // the cycle: scrollTop change → content-visibility renders →
+      // layout shift → ResizeObserver → scroll → ...
+      if (suppressScroll) return;
+      if (!didInitialScroll.current && vp.scrollHeight <= vp.clientHeight + 10) return;
       const prev = vp.style.scrollBehavior;
       vp.style.scrollBehavior = "auto";
-      if (!didInitialScroll.current && vp.scrollHeight > vp.clientHeight + 10) {
-        vp.scrollTop = vp.scrollHeight;
+      vp.scrollTop = vp.scrollHeight;
+      vp.style.scrollBehavior = prev;
+      if (!didInitialScroll.current) {
         if (!loadingHistoryRef.current) {
           didInitialScroll.current = true;
         }
         userScrolledUp = false;
-      } else if (didInitialScroll.current && !loadingHistoryRef.current) {
-        vp.scrollTop = vp.scrollHeight;
       }
-      vp.style.scrollBehavior = prev;
+      // Suppress ResizeObserver callbacks for 120ms after a programmatic
+      // scroll to let content-visibility settle without re-triggering.
+      suppressScroll = true;
+      requestAnimationFrame(() => {
+        setTimeout(() => { suppressScroll = false; }, 120);
+      });
     };
     scroll();
     const ro = new ResizeObserver(() => {
       if (timer) return;
-      // During history loading content-visibility underestimates scrollHeight;
-      // skip re-snapping — the loadingHistory change effect does one final scroll.
       if (loadingHistoryRef.current) return;
+      if (suppressScroll) return;
       timer = setTimeout(() => { timer = null; scroll(); }, 80);
     });
     ro.observe(inner);
-    ro.observe(vp);
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);
@@ -261,6 +275,13 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     });
   }, [hasOlderMessages]);
 
+  // Reset loading spinner after messages render.
+  useEffect(() => {
+    if (!loadingMore) return;
+    const timer = setTimeout(() => setLoadingMore(false), 200);
+    return () => clearTimeout(timer);
+  }, [loadingMore, hasOlderMessages]);
+
   const questionEntries = questions.size > 0
     ? Array.from(questions.entries())
     : [];
@@ -297,16 +318,30 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
             </div>
           )}
 
-          {/* Load earlier messages — appears when render window is smaller than total aggregated messages */}
-          {showLoadMoreButton && (
-            <div className="flex justify-center pb-2">
-              <button
-                type="button"
-                onClick={handleLoadMore}
-                className="rounded-full border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
-              >
-                Load earlier messages
-              </button>
+          {/* Loading spinner — shown briefly while older messages render */}
+          {loadingMore && (
+            <div className="flex justify-center py-2">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-500" />
+            </div>
+          )}
+
+          {/* Driver handoff timeline. First entry is the creator at creation
+              time — drop it; subsequent entries are real handoffs and the
+              ones worth surfacing. Anchored at the top of the viewport so
+              users skimming the conversation see who's been driving and when
+              control changed hands. Timestamps stay explicit so handoffs can
+              be correlated with nearby messages. */}
+          {(driverHistory ?? []).length > 1 && (
+            <div className="flex flex-col gap-1 pb-2">
+              {(driverHistory ?? []).slice(1).map((h) => (
+                <div key={h.since} className="flex items-center gap-2 text-[11px] text-gray-500">
+                  <div className="flex-1 h-px bg-gray-200" />
+                  <span className="text-gray-600">
+                    <span className="text-amber-600">▸</span>{" "}driving by <span className="text-gray-900 font-medium">{h.driver}</span> since {new Date(h.since).toLocaleString()}
+                  </span>
+                  <div className="flex-1 h-px bg-gray-200" />
+                </div>
+              ))}
             </div>
           )}
 
@@ -322,6 +357,30 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
               }
             </ThreadPrimitive.Messages>
             <div ref={bottomRef} />
+
+            {/* Pending questions (AskUserQuestion tool) — inside scroll,
+                rendered as part of the message list so they don't cover history. */}
+            {questionEntries.length > 0 && (
+              <ErrorBoundary name="QuestionsPanel">
+                <div className="space-y-3 w-full pt-2">
+                  {questionEntries.map(([toolUseId, qs]) =>
+                    Array.isArray(qs) && qs.length > 0 ? (
+                      <div
+                        key={toolUseId}
+                        className="rounded-lg border border-violet-100 bg-violet-50/30 p-4 shadow-sm"
+                      >
+                        <AskUserQuestionRenderer
+                          questions={qs}
+                          toolUseId={toolUseId}
+                          onAnswers={sendAnswers}
+                          onDismiss={(id) => sendAnswers(id, {})}
+                        />
+                      </div>
+                    ) : null,
+                  )}
+                </div>
+              </ErrorBoundary>
+            )}
           </div>
         </div>
       </ThreadPrimitive.Viewport>
@@ -330,29 +389,6 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
           When thread is empty the footer fills the page and is centered. */}
       <div className={isEmpty ? "flex-1 flex items-center justify-center px-2 md:px-3 pb-3 md:pb-6" : "shrink-0 z-10 bg-gradient-to-t from-white via-white to-transparent px-2 md:px-3 pt-1 md:pt-2 pb-3 md:pb-6"}>
         <div className={isEmpty ? "w-full max-w-[36rem]" : ""}>
-        {/* Pending questions (AskUserQuestion tool) — fixed above input */}
-        {questionEntries.length > 0 && (
-          <ErrorBoundary name="QuestionsPanel">
-            <div className="mb-3 space-y-3 max-w-[44rem] mx-auto w-full">
-              {questionEntries.map(([toolUseId, qs]) =>
-                Array.isArray(qs) && qs.length > 0 ? (
-                  <div
-                    key={toolUseId}
-                    className="rounded-lg border border-violet-100 bg-violet-50/30 p-4 shadow-sm"
-                  >
-                    <AskUserQuestionRenderer
-                      questions={qs}
-                      toolUseId={toolUseId}
-                      onAnswers={sendAnswers}
-                      onDismiss={(id) => sendAnswers(id, {})}
-                    />
-                  </div>
-                ) : null,
-              )}
-            </div>
-          </ErrorBoundary>
-        )}
-
         {/* Empty-state info & settings — repo info + thinking depth */}
         {isEmpty && (
           <div className="mb-4 space-y-2 px-4">
@@ -418,6 +454,22 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
                 className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900 hover:bg-amber-100"
               >
                 Unarchive
+              </button>
+            )}
+          </div>
+        ) : rfdRequestedAt ? (
+          <div className="mx-3 md:mx-5 mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[12px] text-amber-800">
+            <span>✋</span>
+            <span className="flex-1">
+              Released for drive{rfdRequestedBy ? ` by ${rfdRequestedBy}` : ""} — no one can write until someone takes over.
+            </span>
+            {onTakeDrive && (
+              <button
+                type="button"
+                onClick={onTakeDrive}
+                className="rounded bg-amber-500 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-600"
+              >
+                Drive
               </button>
             )}
           </div>

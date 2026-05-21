@@ -5,12 +5,12 @@
 import { useEffect, useState, useMemo } from "react"
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand, FlaskConical } from "lucide-react"
 import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, getLoopSandbox, refreshLoopSandbox, type ContextMount, type LoopSandboxInfo, type LoopMeta, markLoopViewed } from "../api"
+import { getContext, getLoopSandbox, refreshLoopSandbox, distillLoop, type ContextMount, type LoopSandboxInfo, type LoopMeta, markLoopViewed } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { useLoopStatus } from "../useLoopStatus"
@@ -83,8 +83,9 @@ function LoopsList({ currentId }: { currentId: string }) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim()
     return ws.loops.filter((loop) => {
-      if (scope === "mine" && loop.createdBy !== userId) return false
-      if (scope === "rfd") return false
+      const effective = loop.driver ?? loop.createdBy
+      if (scope === "mine" && loop.createdBy !== userId && effective !== userId) return false
+      if (scope === "rfd" && !loop.rfdRequestedAt) return false
       if (q && !loop.title.toLowerCase().includes(q) && !loop.id.toLowerCase().includes(q)) return false
       return true
     })
@@ -184,6 +185,9 @@ function LoopsList({ currentId }: { currentId: string }) {
                 <div className="flex-1 min-w-0">
                   <div className="text-[13px] text-gray-900 truncate flex items-center gap-1">
                     {archived && <Archive size={10} className="text-gray-400 shrink-0" />}
+                    {loop.rfdRequestedAt && (
+                      <span className="shrink-0 text-[9px] px-1 rounded bg-amber-100 text-amber-800 font-medium tracking-wide">RFD</span>
+                    )}
                     <span className="truncate">{loop.title}</span>
                   </div>
                   {entry && (
@@ -193,7 +197,7 @@ function LoopsList({ currentId }: { currentId: string }) {
                   )}
                   <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
                     <span className="text-gray-400 font-mono text-[10px]">‹›</span>
-                    <span>{loop.createdBy}</span>
+                    <span>{loop.driver ?? loop.createdBy}</span>
                     <span>·</span>
                     <span className="font-mono">{loop.id.slice(0, 6)}</span>
                   </div>
@@ -429,7 +433,11 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 repo={meta.repo}
                 branch={meta.branch}
                 title={meta.title}
-                driver={meta.createdBy}
+                driver={meta.driver ?? meta.createdBy}
+                driverHistory={meta.driverHistory}
+                rfdRequestedAt={meta.rfdRequestedAt}
+                rfdRequestedBy={meta.rfdRequestedBy}
+                onTakeDrive={() => ws.takeDrive(meta.id)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -454,7 +462,11 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                   repo={meta.repo}
                   branch={meta.branch}
                   title={meta.title}
-                  driver={meta.createdBy}
+                  driver={meta.driver ?? meta.createdBy}
+                  driverHistory={meta.driverHistory}
+                  rfdRequestedAt={meta.rfdRequestedAt}
+                  rfdRequestedBy={meta.rfdRequestedBy}
+                  onTakeDrive={() => ws.takeDrive(meta.id)}
                 />
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
@@ -502,7 +514,11 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 repo={meta.repo}
                 branch={meta.branch}
                 title={meta.title}
-                driver={meta.createdBy}
+                driver={meta.driver ?? meta.createdBy}
+                driverHistory={meta.driverHistory}
+                rfdRequestedAt={meta.rfdRequestedAt}
+                rfdRequestedBy={meta.rfdRequestedBy}
+                onTakeDrive={() => ws.takeDrive(meta.id)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -554,7 +570,30 @@ function LoopHeader({
   onShareWork: () => void
 }) {
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
+  const ws = useWorkspace()
   const [collapsed, setCollapsed] = useState(isMobile)
+  const [distilling, setDistilling] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(meta.title)
+  const canEditTitle = ws.currentUser?.id === meta.createdBy
+  const onDistill = async () => {
+    if (distilling) return
+    setDistilling(true)
+    try {
+      const child = await distillLoop(meta.id)
+      if (child) navigate(`/loop/${child.id}`)
+    } finally {
+      setDistilling(false)
+    }
+  }
+  const saveTitle = async () => {
+    const next = titleDraft.trim()
+    if (!next || next === meta.title) { setEditingTitle(false); setTitleDraft(meta.title); return }
+    setEditingTitle(false)
+    const updated = await ws.setLoopTitle(meta.id, next)
+    if (!updated) setTitleDraft(meta.title)
+  }
   const modeBtn = (label: string, m: RightMode) => (
     <button
       key={m}
@@ -579,10 +618,40 @@ function LoopHeader({
         >
           <ChevronDown size={14} className={"transition-transform " + (collapsed ? "-rotate-90" : "")} />
         </button>
-        <span className="text-[14px] md:text-[15px] font-medium text-gray-900">{meta.title}</span>
+        {editingTitle ? (
+          <input
+            type="text"
+            value={titleDraft}
+            autoFocus
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); saveTitle() }
+              else if (e.key === "Escape") { e.preventDefault(); setEditingTitle(false); setTitleDraft(meta.title) }
+            }}
+            onBlur={saveTitle}
+            maxLength={200}
+            className="text-[14px] md:text-[15px] font-medium text-gray-900 bg-white border border-blue-400 rounded px-1 py-0 outline-none min-w-[120px]"
+          />
+        ) : (
+          <span
+            className={"text-[14px] md:text-[15px] font-medium text-gray-900 " + (canEditTitle ? "cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1" : "")}
+            onClick={() => { if (canEditTitle) { setTitleDraft(meta.title); setEditingTitle(true) } }}
+            title={canEditTitle ? "click to rename" : undefined}
+          >
+            {meta.title}
+          </span>
+        )}
         <span className="text-xs text-gray-500">
-          driver: <span className="text-gray-900">{meta.createdBy}</span>
+          driver: <span className="text-gray-900">{meta.driver ?? meta.createdBy}</span>
         </span>
+        {meta.rfdRequestedAt && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200 font-medium tracking-wide"
+            title={`released for drive by ${meta.rfdRequestedBy ?? "?"} at ${meta.rfdRequestedAt}`}
+          >
+            RFD
+          </span>
+        )}
         {/* Only surface WS state when something's wrong — green-when-fine is noise. */}
         {!connected && (
           <span className={"text-[11px] " + (reconnecting ? "text-amber-600" : "text-red-600")}>
@@ -600,6 +669,16 @@ function LoopHeader({
         )}
         <div className="flex-1" />
         <button
+          type="button"
+          onClick={onDistill}
+          disabled={distilling}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border bg-white text-violet-700 border-violet-300 hover:bg-violet-50 disabled:opacity-50"
+          title="Spawn a child loop seeded with this loop's conversation, for sedimenting reusable insights into knowledge/"
+        >
+          <FlaskConical size={11} />
+          {distilling ? "Distilling…" : "Distill"}
+        </button>
+        <button
           onClick={onShareWork}
           className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${meta.shareEnabled ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"}`}
           title="Share workspace artifact (static files or port forward)"
@@ -607,6 +686,7 @@ function LoopHeader({
           <Globe size={11} />
           Share Artifact
         </button>
+        <DriveToggle meta={meta} />
         <ShareToggle meta={meta} />
       </div>
 
@@ -771,6 +851,56 @@ function ShareToggle({ meta }: { meta: LoopMeta }) {
         {isPublic ? "shared" : "share"}
       </button>
     </div>
+  )
+}
+
+// "Request For Drive" / "Drive" — driver handoff. Driver releases the loop
+// for grabs (sandbox is torn down server-side, history kept); any authed
+// user can then claim it. The new driver's personal config (apiKey, vault)
+// takes over on the next user message.
+function DriveToggle({ meta }: { meta: LoopMeta }) {
+  const ws = useWorkspace()
+  const [busy, setBusy] = useState(false)
+  if (!ws.currentUser) return null
+  const effectiveDriver = meta.driver ?? meta.createdBy
+  const isDriver = ws.currentUser.id === effectiveDriver
+  const isRfd = !!meta.rfdRequestedAt
+
+  if (isRfd) {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          try { await ws.takeDrive(meta.id) } finally { setBusy(false) }
+        }}
+        title={`released for drive by ${meta.rfdRequestedBy ?? "?"} — click to take over`}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border bg-amber-500 text-white border-amber-600 hover:bg-amber-600 disabled:opacity-50"
+      >
+        <Hand size={11} />
+        Drive
+      </button>
+    )
+  }
+
+  if (!isDriver) return null
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        if (!window.confirm("Request For Drive: this will tear down the sandbox and release the loop so anyone else can take over. Continue?")) return
+        setBusy(true)
+        try { await ws.requestDrive(meta.id) } finally { setBusy(false) }
+      }}
+      title="Release this loop so someone else can drive it"
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border bg-white text-amber-700 border-amber-300 hover:bg-amber-50 disabled:opacity-50"
+    >
+      <Hand size={11} />
+      Request For Drive
+    </button>
   )
 }
 

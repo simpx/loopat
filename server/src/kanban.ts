@@ -134,7 +134,11 @@ function parseColumnFile(filename: string, body: string): KanbanColumn {
         if (k === "assignee") assignee = v || undefined
         else if (k === "priority") priority = v || undefined
         else if (k === "due") due = v || undefined
-        else if (k === "loop") loopId = v || undefined
+        else if (k === "loop") {
+          // accept either "loop: <id>" or "loop: <label> [<id>]"
+          const bm = v.match(/\[([^\]]+)\]\s*$/)
+          loopId = (bm ? bm[1] : v).trim() || undefined
+        }
         j++
         continue
       }

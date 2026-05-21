@@ -4,6 +4,9 @@ import {
   createLoop as apiCreateLoop,
   setLoopArchived as apiSetLoopArchived,
   setLoopPublic as apiSetLoopPublic,
+  setLoopTitle as apiSetLoopTitle,
+  requestDrive as apiRequestDrive,
+  takeDrive as apiTakeDrive,
   getMe,
   login as apiLogin,
   register as apiRegister,
@@ -23,6 +26,9 @@ export type WorkspaceState = {
   createLoop: (opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean }) => Promise<LoopMeta>
   setLoopArchived: (id: string, archived: boolean) => Promise<void>
   setLoopPublic: (id: string, isPublic: boolean) => Promise<void>
+  setLoopTitle: (id: string, title: string) => Promise<LoopMeta | null>
+  requestDrive: (id: string) => Promise<void>
+  takeDrive: (id: string) => Promise<void>
   newLoopDialogOpen: boolean
   newLoopDialogTitle: string
   kanbanCreateCtx: KanbanCreateCtx | null
@@ -98,6 +104,25 @@ export function useWorkspaceState(): WorkspaceState {
     setLoops((prev) => prev.map((l) => (l.id === id ? updated : l)))
   }, [])
 
+  const setLoopTitle = useCallback(async (id: string, title: string) => {
+    const updated = await apiSetLoopTitle(id, title)
+    if (!updated) return null
+    setLoops((prev) => prev.map((l) => (l.id === id ? updated : l)))
+    return updated
+  }, [])
+
+  const requestDrive = useCallback(async (id: string) => {
+    const updated = await apiRequestDrive(id)
+    if (!updated) return
+    setLoops((prev) => prev.map((l) => (l.id === id ? updated : l)))
+  }, [])
+
+  const takeDrive = useCallback(async (id: string) => {
+    const updated = await apiTakeDrive(id)
+    if (!updated) return
+    setLoops((prev) => prev.map((l) => (l.id === id ? updated : l)))
+  }, [])
+
   const login = useCallback(async (username: string, password: string) => {
     const r = await apiLogin(username, password)
     if (r.user) setCurrentUser(r.user)
@@ -145,6 +170,9 @@ export function useWorkspaceState(): WorkspaceState {
     createLoop,
     setLoopArchived,
     setLoopPublic,
+    setLoopTitle,
+    requestDrive,
+    takeDrive,
     newLoopDialogOpen,
     newLoopDialogTitle,
     kanbanCreateCtx,

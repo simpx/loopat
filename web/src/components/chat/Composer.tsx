@@ -31,8 +31,7 @@ export default function Composer() {
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, contextUsage, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, estimatedTokens } = useLoopRuntimeExtra();
-  const usedTokens = estimatedTokens;
+  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, streamingTokenCount, suppressSlashRef } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
@@ -79,6 +78,32 @@ export default function Composer() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ignore Enter during IME composition (e.g. Chinese input method
+    // confirmation) to avoid prematurely sending unfinished text.
+    if ((e.nativeEvent as any).isComposing || e.keyCode === 229) {
+      return;
+    }
+    // Ctrl+C clears the input (macOS / Linux only; conflicts with copy on Windows).
+    if (
+      e.key === "c" &&
+      e.ctrlKey &&
+      !e.altKey &&
+      !e.metaKey &&
+      !e.shiftKey &&
+      !/windows/i.test(navigator.userAgent)
+    ) {
+      const ta = e.target as HTMLTextAreaElement
+      if (ta.selectionStart === ta.selectionEnd && textRef.current.trim().length > 0) {
+        e.preventDefault()
+        aui.composer().setText("")
+        return
+      }
+    }
+    // Reset slash-suppression on any printable keystroke so the / menu
+    // reappears once the user actually starts typing again.
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+      suppressSlashRef.current = false;
+    }
     if (e.key === "Enter" && !e.shiftKey && isRunning) {
       e.preventDefault();
       handleEnqueue();
@@ -87,6 +112,7 @@ export default function Composer() {
     if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       if (history.length === 0) return;
       e.preventDefault();
+      suppressSlashRef.current = true;
       if (historyIdx === -1) {
         pendingDraftRef.current = textRef.current;
         setHistoryIdx(history.length - 1);
@@ -101,6 +127,7 @@ export default function Composer() {
     if (e.key === "ArrowDown" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       if (historyIdx === -1) return;
       e.preventDefault();
+      suppressSlashRef.current = true;
       if (historyIdx < history.length - 1) {
         const nextIdx = historyIdx + 1;
         setHistoryIdx(nextIdx);
@@ -116,7 +143,7 @@ export default function Composer() {
   return (
     <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
       {/* Claude Status bar */}
-      <ClaudeStatus isLoading={isRunning} tokenCount={usedTokens} />
+      <ClaudeStatus isLoading={isRunning} tokenCount={streamingTokenCount} />
 
       {/* Queue: inline items with per-item remove */}
       {queue.length > 0 && (
@@ -161,9 +188,8 @@ export default function Composer() {
           <div className="flex items-center justify-between gap-0.5 border-t border-gray-100 pt-2 overflow-hidden">
             <div className="flex items-center gap-0.5 min-w-0">
               <TokenUsagePie
-                used={Math.min(usedTokens, contextWindow)}
+                used={Math.min(contextTokens, contextWindow)}
                 total={contextWindow}
-                contextUsage={contextUsage}
               />
 
               <ModelSelector />

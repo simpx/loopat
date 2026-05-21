@@ -1,6 +1,55 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 import type { PermissionMode } from "@/components/chat/PlanModeToggle"
+import { getVersion, getBuildInfo } from "@/api"
+
+// ── Slash-commands cache ──
+// Persists the last known slash commands per loopId so they're available
+// immediately on reconnect, before CC's system/init message arrives.
+
+type SlashCommandInfo = { name: string; description: string }
+
+function normalizeSlashCommands(cmds: unknown[]): SlashCommandInfo[] {
+  const result: SlashCommandInfo[] = []
+  for (const c of cmds) {
+    if (typeof c === "string") {
+      result.push({ name: c, description: "" })
+    } else if (typeof c === "object" && c !== null && "name" in c) {
+      const obj = c as Record<string, unknown>
+      result.push({
+        name: String(obj.name),
+        description: typeof obj.description === "string" ? obj.description : "",
+      })
+    }
+  }
+  return result
+}
+
+const SLASH_CACHE_KEY = "loopat:slash-commands"
+
+function loadCachedSlashCommands(loopId: string): SlashCommandInfo[] {
+  try {
+    const raw = localStorage.getItem(SLASH_CACHE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    const cache: Record<string, unknown[]> = typeof parsed === "object" && parsed !== null ? parsed : {}
+    const entry = cache[loopId]
+    return Array.isArray(entry) ? normalizeSlashCommands(entry) : []
+  } catch {
+    return []
+  }
+}
+
+function saveCachedSlashCommands(loopId: string, cmds: SlashCommandInfo[]) {
+  try {
+    const raw = localStorage.getItem(SLASH_CACHE_KEY)
+    const cache: Record<string, SlashCommandInfo[]> = raw ? JSON.parse(raw) : {}
+    cache[loopId] = cmds
+    localStorage.setItem(SLASH_CACHE_KEY, JSON.stringify(cache))
+  } catch {
+    // ignore storage errors
+  }
+}
 
 type RawMsg = {
   id: string
@@ -308,13 +357,23 @@ export interface LoopRuntimeExtra {
    *  "clear"), user-tier skills ("loop", "schedule"), and plugin commands
    *  ("loopat:onboarding"). Empty until the first init message arrives;
    *  may include duplicates if CC ever reports them — caller should dedup. */
-  availableSlashCommands: string[]
+  availableSlashCommands: SlashCommandInfo[]
+  /** Set by Composer before navigating history with ArrowUp/ArrowDown.
+   *  SlashCommand reads it to suppress the dropdown so it doesn't pop up
+   *  when the history entry happens to start with "/". */
+  suppressSlashRef: React.MutableRefObject<boolean>
   /** True when aggregated messages exceed the render window. */
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
   loadMoreMessages: () => void
   /** Token estimate based on the full aggregated conversation (not just visible window). */
   estimatedTokens: number
+  /** Current-turn streaming tokens (resets each turn). */
+  streamingTokenCount: number
+  /** Precise context-window token count (last result input+output). */
+  contextTokens: number
+  /** Precise cumulative tokens from model turns + agent tasks + live streaming. */
+  cumulativeTokens: number
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -349,9 +408,13 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   showHistory: false,
   toggleShowHistory: () => {},
   availableSlashCommands: [],
+  suppressSlashRef: { current: false },
   hasOlderMessages: false,
   loadMoreMessages: () => {},
   estimatedTokens: 0,
+  streamingTokenCount: 0,
+  contextTokens: 0,
+  cumulativeTokens: 0,
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -380,7 +443,21 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
   const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
-  const [availableSlashCommands, setAvailableSlashCommands] = useState<string[]>([])
+  // Start with cached commands (or empty). When CC's real system/init
+  // arrives, the list is replaced with the actual reported commands.
+  // On first-ever open (no cache), seed with known CC built-in commands
+  // so the / menu is useful immediately.
+  const [availableSlashCommands, setAvailableSlashCommands] = useState<SlashCommandInfo[]>(
+    () => {
+      if (!loopId) return []
+      const cached = loadCachedSlashCommands(loopId)
+      if (cached.length > 0) return cached
+      // Default CC built-in commands — always available once CC starts.
+      // These get replaced by the real list when system/init arrives.
+      return ["help", "model", "compress", "review", "init", "foxtrot"].map(name => ({ name, description: "" }))
+    },
+  )
+  const suppressSlashRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -397,6 +474,25 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   // Task state (task_started / task_updated / task_progress / task_notification) keyed by task_id
   const taskRef = useRef<Map<string, TaskState>>(new Map())
   const [taskVersion, setTaskVersion] = useState(0)
+  // Accumulated token usage from result messages (main model turns).
+  // Reset on reconnect; incremented in dispatchMsg.
+  const tokenUsageRef = useRef(0)
+  const [tokenUsageVersion, setTokenUsageVersion] = useState(0)
+  // Live token tracking from stream events during the current model turn.
+  // input: from message_start, output: estimated from content_block_delta chars
+  // or precise from message_delta usage. Reset when result arrives.
+  const streamingInputRef = useRef(0)
+  const streamingOutputCharsRef = useRef(0)
+  const streamingTokensRef = useRef(0)
+  const [streamingTokensVersion, setStreamingTokensVersion] = useState(0)
+  // Precise context-window size snapshot from the last main-model result
+  // (input_tokens + output_tokens). Reset on clear-boundary / reconnect.
+  // Output-only counter for ClaudeStatus display. Resets on result, grows
+  // from 0 during streaming (not reset on message_start).
+  const streamingOutputRef = useRef(0)
+  const [streamingOutputVersion, setStreamingOutputVersion] = useState(0)
+  const contextInputRef = useRef(0)
+  const [contextInputVersion, setContextInputVersion] = useState(0)
 
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
@@ -591,17 +687,46 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     setShowHistory((v) => !v)
   }, [])
 
+  // Context-window estimate from visible messages (for pie chart fallback).
   const estimatedTokens = useMemo(() => {
     let chars = 0
     for (const m of aggregated) {
       chars += JSON.stringify(m).length
     }
+    for (const [, children] of childMessagesByAgentId) {
+      for (const m of children) {
+        chars += JSON.stringify(m).length
+      }
+    }
     return Math.round(chars / 3.5)
-  }, [aggregated])
+  }, [aggregated, childMessagesByAgentId])
+
+  // Current-turn output tokens only. Grows from 0 during streaming,
+  // resets on result — no reset on message_start. For ClaudeStatus.
+  const streamingTokenCount = useMemo(() => streamingOutputRef.current, [streamingOutputVersion])
+
+  // Precise context-window token count (for pie chart). Uses last result's
+  // input+output as the snapshot; during streaming prefers the live estimate.
+  const contextTokens = useMemo(() => {
+    if (streamingTokensRef.current > 0) return streamingTokensRef.current
+    return contextInputRef.current
+  }, [contextInputVersion, streamingTokensVersion])
+
+  // Cumulative precise count from result + task + streaming events (for status bar).
+  const cumulativeTokens = useMemo(() => {
+    let total = tokenUsageRef.current + streamingTokensRef.current
+    for (const [, task] of taskRef.current) {
+      const u = task.usage
+      if (u && typeof u.total_tokens === "number") {
+        total += u.total_tokens
+      }
+    }
+    return total
+  }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens],
   )
 
   useEffect(() => {
@@ -621,6 +746,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setToolProgressVersion((v) => v + 1)
       taskRef.current = new Map()
       setTaskVersion((v) => v + 1)
+      tokenUsageRef.current = 0
+      setTokenUsageVersion((v) => v + 1)
+      streamingInputRef.current = 0
+      streamingOutputCharsRef.current = 0
+      streamingTokensRef.current = 0
+      setStreamingTokensVersion((v) => v + 1)
+      streamingOutputRef.current = 0
+      setStreamingOutputVersion((v) => v + 1)
+      contextInputRef.current = 0
+      setContextInputVersion((v) => v + 1)
       setQuestionsObj({})
       setPermissionPrompt(null)
       setContextUsage(null)
@@ -639,6 +774,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           clearTimeout(reconnectTimerRef.current)
           reconnectTimerRef.current = null
         }
+        // Check if server version differs from the frontend build
+        getVersion().then((v) => {
+          const build = getBuildInfo()
+          if (v.commit !== "unknown" && build.commit !== "unknown" && v.commit !== build.commit) {
+            window.dispatchEvent(new CustomEvent("loopat:version-mismatch", { detail: { commit: v.commit } }))
+          }
+        }).catch(() => {})
       }
       ws.onclose = () => {
         setConnected(false)
@@ -787,12 +929,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           // "loopat:onboarding").
           if (subtype === "init") {
             if (!loadingHistoryRef.current) setRunning(true)
-            const cmds = Array.isArray((m as any).slash_commands)
-              ? ((m as any).slash_commands as unknown[]).filter(
-                  (c): c is string => typeof c === "string",
-                )
-              : []
-            if (cmds.length > 0) setAvailableSlashCommands(cmds)
+            const raw = (m as any).slash_commands
+            const cmds = Array.isArray(raw) ? normalizeSlashCommands(raw) : []
+            if (cmds.length > 0) {
+              setAvailableSlashCommands(cmds)
+              saveCachedSlashCommands(loopId, cmds)
+            }
             return
           }
           return
@@ -800,6 +942,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
 
         if (m?.type === "result") {
           if (!loadingHistoryRef.current) setRunning(false)
+          // Only accumulate main-model results; agent tokens are tracked via
+          // task_notification messages and counted from taskRef.
+          if (!m.parent_tool_use_id) {
+            const u = m.usage
+            if (u && typeof u.input_tokens === "number" && typeof u.output_tokens === "number") {
+              tokenUsageRef.current += u.input_tokens + u.output_tokens
+              setTokenUsageVersion((v) => v + 1)
+              // Snapshot the precise context-window size after this turn.
+              contextInputRef.current = u.input_tokens + u.output_tokens
+              setContextInputVersion((v) => v + 1)
+            }
+            // Reset live streaming counters — the turn is complete.
+            streamingInputRef.current = 0
+            streamingTokensRef.current = 0
+            setStreamingTokensVersion((v) => v + 1)
+          }
           return
         }
 
@@ -851,6 +1009,41 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           } catch {}
         } else if (m?.type === "stream_event") {
           try { handleStreamEvent(m, setRaw) } catch {}
+          // Only track main-model streams; agent stream events have
+          // parent_tool_use_id and would overwrite the main counters.
+          if (m.parent_tool_use_id) return
+          // Track live token usage from streaming events.
+          // message_delta only fires at stream end, so we estimate from
+          // content_block_delta text/thinking growth for real-time updates.
+          const ev = m?.event
+          if (ev?.type === "message_start") {
+            streamingInputRef.current = ev?.message?.usage?.input_tokens ?? 0
+            streamingOutputCharsRef.current = 0
+            streamingTokensRef.current = streamingInputRef.current
+            setStreamingTokensVersion((v) => v + 1)
+          } else if (ev?.type === "message_delta") {
+            const u = ev?.usage
+            if (u && typeof u.output_tokens === "number") {
+              streamingTokensRef.current = streamingInputRef.current + u.output_tokens
+              setStreamingTokensVersion((v) => v + 1)
+              streamingOutputRef.current = u.output_tokens
+              setStreamingOutputVersion((v) => v + 1)
+            }
+          } else if (ev?.type === "content_block_delta") {
+            const d = ev?.delta
+            if (d?.type === "text_delta" && typeof d.text === "string") {
+              streamingOutputCharsRef.current += d.text.length
+            } else if (d?.type === "thinking_delta" && typeof d.thinking === "string") {
+              streamingOutputCharsRef.current += d.thinking.length
+            } else if (d?.type === "input_json_delta" && typeof d.partial_json === "string") {
+              streamingOutputCharsRef.current += d.partial_json.length
+            }
+            const estimated = Math.round(streamingOutputCharsRef.current / 3.5)
+            streamingTokensRef.current = streamingInputRef.current + estimated
+            setStreamingTokensVersion((v) => v + 1)
+            streamingOutputRef.current = estimated
+            setStreamingOutputVersion((v) => v + 1)
+          }
         } else if (m?.type === "error") {
           setRaw((prev) => [
             ...prev,
@@ -858,6 +1051,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           ])
           if (!loadingHistoryRef.current) setRunning(false)
         } else if (m?.type === "clear-boundary") {
+          // Context dropped — reset the context-window snapshot.
+          contextInputRef.current = 0
+          setContextInputVersion((v) => v + 1)
           // Server signals: SDK context dropped at this point. We push a
           // synthetic assistant message whose only content part is a custom
           // `clear-divider`; AssistantMessage detects that part type and
@@ -884,6 +1080,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         // This avoids partial/intermediate state during loading.
         if (loadingHistoryRef.current) {
           if (m?.type === "history_end") {
+            // Seed slash commands from server (best-effort before CC starts).
+            const raw = (m as any).slash_commands
+            if (Array.isArray(raw) && raw.length > 0) {
+              const seedCmds = normalizeSlashCommands(raw)
+              setAvailableSlashCommands(seedCmds)
+              saveCachedSlashCommands(loopId, seedCmds)
+            }
             for (const bufMsg of replayBufRef.current) {
               dispatchMsg(bufMsg)
             }
@@ -897,6 +1100,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
         }
         // Live messages: process immediately
         if (m?.type === "history_end") {
+          const raw = (m as any).slash_commands
+          if (Array.isArray(raw) && raw.length > 0) {
+            const seedCmds = normalizeSlashCommands(raw)
+            setAvailableSlashCommands(seedCmds)
+            saveCachedSlashCommands(loopId, seedCmds)
+          }
           loadingHistoryRef.current = false
           setLoadingHistory(false)
           setRunning(false)
