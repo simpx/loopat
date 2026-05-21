@@ -2,6 +2,9 @@ mod vm;
 mod commands;
 
 use std::sync::{Arc, Mutex};
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
@@ -156,6 +159,10 @@ pub async fn start_vm_and_navigate(app: tauri::AppHandle) {
     let server_url_slot = state.server_url.clone();
     let app2 = app.clone();
 
+    // server.log path on the host (written by the VM via virtiofs, or by a
+    // direct macOS server). Compute before loopat_home is moved into start().
+    let server_log_path = loopat_home.join("server.log");
+
     {
         let mut vm = state.vm.lock().unwrap();
         if let Err(e) = vm.start(&resources_dir, data_dir, loopat_home) {
@@ -166,20 +173,29 @@ pub async fn start_vm_and_navigate(app: tauri::AppHandle) {
         }
     }
 
-    // ── Step 3: Poll console log until ready signal or timeout ────────────────
+    // ── Step 3: Poll console log + server log until ready signal or timeout ──
+    let mut server_log_offset: u64 = 0;
+
     let start_time = std::time::Instant::now();
     const TIMEOUT_SECS: u64 = 120;
 
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-        let new_lines: Vec<String> = {
+        // Drain VM serial console logs
+        let vm_lines: Vec<String> = {
             let mut vm = state.vm.lock().unwrap();
             vm.drain_new_logs()
         };
 
+        // Drain server.log (shared via virtiofs, falls back to local file
+        // when running the server directly on macOS without a VM).
+        let server_lines = drain_file(&server_log_path, &mut server_log_offset);
+
+        let new_lines: Vec<_> = vm_lines.iter().chain(server_lines.iter()).cloned().collect();
+
         for line in &new_lines {
-            log::debug!("[vm] {line}");
+            eprintln!("[vm-out] {line}");
             let _ = app2.emit("vm-log", line.clone());
         }
 
@@ -197,12 +213,54 @@ pub async fn start_vm_and_navigate(app: tauri::AppHandle) {
             if let Some(url) = parse_server_ready(line) {
                 log::info!("VM server ready at {url}");
                 *server_url_slot.lock().unwrap() = Some(url.clone());
-                let _ = app2.emit("vm-status", serde_json::json!({ "status": "ready", "url": url }));
+                let _ = app2.emit("vm-status", serde_json::json!({ "status": "connecting", "url": url, "message": "Waiting for server to respond…" }));
 
-                if let Some(window) = app2.get_webview_window("main") {
-                    if let Ok(parsed) = url::Url::parse(&url) {
-                        let _ = window.navigate(parsed);
+                // ── Poll /api/health until the server is reachable ─────────
+                // LOOPAT_SERVER_READY is emitted before the server starts, so
+                // we must wait for it to bind and serve before navigating.
+                let health_url = format!("{}/api/health", url.trim_end_matches('/'));
+                let poll_start = std::time::Instant::now();
+                const POLL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+                let mut connected = false;
+
+                while poll_start.elapsed() < POLL_TIMEOUT {
+                    if let Ok(parsed) = url::Url::parse(&health_url) {
+                        let host = parsed.host_str().unwrap_or("localhost");
+                        let port = parsed.port().unwrap_or(80);
+                        let addr = format!("{host}:{port}");
+
+                        if let Ok(mut stream) = tokio::net::TcpStream::connect(&addr).await {
+                            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                            let req = format!(
+                                "GET /api/health HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+                            );
+                            if stream.write_all(req.as_bytes()).await.is_ok() {
+                                let mut buf = [0; 1024];
+                                if stream.read(&mut buf).await.is_ok() {
+                                    let resp = String::from_utf8_lossy(&buf[..]);
+                                    if resp.contains("200 OK") {
+                                        connected = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                     }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+
+                if connected {
+                    log::info!("Server health check passed, navigating to {url}");
+                    let _ = app2.emit("vm-status", serde_json::json!({ "status": "ready", "url": url }));
+                    if let Some(window) = app2.get_webview_window("main") {
+                        if let Ok(parsed) = url::Url::parse(&url) {
+                            let _ = window.navigate(parsed);
+                        }
+                    }
+                } else {
+                    let msg = format!("Server at {url} did not become reachable within 30s");
+                    log::error!("{msg}");
+                    let _ = app2.emit("vm-status", serde_json::json!({ "status": "error", "message": msg }));
                 }
                 return;
             }
@@ -228,6 +286,26 @@ pub async fn start_vm_and_navigate(app: tauri::AppHandle) {
             return;
         }
     }
+}
+
+/// Read new lines from a file incrementally (seek to last offset).
+fn drain_file(path: &PathBuf, offset: &mut u64) -> Vec<String> {
+    let Ok(file) = fs::File::open(path) else { return vec![] };
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if file_len <= *offset { return vec![] }
+
+    let mut reader = BufReader::new(file);
+    use std::io::Seek;
+    if reader.seek(std::io::SeekFrom::Start(*offset)).is_err() { return vec![] }
+
+    let mut lines = vec![];
+    for line in reader.lines() {
+        match line {
+            Ok(l) => { *offset += l.len() as u64 + 1; lines.push(l); }
+            Err(_) => break,
+        }
+    }
+    lines
 }
 
 /// Parse "LOOPAT_SERVER_READY=http://..." from VM console output.

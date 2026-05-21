@@ -237,15 +237,13 @@ fn prepare_data_dir(resources_dir: &Path) -> Result<PathBuf, String> {
             )
         })?;
 
-    // If rootfs.img exists directly (development build), use resources in place
-    if src_dir.join("rootfs.img").exists() {
-        return Ok(src_dir);
-    }
-
-    // Copy / decompress into app data directory
+    // Copy / decompress into app data directory (NEVER return src_dir — the
+    // built .app bundle's Resources/ is read-only, so VZ would fail opening
+    // rootfs.img with readOnly:NO).
     let kernel_dst = data_dir.join("vmlinuz");
     let initrd_dst = data_dir.join("initrd");
     let rootfs_dst = data_dir.join("rootfs.img");
+    let rootfs_src = src_dir.join("rootfs.img");
     let rootfs_gz  = src_dir.join("rootfs.img.gz");
 
     // Always refresh kernel and initrd — they are small and cheap to copy.
@@ -254,18 +252,25 @@ fn prepare_data_dir(resources_dir: &Path) -> Result<PathBuf, String> {
     fs::copy(&src_dir.join("initrd"), &initrd_dst)
         .map_err(|e| format!("Failed to copy initrd: {e}"))?;
 
-    // Decompress rootfs only when needed: either it doesn't exist yet, or the
-    // bundled rootfs.img.gz is newer than the cached rootfs.img (i.e. app was updated).
-    let needs_decompress = if !rootfs_dst.exists() {
+    // Determine if rootfs needs to be copied / decompressed
+    let needs_refresh = if !rootfs_dst.exists() {
         true
-    } else if let (Ok(src_meta), Ok(dst_meta)) = (rootfs_gz.metadata(), rootfs_dst.metadata()) {
-        src_meta.modified().ok() > dst_meta.modified().ok()
+    } else if rootfs_src.exists() {
+        // Development build with uncompressed rootfs.img — copy if newer
+        src_modified(&rootfs_src) > src_modified(&rootfs_dst)
+    } else if rootfs_gz.exists() {
+        // Bundled .app — decompress if gz is newer than cached img
+        src_modified(&rootfs_gz) > src_modified(&rootfs_dst)
     } else {
         false
     };
 
-    if needs_decompress {
-        if rootfs_gz.exists() {
+    if needs_refresh {
+        if rootfs_src.exists() {
+            log::info!("Copying rootfs (development build)…");
+            fs::copy(&rootfs_src, &rootfs_dst)
+                .map_err(|e| format!("Failed to copy rootfs: {e}"))?;
+        } else if rootfs_gz.exists() {
             log::info!("Decompressing rootfs (new or updated bundle)…");
             decompress_gzip(&rootfs_gz, &rootfs_dst)
                 .map_err(|e| format!("Failed to decompress rootfs: {e}"))?;
@@ -275,9 +280,21 @@ fn prepare_data_dir(resources_dir: &Path) -> Result<PathBuf, String> {
                 src_dir.display()
             ));
         }
+        // Sanity check: rootfs must be > 100 MB or something went wrong
+        let size = rootfs_dst.metadata().map(|m| m.len()).unwrap_or(0);
+        if size < 100 * 1024 * 1024 {
+            return Err(format!(
+                "rootfs.img is suspiciously small ({} bytes) — possible corrupt decompression",
+                size
+            ));
+        }
     }
 
     Ok(data_dir)
+}
+
+fn src_modified(p: &Path) -> std::time::SystemTime {
+    p.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH)
 }
 
 /// Decompress a gzip file using the system `gunzip`.

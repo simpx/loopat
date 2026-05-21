@@ -130,6 +130,10 @@ docker run --privileged --rm \
 ROOTFS_IMG="$OUTPUT_DIR/rootfs.img"
 echo "  ✓ Rootfs image: $(ls -lh "$ROOTFS_IMG" | awk '{print $5}')"
 
+# Remove any stale rootfs.img.gz from a previous compressed build so the
+# script always produces a clean output directory.
+rm -f "${ROOTFS_IMG}.gz"
+
 # ── Step 4: Compress ─────────────────────────────────────────────────────────
 if [[ "${1:-}" != "--no-compress" ]]; then
   echo "▶ Step 4/4 — Compressing rootfs (gzip)…"
@@ -137,6 +141,9 @@ if [[ "${1:-}" != "--no-compress" ]]; then
   echo "  ✓ Compressed: $(ls -lh "${ROOTFS_IMG}.gz" | awk '{print $5}')"
 else
   echo "▶ Step 4/4 — Skipping compression (--no-compress)"
+  # Warn if rootfs.img will end up in the Tauri bundle
+  echo "  ⚠  rootfs.img left uncompressed — it will be bundled into the .app"
+  echo "     making it very large. Run without --no-compress before 'cargo tauri build'."
 fi
 
 echo ""

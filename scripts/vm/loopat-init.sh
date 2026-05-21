@@ -20,6 +20,10 @@ mount -t tmpfs   tmpfs    /tmp               2>/dev/null || true
 [ -e /dev/stdout ] || ln -sf /proc/self/fd/1 /dev/stdout
 [ -e /dev/stderr ] || ln -sf /proc/self/fd/2 /dev/stderr
 
+# Set hostname + /etc/hosts so sudo doesn't warn "unable to resolve host"
+hostname loopat 2>/dev/null || true
+echo "127.0.0.1 localhost loopat" > /etc/hosts 2>/dev/null || true
+
 echo "[loopat-init] pseudo-filesystems ready"
 
 # 2. Networking
@@ -79,12 +83,15 @@ export HOST=0.0.0.0
 export LOOPAT_SERVE_HOST=0.0.0.0
 export PATH=/usr/local/bin:/usr/bin:/bin
 export HOME=/home/loopat
+export SERVER_LOG=/home/loopat/.loopat/server.log
 
 while true; do
   echo "[loopat-init] starting server ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
-  su -s /bin/bash loopat -c \
-    "cd /opt/loopat && exec bun run server/src/index.ts" \
-    2>&1 || true
+  # sudo clears the environment by default, so export vars inside the shell
+  # command to ensure HOST/LOOPAT_HOME reach the bun process.
+  sudo -u loopat bash -c \
+    "export HOST=0.0.0.0 LOOPAT_HOME=${LOOPAT_HOME} LOOPAT_SERVE_HOST=0.0.0.0 HOME=${HOME} PATH=${PATH} && cd /opt/loopat && exec bun run server/src/index.ts 2>&1" \
+    2>&1 | tee "$SERVER_LOG" || true
   echo "[loopat-init] server exited - restarting in 3s"
   sleep 3
 done
