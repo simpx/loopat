@@ -105,6 +105,17 @@ export async function listSandboxes(): Promise<SandboxEntry[]> {
   return entries
 }
 
+/**
+ * Pick a default sandbox for programmatic loop spawns (distill, kanban,
+ * chat-thread). When exactly one sandbox exists, there's no real choice —
+ * use it. With 0 or 2+, return undefined (caller falls back to host PATH).
+ * Interactive flows do their own picking in the UI.
+ */
+export async function pickDefaultSandbox(): Promise<string | undefined> {
+  const xs = await listSandboxes()
+  return xs.length === 1 ? xs[0].name : undefined
+}
+
 /** Resolve sandbox name to its mise.toml path. Returns null if missing. */
 export function resolveSandboxFile(name: string): string | null {
   const p = workspaceLoopatSandboxPath(name)
