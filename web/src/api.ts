@@ -328,6 +328,17 @@ export async function setLoopPublic(id: string, isPublic: boolean): Promise<Loop
   return (await r.json()) as LoopMeta
 }
 
+/** Rename the loop. Server allows only meta.createdBy to patch. */
+export async function setLoopTitle(id: string, title: string): Promise<LoopMeta | null> {
+  const r = await apiFetch(`/api/loops/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title }),
+  })
+  if (!r.ok) return null
+  return (await r.json()) as LoopMeta
+}
+
 /** Current driver releases control. Sandbox + PTY are torn down server-side;
  *  any authed user can then claim via takeDrive(). */
 export async function requestDrive(id: string): Promise<LoopMeta | null> {

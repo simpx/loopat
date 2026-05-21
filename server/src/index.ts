@@ -1003,6 +1003,12 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
     patch.public = body.public
     patch.publicAt = body.public ? new Date().toISOString() : undefined
   }
+  if (typeof body.title === "string") {
+    const t = body.title.trim()
+    if (!t) return c.json({ error: "title cannot be empty" }, 400)
+    if (t.length > 200) return c.json({ error: "title too long (max 200)" }, 400)
+    patch.title = t
+  }
   // Share config fields
   if (typeof body.shareEnabled === "boolean") patch.shareEnabled = body.shareEnabled
   if (body.shareMode === "static" || body.shareMode === "port") patch.shareMode = body.shareMode
