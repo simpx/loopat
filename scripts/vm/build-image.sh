@@ -35,6 +35,12 @@ echo ""
 
 mkdir -p "$OUTPUT_DIR"
 
+# Ensure web frontend is built (needed by Dockerfile COPY)
+if [[ ! -d "web/dist" ]]; then
+  echo "▶ Building web frontend (web/dist not found)…"
+  bun --cwd web run build || { echo "ERROR: web build failed"; exit 1; }
+fi
+
 # Allow forcing a clean rebuild (bypasses Docker layer cache)
 NO_CACHE_FLAG=""
 if [[ "${1:-}" == "--no-cache" ]] || [[ "${2:-}" == "--no-cache" ]]; then

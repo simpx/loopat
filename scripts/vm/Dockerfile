@@ -75,6 +75,7 @@ COPY web/package.json web/
 RUN bun install --production --frozen-lockfile --filter '@loopat/server'
 
 COPY server server
+COPY web/dist web/dist
 RUN chown -R loopat:loopat /opt/loopat
 
 # ── Final image ───────────────────────────────────────────────────────────────
