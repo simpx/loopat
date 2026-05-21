@@ -37,6 +37,7 @@ import { mkdir } from "node:fs/promises"
 import {
   loopWorkdir,
   loopClaudeDir,
+  loopsDir,
   loopSandboxDir,
   loopSandboxPath,
   loopContextChatDir,
@@ -155,6 +156,10 @@ function isValidMountDst(s: unknown): s is string {
 export const V_LOOP = (id: string) => `/loopat/loop/${id}`
 export const V_LOOP_WORKDIR = (id: string) => `/loopat/loop/${id}/workdir`
 export const V_LOOP_CLAUDE = (id: string) => `/loopat/loop/${id}/.claude`
+// All-loops view (admin / cross-loop distill only). When `mountAllLoops`
+// is set, the entire LOOPAT_HOME/loops/ tree is ro-bound here so this loop
+// can read every other loop's meta.json / messages.jsonl / workdir.
+export const V_ALL_LOOPS = "/loopat/loops"
 export const V_CONTEXT_KNOWLEDGE = "/loopat/context/knowledge"
 export const V_CONTEXT_NOTES = "/loopat/context/notes"
 export const V_CONTEXT_NOTES_MEMORY = "/loopat/context/notes/memory"
@@ -183,6 +188,7 @@ export async function buildBwrapArgs(
   vaultName?: string,
   knowledgeRw?: boolean,
   homeOverlay: boolean = true,
+  mountAllLoops?: boolean,
 ): Promise<string[]> {
   const home = homedir()
 
@@ -312,6 +318,16 @@ export async function buildBwrapArgs(
   const chatDir = loopContextChatDir(loopId)
   if (existsSync(chatDir)) {
     args.push("--ro-bind", chatDir, V_CONTEXT_CHAT)
+  }
+
+  // All-loops ro view (admin-gated). When set, expose the entire
+  // LOOPAT_HOME/loops/ tree at /loopat/loops so this loop can read every
+  // other loop's chat / workdir / meta for cross-loop distill. Strictly
+  // read-only — this loop never mutates other loops' state. The current
+  // loop's own data is still rw at /loopat/loop/<id>/ via the binds above
+  // (bwrap stacks the two non-overlapping paths cleanly).
+  if (mountAllLoops) {
+    args.push("--ro-bind", loopsDir(), V_ALL_LOOPS)
   }
 
   args.push(

@@ -944,8 +944,18 @@ app.post("/api/loops", requireAuth, async (c) => {
   }
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
   const knowledgeRw = body.knowledge_rw === true
+  const mountAllLoops = body.mount_all_loops === true
+  if (mountAllLoops) {
+    // Cross-loop view exposes every other loop's chats / workdir / meta.
+    // Admin-only — checked server-side so a non-admin can't just POST the
+    // flag by hand. (UI never offers the toggle outside the admin menu.)
+    const me = await findUser(userId)
+    if (!me || me.role !== "admin") {
+      return c.json({ error: "mount_all_loops requires admin role" }, 403)
+    }
+  }
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault, knowledgeRw })
+    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault, knowledgeRw, mountAllLoops })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)

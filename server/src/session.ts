@@ -384,7 +384,7 @@ class LoopSession {
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
     const useOverlay = await isHomeOverlaySupported()
-    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay)
+    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
     // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)
