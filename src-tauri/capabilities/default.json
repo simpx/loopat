@@ -1,0 +1,13 @@
+{
+  "identifier": "default",
+  "local": true,
+  "windows": ["main", "logs"],
+  "webviews": [],
+  "remote": {
+    "urls": ["http://*:7787/*", "http://*:7788/*"]
+  },
+  "permissions": [
+    "core:default",
+    "shell:default"
+  ]
+}

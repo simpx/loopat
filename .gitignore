@@ -1,16 +1,40 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 .vite/
+src-tauri/target/
+
+# Environment files
 .env
 .env.local
+.env.*.local
+
+# Logs
 *.log
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Bun
 bun.lock
+
+# TypeScript
 *.tsbuildinfo
+
+# Server compiled output
 server/src/*.js
 server/src/*.js.map
 
-# Editor swap / temp files
+# Tauri generated
+src-tauri/gen/
+src-tauri/resources/
+
+# Editor / IDE
+.vscode/
+.idea/
 .*.swp
 .*.swo
 *~

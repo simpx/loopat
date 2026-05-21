@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>loopat – Server Logs</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0f0f0f; color: #d4d4d4; font-family: "SF Mono", "Menlo", monospace; font-size: 12px; }
+
+    .toolbar {
+      height: 36px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .toolbar span { color: #888; font-size: 11px; }
+    .toolbar button {
+      padding: 3px 10px;
+      border-radius: 4px;
+      border: 1px solid #333;
+      background: #222;
+      color: #ccc;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .toolbar button:hover { background: #2a2a2a; }
+    .badge {
+      margin-left: auto;
+      font-size: 10px;
+      color: #555;
+    }
+    #indicator {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #444; flex-shrink: 0;
+    }
+    #indicator.running { background: #4caf50; }
+    #indicator.error { background: #f44336; }
+
+    #log-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 12px;
+      display: flex;
+      flex-direction: column;
+    }
+    .log-line {
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.55;
+      color: #c8c8c8;
+    }
+    .log-line.ready { color: #4caf50; font-weight: bold; }
+    .log-line.error { color: #f44336; }
+    .log-line.warn { color: #ff9800; }
+
+    #scroll-anchor { height: 1px; }
+
+    .layout { display: flex; flex-direction: column; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="toolbar">
+      <div id="indicator"></div>
+      <span id="vm-label">VM: initializing</span>
+      <button onclick="clearLogs()">Clear</button>
+      <button onclick="scrollBottom()">↓ Scroll to bottom</button>
+      <span class="badge" id="line-count">0 lines</span>
+    </div>
+    <div id="log-area">
+      <div id="scroll-anchor"></div>
+    </div>
+  </div>
+
+  <script>
+    const { invoke, event } = window.__TAURI__ || {};
+    let lineCount = 0;
+    let autoScroll = true;
+    const logArea = document.getElementById('log-area');
+    const anchor = document.getElementById('scroll-anchor');
+    const indicator = document.getElementById('indicator');
+    const vmLabel = document.getElementById('vm-label');
+    const lineCountEl = document.getElementById('line-count');
+
+    function appendLine(text) {
+      const el = document.createElement('div');
+      el.className = 'log-line';
+      if (text.includes('LOOPAT_SERVER_READY') || text.includes('server ready')) {
+        el.className += ' ready';
+      } else if (/error|Error|ERROR|fatal|FATAL/.test(text)) {
+        el.className += ' error';
+      } else if (/warn|WARN|warning/.test(text)) {
+        el.className += ' warn';
+      }
+      el.textContent = text;
+      logArea.insertBefore(el, anchor);
+      lineCount++;
+      lineCountEl.textContent = `${lineCount} lines`;
+      if (autoScroll) anchor.scrollIntoView({ behavior: 'instant' });
+    }
+
+    function clearLogs() {
+      Array.from(logArea.querySelectorAll('.log-line')).forEach(el => el.remove());
+      lineCount = 0;
+      lineCountEl.textContent = '0 lines';
+    }
+
+    function scrollBottom() {
+      anchor.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    logArea.addEventListener('scroll', () => {
+      const near = logArea.scrollTop + logArea.clientHeight >= logArea.scrollHeight - 40;
+      autoScroll = near;
+    });
+
+    // Load existing logs
+    if (invoke) {
+      invoke('get_logs').then(logs => {
+        logs.forEach(l => appendLine(l));
+      }).catch(console.error);
+
+      invoke('get_vm_status').then(status => {
+        updateStatus(status.running, status.server_url);
+      }).catch(console.error);
+
+      // Live log stream
+      event.listen('vm-log', ev => {
+        appendLine(ev.payload);
+      });
+
+      // Status updates
+      event.listen('vm-status', ev => {
+        const { status, url } = ev.payload;
+        if (status === 'ready') updateStatus(true, url);
+        else if (status === 'error') updateStatus(false, null);
+        else updateStatus(null, null);
+      });
+    }
+
+    function updateStatus(running, url) {
+      if (running === true) {
+        indicator.className = 'running';
+        vmLabel.textContent = url ? `VM: running → ${url}` : 'VM: running';
+      } else if (running === false) {
+        indicator.className = 'error';
+        vmLabel.textContent = 'VM: stopped';
+      } else {
+        indicator.className = '';
+        vmLabel.textContent = 'VM: starting…';
+      }
+    }
+  </script>
+</body>
+</html>

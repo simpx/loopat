@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Allow the app to use Virtualization.framework (required for macOS 14+) -->
+    <key>com.apple.security.virtualization</key>
+    <true/>
+    <!-- Allow the app to run as a hypervisor (required for Virtualization.framework) -->
+    <key>com.apple.security.hypervisor</key>
+    <true/>
+    <!-- Allow outgoing network connections -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <!-- Allow incoming network connections (for localhost server) -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    <!-- App Sandbox: disabled for local development; enable for distribution -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+  </dict>
+</plist>

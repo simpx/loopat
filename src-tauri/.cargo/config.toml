@@ -1,0 +1,5 @@
+# Wrap the dev binary with a codesign step before running.
+# This ensures the Virtualization.framework entitlement is present
+# when `cargo tauri dev` launches the app.
+[target.aarch64-apple-darwin]
+runner = ["../scripts/codesign-runner.sh"]
