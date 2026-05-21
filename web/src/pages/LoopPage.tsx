@@ -571,8 +571,12 @@ function LoopHeader({
 }) {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
+  const ws = useWorkspace()
   const [collapsed, setCollapsed] = useState(isMobile)
   const [distilling, setDistilling] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(meta.title)
+  const canEditTitle = ws.currentUser?.id === meta.createdBy
   const onDistill = async () => {
     if (distilling) return
     setDistilling(true)
@@ -582,6 +586,13 @@ function LoopHeader({
     } finally {
       setDistilling(false)
     }
+  }
+  const saveTitle = async () => {
+    const next = titleDraft.trim()
+    if (!next || next === meta.title) { setEditingTitle(false); setTitleDraft(meta.title); return }
+    setEditingTitle(false)
+    const updated = await ws.setLoopTitle(meta.id, next)
+    if (!updated) setTitleDraft(meta.title)
   }
   const modeBtn = (label: string, m: RightMode) => (
     <button
@@ -607,7 +618,29 @@ function LoopHeader({
         >
           <ChevronDown size={14} className={"transition-transform " + (collapsed ? "-rotate-90" : "")} />
         </button>
-        <span className="text-[14px] md:text-[15px] font-medium text-gray-900">{meta.title}</span>
+        {editingTitle ? (
+          <input
+            type="text"
+            value={titleDraft}
+            autoFocus
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); saveTitle() }
+              else if (e.key === "Escape") { e.preventDefault(); setEditingTitle(false); setTitleDraft(meta.title) }
+            }}
+            onBlur={saveTitle}
+            maxLength={200}
+            className="text-[14px] md:text-[15px] font-medium text-gray-900 bg-white border border-blue-400 rounded px-1 py-0 outline-none min-w-[120px]"
+          />
+        ) : (
+          <span
+            className={"text-[14px] md:text-[15px] font-medium text-gray-900 " + (canEditTitle ? "cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1" : "")}
+            onClick={() => { if (canEditTitle) { setTitleDraft(meta.title); setEditingTitle(true) } }}
+            title={canEditTitle ? "click to rename" : undefined}
+          >
+            {meta.title}
+          </span>
+        )}
         <span className="text-xs text-gray-500">
           driver: <span className="text-gray-900">{meta.driver ?? meta.createdBy}</span>
         </span>
