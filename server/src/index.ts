@@ -1003,6 +1003,12 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
     patch.public = body.public
     patch.publicAt = body.public ? new Date().toISOString() : undefined
   }
+  if (typeof body.title === "string") {
+    const t = body.title.trim()
+    if (!t) return c.json({ error: "title cannot be empty" }, 400)
+    if (t.length > 200) return c.json({ error: "title too long (max 200)" }, 400)
+    patch.title = t
+  }
   // Share config fields
   if (typeof body.shareEnabled === "boolean") patch.shareEnabled = body.shareEnabled
   if (body.shareMode === "static" || body.shareMode === "port") patch.shareMode = body.shareMode
@@ -2444,6 +2450,12 @@ import "./serve"
 
 const serveHost = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
 const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
+
+// Probe $HOME overlay support up front so the first user-facing spawn
+// doesn't pay for it (and the warning lands in boot logs, not mid-session).
+import { isHomeOverlaySupported } from "./bwrap"
+const overlayOk = await isHomeOverlaySupported()
+console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled (tmpfs fallback)"}`)
 
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
 console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
