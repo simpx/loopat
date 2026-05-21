@@ -12,7 +12,7 @@ import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
+import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
@@ -383,10 +383,12 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
     }
-    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw)
+    const useOverlay = await isHomeOverlaySupported()
+    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay)
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
-    const sandboxOverlay = await prepareSandboxOverlay(loopId)
+    // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)
+    const sandboxOverlay = useOverlay ? await prepareSandboxOverlay(loopId) : null
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
@@ -522,10 +524,13 @@ class LoopSession {
             `${V_LOOP_CLAUDE(loopId)}/plugins/cache/${name}`,
           ])
           const augmentedArgs = [...args, ...pluginDirArgs]
-          // Wrap bwrap in unshare + overlay mount (docker container layer
-          // semantics for $HOME). spawnClaudeCodeProcess is sync; overlay
-          // dirs were pre-mkdir'd above via prepareSandboxOverlay.
-          const fullArgs = buildSandboxSpawnArgv(sandboxOverlay, bwrapBase, command, augmentedArgs)
+          // Overlay path: unshare wrapper mounts overlayfs at $HOME, bwrap drops
+          // uid via nested userns. Tmpfs path: bwrap directly (when host bwrap
+          // can't do the nested-userns uid drop, see isHomeOverlaySupported).
+          const spawnBinary = sandboxOverlay ? "unshare" : "bwrap"
+          const fullArgs = sandboxOverlay
+            ? buildSandboxSpawnArgv(sandboxOverlay, bwrapBase, command, augmentedArgs)
+            : [...bwrapBase, "--", command, ...augmentedArgs]
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed
@@ -535,15 +540,15 @@ class LoopSession {
           const stderrFile = createWriteStream(stderrLogPath, { flags: "a" })
           stderrFile.write(`\n=== ${new Date().toISOString()} spawn ===\n`)
           stderrFile.write(`binary: ${command}\n`)
-          stderrFile.write(`unshare argc: ${fullArgs.length}\n`)
+          stderrFile.write(`${spawnBinary} argc: ${fullArgs.length}\n`)
           if (DEBUG) {
-            const argvLine = `unshare ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`
+            const argvLine = `${spawnBinary} ${fullArgs.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`
             console.error(`[sdk:${tag}] binary: ${command}`)
             console.error(`[sdk:${tag}] spawn cmd: ${argvLine}`)
             stderrFile.write(`argv: ${argvLine}\n`)
           }
 
-          const proc = nodeSpawn("unshare", fullArgs, {
+          const proc = nodeSpawn(spawnBinary, fullArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             signal,
           })
