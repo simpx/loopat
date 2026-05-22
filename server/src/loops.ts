@@ -88,6 +88,7 @@ export type LoopMeta = {
   config?: {
     default_model?: string
     default_model_source?: "personal" | "workspace"
+    default_model_id?: string
     permission_mode?: string
     /**
      * Workspace sandbox (knowledge/.loopat/sandboxes/<sandbox>/) activated

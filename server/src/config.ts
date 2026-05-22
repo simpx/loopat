@@ -41,17 +41,28 @@ export type ConfigValue =
   | { vault: string }
   | { file: string }
 
+/** A model entry within a provider's model list. */
+export type ModelEntry = {
+  id: string
+  enabled?: boolean
+  /** Per-model context-window override (takes precedence over provider-level). */
+  maxContextTokens?: number
+}
+
 /** On-disk shape of a provider — apiKey is a ConfigValue (or absent). */
 export type ProviderConfigDisk = {
-  model: string
+  model?: string          // legacy single-model; migrated to models[] on read
+  models?: ModelEntry[]   // canonical multi-model format
   baseUrl: string
   apiKey?: ConfigValue
   maxContextTokens?: number
+  enabled?: boolean       // provider-level toggle, default true
 }
 
 /** Runtime/resolved shape — apiKey is the actual string after resolution. */
 export type ProviderConfig = {
-  model: string
+  /** Canonical model list (at least one entry after migration). */
+  models: ModelEntry[]
   baseUrl: string
   /** Resolved at load time from `apiKey: ConfigValue` on disk. Empty string
    *  if the reference is missing or the target file doesn't exist. */
@@ -65,6 +76,7 @@ export type ProviderConfig = {
    * env vars DISABLE_COMPACT=1 + CLAUDE_CODE_MAX_CONTEXT_TOKENS=<value>.
    */
   maxContextTokens?: number
+  enabled: boolean
 }
 
 export type RemoteSpec = {
@@ -196,22 +208,65 @@ export type PersonalConfig = {
   onboarding?: OnboardingState
 }
 
+/** Preset providers with Anthropic-compatible endpoints. loopat uses the
+ *  Claude Agent SDK which speaks the Anthropic Messages API — only providers
+ *  that expose an Anthropic-compatible endpoint work directly.
+ *  Each provider is disabled by default; the user supplies an API key. */
+const PRESET_PROVIDERS: Array<{ name: string; baseUrl: string; models: string[] }> = [
+  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
+    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
+  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
+    models: ["kimi-k2.6"] },
+  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
+    models: ["MiniMax-M2.7"] },
+]
+
+function buildPresetProviders(): Record<string, ProviderConfig> {
+  return Object.fromEntries(
+    PRESET_PROVIDERS.map(p => [
+      p.name,
+      {
+        models: p.models.map(id => ({ id, enabled: true })),
+        baseUrl: p.baseUrl,
+        apiKey: "",
+        enabled: false,
+      } satisfies ProviderConfig,
+    ]),
+  )
+}
+
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
   knowledge: { git: "" },
   notes: { git: "" },
   repos: [
     { name: "loopat", git: "git@github.com:simpx/loopat.git" },
   ],
+  providers: buildPresetProviders(),
 }
 
 const PERSONAL_TEMPLATE: PersonalConfig = {
-  default: "",
-  providers: {},
+  default: PRESET_PROVIDERS[0]?.name ?? "",
+  providers: buildPresetProviders(),
 }
 
-/** Empty on-disk shape — used when no config.json exists yet. */
+/** On-disk shape used when a config.json is missing or malformed. Seeded
+ *  with presets so the user has a populated model list immediately. */
 const PERSONAL_DISK_TEMPLATE: PersonalConfigDisk = {
-  providers: {},
+  providers: (() => {
+    const providers: Record<string, ProviderConfigDisk | string> = {
+      default: PRESET_PROVIDERS[0]?.name ?? "",
+    }
+    for (const p of PRESET_PROVIDERS) {
+      providers[p.name] = {
+        models: p.models.map(id => ({ id, enabled: true })),
+        baseUrl: p.baseUrl,
+        enabled: false,
+      }
+    }
+    return providers
+  })(),
 }
 
 export const configPath = () => join(workspaceDir(), "config.json")
@@ -235,6 +290,16 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
   if (cachedWorkspace && mtimeMs === cachedWorkspaceMtimeMs) return cachedWorkspace
   const raw = await readFile(path, "utf8")
   const parsed = JSON.parse(raw) as WorkspaceConfig
+  // Normalize legacy single-model providers to canonical models[] format.
+  if (parsed.providers) {
+    for (const [name, p] of Object.entries(parsed.providers)) {
+      const disk = p as any
+      if (!disk.models && disk.model) {
+        ;(p as any).models = [{ id: disk.model, enabled: true }]
+      }
+      if (p.enabled === undefined) (p as any).enabled = true
+    }
+  }
   cachedWorkspace = parsed
   cachedWorkspaceMtimeMs = mtimeMs
   return cachedWorkspace
@@ -367,10 +432,15 @@ export async function loadPersonalConfig(
       apiKey = r.value
       if (r.path) refMtimes[r.path] = r.mtimeMs
     }
+    // Normalize legacy single-model to canonical models[] format.
+    const models: ModelEntry[] = p.models && p.models.length > 0
+      ? p.models.map(m => ({ id: m.id, enabled: m.enabled !== false }))
+      : (p.model ? [{ id: p.model, enabled: true }] : [])
     providers[name] = {
-      model: p.model,
+      models,
       baseUrl: p.baseUrl,
       apiKey,
+      enabled: p.enabled !== false,
       ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
     }
   }
@@ -527,8 +597,13 @@ export async function savePersonalDisk(
         return { ok: false, error: `provider "${name}" must be an object` }
       }
       const p = val as ProviderConfigDisk
-      if (typeof p.model !== "string" || typeof p.baseUrl !== "string") {
-        return { ok: false, error: `provider "${name}" missing model/baseUrl` }
+      const hasModels = Array.isArray(p.models) && p.models.length > 0
+      const hasModel = typeof p.model === "string"
+      if (!hasModels && !hasModel) {
+        return { ok: false, error: `provider "${name}" missing models (or legacy model)` }
+      }
+      if (typeof p.baseUrl !== "string") {
+        return { ok: false, error: `provider "${name}" missing baseUrl` }
       }
       if (p.apiKey !== undefined && !isValidConfigValueShape(p.apiKey)) {
         return { ok: false, error: `provider "${name}" apiKey has invalid shape` }
@@ -655,7 +730,7 @@ function resolveWritablePath(ref: ConfigValue, user: string): string | null {
  */
 export async function savePersonalConfig(user: string, cfg: {
   default?: string
-  providers?: Record<string, { model: string; baseUrl: string; apiKey?: string; maxContextTokens?: number }>
+  providers?: Record<string, { model?: string; models?: ModelEntry[]; baseUrl: string; apiKey?: string; maxContextTokens?: number; enabled?: boolean }>
 }): Promise<void> {
   const disk = await readPersonalDisk(user)
 
@@ -690,11 +765,16 @@ export async function savePersonalConfig(user: string, cfg: {
           }
         }
       }
+      // Normalize to canonical models[] format.
+      const models: ModelEntry[] = p.models && p.models.length > 0
+        ? p.models.map(m => ({ id: m.id, ...(m.enabled === false ? { enabled: false } : {}) }))
+        : (p.model ? [{ id: p.model, enabled: true }] : [])
       rebuilt[name] = {
-        model: p.model,
         baseUrl: p.baseUrl,
         apiKey: ref,
+        ...(models.length > 0 ? { models } : {}),
         ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
+        ...(p.enabled === false ? { enabled: false } : {}),
       }
     }
     disk.providers = rebuilt
@@ -725,12 +805,17 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
     for (const [name, p] of Object.entries(cfg.providers)) {
       const existingProv = merged.providers[name]
       const incoming = p as any
+      // Normalize to canonical models[] format.
+      const models: ModelEntry[] = incoming.models?.length > 0
+        ? incoming.models.map((m: any) => ({ id: m.id, ...(m.enabled === false ? { enabled: false } : {}) }))
+        : existingProv?.models ?? (incoming.model ? [{ id: incoming.model, enabled: true }] : [])
       merged.providers[name] = {
-        model: incoming.model ?? existingProv?.model ?? "",
+        models,
         baseUrl: incoming.baseUrl ?? existingProv?.baseUrl ?? "",
         ...(incoming.maxContextTokens ? { maxContextTokens: incoming.maxContextTokens } : {}),
         apiKey: incoming.apiKey || existingProv?.apiKey || "",
-      }
+        enabled: incoming.enabled !== undefined ? incoming.enabled : (existingProv?.enabled ?? true),
+      } as any
     }
   }
   if (cfg.default !== undefined) merged.default = cfg.default

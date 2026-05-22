@@ -852,7 +852,8 @@ export async function listTopics(): Promise<TopicAggregate[]> {
   return j.topics as TopicAggregate[]
 }
 
-export type ProviderInfo = { model: string; baseUrl: string; source: "personal" | "workspace" }
+export type ModelEntry = { id: string; enabled?: boolean; maxContextTokens?: number }
+export type ProviderInfo = { model?: string; models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean }
 export type ProvidersResponse = { providers: Record<string, ProviderInfo>; default: string }
 export async function getProviders(): Promise<ProvidersResponse> {
   const r = await apiFetch("/api/providers")
@@ -1004,9 +1005,11 @@ export async function getGitLog(loopId: string, limit = 50): Promise<GitCommit[]
 // ── settings ──
 
 export type SettingsProvider = {
-  model: string
+  model?: string
+  models: ModelEntry[]
   baseUrl: string
   hasKey?: boolean
+  enabled: boolean
   maxContextTokens?: number
   apiKey?: string
 }
@@ -1020,7 +1023,7 @@ export type PersonalSettings = {
 }
 
 export type WorkspaceSettings = {
-  providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }>
+  providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean }>
   default: string
   tokenUsage: TokenUsage
 }
@@ -1051,10 +1054,12 @@ export type ConfigValue = string | { vault: string } | { file: string }
 export type PathRef = string | { vault: string }
 
 export type ProviderDisk = {
-  model: string
+  model?: string
+  models?: ModelEntry[]
   baseUrl: string
   apiKey?: ConfigValue
   maxContextTokens?: number
+  enabled?: boolean
 }
 
 export type MountDisk = {
@@ -1115,7 +1120,7 @@ export async function getWorkspaceSettings(): Promise<WorkspaceSettings> {
 }
 
 export async function updateWorkspaceSettings(patch: {
-  providers?: Record<string, { model: string; baseUrl: string; apiKey?: string }>
+  providers?: Record<string, { model?: string; models?: ModelEntry[]; baseUrl: string; apiKey?: string; enabled?: boolean }>
   default?: string
 }): Promise<boolean> {
   const r = await apiFetch("/api/settings/workspace", {

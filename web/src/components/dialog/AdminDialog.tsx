@@ -230,11 +230,14 @@ function StatusBadge({ status }: { status: "active" | "pending" }) {
 
 // ── Workspace settings panel (formerly SettingsDialog's "Workspace" tab) ──
 
+type ModelForm = { id: string; enabled: boolean }
+
 type ProviderForm = {
-  model: string
+  models: ModelForm[]
   baseUrl: string
   apiKey: string
   keyDirty: boolean
+  enabled: boolean
 }
 
 function WorkspacePanel() {
@@ -246,6 +249,8 @@ function WorkspacePanel() {
   const [def, setDef] = useState("")
   const [newProviderName, setNewProviderName] = useState("")
   const [addingProvider, setAddingProvider] = useState(false)
+  const [newModelFor, setNewModelFor] = useState("")
+  const [addingModelFor, setAddingModelFor] = useState("")
 
   useEffect(() => {
     setLoading(true)
@@ -255,10 +260,11 @@ function WorkspacePanel() {
       const forms: Record<string, ProviderForm> = {}
       for (const [name, prov] of Object.entries(w.providers)) {
         forms[name] = {
-          model: prov.model ?? "",
+          models: (prov as any).models?.map((m: any) => ({ id: m.id, enabled: m.enabled !== false })) ?? [],
           baseUrl: prov.baseUrl ?? "",
           apiKey: "",
           keyDirty: false,
+          enabled: (prov as any).enabled !== false,
         }
       }
       setProviders(forms)
@@ -268,7 +274,16 @@ function WorkspacePanel() {
     }).finally(() => setLoading(false))
   }, [])
 
-  function handleChange(name: string, field: keyof ProviderForm, value: string) {
+  function updateProv(name: string, patch: Partial<ProviderForm>) {
+    setProviders((prev) => {
+      const updated = { ...prev }
+      if (!updated[name]) return prev
+      updated[name] = { ...updated[name], ...patch }
+      return updated
+    })
+  }
+
+  function handleChange(name: string, field: "baseUrl" | "apiKey", value: string) {
     setProviders((prev) => {
       const updated = { ...prev }
       if (!updated[name]) return prev
@@ -294,19 +309,48 @@ function WorkspacePanel() {
     if (providers[name]) { setError("provider name already exists"); return }
     setProviders((prev) => ({
       ...prev,
-      [name]: { model: "", baseUrl: "", apiKey: "", keyDirty: false },
+      [name]: { models: [], baseUrl: "", apiKey: "", keyDirty: false, enabled: false },
     }))
     setNewProviderName("")
     setAddingProvider(false)
     setError("")
   }
 
+  function toggleModel(provName: string, modelId: string) {
+    setProviders((prev) => {
+      const p = prev[provName]
+      if (!p) return prev
+      return { ...prev, [provName]: { ...p, models: p.models.map(m => m.id === modelId ? { ...m, enabled: !m.enabled } : m) } }
+    })
+  }
+
+  function addModel(provName: string) {
+    const id = newModelFor.trim()
+    if (!id) return
+    setProviders((prev) => {
+      const p = prev[provName]
+      if (!p || p.models.some(m => m.id === id)) return prev
+      return { ...prev, [provName]: { ...p, models: [...p.models, { id, enabled: true }] } }
+    })
+    setNewModelFor("")
+    setAddingModelFor("")
+  }
+
+  function removeModel(provName: string, modelId: string) {
+    setProviders((prev) => {
+      const p = prev[provName]
+      if (!p) return prev
+      return { ...prev, [provName]: { ...p, models: p.models.filter(m => m.id !== modelId) } }
+    })
+  }
+
   async function handleSave() {
     setSaving(true); setError("")
     try {
-      const out: Record<string, { model: string; baseUrl: string; apiKey?: string }> = {}
+      const out: Record<string, any> = {}
       for (const [name, f] of Object.entries(providers)) {
-        out[name] = { model: f.model, baseUrl: f.baseUrl }
+        const models = f.models.filter(m => m.id.trim()).map(m => ({ id: m.id.trim(), ...(m.enabled ? {} : { enabled: false }) }))
+        out[name] = { models, baseUrl: f.baseUrl, enabled: f.enabled }
         if (f.keyDirty && f.apiKey) out[name].apiKey = f.apiKey
       }
       const ok = await updateWorkspaceSettings({ providers: out, default: def })
@@ -339,7 +383,17 @@ function WorkspacePanel() {
           return (
             <div key={name} className="border border-gray-200 rounded-lg p-3 sm:p-4">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-gray-900">{name}</span>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={f.enabled}
+                      onChange={(e) => updateProv(name, { enabled: e.target.checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className={`text-sm font-semibold ${f.enabled ? "text-gray-900" : "text-gray-400"}`}>{name}</span>
+                  </label>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleRemove(name)}
@@ -348,17 +402,7 @@ function WorkspacePanel() {
                   Remove
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Model</label>
-                  <input
-                    type="text"
-                    value={f.model}
-                    onChange={(e) => handleChange(name, "model", e.target.value)}
-                    placeholder="e.g. claude-sonnet-4-6"
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                  />
-                </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Base URL</label>
                   <input
@@ -369,7 +413,7 @@ function WorkspacePanel() {
                     className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                   />
                 </div>
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
                   <input
                     type="password"
@@ -379,6 +423,63 @@ function WorkspacePanel() {
                     className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
                   />
                 </div>
+              </div>
+
+              {/* Model list */}
+              <div className="border-t border-gray-100 pt-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-medium text-gray-500">Models ({f.models.length})</span>
+                  <button
+                    type="button"
+                    onClick={() => setAddingModelFor(addingModelFor === name ? "" : name)}
+                    className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
+                  >
+                    <span className="text-base leading-none">+</span> add model
+                  </button>
+                </div>
+
+                {addingModelFor === name && (
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <input
+                      type="text"
+                      value={newModelFor}
+                      onChange={(e) => setNewModelFor(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModelFor("") }}
+                      placeholder="model ID"
+                      autoFocus
+                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+                    />
+                    <Button size="xs" onClick={() => addModel(name)}>Add</Button>
+                    <button type="button" onClick={() => setAddingModelFor("")} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                  </div>
+                )}
+
+                {f.models.length === 0 && addingModelFor !== name && (
+                  <div className="text-[11px] text-gray-400 italic py-1">no models — add one above</div>
+                )}
+                {f.models.map((m) => (
+                  <div key={m.id} className="flex items-center gap-2 py-1 group">
+                    <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={m.enabled}
+                        onChange={() => toggleModel(name, m.id)}
+                        className="h-3 w-3 shrink-0"
+                      />
+                      <span className={`text-xs font-mono truncate ${m.enabled ? "text-gray-700" : "text-gray-300 line-through"}`}>
+                        {m.id}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => removeModel(name, m.id)}
+                      className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      title="remove model"
+                    >
+                      <span className="text-[10px]">✕</span>
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
           )

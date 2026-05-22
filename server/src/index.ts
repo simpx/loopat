@@ -45,7 +45,7 @@ import {
   loopHistoryPath,
   loopChatHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -165,10 +165,10 @@ app.get("/api/serve/alias-check", requireAuth, async (c) => {
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
 app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
-  const providers: Record<string, { model: string; baseUrl: string; source: "personal" | "workspace" }> = {}
+  const providers: Record<string, { models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean }> = {}
   if (wCfg.providers) {
     for (const [name, p] of Object.entries(wCfg.providers)) {
-      providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "workspace" }
+      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "workspace", enabled: p.enabled }
     }
   }
   // Overlay personal providers (they take precedence)
@@ -177,7 +177,7 @@ app.get("/api/providers", requireAuth, async (c) => {
   try {
     const pCfg = await loadPersonalConfig(userId)
     for (const [name, p] of Object.entries(pCfg.providers)) {
-      providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "personal" }
+      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: p.enabled }
     }
     active = pCfg.default || active
   } catch {}
@@ -397,12 +397,13 @@ app.get("/api/settings/personal", requireAuth, async (c) => {
   const cfg = await loadPersonalConfig(userId)
   // Recompute token usage from persisted message histories (modelUsage in result messages)
   const tokenUsage = await recomputeTokenUsage(userId)
-  const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean; maxContextTokens?: number }> = {}
+  const providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean; maxContextTokens?: number }> = {}
   for (const [name, p] of Object.entries(cfg.providers)) {
     providers[name] = {
-      model: p.model,
+      models: p.models,
       baseUrl: p.baseUrl,
       hasKey: !!p.apiKey,
+      enabled: p.enabled,
       ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
     }
   }
@@ -702,10 +703,10 @@ app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
 
 app.get("/api/settings/workspace", requireAuth, async (c) => {
   const cfg = await loadConfig()
-  const providers: Record<string, { model: string; baseUrl: string; hasKey: boolean }> = {}
+  const providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean }> = {}
   if (cfg.providers) {
     for (const [name, p] of Object.entries(cfg.providers)) {
-      providers[name] = { model: p.model, baseUrl: p.baseUrl, hasKey: !!(p as any).apiKey }
+      providers[name] = { models: p.models, baseUrl: p.baseUrl, hasKey: !!(p as any).apiKey, enabled: p.enabled }
     }
   }
   const tokenUsage = await recomputeWorkspaceTokenUsage()
@@ -2436,11 +2437,12 @@ app.get(
             const ok = session.setProvider(msg.provider)
             if (ok) {
               const source = msg.source === "personal" || msg.source === "workspace" ? msg.source : undefined
+              const selectedModel = typeof msg.model === "string" ? msg.model : undefined
               // Persist to loop meta so it survives reloads
-              patchLoopMeta(id, { config: { default_model: msg.provider, default_model_source: source } }).catch(() => {})
+              patchLoopMeta(id, { config: { default_model: msg.provider, default_model_source: source, ...(selectedModel ? { default_model_id: selectedModel } : {}) } }).catch(() => {})
               try {
                 // Resolve provider info: personal first, then workspace fallback.
-                let p: { model: string; maxContextTokens?: number } | undefined
+                let p: ProviderConfig | undefined
                 if (userId) {
                   try {
                     const loopMeta = await getLoop(id)
@@ -2453,11 +2455,19 @@ app.get(
                   p = wCfg.providers?.[msg.provider]
                 }
                 if (p) {
+                  const activeModel = selectedModel ?? p.models.find(m => m.enabled !== false)?.id ?? p.models[0]?.id ?? ""
+                  const activeModelEntry = p.models.find(m => m.id === activeModel)
+                  const ctxWindow = activeModelEntry?.maxContextTokens && activeModelEntry.maxContextTokens > 0
+                    ? activeModelEntry.maxContextTokens
+                    : p.maxContextTokens && p.maxContextTokens > 0
+                      ? p.maxContextTokens
+                      : 200_000
                   ws.send(JSON.stringify({
                     type: "provider",
                     name: msg.provider,
-                    model: p.model,
-                    contextWindow: p.maxContextTokens && p.maxContextTokens > 0 ? p.maxContextTokens : 200_000,
+                    model: activeModel,
+                    models: p.models,
+                    contextWindow: ctxWindow,
                   }))
                 }
               } catch {}

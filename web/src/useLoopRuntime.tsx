@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useExternalStoreRuntime, type AppendMessage } from "@assistant-ui/react"
 import type { PermissionMode } from "@/components/chat/PlanModeToggle"
-import { getVersion, getBuildInfo } from "@/api"
+import { getVersion, getBuildInfo, type ModelEntry } from "@/api"
 
 // ── Slash-commands cache ──
 // Persists the last known slash commands per loopId so they're available
@@ -295,6 +295,7 @@ export interface QuestionDef {
 export interface ProviderInfo {
   name: string
   model: string
+  models: ModelEntry[]
   contextWindow: number
 }
 
@@ -321,7 +322,7 @@ export interface LoopRuntimeExtra {
   contextUsage: ContextUsage | null
   thinkingBudget: number | null
   provider: ProviderInfo | null
-  selectProvider: (name: string, source?: "personal" | "workspace") => void
+  selectProvider: (name: string, source?: "personal" | "workspace", model?: string) => void
   /** Drop SDK context (like CC's /clear); next message starts with 0 history. */
   clearContext: () => void
   /** Count of thinking/redacted_thinking content blocks currently in raw
@@ -594,10 +595,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     return new Map(Object.entries(questionsObj))
   }, [questionsObj])
 
-  const selectProvider = useCallback((name: string, source?: "personal" | "workspace") => {
+  const selectProvider = useCallback((name: string, source?: "personal" | "workspace", model?: string) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "provider_select", provider: name, source }))
+    ws.send(JSON.stringify({ type: "provider_select", provider: name, source, ...(model ? { model } : {}) }))
   }, [])
 
   const clearContext = useCallback(() => {
@@ -831,9 +832,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           return
         }
         if (m?.type === "provider") {
+          const models: ModelEntry[] = Array.isArray(m.models) ? m.models : (m.model ? [{ id: String(m.model), enabled: true }] : [])
           setProvider({
             name: String(m.name ?? "?"),
-            model: String(m.model ?? "?"),
+            model: String(m.model ?? models[0]?.id ?? ""),
+            models,
             contextWindow: typeof m.contextWindow === "number" ? m.contextWindow : 200_000,
           })
           return
