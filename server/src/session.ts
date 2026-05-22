@@ -39,9 +39,13 @@ async function readSkillDescription(skillsDir: string, skillName: string): Promi
  * any claude opus-4-7/4-6/sonnet-4/sonnet-4-6 → still defaults to 200K
  * unless tagged [1m] (1M is opt-in via beta on those). Fallback 200K.
  */
-function resolveContextWindow(p: ProviderConfig): number {
+function resolveContextWindow(p: ProviderConfig, modelId?: string): number {
+  // Per-model override takes precedence
+  const model = modelId ? p.models.find(m => m.id === modelId) : undefined
+  if (model?.maxContextTokens && model.maxContextTokens > 0) return model.maxContextTokens
+  // Provider-level fallback
   if (p.maxContextTokens && p.maxContextTokens > 0) return p.maxContextTokens
-  if (/\[1m\]/i.test(p.model)) return 1_000_000
+  if (/\[1m\]/i.test(model?.id ?? p.models[0]?.id ?? "")) return 1_000_000
   return 200_000
 }
 
@@ -379,9 +383,12 @@ class LoopSession {
     // Override cli's hardcoded model→context-window map for gateway-routed
     // models. Both env vars are required (cli checks DISABLE_COMPACT first
     // to enable the override path, then reads CLAUDE_CODE_MAX_CONTEXT_TOKENS).
-    if (provider.maxContextTokens && provider.maxContextTokens > 0) {
+    // Per-model override takes precedence over provider-level.
+    const activeModel = provider.models.find(m => m.enabled !== false) ?? provider.models[0]
+    const contextTokenOverride = activeModel?.maxContextTokens ?? provider.maxContextTokens
+    if (contextTokenOverride && contextTokenOverride > 0) {
       extraEnv.DISABLE_COMPACT = "1"
-      extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(provider.maxContextTokens)
+      extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
     const useOverlay = await isHomeOverlaySupported()
     const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
@@ -391,7 +398,7 @@ class LoopSession {
     const sandboxOverlay = useOverlay ? await prepareSandboxOverlay(loopId) : null
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
-      console.error(`[sdk:${tag}] config: provider=${providerName} model=${provider.model} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
+      console.error(`[sdk:${tag}] config: provider=${providerName} model=${activeModel?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
       console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${CLAUDE_BINARY}`)
     }
@@ -406,7 +413,7 @@ class LoopSession {
           ANTHROPIC_API_KEY: provider.apiKey,
           ANTHROPIC_BASE_URL: provider.baseUrl,
         },
-        model: provider.model,
+        model: activeModel?.id ?? "",
         permissionMode: this.currentPermissionMode,
         // Required by SDK when using permissionMode: "bypassPermissions"
         ...(this.currentPermissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
@@ -838,11 +845,13 @@ class LoopSession {
           meta.config?.default_model,
         ], false)
         if (resolved) {
+          const activeModel = resolved.provider.models.find(m => m.enabled !== false)?.id ?? resolved.provider.models[0]?.id ?? ""
           ws.send(JSON.stringify({
             type: "provider",
             name: resolved.name,
-            model: resolved.provider.model,
-            contextWindow: resolveContextWindow(resolved.provider),
+            model: activeModel,
+            models: resolved.provider.models,
+            contextWindow: resolveContextWindow(resolved.provider, activeModel),
           }))
         } else {
           console.warn(`[loop:${this.id.slice(0, 8)}] no provider found in personal or workspace config`)

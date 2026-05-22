@@ -23,6 +23,7 @@ import {
   type MountDisk,
   type RefExistsMap,
   type PersonalEntry,
+  type ModelEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { McpStatusPanel } from "../components/McpStatusPanel"
@@ -240,15 +241,30 @@ export function SettingsPage() {
 // Providers
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Preset providers with Anthropic-compatible endpoints.
+ *  loopat uses the Claude Agent SDK which speaks the Anthropic Messages API.
+ *  Only providers that expose an Anthropic-compatible endpoint work directly. */
+const PRESETS: Array<{ name: string; baseUrl: string; models: string[] }> = [
+  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
+    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
+  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
+    models: ["kimi-k2.6"] },
+  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
+    models: ["MiniMax-M2.7"] },
+  { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1",
+    models: ["anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.5-flash"] },
+]
+
 type ProvidersDraft = {
   default: string
   providers: Record<string, {
-    model: string
+    models: ModelEntry[]
     baseUrl: string
     maxContextTokens: string
-    /** New value typed by the user. Empty = "keep whatever is in the vault". */
+    enabled: boolean
     apiKeyNewValue: string
-    /** Whether the apiKey vault file exists today. Display-only. */
     apiKeyStored: boolean
   }>
 }
@@ -264,6 +280,8 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const [err, setErr] = useState<string | null>(null)
   const [newName, setNewName] = useState("")
   const [adding, setAdding] = useState(false)
+  const [newModelName, setNewModelName] = useState<Record<string, string>>({})
+  const [addingModel, setAddingModel] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     if (!disk) { setDraft(null); return }
@@ -277,9 +295,12 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         const p = val as ProviderDisk
         const refInfo = refExists[`providers.${name}.apiKey`]
         next.providers[name] = {
-          model: p.model ?? "",
+          models: (p.models && p.models.length > 0)
+            ? p.models.map(m => ({ id: m.id, enabled: m.enabled !== false }))
+            : (p.model ? [{ id: p.model, enabled: true }] : []),
           baseUrl: p.baseUrl ?? "",
           maxContextTokens: p.maxContextTokens ? String(p.maxContextTokens) : "",
+          enabled: p.enabled !== false,
           apiKeyNewValue: "",
           apiKeyStored: !!refInfo?.exists,
         }
@@ -290,10 +311,10 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
 
   const names = draft ? Object.keys(draft.providers) : []
 
-  const update = (name: string, field: keyof ProvidersDraft["providers"][string], value: any) => {
+  const updateProv = (name: string, patch: Partial<ProvidersDraft["providers"][string]>) => {
     setDraft((d) => {
       if (!d || !d.providers[name]) return d
-      return { ...d, providers: { ...d.providers, [name]: { ...d.providers[name], [field]: value } } }
+      return { ...d, providers: { ...d.providers, [name]: { ...d.providers[name], ...patch } } }
     })
   }
 
@@ -305,6 +326,55 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     })
   }
 
+  const updateModel = (provName: string, modelId: string, patch: Partial<ModelEntry>) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.map(m =>
+        m.id === modelId ? { ...m, ...patch } : m,
+      )
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+  }
+
+  const toggleModel = (provName: string, modelId: string) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.map(m =>
+        m.id === modelId ? { ...m, enabled: !m.enabled } : m,
+      )
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+  }
+
+  const removeModel = (provName: string, modelId: string) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.filter(m => m.id !== modelId)
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+  }
+
+  const addModel = (provName: string) => {
+    const id = (newModelName[provName] ?? "").trim()
+    if (!id) return
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      if (d.providers[provName].models.some(m => m.id === id)) return d
+      return {
+        ...d,
+        providers: {
+          ...d.providers,
+          [provName]: {
+            ...d.providers[provName],
+            models: [...d.providers[provName].models, { id, enabled: true }],
+          },
+        },
+      }
+    })
+    setNewModelName((p) => ({ ...p, [provName]: "" }))
+    setAddingModel((p) => ({ ...p, [provName]: false }))
+  }
+
   const addProvider = () => {
     const n = newName.trim()
     if (!n) return
@@ -313,7 +383,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       if (!d) return d
       if (d.providers[n]) return d
       return { ...d, providers: { ...d.providers, [n]: {
-        model: "", baseUrl: "", maxContextTokens: "",
+        models: [], baseUrl: "", maxContextTokens: "", enabled: false,
         apiKeyNewValue: "", apiKeyStored: false,
       } } }
     })
@@ -326,11 +396,6 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     if (!draft) return
     setSaving(true)
     setErr(null)
-    // Best practice: each provider's apiKey ALWAYS lives at
-    //   <active vault>/provider-keys/<providerName>
-    // The user just enters the value; we own the storage layout. Renaming
-    // a provider implicitly moves the key file (next save writes to the
-    // new path).
     for (const [name, p] of Object.entries(draft.providers)) {
       if (!p.apiKeyNewValue.trim()) continue
       const r = await writePersonalValue({ vault: `provider-keys/${name}` }, p.apiKeyNewValue.trim())
@@ -339,11 +404,19 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     const providersOut: Record<string, ProviderDisk | string> = {}
     if (draft.default) providersOut.default = draft.default
     for (const [name, p] of Object.entries(draft.providers)) {
+      const models: ModelEntry[] = p.models
+        .filter(m => m.id.trim())
+        .map(m => ({
+          id: m.id.trim(),
+          ...(m.enabled ? {} : { enabled: false }),
+          ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
+        }))
       providersOut[name] = {
-        model: p.model,
         baseUrl: p.baseUrl,
         apiKey: { vault: `provider-keys/${name}` },
+        ...(models.length > 0 ? { models } : {}),
         ...(p.maxContextTokens ? { maxContextTokens: Number(p.maxContextTokens) } : {}),
+        ...(p.enabled ? {} : { enabled: false }),
       }
     }
     const r = await savePersonalDisk({ providers: providersOut })
@@ -358,11 +431,20 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     <div className="flex flex-col gap-3">
       {names.map((name) => {
         const p = draft.providers[name]
+        const isAddingModel = addingModel[name] ?? false
         return (
           <div key={name} className="border border-gray-200 rounded-md p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-[13px] font-medium text-gray-900">{name}</span>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => updateProv(name, { enabled: e.target.checked })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className={`text-[13px] font-medium ${p.enabled ? "text-gray-900" : "text-gray-400"}`}>{name}</span>
+                </label>
                 <label
                   className={"text-[11px] flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer select-none " + (draft.default === name ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
                 >
@@ -384,19 +466,11 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                 remove
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Labeled label="Model">
-                <input
-                  value={p.model}
-                  onChange={(e) => update(name, "model", e.target.value)}
-                  placeholder="e.g. claude-opus-4-7"
-                  className="ip"
-                />
-              </Labeled>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2.5">
               <Labeled label="Base URL">
                 <input
                   value={p.baseUrl}
-                  onChange={(e) => update(name, "baseUrl", e.target.value)}
+                  onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
                   placeholder="https://api.example.com"
                   className="ip"
                 />
@@ -405,24 +479,121 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                 <input
                   type="number"
                   value={p.maxContextTokens}
-                  onChange={(e) => update(name, "maxContextTokens", e.target.value)}
+                  onChange={(e) => updateProv(name, { maxContextTokens: e.target.value })}
                   placeholder="auto"
                   className="ip"
                 />
               </Labeled>
-              <Labeled label={p.apiKeyStored ? "API key (set — type to overwrite)" : "API key"}>
+              <Labeled label={p.apiKeyStored ? "API key (set — type to overwrite)" : "API key"} className="sm:col-span-2">
                 <input
                   type="password"
                   value={p.apiKeyNewValue}
-                  onChange={(e) => update(name, "apiKeyNewValue", e.target.value)}
+                  onChange={(e) => updateProv(name, { apiKeyNewValue: e.target.value })}
                   placeholder={p.apiKeyStored ? "•••••• stored encrypted in vault" : "paste API key"}
                   className="ip"
                 />
               </Labeled>
             </div>
+
+            {/* Model list */}
+            <div className="border-t border-gray-100 pt-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-medium text-gray-500">Models ({p.models.length})</span>
+                <button
+                  type="button"
+                  onClick={() => setAddingModel((a) => ({ ...a, [name]: !isAddingModel }))}
+                  className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
+                >
+                  <Plus size={11} /> add model
+                </button>
+              </div>
+
+              {isAddingModel && (
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <input
+                    autoFocus
+                    value={newModelName[name] ?? ""}
+                    onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
+                    placeholder="model ID (e.g. claude-sonnet-4-20250514)"
+                    className="ip flex-1 text-[11px]"
+                  />
+                  <button onClick={() => addModel(name)} className="px-2 h-6 rounded bg-gray-900 text-white text-[10px] hover:bg-gray-700">add</button>
+                  <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                </div>
+              )}
+
+              {p.models.length === 0 && !isAddingModel && (
+                <div className="text-[11px] text-gray-400 italic py-1">no models — add one above</div>
+              )}
+              {p.models.map((m) => (
+                <div key={m.id} className="flex items-center gap-2 py-1 group">
+                  <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={m.enabled !== false}
+                      onChange={() => toggleModel(name, m.id)}
+                      className="h-3 w-3 shrink-0"
+                    />
+                    <span className={`text-[12px] font-mono truncate ${m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"}`}>
+                      {m.id}
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    value={m.maxContextTokens ?? ""}
+                    onChange={(e) => updateModel(name, m.id, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
+                    placeholder="auto"
+                    className={`w-28 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
+                    title="max context tokens (empty = auto)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeModel(name, m.id)}
+                    className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    title="remove model"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )
       })}
+
+      {/* Preset provider shortcuts */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {PRESETS.filter((p) => !draft.providers[p.name]).map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            onClick={() => {
+              setDraft((d) => {
+                if (!d || d.providers[p.name]) return d
+                return {
+                  ...d,
+                  providers: {
+                    ...d.providers,
+                    [p.name]: {
+                      models: p.models.map((id) => ({ id, enabled: true })),
+                      baseUrl: p.baseUrl,
+                      maxContextTokens: "",
+                      enabled: false,
+                      apiKeyNewValue: "",
+                      apiKeyStored: false,
+                    },
+                  },
+                }
+              })
+            }}
+            className="px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] text-gray-500 hover:text-gray-900 hover:border-gray-400 transition-colors"
+            title={`Add ${p.name} preset`}
+          >
+            + {p.name}
+          </button>
+        ))}
+      </div>
 
       {adding ? (
         <div className="flex items-center gap-2">
@@ -442,7 +613,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
           onClick={() => setAdding(true)}
           className="self-start text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
         >
-          <Plus size={12} /> add provider
+          <Plus size={12} /> add custom provider
         </button>
       )}
 
@@ -461,9 +632,9 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   )
 }
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
+function Labeled({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <label className="flex flex-col gap-1">
+    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
       <span className="text-[11px] font-medium text-gray-500">{label}</span>
       {children}
     </label>
