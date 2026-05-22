@@ -34,6 +34,45 @@ async function readSkillDescription(skillsDir: string, skillName: string): Promi
   }
 }
 
+async function pruneClaudeMcpOAuthState(loopId: string, tokenServerNames: Iterable<string>) {
+  const names = [...tokenServerNames].filter(Boolean)
+  if (names.length === 0) return
+
+  const credentialsPath = join(loopClaudeDir(loopId), ".credentials.json")
+  let raw = ""
+  try {
+    raw = await readFile(credentialsPath, "utf-8")
+  } catch {
+    return
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    await rm(credentialsPath, { force: true }).catch(() => {})
+    return
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return
+
+  const credentials = parsed as Record<string, unknown>
+  const ownedPrefixes = names.map((name) => `mcpOAuth.${name}|`)
+  let changed = false
+  for (const key of Object.keys(credentials)) {
+    if (ownedPrefixes.some((prefix) => key.startsWith(prefix))) {
+      delete credentials[key]
+      changed = true
+    }
+  }
+  if (!changed) return
+
+  if (Object.keys(credentials).length === 0) {
+    await rm(credentialsPath, { force: true }).catch(() => {})
+    return
+  }
+  await writeFile(credentialsPath, JSON.stringify(credentials, null, 2) + "\n")
+}
+
 /**
  * Mirror cli's ff(): explicit override wins; otherwise [1m] tag → 1M;
  * any claude opus-4-7/4-6/sonnet-4/sonnet-4-6 → still defaults to 200K
@@ -321,28 +360,6 @@ class LoopSession {
     const { enabledPlugins } = await composeLoopClaudeConfig(loopId, driver)
     await writeLoopSettings(loopId, enabledPlugins)
 
-    // Nuke CC's MCP-related cache files that linger across spawns:
-    //
-    //   `.credentials.json`        — CC's ephemeral OAuth state (mcpOAuth.<name>|<hash>).
-    //                                When present CC prefers it over Authorization
-    //                                headers we inject; stale entries cause needs-auth.
-    //   `mcp-needs-auth-cache.json` — CC's "I already know this server needs auth"
-    //                                short-circuit cache. If a server was marked
-    //                                needs-auth in a previous spawn, CC skips the
-    //                                connection attempt entirely on subsequent
-    //                                spawns — even when our injection now provides
-    //                                a valid header.
-    //
-    // loopat owns MCP auth now (Settings → MCP → Connect), tokens live in
-    // the vault, and they're applied per-spawn through mergeMcpTokens(). CC
-    // has nothing to maintain in these files; clear them every spawn so
-    // header injection takes effect immediately.
-    for (const f of [".credentials.json", "mcp-needs-auth-cache.json"]) {
-      try {
-        await rm(join(loopClaudeDir(loopId), f), { force: true })
-      } catch {}
-    }
-
     // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
     // Passed through to SDK as-is — secret substitution removed; static-auth
     // servers should keep their token in `env`/`headers` directly (only ever
@@ -361,6 +378,14 @@ class LoopSession {
     // authenticated transports and never triggers its own OAuth flow.
     const activeVault = meta.config?.vault?.trim() || "default"
     const userMcpTokens = await loadMcpTokens(driver, activeVault)
+    // Clear only the MCP OAuth state that conflicts with loopat-owned vault
+    // tokens. Servers without a vault token may still rely on Claude Code's
+    // built-in in-band OAuth flow, whose PKCE state also lives here.
+    await pruneClaudeMcpOAuthState(loopId, Object.keys(userMcpTokens).filter((name) => !!userMcpTokens[name]?.accessToken))
+    // This cache only says "server needs auth" and can block a fresh
+    // header-injected attempt after Settings → MCP succeeds; it does not
+    // carry OAuth verifier/state data.
+    await rm(join(loopClaudeDir(loopId), "mcp-needs-auth-cache.json"), { force: true }).catch(() => {})
     const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
     // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
@@ -1242,4 +1267,3 @@ export function restartSession(id: string): boolean {
   s.restartOnNextMessage()
   return true
 }
-
