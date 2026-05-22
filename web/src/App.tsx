@@ -212,6 +212,28 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                     Admin
                   </button>
                 )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setMenuOpen(false)
+                      try {
+                        const m = await ws.createLoop({
+                          title: "cross-loop distill",
+                          mountAllLoops: true,
+                          knowledgeRw: true,
+                        })
+                        navigate(`/loop/${m.id}`)
+                      } catch (e: any) {
+                        alert(e?.message ?? "create failed")
+                      }
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                    title="New loop with /loopat/loops/ mounted read-only — read every loop's chat/workdir for distill"
+                  >
+                    Cross-loop distill
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

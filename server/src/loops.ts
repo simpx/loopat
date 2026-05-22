@@ -117,6 +117,16 @@ export type LoopMeta = {
      * for loops that exist to distill notes into knowledge.
      */
     knowledge_rw?: boolean
+    /**
+     * Admin-only flag: bind the entire LOOPAT_HOME/loops/ tree read-only
+     * at /loopat/loops/ so this loop can read every other loop's chat
+     * history, workdir, meta, etc. — for cross-loop distill. Granted only
+     * to admins at create time; cannot be toggled later.
+     *
+     * Privacy note: this exposes other users' chats and workdirs to the
+     * driver of this loop. Don't ship a UI that lets non-admins flip it.
+     */
+    mount_all_loops?: boolean
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes
@@ -1241,6 +1251,7 @@ export async function createLoop(opts: {
   sandbox?: string
   vault?: string
   knowledgeRw?: boolean
+  mountAllLoops?: boolean
 }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
@@ -1262,6 +1273,9 @@ export async function createLoop(opts: {
   }
   if (opts.knowledgeRw) {
     meta.config = { ...(meta.config ?? {}), knowledge_rw: true }
+  }
+  if (opts.mountAllLoops) {
+    meta.config = { ...(meta.config ?? {}), mount_all_loops: true }
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })

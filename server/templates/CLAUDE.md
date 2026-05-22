@@ -10,6 +10,7 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 
 - `/loopat/loop/<id>/workdir/`      — the workdir (rw). cwd lives here. For code-repo loops, contents = git worktree of one repo in `context/repos/`.
 - `/loopat/loop/<id>/.claude/`      — internal SDK session state (rw). Don't poke unless debugging.
+- `/loopat/loops/`                  — **admin / cross-loop distill only.** Read-only view of every other loop's `loops/<id>/{meta.json,messages.jsonl,workdir/,...}`. Absent on normal loops. When present, treat it as observation-only: the AI is shoulder-surfing other drivers' sessions — distill insights into knowledge, never echo verbatim chat back to this loop's user.
 - `/loopat/context/knowledge/`      — workspace's distilled docs. **Your private git worktree** on branch `loop/<id>`. Read-only by default; rw if the loop opted in. Other loops see your edits only after you publish (see below).
 - `/loopat/context/notes/`          — workspace prose layer (rw). **Your private git worktree** on branch `loop/<id>`. `inbox.md`, `focus.md`, plus `memory/` (team memory). Other loops see your edits only after you publish.
 - `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory), `.loopat/config.json` (per-user config), and `.loopat/vaults/<name>/` (the user's credential catalogs — see `/loopat/context/vault` below).
