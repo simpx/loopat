@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, writeFile, stat, symlink, lstat, rm } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
@@ -276,19 +276,45 @@ export async function ensureWorkspaceDirs() {
   void k
 
   // Per-loop worktrees push back here via `git push . HEAD:<trunk>`. Allow
-  // pushing to the currently checked-out branch (ref-only update; primary
-  // wd goes stale but no one reads it). `updateInstead` would race on the
-  // primary worktree under concurrent pushes — verified empirically.
+  // pushing to the currently checked-out branch (ref-only update). The
+  // companion post-receive hook then resets the primary worktree to the
+  // new ref so its working dir doesn't go stale. `updateInstead` would race
+  // on the primary worktree under concurrent pushes — verified empirically.
   for (const dir of [workspaceNotesDir(), workspaceKnowledgeDir()]) {
     if (existsSyncBase(join(dir, ".git"))) {
       try {
         await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
+        const hooksDir = join(dir, ".git", "hooks")
+        await mkdir(hooksDir, { recursive: true })
+        const hookPath = join(hooksDir, "post-receive")
+        await writeFile(hookPath, TRUNK_SYNC_HOOK)
+        await chmod(hookPath, 0o755)
       } catch (e: any) {
-        console.warn(`[loopat] failed to set denyCurrentBranch on ${dir}: ${e?.message ?? e}`)
+        console.warn(`[loopat] failed to set up trunk-sync on ${dir}: ${e?.message ?? e}`)
       }
     }
   }
 }
+
+// post-receive hook for notes/knowledge primary repos. Pairs with
+// receive.denyCurrentBranch=ignore: that lets loop worktrees push to the
+// trunk ref but doesn't update primary's working dir, so this hook does it
+// via reset --hard. Uses --git-common-dir because $GIT_DIR points at the
+// pushing worktree's private gitdir, where HEAD = loop/<id>, not trunk.
+const TRUNK_SYNC_HOOK = `#!/bin/sh
+set -e
+COMMON=$(git rev-parse --git-common-dir)
+COMMON=$(cd "$COMMON" && pwd -P)
+PRIMARY=$(dirname "$COMMON")
+TRUNK_REF=$(sed -n 's|^ref: ||p' "$COMMON/HEAD")
+[ -n "$TRUNK_REF" ] || exit 0
+
+while read oldrev newrev refname; do
+  if [ "$refname" = "$TRUNK_REF" ]; then
+    git --git-dir="$COMMON" --work-tree="$PRIMARY" reset --hard "$newrev" >/dev/null
+  fi
+done
+`
 
 /**
  * Provision a freshly-registered user's personal/ tree. NEVER clones the

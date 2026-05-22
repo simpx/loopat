@@ -1,8 +1,32 @@
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises"
 import { join, basename } from "node:path"
+import { existsSync } from "node:fs"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { workspaceNotesDir } from "./paths"
 import { createLoop, patchLoopMeta, type LoopMeta } from "./loops"
 import { pickDefaultSandbox } from "./sandboxes"
+
+const execFileP = promisify(execFile)
+
+// Auto-commit kanban writes so loop-worktree pushes don't silently wipe
+// them via the post-receive reset --hard hook. Scoped to focus/ to avoid
+// racing with vaultWrite's own commits on other paths under notes/.
+async function commitFocus(msg: string): Promise<void> {
+  const dir = workspaceNotesDir()
+  if (!existsSync(join(dir, ".git"))) return
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "loopat",
+    GIT_AUTHOR_EMAIL: "ui@loopat.local",
+    GIT_COMMITTER_NAME: "loopat",
+    GIT_COMMITTER_EMAIL: "ui@loopat.local",
+  }
+  try {
+    await execFileP("git", ["-C", dir, "add", "--", "focus/"], { env })
+    await execFileP("git", ["-C", dir, "commit", "-m", `kanban: ${msg}`], { env })
+  } catch { /* nothing to commit, or transient — best-effort */ }
+}
 
 // ── types ──
 
@@ -210,6 +234,7 @@ export async function renameBoard(oldName: string, newName: string): Promise<boo
   if (!newName || newName.startsWith(".") || /[/\\]/.test(newName)) return false
   try {
     await rename(boardDir(oldName), boardDir(newName))
+    await commitFocus(`renameBoard ${oldName} → ${newName}`)
     return true
   } catch {
     return false
@@ -297,6 +322,7 @@ export async function addCard(board: string, filename: string, opts: {
     const body = `# ${title}\n\n- [ ] ${opts.text}\n`
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, basename(filename)), body)
+    await commitFocus(`addCard ${board}/${filename}`)
     return { ok: true, cid: hashCid(opts.text) }
   }
 
@@ -326,6 +352,7 @@ export async function addCard(board: string, filename: string, opts: {
   if (lines[lines.length - 1] !== "") lines.push("")
 
   await writeFile(raw.path, lines.join("\n"))
+  await commitFocus(`addCard ${board}/${filename}`)
   return { ok: true, cid: hashCid(opts.text) }
 }
 
@@ -342,6 +369,7 @@ export async function toggleCard(board: string, filename: string, cid: string): 
     const ch = bm[2].toLowerCase() === "x" ? " " : "x"
     lines[i] = lines[i].replace(/\[[ xX]\]/, `[${ch}]`)
     await writeFile(raw.path, lines.join("\n"))
+    await commitFocus(`toggleCard ${board}/${filename}`)
     return true
   }
   return false
@@ -362,6 +390,7 @@ export async function deleteCard(board: string, filename: string, cid: string): 
   // clean up trailing double-blanks
   const newBody = lines.join("\n").replace(/\n{3,}/g, "\n\n")
   await writeFile(raw.path, newBody)
+  await commitFocus(`deleteCard ${board}/${filename}`)
   return true
 }
 
@@ -396,6 +425,7 @@ export async function moveCard(board: string, fromFile: string, cid: string, toF
     const body = `# ${title}\n\n${cardLines.join("\n")}\n`
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, basename(toFile)), body)
+    await commitFocus(`moveCard ${board}/${fromFile} → ${toFile}`)
     return true
   }
 
@@ -431,6 +461,7 @@ export async function moveCard(board: string, fromFile: string, cid: string, toF
   }
   if (toLines[toLines.length - 1] !== "") toLines.push("")
   await writeFile(toRaw.path, toLines.join("\n"))
+  await commitFocus(`moveCard ${board}/${fromFile} → ${toFile}`)
   return true
 }
 
@@ -489,6 +520,7 @@ export async function updateCardMeta(board: string, filename: string, cid: strin
   }
 
   await writeFile(raw.path, lines.join("\n"))
+  await commitFocus(`updateCardMeta ${board}/${filename}`)
   return true
 }
 
@@ -506,6 +538,7 @@ export async function updateCardBlock(board: string, filename: string, cid: stri
   // Clean up excessive blanks
   const newBody = lines.join("\n").replace(/\n{3,}/g, "\n\n")
   await writeFile(raw.path, newBody)
+  await commitFocus(`updateCardBlock ${board}/${filename}`)
   return true
 }
 
@@ -543,6 +576,7 @@ export async function linkLoopToCard(
   const lines = raw.body.split("\n")
   lines.splice(range.start + 1, 0, `  > loop: ${loopId}`)
   await writeFile(raw.path, lines.join("\n"))
+  await commitFocus(`linkLoopToCard ${board}/${filename}`)
 
   await patchLoopMeta(loopId, { driver: userId } as Partial<LoopMeta>)
   return true
@@ -575,6 +609,7 @@ export async function createLoopFromCard(
       const lines = raw.body.split("\n")
       lines.splice(range.start + 1, 0, `  > loop: ${loop.id}`)
       await writeFile(raw.path, lines.join("\n"))
+      await commitFocus(`createLoopFromCard ${board}/${filename}`)
     }
   }
 
@@ -589,6 +624,7 @@ export async function createColumn(board: string, filename: string, title?: stri
   const path = join(dir, safe)
   const displayTitle = title || basename(safe, ".md")
   await writeFile(path, `# ${displayTitle}\n\n`)
+  await commitFocus(`createColumn ${board}/${safe}`)
   return true
 }
 
@@ -647,6 +683,7 @@ export async function reorderCards(board: string, filename: string, orderedCids:
   result.push("")
 
   await writeFile(raw.path, result.join("\n"))
+  await commitFocus(`reorderCards ${board}/${filename}`)
   return true
 }
 
@@ -715,6 +752,7 @@ export async function saveColumnOrder(board: string, orderedFiles: string[]): Pr
     return entry
   })
   await writeKanbanConfig(board, { columns })
+  await commitFocus(`saveColumnOrder ${board}`)
 }
 
 /** Update column color in config. */
@@ -728,6 +766,7 @@ export async function setColumnColor(board: string, filename: string, color: str
     existing.push({ file: filename, color })
   }
   await writeKanbanConfig(board, { columns: existing })
+  await commitFocus(`setColumnColor ${board}/${filename}`)
 }
 
 /** Delete a column file. All cards in the column are lost (caller should archive first). */
@@ -743,6 +782,7 @@ export async function deleteColumn(board: string, filename: string): Promise<boo
     cfg.columns = cfg.columns.filter((c) => c.file !== safe)
     await writeKanbanConfig(board, cfg)
   }
+  await commitFocus(`deleteColumn ${board}/${safe}`)
   return true
 }
 
@@ -764,5 +804,6 @@ export async function renameColumn(board: string, fromFile: string, toFile: stri
     if (found) found.file = safeTo
     await writeKanbanConfig(board, cfg)
   }
+  await commitFocus(`renameColumn ${board}/${safeFrom} → ${safeTo}`)
   return true
 }
