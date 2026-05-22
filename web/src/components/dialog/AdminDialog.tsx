@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Plus, Trash2 } from "lucide-react"
 import {
   listAdminUsers,
   activateAdminUser,
@@ -12,6 +13,7 @@ import {
   setServeDomain,
   type AdminUser,
   type WorkspaceSettings,
+  type ModelEntry,
 } from "@/api"
 
 type Tab = "users" | "workspace" | "serve"
@@ -78,7 +80,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   )
 }
 
-function UsersPanel({ currentUserId }: { currentUserId: string }) {
+export function UsersPanel({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<AdminUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
@@ -228,326 +230,386 @@ function StatusBadge({ status }: { status: "active" | "pending" }) {
   )
 }
 
-// ── Workspace settings panel (formerly SettingsDialog's "Workspace" tab) ──
+// ── Workspace settings panel — matches the personal ProvidersSection UI ──
 
-type ModelForm = { id: string; enabled: boolean }
+/** Preset providers — kept in sync with server/src/config.ts PRESET_PROVIDERS. */
+const WS_PRESETS: Array<{ name: string; baseUrl: string; models: string[] }> = [
+  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
+    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
+  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
+    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
+  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
+    models: ["kimi-k2.6"] },
+  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
+    models: ["MiniMax-M2.7"] },
+]
 
-type ProviderForm = {
-  models: ModelForm[]
-  baseUrl: string
-  apiKey: string
-  keyDirty: boolean
-  enabled: boolean
+type WorkspaceDraft = {
+  default: string
+  providers: Record<string, {
+    models: ModelEntry[]
+    baseUrl: string
+    apiKey: string
+    keyDirty: boolean
+    enabled: boolean
+  }>
 }
 
-function WorkspacePanel() {
+export function WorkspacePanel() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
-  const [, setWorkspace] = useState<WorkspaceSettings | null>(null)
-  const [providers, setProviders] = useState<Record<string, ProviderForm>>({})
-  const [def, setDef] = useState("")
-  const [newProviderName, setNewProviderName] = useState("")
-  const [addingProvider, setAddingProvider] = useState(false)
-  const [newModelFor, setNewModelFor] = useState("")
-  const [addingModelFor, setAddingModelFor] = useState("")
+  const [err, setErr] = useState<string | null>(null)
+  const [draft, setDraft] = useState<WorkspaceDraft | null>(null)
+  const [newName, setNewName] = useState("")
+  const [adding, setAdding] = useState(false)
+  const [newModelName, setNewModelName] = useState<Record<string, string>>({})
+  const [addingModel, setAddingModel] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     setLoading(true)
-    setError("")
+    setErr(null)
     getWorkspaceSettings().then((w) => {
-      setWorkspace(w)
-      const forms: Record<string, ProviderForm> = {}
+      const next: WorkspaceDraft = { default: w.default ?? "", providers: {} }
       for (const [name, prov] of Object.entries(w.providers)) {
-        forms[name] = {
-          models: (prov as any).models?.map((m: any) => ({ id: m.id, enabled: m.enabled !== false })) ?? [],
+        next.providers[name] = {
+          models: (prov as any).models?.map((m: any) => ({
+            id: m.id,
+            enabled: m.enabled !== false,
+            ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
+          })) ?? [],
           baseUrl: prov.baseUrl ?? "",
           apiKey: "",
           keyDirty: false,
           enabled: (prov as any).enabled !== false,
         }
       }
-      setProviders(forms)
-      setDef(w.default ?? "")
+      setDraft(next)
     }).catch((e) => {
-      setError(e?.message ?? "load failed")
+      setErr(e?.message ?? "load failed")
     }).finally(() => setLoading(false))
   }, [])
 
-  function updateProv(name: string, patch: Partial<ProviderForm>) {
-    setProviders((prev) => {
-      const updated = { ...prev }
-      if (!updated[name]) return prev
-      updated[name] = { ...updated[name], ...patch }
-      return updated
+  const names = draft ? Object.keys(draft.providers) : []
+
+  const updateProv = (name: string, patch: Partial<WorkspaceDraft["providers"][string]>) => {
+    setDraft((d) => {
+      if (!d || !d.providers[name]) return d
+      return { ...d, providers: { ...d.providers, [name]: { ...d.providers[name], ...patch } } }
     })
   }
 
-  function handleChange(name: string, field: "baseUrl" | "apiKey", value: string) {
-    setProviders((prev) => {
-      const updated = { ...prev }
-      if (!updated[name]) return prev
-      const entry = { ...updated[name], [field]: value }
-      if (field === "apiKey") entry.keyDirty = true
-      updated[name] = entry
-      return updated
+  const remove = (name: string) => {
+    setDraft((d) => {
+      if (!d) return d
+      const { [name]: _, ...rest } = d.providers
+      return { ...d, providers: rest, default: d.default === name ? "" : d.default }
     })
   }
 
-  function handleRemove(name: string) {
-    setProviders((prev) => {
-      const updated = { ...prev }
-      delete updated[name]
-      return updated
-    })
-    setDef((prev) => (prev === name ? "" : prev))
-  }
-
-  function handleAdd() {
-    const name = newProviderName.trim()
-    if (!name) return
-    if (providers[name]) { setError("provider name already exists"); return }
-    setProviders((prev) => ({
-      ...prev,
-      [name]: { models: [], baseUrl: "", apiKey: "", keyDirty: false, enabled: false },
-    }))
-    setNewProviderName("")
-    setAddingProvider(false)
-    setError("")
-  }
-
-  function toggleModel(provName: string, modelId: string) {
-    setProviders((prev) => {
-      const p = prev[provName]
-      if (!p) return prev
-      return { ...prev, [provName]: { ...p, models: p.models.map(m => m.id === modelId ? { ...m, enabled: !m.enabled } : m) } }
+  const updateModel = (provName: string, modelId: string, patch: Partial<ModelEntry>) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.map(m =>
+        m.id === modelId ? { ...m, ...patch } : m,
+      )
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
     })
   }
 
-  function addModel(provName: string) {
-    const id = newModelFor.trim()
+  const toggleModel = (provName: string, modelId: string) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.map(m =>
+        m.id === modelId ? { ...m, enabled: !m.enabled } : m,
+      )
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+  }
+
+  const removeModel = (provName: string, modelId: string) => {
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      const models = d.providers[provName].models.filter(m => m.id !== modelId)
+      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+  }
+
+  const addModel = (provName: string) => {
+    const id = (newModelName[provName] ?? "").trim()
     if (!id) return
-    setProviders((prev) => {
-      const p = prev[provName]
-      if (!p || p.models.some(m => m.id === id)) return prev
-      return { ...prev, [provName]: { ...p, models: [...p.models, { id, enabled: true }] } }
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      if (d.providers[provName].models.some(m => m.id === id)) return d
+      return {
+        ...d,
+        providers: {
+          ...d.providers,
+          [provName]: {
+            ...d.providers[provName],
+            models: [...d.providers[provName].models, { id, enabled: true }],
+          },
+        },
+      }
     })
-    setNewModelFor("")
-    setAddingModelFor("")
+    setNewModelName((p) => ({ ...p, [provName]: "" }))
+    setAddingModel((p) => ({ ...p, [provName]: false }))
   }
 
-  function removeModel(provName: string, modelId: string) {
-    setProviders((prev) => {
-      const p = prev[provName]
-      if (!p) return prev
-      return { ...prev, [provName]: { ...p, models: p.models.filter(m => m.id !== modelId) } }
+  const addProvider = () => {
+    const n = newName.trim()
+    if (!n) return
+    if (draft?.providers[n]) { setErr("provider name already exists"); return }
+    setDraft((d) => {
+      if (!d) return d
+      return { ...d, providers: { ...d.providers, [n]: {
+        models: [], baseUrl: "", apiKey: "", keyDirty: false, enabled: false,
+      } } }
     })
+    setNewName("")
+    setAdding(false)
+    setErr(null)
   }
 
-  async function handleSave() {
-    setSaving(true); setError("")
+  const save = async () => {
+    if (!draft) return
+    setSaving(true); setErr(null)
     try {
       const out: Record<string, any> = {}
-      for (const [name, f] of Object.entries(providers)) {
-        const models = f.models.filter(m => m.id.trim()).map(m => ({ id: m.id.trim(), ...(m.enabled ? {} : { enabled: false }) }))
-        out[name] = { models, baseUrl: f.baseUrl, enabled: f.enabled }
-        if (f.keyDirty && f.apiKey) out[name].apiKey = f.apiKey
+      for (const [name, p] of Object.entries(draft.providers)) {
+        const models = p.models
+          .filter(m => m.id.trim())
+          .map(m => ({
+            id: m.id.trim(),
+            ...(m.enabled ? {} : { enabled: false }),
+            ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
+          }))
+        out[name] = { models, baseUrl: p.baseUrl, enabled: p.enabled }
+        if (p.keyDirty && p.apiKey.trim()) out[name].apiKey = p.apiKey.trim()
       }
-      const ok = await updateWorkspaceSettings({ providers: out, default: def })
-      if (!ok) setError("save failed")
-      else {
-        setProviders((prev) => {
-          const updated = { ...prev }
-          for (const k of Object.keys(updated)) {
-            updated[k] = { ...updated[k], keyDirty: false, apiKey: "" }
-          }
-          return updated
-        })
-      }
+      const ok = await updateWorkspaceSettings({ providers: out, default: draft.default })
+      if (!ok) { setErr("save failed"); return }
+      setDraft((d) => {
+        if (!d) return d
+        const next = { ...d, providers: { ...d.providers } }
+        for (const k of Object.keys(next.providers)) {
+          next.providers[k] = { ...next.providers[k], keyDirty: false, apiKey: "" }
+        }
+        return next
+      })
     } catch (e: any) {
-      setError(e?.message ?? "save failed")
+      setErr(e?.message ?? "save failed")
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) return <div className="text-sm text-gray-400 py-8 text-center">Loading…</div>
-
-  const names = Object.keys(providers)
+  if (loading) return <div className="text-[12px] text-gray-400 italic py-12 text-center">loading…</div>
+  if (!draft) return null
 
   return (
-    <div className="flex flex-col gap-5 min-h-full">
-      <div className="flex-1 flex flex-col gap-5">
-        {names.map((name) => {
-          const f = providers[name]!
-          return (
-            <div key={name} className="border border-gray-200 rounded-lg p-3 sm:p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={f.enabled}
-                      onChange={(e) => updateProv(name, { enabled: e.target.checked })}
-                      className="h-3.5 w-3.5"
-                    />
-                    <span className={`text-sm font-semibold ${f.enabled ? "text-gray-900" : "text-gray-400"}`}>{name}</span>
-                  </label>
-                </div>
+    <div className="flex flex-col gap-3">
+      <style>{`.ip { width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; background: white; } .ip:focus { border-color: #111827; } .ip:disabled { background: #f3f4f6; color: #9ca3af; }`}</style>
+
+      {names.map((name) => {
+        const p = draft.providers[name]
+        const isAddingModel = addingModel[name] ?? false
+        return (
+          <div key={name} className="border border-gray-200 rounded-md p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => updateProv(name, { enabled: e.target.checked })}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className={`text-[13px] font-medium ${p.enabled ? "text-gray-900" : "text-gray-400"}`}>{name}</span>
+                </label>
+                <label
+                  className={"text-[11px] flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer select-none " + (draft.default === name ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
+                >
+                  <input
+                    type="radio"
+                    name="ws-default-provider"
+                    checked={draft.default === name}
+                    onChange={() => setDraft((d) => d ? { ...d, default: name } : d)}
+                    className="hidden"
+                  />
+                  <span>★ default</span>
+                </label>
+              </div>
+              <button type="button" onClick={() => remove(name)} className="text-[11px] text-gray-400 hover:text-red-500">
+                remove
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2.5">
+              <Labeled label="Base URL">
+                <input
+                  value={p.baseUrl}
+                  onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
+                  placeholder="https://api.example.com"
+                  className="ip"
+                />
+              </Labeled>
+              <Labeled label="API Key">
+                <input
+                  type="password"
+                  value={p.apiKey}
+                  onChange={(e) => updateProv(name, { apiKey: e.target.value, keyDirty: true })}
+                  placeholder="API key"
+                  className="ip"
+                />
+              </Labeled>
+            </div>
+
+            {/* Model list */}
+            <div className="border-t border-gray-100 pt-2.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-medium text-gray-500">Models ({p.models.length})</span>
                 <button
                   type="button"
-                  onClick={() => handleRemove(name)}
-                  className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                  onClick={() => setAddingModel((a) => ({ ...a, [name]: !isAddingModel }))}
+                  className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
                 >
-                  Remove
+                  <Plus size={11} /> add model
                 </button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Base URL</label>
-                  <input
-                    type="url"
-                    value={f.baseUrl}
-                    onChange={(e) => handleChange(name, "baseUrl", e.target.value)}
-                    placeholder="https://api.example.com"
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">API Key</label>
-                  <input
-                    type="password"
-                    value={f.apiKey}
-                    onChange={(e) => handleChange(name, "apiKey", e.target.value)}
-                    placeholder="API key"
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                  />
-                </div>
-              </div>
 
-              {/* Model list */}
-              <div className="border-t border-gray-100 pt-2.5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-medium text-gray-500">Models ({f.models.length})</span>
+              {isAddingModel && (
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <input
+                    autoFocus
+                    value={newModelName[name] ?? ""}
+                    onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
+                    placeholder="model ID (e.g. claude-sonnet-4-20250514)"
+                    className="ip flex-1 text-[11px]"
+                  />
+                  <button onClick={() => addModel(name)} className="px-2 h-6 rounded bg-gray-900 text-white text-[10px] hover:bg-gray-700">add</button>
+                  <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                </div>
+              )}
+
+              {p.models.length === 0 && !isAddingModel && (
+                <div className="text-[11px] text-gray-400 italic py-1">no models — add one above</div>
+              )}
+              {p.models.map((m) => (
+                <div key={m.id} className="flex items-center gap-2 py-1 group">
+                  <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={m.enabled !== false}
+                      onChange={() => toggleModel(name, m.id)}
+                      className="h-3 w-3 shrink-0"
+                    />
+                    <span className={`text-[12px] font-mono truncate ${m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"}`}>
+                      {m.id}
+                    </span>
+                  </label>
+                  <input
+                    type="number"
+                    value={m.maxContextTokens ?? ""}
+                    onChange={(e) => updateModel(name, m.id, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
+                    placeholder="auto"
+                    className={`w-28 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
+                    title="max context tokens (empty = auto)"
+                  />
                   <button
                     type="button"
-                    onClick={() => setAddingModelFor(addingModelFor === name ? "" : name)}
-                    className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
+                    onClick={() => removeModel(name, m.id)}
+                    className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    title="remove model"
                   >
-                    <span className="text-base leading-none">+</span> add model
+                    <Trash2 size={11} />
                   </button>
                 </div>
-
-                {addingModelFor === name && (
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <input
-                      type="text"
-                      value={newModelFor}
-                      onChange={(e) => setNewModelFor(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModelFor("") }}
-                      placeholder="model ID"
-                      autoFocus
-                      className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-                    />
-                    <Button size="xs" onClick={() => addModel(name)}>Add</Button>
-                    <button type="button" onClick={() => setAddingModelFor("")} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
-                  </div>
-                )}
-
-                {f.models.length === 0 && addingModelFor !== name && (
-                  <div className="text-[11px] text-gray-400 italic py-1">no models — add one above</div>
-                )}
-                {f.models.map((m) => (
-                  <div key={m.id} className="flex items-center gap-2 py-1 group">
-                    <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={m.enabled}
-                        onChange={() => toggleModel(name, m.id)}
-                        className="h-3 w-3 shrink-0"
-                      />
-                      <span className={`text-xs font-mono truncate ${m.enabled ? "text-gray-700" : "text-gray-300 line-through"}`}>
-                        {m.id}
-                      </span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => removeModel(name, m.id)}
-                      className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                      title="remove model"
-                    >
-                      <span className="text-[10px]">✕</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        })}
-
-        {addingProvider ? (
-          <div className="border border-dashed border-gray-300 rounded-lg p-3 flex items-center gap-2">
-            <input
-              type="text"
-              value={newProviderName}
-              onChange={(e) => setNewProviderName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAdd()
-                if (e.key === "Escape") { setAddingProvider(false); setNewProviderName("") }
-              }}
-              placeholder="provider name"
-              autoFocus
-              className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-            />
-            <Button size="xs" onClick={handleAdd}>Add</Button>
-            <button
-              type="button"
-              onClick={() => { setAddingProvider(false); setNewProviderName("") }}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              cancel
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setAddingProvider(true)}
-            className="text-sm text-gray-500 hover:text-gray-900 transition-colors flex items-center gap-1"
-          >
-            <span className="text-base leading-none">+</span> Add Provider
-          </button>
-        )}
-
-        {names.length > 0 && (
-          <div className="pt-2 border-t border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Default Provider</label>
-            <select
-              value={def}
-              onChange={(e) => setDef(e.target.value)}
-              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 bg-white"
-            >
-              <option value="">None</option>
-              {names.map((n) => (
-                <option key={n} value={n}>{n}</option>
               ))}
-            </select>
+            </div>
           </div>
-        )}
+        )
+      })}
+
+      {/* Preset provider shortcuts */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {WS_PRESETS.filter((p) => !draft.providers[p.name]).map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            onClick={() => {
+              setDraft((d) => {
+                if (!d || d.providers[p.name]) return d
+                return {
+                  ...d,
+                  providers: {
+                    ...d.providers,
+                    [p.name]: {
+                      models: p.models.map((id) => ({ id, enabled: true })),
+                      baseUrl: p.baseUrl,
+                      apiKey: "",
+                      keyDirty: false,
+                      enabled: false,
+                    },
+                  },
+                }
+              })
+            }}
+            className="px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] text-gray-500 hover:text-gray-900 hover:border-gray-400 transition-colors"
+            title={`Add ${p.name} preset`}
+          >
+            + {p.name}
+          </button>
+        ))}
       </div>
 
-      <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
-        {error && <span className="text-xs text-red-500">{error}</span>}
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </Button>
+      {adding ? (
+        <div className="flex items-center gap-2">
+          <input
+            autoFocus
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addProvider(); if (e.key === "Escape") setAdding(false) }}
+            placeholder="provider name"
+            className="ip flex-1"
+          />
+          <button onClick={addProvider} className="px-2.5 h-7 rounded bg-gray-900 text-white text-xs hover:bg-gray-700">add</button>
+          <button onClick={() => { setAdding(false); setNewName("") }} className="text-xs text-gray-400 hover:text-gray-700">cancel</button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="self-start text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
+        >
+          <Plus size={12} /> add custom provider
+        </button>
+      )}
+
+      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
+        {err && <span className="text-[11px] text-red-600">{err}</span>}
+        <button
+          onClick={save}
+          disabled={saving}
+          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? "saving…" : "save providers"}
+        </button>
       </div>
     </div>
   )
 }
 
+function Labeled({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <label className={`flex flex-col gap-1 ${className ?? ""}`}>
+      <span className="text-[11px] font-medium text-gray-500">{label}</span>
+      {children}
+    </label>
+  )
+}
+
 // ── Workspace Serve panel ──
 
-function ServePanel() {
+export function ServePanel() {
   const [domain, setDomainState] = useState("")
   const [ip, setServeIp] = useState("")
   const [baseUrl, setServeBaseUrl] = useState("")

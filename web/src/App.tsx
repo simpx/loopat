@@ -12,7 +12,6 @@ import { useWorkspaceState, type WorkspaceState } from "./state"
 import { WorkspaceCtx, useWorkspace } from "./ctx"
 import { NewLoopDialog } from "./components/dialog/NewLoopDialog"
 import { AboutDialog } from "./components/dialog/AboutDialog"
-import { AdminDialog } from "./components/dialog/AdminDialog"
 import { LoopPage } from "./pages/LoopPage"
 
 import { TopicView } from "./pages/TopicView"
@@ -51,7 +50,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [workspaceName, setWorkspaceName] = useState("loopat")
   const [menuOpen, setMenuOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [adminOpen, setAdminOpen] = useState(false)
   const [showUpdateBanner, setShowUpdateBanner] = useState(false)
   const [newVersionCommit, setNewVersionCommit] = useState("")
   const [newVersionTime, setNewVersionTime] = useState("")
@@ -206,18 +204,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                     type="button"
                     onClick={() => {
                       setMenuOpen(false)
-                      setAdminOpen(true)
-                    }}
-                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
-                  >
-                    Admin
-                  </button>
-                )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false)
                       navigate("/admin/system")
                     }}
                     className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
@@ -321,13 +307,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
       )}
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
-      {isAdmin && (
-        <AdminDialog
-          open={adminOpen}
-          onClose={() => setAdminOpen(false)}
-          currentUserId={me}
-        />
-      )}
       {/* Floating DM bubble — hidden on /chat where the full surface is already up. */}
       {!onChatRoute && <FloatingDm me={me} />}
     </div>

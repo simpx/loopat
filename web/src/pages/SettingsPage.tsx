@@ -27,10 +27,12 @@ import {
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { McpStatusPanel } from "../components/McpStatusPanel"
+import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
+import { useWorkspace } from "@/ctx"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp"
+type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
@@ -39,6 +41,9 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
   { id: "mounts",        label: "Sandbox Mounts",         gated: true,  description: "Expose personal files / dirs into loop sandboxes." },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
   { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
+  { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove." },
+  { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration." },
+  { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings." },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -47,6 +52,8 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
 
 export function SettingsPage() {
   const navigate = useNavigate()
+  const ws = useWorkspace()
+  const isAdmin = ws.currentUser?.role === "admin"
   const { tab } = useParams<{ tab: string }>()
   const active = (TABS.some((t) => t.id === tab) ? tab : "personal-repo") as TabId
 
@@ -80,18 +87,25 @@ export function SettingsPage() {
   // If the active tab is gated and personal repo isn't ready, bounce to the
   // personal-repo tab so users see the unlock path instead of a dead pane.
   useEffect(() => {
-    if (!loading && !statusReady && TABS.find((t) => t.id === active)?.gated) {
+    if (!loading && !statusReady && TABS.find((t) => t.id === active)?.gated && !active.startsWith("admin-")) {
       navigate(`/settings/personal-repo`, { replace: true })
     }
   }, [loading, statusReady, active, navigate])
 
   const activeMeta = TABS.find((t) => t.id === active) ?? TABS[0]
-  const isGatedAndLocked = activeMeta.gated && !statusReady
+  const isGatedAndLocked = activeMeta.gated && !statusReady && !active.startsWith("admin-")
 
   const [search, setSearch] = useState("")
+  const visibleTabs = TABS.filter((t) => {
+    if (t.id.startsWith("admin-") && !isAdmin) return false
+    return true
+  })
+  const regularTabs = visibleTabs.filter((t) => !t.id.startsWith("admin-"))
+  const adminTabs = visibleTabs.filter((t) => t.id.startsWith("admin-"))
+
   const filteredTabs = search.trim() === ""
-    ? TABS
-    : TABS.filter((t) =>
+    ? visibleTabs
+    : visibleTabs.filter((t) =>
         t.label.toLowerCase().includes(search.toLowerCase()) ||
         t.description.toLowerCase().includes(search.toLowerCase()) ||
         t.id.toLowerCase().includes(search.toLowerCase()),
@@ -153,31 +167,74 @@ export function SettingsPage() {
             </div>
           </div>
           <ul className="flex sm:flex-col gap-0.5 sm:gap-0 p-2 sm:py-2 overflow-x-auto sm:overflow-x-visible">
-            {filteredTabs.map((t) => {
-              const isActive = t.id === active
-              const locked = t.gated && !statusReady
-              return (
-                <li key={t.id} className="shrink-0 sm:px-1">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/settings/${t.id}`)}
-                    className={
-                      "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
-                      (isActive
-                        ? "bg-gray-100 text-gray-900 font-medium"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
-                    }
-                  >
-                    <span className="flex-1 truncate">{t.label}</span>
-                    {locked && (
-                      <span title="locked — set up personal repo">
-                        <Lock size={11} className="text-amber-600 shrink-0" />
-                      </span>
-                    )}
-                  </button>
-                </li>
+            {search.trim()
+              ? filteredTabs.map((t) => {
+                  const isActive = t.id === active
+                  const locked = t.gated && !statusReady
+                  return (
+                    <li key={t.id} className="shrink-0 sm:px-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/settings/${t.id}`)}
+                        className={
+                          "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
+                          (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
+                        }
+                      >
+                        <span className="flex-1 truncate">{t.label}</span>
+                        {locked && <span title="locked"><Lock size={11} className="text-amber-600 shrink-0" /></span>}
+                      </button>
+                    </li>
+                  )
+                })
+              : (
+                <>
+                  {regularTabs.map((t) => {
+                    const isActive = t.id === active
+                    const locked = t.gated && !statusReady
+                    return (
+                      <li key={t.id} className="shrink-0 sm:px-1">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/settings/${t.id}`)}
+                          className={
+                            "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
+                            (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
+                          }
+                        >
+                          <span className="flex-1 truncate">{t.label}</span>
+                          {locked && <span title="locked"><Lock size={11} className="text-amber-600 shrink-0" /></span>}
+                        </button>
+                      </li>
+                    )
+                  })}
+                  {adminTabs.length > 0 && (
+                    <>
+                      <li className="px-3 pt-3 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                        Admin Settings
+                      </li>
+                      {adminTabs.map((t) => {
+                        const isActive = t.id === active
+                        return (
+                          <li key={t.id} className="shrink-0 sm:px-1">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/settings/${t.id}`)}
+                              className={
+                                "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
+                                (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
+                              }
+                            >
+                              <span className="flex-1 truncate">{t.label}</span>
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </>
+                  )}
+                </>
               )
-            })}
+            }
             {filteredTabs.length === 0 && (
               <li className="px-3 py-2 text-[11px] text-gray-400 italic">no match</li>
             )}
@@ -226,6 +283,15 @@ export function SettingsPage() {
                   )}
                   {active === "mcp" && (
                     <McpSection disabled={isGatedAndLocked} />
+                  )}
+                  {active === "admin-users" && (
+                    <UsersPanel currentUserId={ws.currentUser?.id ?? ""} />
+                  )}
+                  {active === "admin-workspace" && (
+                    <AdminWorkspacePanel />
+                  )}
+                  {active === "admin-serve" && (
+                    <ServePanel />
                   )}
                 </div>
               </>

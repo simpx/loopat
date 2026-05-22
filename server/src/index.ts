@@ -701,7 +701,7 @@ app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-app.get("/api/settings/workspace", requireAuth, async (c) => {
+app.get("/api/settings/workspace", requireAuth, requireAdmin, async (c) => {
   const cfg = await loadConfig()
   const providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean }> = {}
   if (cfg.providers) {
@@ -717,7 +717,7 @@ app.get("/api/settings/workspace", requireAuth, async (c) => {
   })
 })
 
-app.put("/api/settings/workspace", requireAuth, async (c) => {
+app.put("/api/settings/workspace", requireAuth, requireAdmin, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   try {
     await saveWorkspaceConfig({
