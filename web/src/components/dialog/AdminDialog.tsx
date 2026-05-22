@@ -249,6 +249,7 @@ type WorkspaceDraft = {
   providers: Record<string, {
     models: ModelEntry[]
     baseUrl: string
+    maxContextTokens?: number
     apiKey: string
     keyDirty: boolean
     enabled: boolean
@@ -278,6 +279,7 @@ export function WorkspacePanel() {
             ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
           })) ?? [],
           baseUrl: prov.baseUrl ?? "",
+          maxContextTokens: (prov as any).maxContextTokens || undefined,
           apiKey: "",
           keyDirty: false,
           enabled: (prov as any).enabled !== false,
@@ -383,7 +385,12 @@ export function WorkspacePanel() {
             ...(m.enabled ? {} : { enabled: false }),
             ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
           }))
-        out[name] = { models, baseUrl: p.baseUrl, enabled: p.enabled }
+        out[name] = {
+          models,
+          baseUrl: p.baseUrl,
+          enabled: p.enabled,
+          ...(p.maxContextTokens && p.maxContextTokens > 0 ? { maxContextTokens: p.maxContextTokens } : {}),
+        }
         if (p.keyDirty && p.apiKey.trim()) out[name].apiKey = p.apiKey.trim()
       }
       const ok = await updateWorkspaceSettings({ providers: out, default: draft.default })
@@ -414,117 +421,147 @@ export function WorkspacePanel() {
         const p = draft.providers[name]
         const isAddingModel = addingModel[name] ?? false
         return (
-          <div key={name} className="border border-gray-200 rounded-md p-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={p.enabled}
-                    onChange={(e) => updateProv(name, { enabled: e.target.checked })}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span className={`text-[13px] font-medium ${p.enabled ? "text-gray-900" : "text-gray-400"}`}>{name}</span>
-                </label>
-                <label
-                  className={"text-[11px] flex items-center gap-1 px-1.5 py-0.5 rounded cursor-pointer select-none " + (draft.default === name ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200")}
-                >
-                  <input
-                    type="radio"
-                    name="ws-default-provider"
-                    checked={draft.default === name}
-                    onChange={() => setDraft((d) => d ? { ...d, default: name } : d)}
-                    className="hidden"
-                  />
-                  <span>★ default</span>
-                </label>
-              </div>
-              <button type="button" onClick={() => remove(name)} className="text-[11px] text-gray-400 hover:text-red-500">
+          <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            {/* Provider header */}
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50/50 border-b border-gray-100">
+              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={p.enabled}
+                  onChange={(e) => updateProv(name, { enabled: e.target.checked })}
+                  className="h-3.5 w-3.5 rounded"
+                />
+                <span className={`text-[13px] font-semibold truncate ${p.enabled ? "text-gray-900" : "text-gray-400"}`}>
+                  {name}
+                </span>
+                {!p.enabled && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium">disabled</span>
+                )}
+              </label>
+              <label className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-medium transition-colors ${
+                draft.default === name
+                  ? "bg-blue-500 text-white"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+              }`}>
+                <input
+                  type="radio"
+                  name="ws-default-provider"
+                  checked={draft.default === name}
+                  onChange={() => setDraft((d) => d ? { ...d, default: name } : d)}
+                  className="hidden"
+                />
+                {draft.default === name ? "default" : "set default"}
+              </label>
+              <button
+                type="button"
+                onClick={() => remove(name)}
+                className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+              >
                 remove
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2.5">
-              <Labeled label="Base URL">
-                <input
-                  value={p.baseUrl}
-                  onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
-                  placeholder="https://api.example.com"
-                  className="ip"
-                />
-              </Labeled>
-              <Labeled label="API Key">
-                <input
-                  type="password"
-                  value={p.apiKey}
-                  onChange={(e) => updateProv(name, { apiKey: e.target.value, keyDirty: true })}
-                  placeholder="API key"
-                  className="ip"
-                />
-              </Labeled>
-            </div>
 
-            {/* Model list */}
-            <div className="border-t border-gray-100 pt-2.5">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[11px] font-medium text-gray-500">Models ({p.models.length})</span>
-                <button
-                  type="button"
-                  onClick={() => setAddingModel((a) => ({ ...a, [name]: !isAddingModel }))}
-                  className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
-                >
-                  <Plus size={11} /> add model
-                </button>
-              </div>
-
-              {isAddingModel && (
-                <div className="flex items-center gap-1.5 mb-1.5">
+            {/* Fields */}
+            <div className="p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <Labeled label="Base URL">
                   <input
-                    autoFocus
-                    value={newModelName[name] ?? ""}
-                    onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
-                    placeholder="model ID (e.g. claude-sonnet-4-20250514)"
-                    className="ip flex-1 text-[11px]"
+                    value={p.baseUrl}
+                    onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
+                    placeholder="https://api.example.com"
+                    className="ip"
                   />
-                  <button onClick={() => addModel(name)} className="px-2 h-6 rounded bg-gray-900 text-white text-[10px] hover:bg-gray-700">add</button>
-                  <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
-                </div>
-              )}
-
-              {p.models.length === 0 && !isAddingModel && (
-                <div className="text-[11px] text-gray-400 italic py-1">no models — add one above</div>
-              )}
-              {p.models.map((m) => (
-                <div key={m.id} className="flex items-center gap-2 py-1 group">
-                  <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={m.enabled !== false}
-                      onChange={() => toggleModel(name, m.id)}
-                      className="h-3 w-3 shrink-0"
-                    />
-                    <span className={`text-[12px] font-mono truncate ${m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"}`}>
-                      {m.id}
-                    </span>
-                  </label>
+                </Labeled>
+                <Labeled label="Max context tokens">
                   <input
                     type="number"
-                    value={m.maxContextTokens ?? ""}
-                    onChange={(e) => updateModel(name, m.id, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
+                    value={p.maxContextTokens ?? ""}
+                    onChange={(e) => updateProv(name, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
                     placeholder="auto"
-                    className={`w-28 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
-                    title="max context tokens (empty = auto)"
+                    className="ip"
                   />
+                </Labeled>
+                <Labeled label="API Key" className="sm:col-span-2">
+                  <input
+                    type="password"
+                    value={p.apiKey}
+                    onChange={(e) => updateProv(name, { apiKey: e.target.value, keyDirty: true })}
+                    placeholder="API key"
+                    className="ip"
+                  />
+                </Labeled>
+              </div>
+
+              {/* Model list */}
+              <div className="border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Models ({p.models.length})
+                  </span>
                   <button
                     type="button"
-                    onClick={() => removeModel(name, m.id)}
-                    className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                    title="remove model"
+                    onClick={() => setAddingModel((a) => ({ ...a, [name]: !isAddingModel }))}
+                    className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 transition-colors"
                   >
-                    <Trash2 size={11} />
+                    <Plus size={11} /> add model
                   </button>
                 </div>
-              ))}
+
+                {isAddingModel && (
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <input
+                      autoFocus
+                      value={newModelName[name] ?? ""}
+                      onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
+                      placeholder="model ID (e.g. claude-sonnet-4-20250514)"
+                      className="ip flex-1 text-[11px]"
+                    />
+                    <button onClick={() => addModel(name)} className="px-2.5 h-6 rounded bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-700">add</button>
+                    <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                  </div>
+                )}
+
+                {p.models.length === 0 && !isAddingModel && (
+                  <div className="text-[11px] text-gray-400 italic py-2">no models — add one above</div>
+                )}
+                <div className="-mx-1">
+                  {p.models.map((m) => (
+                    <div key={m.id} className="flex items-center gap-2 px-1 py-1.5 rounded group hover:bg-gray-50 transition-colors">
+                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={m.enabled !== false}
+                          onChange={() => toggleModel(name, m.id)}
+                          className="h-3 w-3 rounded shrink-0"
+                        />
+                        <code className={`text-[12px] truncate ${m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"}`}>
+                          {m.id}
+                        </code>
+                        {m.enabled === false && (
+                          <span className="text-[9px] text-gray-300 font-medium shrink-0">off</span>
+                        )}
+                      </label>
+                      <input
+                        type="number"
+                        value={m.maxContextTokens ?? ""}
+                        onChange={(e) => updateModel(name, m.id, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="auto"
+                        className={`w-28 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
+                        title="max context tokens (empty = auto)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeModel(name, m.id)}
+                        className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        title="remove model"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         )
@@ -549,7 +586,7 @@ export function WorkspacePanel() {
                       apiKey: "",
                       keyDirty: false,
                       enabled: false,
-                    },
+                    } satisfies WorkspaceDraft["providers"][string],
                   },
                 }
               })
