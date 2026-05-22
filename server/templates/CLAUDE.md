@@ -65,6 +65,7 @@ When the user says "the CLAUDE.md" without qualifying, ask which tier — they o
 
 - `.loopat/claude/CLAUDE.md` — team supplement above.
 - `.loopat/claude/skills/` — team skills (auto-discovered as user-tier).
+- `.loopat/claude/agents/` — team subagents (`.md` per agent, YAML frontmatter + system prompt).
 - `.loopat/claude/claude.json` — team MCP config (mirrors `.claude.json` shape).
 
 All under knowledge → **read-only** from your view. To edit the team CLAUDE.md, propose the Context tab's "edit by loop" flow — same as any knowledge file.
