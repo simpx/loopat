@@ -27,6 +27,60 @@ export type WorkspaceClaudeJson = {
   mcpServers?: Record<string, McpServerConfig>
 }
 
+export const MCP_SERVER_NAME_RE = /^[a-zA-Z0-9_-]+$/
+const CLAUDE_MCP_TOOL_ID_SAFE_RE = /[^A-Za-z0-9._-]/g
+
+export function claudeMcpServerNamePart(name: string): string {
+  return name.replace(CLAUDE_MCP_TOOL_ID_SAFE_RE, "_")
+}
+
+export function mcpServerNameWarnings(names: string[]): Record<string, string[]> {
+  const warnings: Record<string, string[]> = {}
+  const byClaudeName: Record<string, string[]> = {}
+
+  for (const name of names) {
+    if (!MCP_SERVER_NAME_RE.test(name)) {
+      warnings[name] = [
+        "invalid name: use ASCII letters, digits, _ or - only",
+      ]
+    }
+
+    const claudeName = claudeMcpServerNamePart(name)
+    ;(byClaudeName[claudeName] ??= []).push(name)
+  }
+
+  for (const [claudeName, collidingNames] of Object.entries(byClaudeName)) {
+    if (collidingNames.length < 2) continue
+    for (const name of collidingNames) {
+      ;(warnings[name] ??= []).push(
+        `collides with ${collidingNames.filter((n) => n !== name).join(", ")} after Claude Code sanitizes server names to "${claudeName}"`,
+      )
+    }
+  }
+
+  return warnings
+}
+
+export function filterSafeMcpServers(
+  mcpServers: Record<string, McpServerConfig> | undefined,
+  source: string,
+): Record<string, McpServerConfig> {
+  if (!mcpServers) return {}
+  const warnings = mcpServerNameWarnings(Object.keys(mcpServers))
+  const safe: Record<string, McpServerConfig> = {}
+  for (const [name, srv] of Object.entries(mcpServers)) {
+    const serverWarnings = warnings[name]
+    if (serverWarnings?.length) {
+      console.warn(
+        `[loopat] skipping ${source} MCP server "${name}": ${serverWarnings.join("; ")}`,
+      )
+      continue
+    }
+    safe[name] = srv
+  }
+  return safe
+}
+
 /**
  * Reference for a config value that gets resolved at load time:
  *   - string             → literal value

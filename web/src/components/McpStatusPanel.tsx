@@ -239,6 +239,7 @@ function ServerRows({
         const st = status[s.name]
         const isConnected = !!st?.connected
         const isHttp = s.type === "http" || s.type === "sse"
+        const hasNameWarning = !!s.nameWarnings?.length
         const needsAuth = isHttp && !isConnected
         const busy = busyFor === s.name
 
@@ -263,13 +264,30 @@ function ServerRows({
                     shadows ws
                   </span>
                 )}
+                {hasNameWarning && (
+                  <span
+                    className="text-[10px] text-red-700 bg-red-50 px-1 rounded"
+                    title={s.nameWarnings?.join("; ")}
+                  >
+                    invalid name
+                  </span>
+                )}
               </div>
               {s.url && (
                 <div className="text-[11px] text-gray-400 font-mono truncate">{s.url}</div>
               )}
+              {hasNameWarning && (
+                <div className="text-[11px] text-red-600 truncate">
+                  {s.nameWarnings?.[0]}
+                </div>
+              )}
             </div>
             <div className="shrink-0">
-              {isConnected ? (
+              {hasNameWarning ? (
+                <span className="text-[11px] text-red-600 inline-flex items-center gap-1">
+                  <AlertTriangle size={11} /> rename
+                </span>
+              ) : isConnected ? (
                 <span className="text-[11px] text-green-700 inline-flex items-center gap-1">
                   <Check size={11} /> connected
                   {variant === "settings" && (

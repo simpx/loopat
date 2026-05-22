@@ -1402,6 +1402,8 @@ export type McpServerEntry = {
   name: string
   type: "http" | "sse" | "stdio"
   url?: string
+  nameWarnings?: string[]
+  claudeName?: string
   /** Personal-tier only: this entry shadows a same-named workspace entry. */
   shadowsWorkspace?: boolean
 }

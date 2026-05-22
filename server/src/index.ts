@@ -45,7 +45,7 @@ import {
   loopHistoryPath,
   loopChatHistoryPath,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, MCP_SERVER_NAME_RE, claudeMcpServerNamePart, mcpServerNameWarnings, type ProviderConfig, type ConfigValue } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -564,7 +564,7 @@ app.post("/api/onboarding/done", requireAuth, async (c) => {
 // Tokens are persisted per-(user, vault) inside the vault tree, so they're
 // auto-encrypted by git-crypt and isolated across vaults.
 
-const VAULT_RE = /^[a-zA-Z0-9_-]+$/
+const VAULT_RE = MCP_SERVER_NAME_RE
 
 /** Best-effort recovery of the public URL the user's browser is hitting us
  *  on. Order: LOOPAT_PUBLIC_URL env → X-Forwarded-* headers → request Host
@@ -588,18 +588,22 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
   const ws = await loadWorkspaceClaudeJson()
   const ps = await loadPersonalClaudeJson(userId)
 
-  const shape = (srv: any) => ({
+  const workspaceWarnings = mcpServerNameWarnings(Object.keys(ws.mcpServers ?? {}))
+  const personalWarnings = mcpServerNameWarnings(Object.keys(ps.mcpServers ?? {}))
+
+  const shape = (name: string, srv: any, warnings: Record<string, string[]>) => ({
     type: (srv?.type ?? "stdio") as string,
     ...(srv?.url ? { url: srv.url as string } : {}),
+    ...(warnings[name]?.length ? { nameWarnings: warnings[name], claudeName: claudeMcpServerNamePart(name) } : {}),
   })
 
   const workspaceTier = Object.entries(ws.mcpServers ?? {}).map(([name, srv]) => ({
     name,
-    ...shape(srv),
+    ...shape(name, srv, workspaceWarnings),
   }))
   const personalTier = Object.entries(ps.mcpServers ?? {}).map(([name, srv]) => ({
     name,
-    ...shape(srv),
+    ...shape(name, srv, personalWarnings),
     /** Same-name in workspace will be shadowed by this entry at spawn time. */
     shadowsWorkspace: !!ws.mcpServers?.[name],
   }))

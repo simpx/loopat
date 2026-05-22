@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
+import { filterSafeMcpServers, loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
@@ -349,11 +349,13 @@ class LoopSession {
     // commit OAuth-flow servers like `coop` to the workspace repo).
     const workspace = await loadWorkspaceClaudeJson()
     const personalClaude = await loadPersonalClaudeJson(driver)
+    const workspaceMcpServers = filterSafeMcpServers(workspace.mcpServers, "workspace")
+    const personalMcpServers = filterSafeMcpServers(personalClaude.mcpServers, "personal")
     // Merge admin-tier + user-tier mcpServers (user wins on name collision —
     // consistent with the skill/plugin compose model).
     const mergedServers: Record<string, any> = {
-      ...(workspace.mcpServers ?? {}),
-      ...(personalClaude.mcpServers ?? {}),
+      ...workspaceMcpServers,
+      ...personalMcpServers,
     }
     // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
     // `Authorization: Bearer <token>` headers on matching servers. This is
@@ -1242,4 +1244,3 @@ export function restartSession(id: string): boolean {
   s.restartOnNextMessage()
   return true
 }
-
