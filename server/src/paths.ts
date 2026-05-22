@@ -53,6 +53,12 @@ export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(),
 // Optional. If present, appended after the bundled platform doctrine.
 export const workspaceClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
 export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
+// Workspace agents (admin-managed subagent .md files, lives under
+// knowledge/.loopat/claude/agents/). Each entry is a SINGLE .md file with
+// YAML frontmatter (name, description, tools, model + body = system prompt),
+// per Claude Code's subagent convention. Composed into the loop's
+// $CLAUDE_CONFIG_DIR/agents/ alongside personal agents.
+export const workspaceLoopatAgentsDir = () => join(workspaceLoopatClaudeDir(), "agents")
 // Workspace plugins (admin-managed, lives under knowledge/.loopat/plugins/).
 // Sibling of claude/ — plugins are namespaced (loaded by CC via plugin manifest)
 // whereas claude/skills/ are flat user-tier skills (composed by loopat).
@@ -128,6 +134,8 @@ export const personalMcpTokensPath = (user: string, vault: string) =>
 // supplements. skills/ here become user-tier skills composed in.
 export const personalLoopatClaudeDir = (user: string) => join(personalLoopatDir(user), "claude")
 export const personalLoopatSkillsDir = (user: string) => join(personalLoopatClaudeDir(user), "skills")
+// Personal agents (per-user subagent .md files, mirrors workspace agents).
+export const personalLoopatAgentsDir = (user: string) => join(personalLoopatClaudeDir(user), "agents")
 /** Per-user Claude config (mcpServers etc.) — sibling of the workspace
  *  knowledge/.loopat/claude/claude.json. Same JSON shape; personal entries
  *  shadow workspace entries by name (user > admin tier ordering). */
@@ -136,6 +144,7 @@ export const personalClaudeJsonPath = (user: string) => join(personalLoopatClaud
 export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir(user), "plugins")
 // Composed output inside each loop's .claude/. Regenerated every spawn.
 export const loopComposedSkillsDir = (id: string) => join(loopDir(id), ".claude", "skills")
+export const loopComposedAgentsDir = (id: string) => join(loopDir(id), ".claude", "agents")
 export const loopComposedPluginsCacheDir = (id: string) => join(loopDir(id), ".claude", "plugins", "cache")
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
 /** Sandbox-internal path: symlink to the active vault's real dir under
