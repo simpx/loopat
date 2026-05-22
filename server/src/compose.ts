@@ -36,19 +36,32 @@ import {
   LOOPAT_INSTALL_DIR,
   builtinPluginsDir,
   loopClaudeDir,
+  loopComposedAgentsDir,
   loopComposedPluginsCacheDir,
   loopComposedSkillsDir,
+  personalLoopatAgentsDir,
   personalLoopatPluginsDir,
   personalLoopatSkillsDir,
+  workspaceLoopatAgentsDir,
   workspaceLoopatPluginsDir,
   workspaceLoopatSkillsDir,
 } from "./paths"
 
 type Tier = {
-  /** Host-side directory that contains subdirs (one per skill/plugin). */
+  /** Host-side directory that contains entries (one per skill/plugin/agent). */
   rootHostPath: string
   /** Sandbox-internal path the symlinks should point at. */
   virtualPath: string
+}
+
+type ComposeOpts = {
+  /** Symlink kind passed to fs.symlink. Skills/plugins are directories; agents
+   *  are single .md files. Pick the wrong kind and the symlink may still work
+   *  on Linux but is wrong on Windows / for tooling that reads the type. */
+  kind: "dir" | "file"
+  /** Optional predicate — only entries returning true are linked. Used for
+   *  agents (`.md` only) to skip stray junk. */
+  filter?: (name: string) => boolean
 }
 
 /**
@@ -58,7 +71,7 @@ type Tier = {
  *
  * Missing tier dirs are silently skipped.
  */
-async function composeTier(dst: string, tiers: Tier[]): Promise<string[]> {
+async function composeTier(dst: string, tiers: Tier[], opts: ComposeOpts = { kind: "dir" }): Promise<string[]> {
   await rm(dst, { recursive: true, force: true })
   await mkdir(dst, { recursive: true })
   const names: string[] = []
@@ -71,12 +84,13 @@ async function composeTier(dst: string, tiers: Tier[]): Promise<string[]> {
       continue
     }
     for (const name of entries) {
-      // Skip dotfiles — `.gitkeep` etc. shouldn't appear as a skill/plugin.
+      // Skip dotfiles — `.gitkeep` etc. shouldn't appear as a skill/plugin/agent.
       if (name.startsWith(".")) continue
+      if (opts.filter && !opts.filter(name)) continue
       const linkPath = join(dst, name)
       // Higher tier wins: rm any existing symlink before relinking.
       await rm(linkPath, { force: true }).catch(() => {})
-      await symlink(`${virtualPath}/${name}`, linkPath, "dir")
+      await symlink(`${virtualPath}/${name}`, linkPath, opts.kind)
       if (!names.includes(name)) names.push(name)
     }
   }
@@ -108,6 +122,24 @@ export async function composeLoopClaudeConfig(
       virtualPath: "/loopat/context/personal/.loopat/claude/skills",
     },
   ])
+
+  // Agents tier — single .md files per agent (CC subagent convention).
+  // CC scans $CLAUDE_CONFIG_DIR/agents/ and registers each as a delegatable
+  // subagent. Same workspace + personal tiering as skills.
+  await composeTier(
+    loopComposedAgentsDir(loopId),
+    [
+      {
+        rootHostPath: workspaceLoopatAgentsDir(),
+        virtualPath: "/loopat/context/knowledge/.loopat/claude/agents",
+      },
+      {
+        rootHostPath: personalLoopatAgentsDir(user),
+        virtualPath: "/loopat/context/personal/.loopat/claude/agents",
+      },
+    ],
+    { kind: "file", filter: (name) => name.endsWith(".md") },
+  )
 
   // Plugins tier — namespaced by plugin.name in each manifest.
   // builtin is bound same-to-same via LOOPAT_INSTALL_DIR, so its virtual path
