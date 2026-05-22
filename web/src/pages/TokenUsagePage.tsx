@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, BarChart3, Hash, MessageSquare } from "lucide-react"
+import { ArrowLeft, BarChart3, Hash, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { getDailyTokenUsage, getLoopTokenUsage, type DailyUsage, type LoopTokenUsage } from "@/api"
 
 type ViewMode = "models" | "daily" | "loops"
 type TimeRange = "today" | "7d" | "30d" | "all"
+type SortDir = "asc" | "desc" | null
 
 function formatTokens(n: number): string {
   if (n < 1000) return String(n)
@@ -24,6 +25,36 @@ function daysAgo(n: number): string {
   const d = new Date()
   d.setDate(d.getDate() - n)
   return d.toISOString().slice(0, 10)
+}
+
+function nextSortDir(current: SortDir): SortDir {
+  if (!current) return "desc"
+  if (current === "desc") return "asc"
+  return null
+}
+
+function SortableTh({ label, field, sortField, sortDir, onSort, className }: {
+  label: string
+  field: string
+  sortField: string | null
+  sortDir: SortDir
+  onSort: (f: string) => void
+  className?: string
+}) {
+  const active = sortField === field
+  return (
+    <th
+      className={`px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider cursor-pointer select-none hover:text-gray-700 transition-colors ${className ?? ""}`}
+      onClick={() => onSort(field)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active && sortDir === "desc" ? <ArrowDown className="h-3 w-3" />
+          : active && sortDir === "asc" ? <ArrowUp className="h-3 w-3" />
+          : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+      </span>
+    </th>
+  )
 }
 
 // ── Simple SVG horizontal bar chart ──
@@ -110,7 +141,10 @@ function AreaChart({ data, w = 600, h = 180 }: {
 // ── Model summary view ──
 
 function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRange: TimeRange }) {
-  const entries = useMemo(() => {
+  const [sortField, setSortField] = useState<string | null>("total")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
+
+  const rawEntries = useMemo(() => {
     const cutoff = timeRange === "today" ? daysAgo(0)
       : timeRange === "7d" ? daysAgo(7)
       : timeRange === "30d" ? daysAgo(30)
@@ -127,8 +161,31 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
     }
     return Object.entries(modelMap)
       .map(([model, u]) => ({ model, ...u, total: u.inputTokens + u.outputTokens }))
-      .sort((a, b) => b.total - a.total)
   }, [dailyUsage, timeRange])
+
+  const entries = useMemo(() => {
+    const sorted = [...rawEntries]
+    if (sortField && sortDir) {
+      sorted.sort((a: any, b: any) => {
+        const va = sortField === "model" ? a.model : a[sortField] ?? 0
+        const vb = sortField === "model" ? b.model : b[sortField] ?? 0
+        if (typeof va === "string" && typeof vb === "string") return sortDir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb)
+        return sortDir === "desc" ? (vb as number) - (va as number) : (va as number) - (vb as number)
+      })
+    }
+    return sorted
+  }, [rawEntries, sortField, sortDir])
+
+  const handleSort = (f: string) => {
+    if (sortField === f) {
+      const next = nextSortDir(sortDir)
+      if (!next) { setSortField(null); setSortDir(null) }
+      else setSortDir(next)
+    } else {
+      setSortField(f)
+      setSortDir("desc")
+    }
+  }
 
   const grandTotal = entries.reduce((s, e) => s + e.total, 0)
   const maxTotal = entries[0]?.total ?? 1
@@ -171,10 +228,10 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/50">
-              <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Model</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Input</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Output</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total</th>
+              <SortableTh label="Model" field="model" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-left" />
+              <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">%</th>
             </tr>
           </thead>
@@ -298,13 +355,48 @@ function DailyView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRang
 // ── Per-loop view ──
 
 function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; timeRange: TimeRange }) {
+  const [sortField, setSortField] = useState<string | null>("lastActivity")
+  const [sortDir, setSortDir] = useState<SortDir>("desc")
+
   const cutoff = timeRange === "today" ? daysAgo(0)
     : timeRange === "7d" ? daysAgo(7)
     : timeRange === "30d" ? daysAgo(30)
     : ""
-  const filtered = cutoff
-    ? loopUsage.filter(l => (l.lastActivity ?? "").slice(0, 10) >= cutoff)
-    : loopUsage
+  const filtered = useMemo(() => {
+    let list = cutoff
+      ? loopUsage.filter(l => (l.lastActivity ?? "").slice(0, 10) >= cutoff)
+      : [...loopUsage]
+    if (sortField && sortDir) {
+      list.sort((a: any, b: any) => {
+        let va: any, vb: any
+        if (sortField === "total") {
+          va = a.inputTokens + a.outputTokens
+          vb = b.inputTokens + b.outputTokens
+        } else if (sortField === "title" || sortField === "lastActivity") {
+          va = a[sortField] ?? ""
+          vb = b[sortField] ?? ""
+        } else {
+          va = a[sortField] ?? 0
+          vb = b[sortField] ?? 0
+        }
+        if (typeof va === "string" && typeof vb === "string") return sortDir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb)
+        return sortDir === "desc" ? (vb as number) - (va as number) : (va as number) - (vb as number)
+      })
+    }
+    return list
+  }, [loopUsage, cutoff, sortField, sortDir])
+
+  const handleSort = (f: string) => {
+    if (sortField === f) {
+      const next = nextSortDir(sortDir)
+      if (!next) { setSortField(null); setSortDir(null) }
+      else setSortDir(next)
+    } else {
+      setSortField(f)
+      setSortDir("desc")
+    }
+  }
+
   const grandTotal = filtered.reduce((s, l) => s + l.inputTokens + l.outputTokens, 0)
   const navigate = useNavigate()
 
@@ -322,12 +414,12 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
         <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/50">
-              <th className="text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Loop</th>
+              <SortableTh label="Loop" field="title" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-left" />
               <th className="hidden sm:table-cell text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Models</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Input</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Output</th>
-              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Total</th>
-              <th className="hidden sm:table-cell text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Last active</th>
+              <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Last active" field="lastActivity" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right hidden sm:table-cell" />
             </tr>
           </thead>
           <tbody>
@@ -337,7 +429,7 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
                 <tr
                   key={l.loopId}
                   className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors cursor-pointer"
-                  onClick={() => navigate(`/loops/${l.loopId}`)}
+                  onClick={() => navigate(`/loop/${l.loopId}`)}
                 >
                   <td className="px-4 py-2.5">
                     <span className="text-[12px] text-gray-800 font-medium hover:text-blue-600">{l.title}</span>
