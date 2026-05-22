@@ -162,6 +162,9 @@ app.get("/api/serve/alias-check", requireAuth, async (c) => {
 // ── providers (auth required) ──
 // Merges personal + workspace configs. Personal providers take precedence
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
+// `active` mirrors session.ts resolveProvider order: any personal provider
+// beats workspace default, so a personal provider without an explicit
+// `default` still surfaces as the active one.
 app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
   const providers: Record<string, { model: string; baseUrl: string; source: "personal" | "workspace" }> = {}
@@ -170,7 +173,6 @@ app.get("/api/providers", requireAuth, async (c) => {
       providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "workspace" }
     }
   }
-  // Overlay personal providers (they take precedence)
   let active = wCfg.default ?? ""
   const userId = c.get("userId") as string
   try {
@@ -178,7 +180,7 @@ app.get("/api/providers", requireAuth, async (c) => {
     for (const [name, p] of Object.entries(pCfg.providers)) {
       providers[name] = { model: p.model, baseUrl: p.baseUrl, source: "personal" }
     }
-    active = pCfg.default || active
+    active = pCfg.default || Object.keys(pCfg.providers)[0] || active
   } catch {}
   return c.json({ providers, default: active })
 })
@@ -1866,7 +1868,7 @@ app.get("/api/topics", requireAuth, async (c) => {
   return c.json({ topics: await listTopics(titles) })
 })
 
-// ── Chat ──────────────────────────────────────────────────────────────────
+// ── Chat ────────────────────────────────────────────────────────────────────────
 //
 // SQLite-backed channels + 1:1 DMs. Real-time fanout via /ws/chat with
 // per-conversation subscriber sets. When a loop is spawned from a chat
@@ -2066,7 +2068,7 @@ app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
   return c.json({ loopId: meta.id, seedPrompt, messageCount: snapshot.messageCount })
 })
 
-// ── Chat WebSocket ────────────────────────────────────────────────────────
+// ── Chat WebSocket ─────────────────────────────────────────────────────────────────
 
 app.get(
   "/ws/chat",
