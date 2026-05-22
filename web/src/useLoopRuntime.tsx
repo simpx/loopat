@@ -366,8 +366,6 @@ export interface LoopRuntimeExtra {
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
   loadMoreMessages: () => void
-  /** Token estimate based on the full aggregated conversation (not just visible window). */
-  estimatedTokens: number
   /** Current-turn streaming tokens (resets each turn). */
   streamingTokenCount: number
   /** Precise context-window token count (last result input+output). */
@@ -411,7 +409,6 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   suppressSlashRef: { current: false },
   hasOlderMessages: false,
   loadMoreMessages: () => {},
-  estimatedTokens: 0,
   streamingTokenCount: 0,
   contextTokens: 0,
   cumulativeTokens: 0,
@@ -485,14 +482,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const streamingOutputCharsRef = useRef(0)
   const streamingTokensRef = useRef(0)
   const [streamingTokensVersion, setStreamingTokensVersion] = useState(0)
-  // Precise context-window size snapshot from the last main-model result
-  // (input_tokens + output_tokens). Reset on clear-boundary / reconnect.
+  // Context-window token count for the pie chart. Updated on message_start,
+  // content_block_delta, message_delta, result, clear-boundary, and reconnect.
+  const contextTokensRef = useRef(0)
+  const [contextTokensVersion, setContextTokensVersion] = useState(0)
   // Output-only counter for ClaudeStatus display. Resets on result, grows
   // from 0 during streaming (not reset on message_start).
   const streamingOutputRef = useRef(0)
   const [streamingOutputVersion, setStreamingOutputVersion] = useState(0)
-  const contextInputRef = useRef(0)
-  const [contextInputVersion, setContextInputVersion] = useState(0)
 
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
@@ -687,30 +684,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     setShowHistory((v) => !v)
   }, [])
 
-  // Context-window estimate from visible messages (for pie chart fallback).
-  const estimatedTokens = useMemo(() => {
-    let chars = 0
-    for (const m of aggregated) {
-      chars += JSON.stringify(m).length
-    }
-    for (const [, children] of childMessagesByAgentId) {
-      for (const m of children) {
-        chars += JSON.stringify(m).length
-      }
-    }
-    return Math.round(chars / 3.5)
-  }, [aggregated, childMessagesByAgentId])
-
   // Current-turn output tokens only. Grows from 0 during streaming,
   // resets on result — no reset on message_start. For ClaudeStatus.
   const streamingTokenCount = useMemo(() => streamingOutputRef.current, [streamingOutputVersion])
 
-  // Precise context-window token count (for pie chart). Uses last result's
-  // input+output as the snapshot; during streaming prefers the live estimate.
-  const contextTokens = useMemo(() => {
-    if (streamingTokensRef.current > 0) return streamingTokensRef.current
-    return contextInputRef.current
-  }, [contextInputVersion, streamingTokensVersion])
+  // Precise context-window token count (for pie chart). Updated on every
+  // streaming event and result — always reflects the latest known value.
+  const contextTokens = useMemo(() => contextTokensRef.current, [contextTokensVersion])
 
   // Cumulative precise count from result + task + streaming events (for status bar).
   const cumulativeTokens = useMemo(() => {
@@ -725,8 +705,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, estimatedTokens, streamingTokenCount, contextTokens, cumulativeTokens],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, streamingTokenCount, contextTokens, cumulativeTokens }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, streamingTokenCount, contextTokens, cumulativeTokens],
   )
 
   useEffect(() => {
@@ -754,8 +734,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
       setStreamingTokensVersion((v) => v + 1)
       streamingOutputRef.current = 0
       setStreamingOutputVersion((v) => v + 1)
-      contextInputRef.current = 0
-      setContextInputVersion((v) => v + 1)
+      contextTokensRef.current = 0
+      setContextTokensVersion((v) => v + 1)
       setQuestionsObj({})
       setPermissionPrompt(null)
       setContextUsage(null)
@@ -950,8 +930,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
               tokenUsageRef.current += u.input_tokens + u.output_tokens
               setTokenUsageVersion((v) => v + 1)
               // Snapshot the precise context-window size after this turn.
-              contextInputRef.current = u.input_tokens + u.output_tokens
-              setContextInputVersion((v) => v + 1)
+              contextTokensRef.current = u.input_tokens + u.output_tokens
+              setContextTokensVersion((v) => v + 1)
             }
             // Reset live streaming counters — the turn is complete.
             streamingInputRef.current = 0
@@ -1020,12 +1000,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             streamingInputRef.current = ev?.message?.usage?.input_tokens ?? 0
             streamingOutputCharsRef.current = 0
             streamingTokensRef.current = streamingInputRef.current
+            contextTokensRef.current = streamingInputRef.current
             setStreamingTokensVersion((v) => v + 1)
+            setContextTokensVersion((v) => v + 1)
           } else if (ev?.type === "message_delta") {
             const u = ev?.usage
             if (u && typeof u.output_tokens === "number") {
               streamingTokensRef.current = streamingInputRef.current + u.output_tokens
+              contextTokensRef.current = streamingInputRef.current + u.output_tokens
               setStreamingTokensVersion((v) => v + 1)
+              setContextTokensVersion((v) => v + 1)
               streamingOutputRef.current = u.output_tokens
               setStreamingOutputVersion((v) => v + 1)
             }
@@ -1040,7 +1024,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             }
             const estimated = Math.round(streamingOutputCharsRef.current / 3.5)
             streamingTokensRef.current = streamingInputRef.current + estimated
+            contextTokensRef.current = streamingInputRef.current + estimated
             setStreamingTokensVersion((v) => v + 1)
+            setContextTokensVersion((v) => v + 1)
             streamingOutputRef.current = estimated
             setStreamingOutputVersion((v) => v + 1)
           }
@@ -1052,8 +1038,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
           if (!loadingHistoryRef.current) setRunning(false)
         } else if (m?.type === "clear-boundary") {
           // Context dropped — reset the context-window snapshot.
-          contextInputRef.current = 0
-          setContextInputVersion((v) => v + 1)
+          contextTokensRef.current = 0
+          setContextTokensVersion((v) => v + 1)
           // Server signals: SDK context dropped at this point. We push a
           // synthetic assistant message whose only content part is a custom
           // `clear-divider`; AssistantMessage detects that part type and
@@ -1089,6 +1075,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
             }
             for (const bufMsg of replayBufRef.current) {
               dispatchMsg(bufMsg)
+            }
+            // If no result with usage was replayed, fall back to an estimate
+            // from the raw conversation messages (e.g. incomplete turn, or
+            // no completed turns yet).
+            if (contextTokensRef.current === 0 && replayBufRef.current.length > 0) {
+              let chars = 0
+              for (const bufMsg of replayBufRef.current) {
+                chars += JSON.stringify(bufMsg).length
+              }
+              contextTokensRef.current = Math.round(chars / 3.5)
+              setContextTokensVersion((v) => v + 1)
             }
             loadingHistoryRef.current = false
             setLoadingHistory(false)
