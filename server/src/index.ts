@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
 import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
@@ -44,6 +44,10 @@ import {
   loopWorkdir,
   loopHistoryPath,
   loopChatHistoryPath,
+  workspaceKnowledgeDir,
+  workspaceNotesDir,
+  workspaceRepoDir,
+  workspaceReposDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
@@ -1067,6 +1071,67 @@ app.post("/api/personal/push", requireAuth, async (c) => {
     return c.json({ error: r.error, needsPull: r.needsPull }, r.needsPull ? 409 : 400)
   }
   return c.json({ ok: true, message: r.message })
+})
+
+// ── Workspace repo sync (knowledge / notes / repos/<name>) ──
+// All ff-only. Any authenticated user may sync. Push to repos/<name> is
+// not supported — code flows through PRs upstream, never from primary.
+
+function syncDirFor(resource: string, name?: string): string | null {
+  if (resource === "knowledge") return workspaceKnowledgeDir()
+  if (resource === "notes") return workspaceNotesDir()
+  if (resource === "repos" && name) {
+    const dir = workspaceRepoDir(name)
+    return existsSync(dir) ? dir : null
+  }
+  return null
+}
+
+app.get("/api/sync/knowledge/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceKnowledgeDir())))
+app.post("/api/sync/knowledge/pull", requireAuth, async (c) => {
+  const r = await pullRepoFromRemote(workspaceKnowledgeDir())
+  return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
+})
+app.post("/api/sync/knowledge/push", requireAuth, async (c) => {
+  const r = await pushRepoToRemote(workspaceKnowledgeDir())
+  return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
+})
+
+app.get("/api/sync/notes/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceNotesDir())))
+app.post("/api/sync/notes/pull", requireAuth, async (c) => {
+  const r = await pullRepoFromRemote(workspaceNotesDir())
+  return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
+})
+app.post("/api/sync/notes/push", requireAuth, async (c) => {
+  const r = await pushRepoToRemote(workspaceNotesDir())
+  return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
+})
+
+app.get("/api/sync/repos", requireAuth, async (c) => {
+  // List repos available for sync (just names of subdirs of workspaceReposDir).
+  try {
+    const { readdir } = await import("node:fs/promises")
+    const entries = await readdir(workspaceReposDir())
+    const repos: string[] = []
+    for (const e of entries) {
+      if (e.startsWith(".")) continue
+      if (existsSync(workspaceRepoDir(e) + "/.git")) repos.push(e)
+    }
+    return c.json({ repos })
+  } catch {
+    return c.json({ repos: [] })
+  }
+})
+app.get("/api/sync/repos/:name/status", requireAuth, async (c) => {
+  const dir = syncDirFor("repos", c.req.param("name"))
+  if (!dir) return c.json({ error: "repo not found" }, 404)
+  return c.json(await inspectRepoSync(dir))
+})
+app.post("/api/sync/repos/:name/pull", requireAuth, async (c) => {
+  const dir = syncDirFor("repos", c.req.param("name"))
+  if (!dir) return c.json({ error: "repo not found" }, 404)
+  const r = await pullRepoFromRemote(dir)
+  return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
 // All /api/* routes below require auth, EXCEPT the two endpoints used by the

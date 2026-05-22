@@ -1019,6 +1019,159 @@ export async function pushPersonalToRemote(
   return { ok: true, message: hadStaged ? "committed and pushed" : "pushed (no new changes)" }
 }
 
+// ── Generic repo sync (knowledge / notes / repos) ─────────────────────
+//
+// Distinct from personal sync above: these workspace-level repos use the
+// host's default SSH config (whatever the server clone used at boot), NOT
+// a per-user deploy key. Strict ff-only on both directions — by design no
+// one edits these outside of loopat, so divergence is treated as an error
+// to investigate, not auto-resolved.
+
+export type RepoSyncStatus = {
+  isGitRepo: boolean
+  hasRemote: boolean
+  branch: string
+  ahead: number
+  behind: number
+  uncommitted: number
+}
+
+export type RepoSyncResult =
+  | { ok: true; message: string }
+  | { ok: false; error: string }
+
+/**
+ * Best-effort fetch then count ahead/behind vs origin/<branch>. Fetch
+ * failures are tolerated (offline / auth glitch) — status still reflects
+ * last-known remote state.
+ */
+export async function inspectRepoSync(dir: string): Promise<RepoSyncStatus> {
+  if (!existsSyncBase(dir) || !existsSyncBase(join(dir, ".git"))) {
+    return { isGitRepo: false, hasRemote: false, branch: "", ahead: 0, behind: 0, uncommitted: 0 }
+  }
+
+  let branch = ""
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    branch = stdout.trim()
+  } catch {}
+
+  let hasRemote = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasRemote = true
+  } catch {}
+
+  if (hasRemote) {
+    try {
+      await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { timeout: 15_000 })
+    } catch {}
+  }
+
+  let uncommitted = 0
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
+    uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
+  } catch {}
+
+  let ahead = 0
+  let behind = 0
+  if (hasRemote && branch) {
+    try {
+      const { stdout } = await execFileP("git", [
+        "-C", dir, "rev-list", "--left-right", "--count", `origin/${branch}...${branch}`,
+      ])
+      const m = stdout.trim().match(/^(\d+)\s+(\d+)$/)
+      if (m) { behind = parseInt(m[1], 10); ahead = parseInt(m[2], 10) }
+    } catch {}
+  }
+
+  return { isGitRepo: true, hasRemote, branch, ahead, behind, uncommitted }
+}
+
+/**
+ * Fetch + ff-only merge into the current HEAD. Aborts on uncommitted
+ * changes (we don't auto-stash workspace repos — caller decides) and on
+ * any non-ff condition.
+ */
+export async function pullRepoFromRemote(dir: string): Promise<RepoSyncResult> {
+  if (!existsSyncBase(join(dir, ".git"))) {
+    return { ok: false, error: "not a git repo" }
+  }
+
+  let hasRemote = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasRemote = true
+  } catch {}
+  if (!hasRemote) return { ok: false, error: "no remote configured" }
+
+  let branch = ""
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    branch = stdout.trim()
+  } catch {}
+  if (!branch) return { ok: false, error: "HEAD is detached" }
+
+  let uncommitted = 0
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
+    uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
+  } catch {}
+  if (uncommitted > 0) {
+    return { ok: false, error: `aborted: ${uncommitted} uncommitted change(s) in primary` }
+  }
+
+  try {
+    await execFileP("git", ["-C", dir, "fetch", "origin"], { timeout: 30_000 })
+  } catch (e: any) {
+    return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+
+  try {
+    await execFileP("git", ["-C", dir, "merge", "--ff-only", `origin/${branch}`])
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `merge --ff-only failed (diverged from origin/${branch}?): ${stderr || e?.message || e}` }
+  }
+
+  return { ok: true, message: `pulled origin/${branch}` }
+}
+
+/**
+ * Push current HEAD branch to origin. Plain `git push` — git refuses
+ * non-ff by default, which is exactly the abort-on-conflict behavior we
+ * want. Caller pulls first if rejected.
+ */
+export async function pushRepoToRemote(dir: string): Promise<RepoSyncResult> {
+  if (!existsSyncBase(join(dir, ".git"))) {
+    return { ok: false, error: "not a git repo" }
+  }
+
+  let hasRemote = false
+  try {
+    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
+    hasRemote = true
+  } catch {}
+  if (!hasRemote) return { ok: false, error: "no remote configured" }
+
+  let branch = ""
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    branch = stdout.trim()
+  } catch {}
+  if (!branch) return { ok: false, error: "HEAD is detached" }
+
+  try {
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`])
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `push failed: ${stderr || e?.message || e}` }
+  }
+
+  return { ok: true, message: `pushed to origin/${branch}` }
+}
+
 /**
  * Wipe personal/<user>/ AND the saved git-crypt key. Deploy keypair stays
  * (it's the SSH identity, reusable for the next import). Re-scaffolds an

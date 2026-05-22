@@ -629,6 +629,44 @@ export async function pullRepo(name: string): Promise<{ ok: boolean; output?: st
   return { ok: true, output: j.output }
 }
 
+// ── Unified workspace-resource sync (knowledge / notes / repos) ──
+
+export type SyncResource = "knowledge" | "notes" | { repo: string }
+
+export type RepoSyncStatus = {
+  isGitRepo: boolean
+  hasRemote: boolean
+  branch: string
+  ahead: number
+  behind: number
+  uncommitted: number
+}
+
+function syncBase(r: SyncResource): string {
+  if (typeof r === "string") return `/api/sync/${r}`
+  return `/api/sync/repos/${encodeURIComponent(r.repo)}`
+}
+
+export async function syncStatus(r: SyncResource): Promise<RepoSyncStatus | null> {
+  const res = await apiFetch(`${syncBase(r)}/status`)
+  if (!res.ok) return null
+  return (await res.json()) as RepoSyncStatus
+}
+
+export async function syncPull(r: SyncResource): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const res = await apiFetch(`${syncBase(r)}/pull`, { method: "POST" })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: j.error ?? `http ${res.status}` }
+  return { ok: true, message: j.message }
+}
+
+export async function syncPush(r: SyncResource): Promise<{ ok: boolean; message?: string; error?: string }> {
+  const res = await apiFetch(`${syncBase(r)}/push`, { method: "POST" })
+  const j = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: j.error ?? `http ${res.status}` }
+  return { ok: true, message: j.message }
+}
+
 export async function addRepo(opts: { name: string; source: string }): Promise<{ ok: boolean; name?: string; kind?: "clone" | "symlink"; error?: string }> {
   const r = await apiFetch(`/api/workspace/repos`, {
     method: "POST",

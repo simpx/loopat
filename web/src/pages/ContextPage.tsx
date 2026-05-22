@@ -26,6 +26,9 @@ import {
   readSandbox,
   writeSandbox,
   deleteSandbox,
+  syncStatus,
+  syncPull,
+  syncPush,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
@@ -33,6 +36,8 @@ import {
   type Backlink,
   type SandboxEntry,
   type SandboxFile,
+  type SyncResource,
+  type RepoSyncStatus,
 } from "../api"
 import { useEffect, useState, useCallback, useRef, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
@@ -98,6 +103,92 @@ const VAULT_TAGLINE: Record<VaultId, string> = {
   notes: "workspace · public",
   personal: "yours · private",
   repos: "registered code repos",
+}
+
+// Sidebar-footer widget that drives /api/sync/<resource>/{status,pull,push}.
+// ff-only on both directions; on conflict the API returns 400 and we surface
+// the error text. `canPush=false` hides the Push button (used for repos).
+function SyncWidget({ resource, canPush = true }: { resource: SyncResource; canPush?: boolean }) {
+  const [status, setStatus] = useState<RepoSyncStatus | null>(null)
+  const [busy, setBusy] = useState<"pull" | "push" | "status" | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  const refresh = useCallback(async () => {
+    setBusy("status")
+    const s = await syncStatus(resource)
+    setStatus(s)
+    setBusy(null)
+  }, [resource])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const onPull = async () => {
+    setBusy("pull"); setMsg(null)
+    const r = await syncPull(resource)
+    setBusy(null)
+    setMsg(r.ok ? { ok: true, text: r.message ?? "pulled" } : { ok: false, text: r.error ?? "pull failed" })
+    if (r.ok) void refresh()
+  }
+  const onPush = async () => {
+    setBusy("push"); setMsg(null)
+    const r = await syncPush(resource)
+    setBusy(null)
+    setMsg(r.ok ? { ok: true, text: r.message ?? "pushed" } : { ok: false, text: r.error ?? "push failed" })
+    if (r.ok) void refresh()
+  }
+
+  const ahead = status?.ahead ?? 0
+  const behind = status?.behind ?? 0
+  const noRemote = status && !status.hasRemote
+
+  return (
+    <div className="px-3 py-1.5 border-t border-gray-200 flex flex-col gap-1 text-[11px]">
+      <div className="flex items-center gap-2">
+        {noRemote ? (
+          <span className="text-gray-400">no remote</span>
+        ) : (
+          <>
+            <span className={ahead > 0 ? "text-emerald-700" : "text-gray-400"} title="unpushed commits">↑{ahead}</span>
+            <span className={behind > 0 ? "text-amber-700" : "text-gray-400"} title="unpulled commits">↓{behind}</span>
+            {status && status.uncommitted > 0 && (
+              <span className="text-red-600" title="uncommitted changes in primary">! {status.uncommitted}</span>
+            )}
+            <button
+              onClick={() => void refresh()}
+              disabled={busy !== null}
+              className="ml-auto text-gray-400 hover:text-gray-700 disabled:opacity-50"
+              title="refresh status"
+            >↻</button>
+          </>
+        )}
+      </div>
+      {!noRemote && (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onPull}
+            disabled={busy !== null || behind === 0}
+            className="px-1.5 h-5 rounded border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy === "pull" ? "pulling…" : "pull"}
+          </button>
+          {canPush && (
+            <button
+              onClick={onPush}
+              disabled={busy !== null || ahead === 0}
+              className="px-1.5 h-5 rounded border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {busy === "push" ? "pushing…" : "push"}
+            </button>
+          )}
+          {msg && (
+            <span className={"truncate flex-1 min-w-0 " + (msg.ok ? "text-emerald-700" : "text-red-600")} title={msg.text}>
+              {msg.text}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; initialFile?: string; initialEditing?: boolean }) {
@@ -335,6 +426,9 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
       <div className="px-3 h-9 border-t border-gray-200 flex items-center text-[11px] text-gray-500">
         {VAULT_TAGLINE[vault]}
       </div>
+      {(vault === "knowledge" || vault === "notes") && (
+        <SyncWidget resource={vault} />
+      )}
     </aside>
   )
 
