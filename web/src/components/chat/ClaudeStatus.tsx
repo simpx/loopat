@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 
 const ACTION_WORDS = [
@@ -25,10 +25,12 @@ function formatTokens(n: number) {
 
 interface ClaudeStatusProps {
   isLoading: boolean;
-  tokenCount: number;
+  /** Stable getter that reads the latest streaming output tokens directly from
+   *  the ref — no React re-render needed. The rAF loop polls this every frame. */
+  getTokenCount: () => number;
 }
 
-export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProps) {
+export default function ClaudeStatus({ isLoading, getTokenCount }: ClaudeStatusProps) {
   const { thinkingBudget } = useLoopRuntimeExtra();
   const [elapsedTime, setElapsedTime] = useState(0);
   const [displayTokens, setDisplayTokens] = useState(0);
@@ -55,17 +57,15 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
     };
   }, [isLoading]);
 
-  // Keep target in sync so the rAF loop reads latest without re-subscribing
-  const targetRef = useRef(0);
-  targetRef.current = tokenCount;
-
-  // Smooth easing rAF loop
+  // Smooth easing rAF loop — polls the getter every frame, no React re-render
+  // needed on the hot content_block_delta path. Same pattern as the official
+  // Claude Code TUI (SpinnerAnimationRow / useAnimationFrame(50)).
   useEffect(() => {
     if (!isLoading) return;
 
     let raf: number;
     const step = () => {
-      const target = targetRef.current;
+      const target = getTokenCount();
       setDisplayTokens((prev) => {
         if (Math.abs(target - prev) < 0.5) return target;
         const diff = target - prev;
@@ -76,15 +76,15 @@ export default function ClaudeStatus({ isLoading, tokenCount }: ClaudeStatusProp
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [isLoading]);
+  }, [isLoading, getTokenCount]);
 
   if (!isLoading) return null;
 
   const statusText =
     ACTION_WORDS[Math.floor(elapsedTime / 3) % ACTION_WORDS.length];
 
-  // ↑ uploading (request sent, no response yet), ↓ streaming (tokens coming in)
-  const arrow = tokenCount > 0 ? "↓" : "↑";
+  // ↑ uploading (no tokens yet), ↓ streaming (tokens are coming in)
+  const arrow = displayTokens > 0 ? "↓" : "↑";
 
   const budgetLabel =
     thinkingBudget === null
