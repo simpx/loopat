@@ -452,7 +452,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
   const [running, setRunning] = useState(false)
   const [viewers, setViewers] = useState(0)
   const [mounts, setMounts] = useState<{ name: string; path: string }[]>([])
-  const [provider, setProvider] = useState<{ name: string; model: string; contextWindow: number } | null>(null)
+  const [provider, setProvider] = useState<ProviderInfo | null>(null)
   // Start with cached commands (or empty). When CC's real system/init
   // arrives, the list is replaced with the actual reported commands.
   // On first-ever open (no cache), seed with known CC built-in commands
