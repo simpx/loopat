@@ -242,6 +242,8 @@ function ServerRows({
         const hasNameWarning = !!s.nameWarnings?.length
         const needsAuth = isHttp && !isConnected
         const busy = busyFor === s.name
+        const statusTone = hasNameWarning ? "text-red-500" : "text-gray-300"
+        const statusMark = hasNameWarning ? "!" : isConnected ? "●" : needsAuth ? "○" : "·"
 
         return (
           <div
@@ -252,8 +254,8 @@ function ServerRows({
                 : "flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50"
             }
           >
-            <span className="text-[14px] text-gray-300 leading-none">
-              {isConnected ? "●" : needsAuth ? "○" : "·"}
+            <span className={`text-[14px] ${statusTone} leading-none`}>
+              {statusMark}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
