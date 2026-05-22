@@ -1139,6 +1139,21 @@ export async function getDailyTokenUsage(): Promise<DailyUsage> {
   return (await r.json()) as DailyUsage
 }
 
+export type LoopTokenUsage = {
+  loopId: string
+  title: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  lastActivity: string
+}
+
+export async function getLoopTokenUsage(): Promise<LoopTokenUsage[]> {
+  const r = await apiFetch("/api/settings/token-usage/loops")
+  if (!r.ok) return []
+  return (await r.json()) as LoopTokenUsage[]
+}
+
 // ── admin ──
 
 export async function listAdminUsers(): Promise<AdminUser[]> {

@@ -736,6 +736,12 @@ app.get("/api/settings/token-usage/daily", requireAuth, async (c) => {
   return c.json(daily)
 })
 
+app.get("/api/settings/token-usage/loops", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const loops = await recomputeLoopTokenUsage(userId)
+  return c.json(loops)
+})
+
 // ── token usage recompute helpers ──
 
 import { readFile, appendFile, mkdir } from "node:fs/promises"
@@ -838,6 +844,67 @@ async function recomputeDailyTokenUsage(userId: string): Promise<Record<string, 
     }
   } catch {}
   return daily
+}
+
+async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
+  loopId: string
+  title: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+  lastActivity: string
+}>> {
+  const loops: Array<{
+    loopId: string
+    title: string
+    model: string
+    inputTokens: number
+    outputTokens: number
+    lastActivity: string
+  }> = []
+  try {
+    const allLoops = await listLoops()
+    const userLoops = allLoops.filter((l) => l.createdBy === userId)
+    for (const loop of userLoops) {
+      const hp = loopHistoryPath(loop.id)
+      if (!existsSync(hp)) continue
+      let raw: string
+      try { raw = await readFile(hp, "utf8") } catch { continue }
+      let inputTokens = 0
+      let outputTokens = 0
+      const models = new Set<string>()
+      let lastActivity = loop.createdAt ?? ""
+      for (const line of raw.split("\n")) {
+        if (!line) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg._ts) lastActivity = msg._ts
+          if (msg.type === "result" && msg.modelUsage) {
+            for (const [, mu] of Object.entries(msg.modelUsage as Record<string, any>)) {
+              inputTokens += (mu as any).inputTokens ?? 0
+              outputTokens += (mu as any).outputTokens ?? 0
+            }
+            for (const model of Object.keys(msg.modelUsage)) {
+              models.add(model)
+            }
+          }
+        } catch {}
+      }
+      if (inputTokens > 0 || outputTokens > 0) {
+        loops.push({
+          loopId: loop.id,
+          title: loop.title || "Untitled",
+          model: Array.from(models).join(", "),
+          inputTokens,
+          outputTokens,
+          lastActivity,
+        })
+      }
+    }
+  } catch {}
+  // Sort by last activity descending
+  loops.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity))
+  return loops
 }
 
 // ── personal repo bootstrap (deploy-key flow) ──

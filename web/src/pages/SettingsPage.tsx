@@ -32,7 +32,7 @@ import { useWorkspace } from "@/ctx"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
@@ -41,6 +41,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
   { id: "mounts",        label: "Sandbox Mounts",         gated: true,  description: "Expose personal files / dirs into loop sandboxes." },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
   { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
+  { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time." },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove." },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration." },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings." },
@@ -175,7 +176,7 @@ export function SettingsPage() {
                     <li key={t.id} className="shrink-0 sm:px-1">
                       <button
                         type="button"
-                        onClick={() => navigate(`/settings/${t.id}`)}
+                        onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
                         className={
                           "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                           (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
@@ -196,7 +197,7 @@ export function SettingsPage() {
                       <li key={t.id} className="shrink-0 sm:px-1">
                         <button
                           type="button"
-                          onClick={() => navigate(`/settings/${t.id}`)}
+                          onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
                           className={
                             "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                             (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
@@ -219,7 +220,7 @@ export function SettingsPage() {
                           <li key={t.id} className="shrink-0 sm:px-1">
                             <button
                               type="button"
-                              onClick={() => navigate(`/settings/${t.id}`)}
+                              onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
                               className={
                                 "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                                 (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
