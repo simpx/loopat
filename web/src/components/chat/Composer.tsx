@@ -31,7 +31,7 @@ export default function Composer() {
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, suppressSlashRef } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, getWaitingForResponse, suppressSlashRef } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
@@ -143,7 +143,7 @@ export default function Composer() {
   return (
     <ComposerPrimitive.Root className="relative flex w-full flex-col" onSubmit={handleSubmit}>
       {/* Claude Status bar */}
-      <ClaudeStatus isLoading={isRunning} getTokenCount={getStreamingTokenCount} />
+      <ClaudeStatus isLoading={isRunning} getTokenCount={getStreamingTokenCount} getWaitingForResponse={getWaitingForResponse} />
 
       {/* Queue: inline items with per-item remove */}
       {queue.length > 0 && (

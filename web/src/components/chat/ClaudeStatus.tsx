@@ -28,15 +28,22 @@ interface ClaudeStatusProps {
   /** Stable getter that reads the latest streaming output tokens directly from
    *  the ref — no React re-render needed. The rAF loop polls this every frame. */
   getTokenCount: () => number;
+  /** Stable getter for the waiting-for-first-token flag. True while an LLM
+   *  request is in-flight with no tokens yet (arrow-up), false once streaming
+   *  (arrow-down). Reset on each message_start within a turn. */
+  getWaitingForResponse: () => boolean;
 }
 
-export default function ClaudeStatus({ isLoading, getTokenCount }: ClaudeStatusProps) {
-  const { thinkingBudget } = useLoopRuntimeExtra();
+export default function ClaudeStatus({ isLoading, getTokenCount, getWaitingForResponse }: ClaudeStatusProps) {
+  const { thinkingBudget, turnGeneration, turnStartedAt } = useLoopRuntimeExtra();
   const [elapsedTime, setElapsedTime] = useState(0);
   const [displayTokens, setDisplayTokens] = useState(0);
   const [ellipsis, setEllipsis] = useState("");
 
-  // Elapsed timer + ellipsis cycle
+  // Elapsed timer + ellipsis cycle.
+  // Uses turnStartedAt (persisted in sessionStorage) as the effective start
+  // time when available, so the timer survives page refreshes during an
+  // active generation.
   useEffect(() => {
     if (!isLoading) {
       setElapsedTime(0);
@@ -44,9 +51,9 @@ export default function ClaudeStatus({ isLoading, getTokenCount }: ClaudeStatusP
       setEllipsis("");
       return;
     }
-    const startTime = Date.now();
+    const effectiveStart = turnStartedAt ?? Date.now();
     const timer = setInterval(() => {
-      setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+      setElapsedTime(Math.floor((Date.now() - effectiveStart) / 1000));
     }, 250);
     const dotTimer = setInterval(() => {
       setEllipsis((prev) => (prev.length >= 3 ? "" : prev + "."));
@@ -55,7 +62,7 @@ export default function ClaudeStatus({ isLoading, getTokenCount }: ClaudeStatusP
       clearInterval(timer);
       clearInterval(dotTimer);
     };
-  }, [isLoading]);
+  }, [isLoading, turnGeneration, turnStartedAt]);
 
   // Smooth easing rAF loop — polls the getter every frame, no React re-render
   // needed on the hot content_block_delta path. Same pattern as the official
@@ -83,8 +90,10 @@ export default function ClaudeStatus({ isLoading, getTokenCount }: ClaudeStatusP
   const statusText =
     ACTION_WORDS[Math.floor(elapsedTime / 3) % ACTION_WORDS.length];
 
-  // ↑ uploading (no tokens yet), ↓ streaming (tokens are coming in)
-  const arrow = displayTokens > 0 ? "↓" : "↑";
+  // ↑ uploading (LLM request in-flight, no tokens yet), ↓ streaming.
+  // Uses the getter directly so it switches immediately on message_start
+  // without waiting for a React re-render.
+  const arrow = getWaitingForResponse() ? "↑" : "↓";
 
   const budgetLabel =
     thinkingBudget === null
