@@ -20,6 +20,7 @@ import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
 import { ChatPage } from "./pages/ChatPage"
 import { SettingsPage } from "./pages/SettingsPage"
+import { AdminSystemPage } from "./pages/AdminSystemPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { WelcomeCard } from "./components/WelcomeCard"
@@ -210,6 +211,19 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                     className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
                   >
                     Admin
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      navigate("/admin/system")
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-100"
+                    title="server version + activity + pull latest code"
+                  >
+                    Platform
                   </button>
                 )}
                 {isAdmin && (
@@ -419,6 +433,7 @@ export function App() {
             <Route path="/chat/:convId" element={<ChatPage />} />
             <Route path="/settings" element={<Navigate to="/settings/personal-repo" replace />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
+            <Route path="/admin/system" element={<AdminSystemPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

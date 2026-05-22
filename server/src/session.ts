@@ -1191,6 +1191,23 @@ class LoopSession {
 
 const sessions = new Map<string, LoopSession>()
 
+/**
+ * Snapshot of in-memory session activity for the admin dashboard.
+ * Only includes loops whose `LoopSession` has been instantiated (i.e. someone
+ * touched them via attach / sendUserText / etc.). Idle loops aren't here.
+ */
+export function getActivitySnapshot(): Array<{
+  id: string
+  wsCount: number
+  generating: boolean
+}> {
+  return [...sessions.entries()].map(([id, s]) => ({
+    id,
+    wsCount: (s as any).subscribers.size as number,
+    generating: (s as any).generating as boolean,
+  }))
+}
+
 export function getSession(id: string): LoopSession {
   let s = sessions.get(id)
   if (!s) {

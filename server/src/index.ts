@@ -28,13 +28,14 @@ import { join as pathJoin, dirname } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
-import { getSession, destroySession as destroyLoopSession, restartSession } from "./session"
+import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, pickDefaultSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
+  LOOPAT_INSTALL_DIR,
   WORKSPACE,
   loopContextKnowledge,
   loopContextNotes,
@@ -288,6 +289,105 @@ app.delete("/api/admin/users/:id", requireAdmin, async (c) => {
   } catch (e: any) {
     return c.json({ error: e?.message ?? "delete failed" }, 400)
   }
+})
+
+// ── admin platform (system info + git pull) ──
+
+/**
+ * Snapshot of server state for the admin dashboard at /admin/system. Polled
+ * every few seconds while the page is open. Active = WS attached OR SDK
+ * streaming a reply OR a user message landed in the last 60s. "Active users"
+ * is the unique-driver count across those loops.
+ */
+app.get("/api/admin/system", requireAdmin, async (c) => {
+  // version + how far behind origin we are
+  let branch = "unknown", commit = "unknown"
+  try { branch = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim() } catch {}
+  try { commit = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "rev-parse", "HEAD"])).stdout.trim() } catch {}
+  let behindBy = 0, latestCommit: string | null = null, latestMessage: string | null = null
+  try {
+    // Don't `fetch` here — too slow for a 5s poll. Use whatever the local
+    // origin/main ref already knows; admin clicks "Check" to refresh it.
+    const remote = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "rev-parse", "@{u}"])).stdout.trim()
+    if (commit && remote && commit !== remote) {
+      const log = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "log", "--oneline", `${commit}..${remote}`])).stdout.trim()
+      behindBy = log ? log.split("\n").length : 0
+      latestCommit = remote
+      latestMessage = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "log", "-1", "--pretty=%s", remote])).stdout.trim()
+    }
+  } catch {}
+
+  const { stat: fsStat } = await import("node:fs/promises")
+  const snap = getActivitySnapshot()
+  const now = Date.now()
+  const activeLoops: Array<{ id: string; title: string; driver: string; wsCount: number; generating: boolean; lastMsgAgeSec: number }> = []
+  let totalWs = 0
+  let totalGenerating = 0
+  for (const s of snap) {
+    totalWs += s.wsCount
+    if (s.generating) totalGenerating++
+    let lastMsgAgeSec = Number.POSITIVE_INFINITY
+    try {
+      const st = await fsStat(loopHistoryPath(s.id))
+      lastMsgAgeSec = Math.floor((now - st.mtimeMs) / 1000)
+    } catch {}
+    const active = s.wsCount > 0 || s.generating || lastMsgAgeSec < 60
+    if (!active) continue
+    const meta = await getLoop(s.id)
+    if (!meta) continue
+    activeLoops.push({
+      id: s.id,
+      title: meta.title,
+      driver: meta.driver ?? meta.createdBy,
+      wsCount: s.wsCount,
+      generating: s.generating,
+      lastMsgAgeSec: Number.isFinite(lastMsgAgeSec) ? lastMsgAgeSec : -1,
+    })
+  }
+  const activeUsers = new Set(activeLoops.map((l) => l.driver)).size
+  return c.json({
+    version: { branch, commit, behindBy, latestCommit, latestMessage },
+    activity: {
+      activeLoops: activeLoops.length,
+      activeUsers,
+      totalWs,
+      totalGenerating,
+      loops: activeLoops,
+    },
+  })
+})
+
+/** Run git fetch — refreshes origin/main so the dashboard's behindBy is current. */
+app.post("/api/admin/system/check", requireAdmin, async (c) => {
+  try {
+    const r = await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "fetch", "--quiet"])
+    return c.json({ ok: true, message: r.stderr.trim() || "ok" })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.stderr?.toString().trim() || e?.message || "fetch failed" }, 500)
+  }
+})
+
+/**
+ * git pull --ff-only. Does NOT restart the server — bun --hot is expected to
+ * pick up code changes. Schema/dep changes need a real restart (ssh in, run
+ * scripts/stop.sh && scripts/start.sh). Failures surface stderr verbatim so
+ * the admin can see exactly what to fix.
+ */
+app.post("/api/admin/system/pull", requireAdmin, async (c) => {
+  let oldHead = "", newHead = "", message = ""
+  try {
+    oldHead = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "rev-parse", "HEAD"])).stdout.trim()
+    const r = await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "pull", "--ff-only"])
+    newHead = (await execFileP("git", ["-C", LOOPAT_INSTALL_DIR, "rev-parse", "HEAD"])).stdout.trim()
+    message = (r.stdout || r.stderr || "").trim() || "ok"
+  } catch (e: any) {
+    return c.json({
+      ok: false,
+      error: e?.stderr?.toString().trim() || e?.stdout?.toString().trim() || e?.message || "pull failed",
+      oldHead, newHead,
+    }, 500)
+  }
+  return c.json({ ok: true, pulled: oldHead !== newHead, oldHead, newHead, message })
 })
 
 // ── settings (auth required) ──

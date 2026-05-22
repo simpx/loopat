@@ -867,6 +867,58 @@ export async function getVersion(): Promise<VersionInfo> {
   return (await r.json()) as VersionInfo
 }
 
+// ── admin platform (/admin/system) ──
+
+export type AdminActiveLoop = {
+  id: string
+  title: string
+  driver: string
+  wsCount: number
+  generating: boolean
+  /** Seconds since last user message; -1 if no messages.jsonl. */
+  lastMsgAgeSec: number
+}
+
+export type AdminSystemInfo = {
+  version: {
+    branch: string
+    commit: string
+    behindBy: number
+    latestCommit: string | null
+    latestMessage: string | null
+  }
+  activity: {
+    activeLoops: number
+    activeUsers: number
+    totalWs: number
+    totalGenerating: number
+    loops: AdminActiveLoop[]
+  }
+}
+
+export async function getAdminSystem(): Promise<AdminSystemInfo | null> {
+  const r = await apiFetch("/api/admin/system")
+  if (!r.ok) return null
+  return (await r.json()) as AdminSystemInfo
+}
+
+export async function adminCheckForUpdates(): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/admin/system/check", { method: "POST" })
+  return (await r.json()) as { ok: boolean; error?: string }
+}
+
+export async function adminPull(): Promise<{
+  ok: boolean
+  pulled?: boolean
+  oldHead?: string
+  newHead?: string
+  message?: string
+  error?: string
+}> {
+  const r = await apiFetch("/api/admin/system/pull", { method: "POST" })
+  return (await r.json()) as any
+}
+
 declare const __BUILD_COMMIT__: string
 declare const __BUILD_TIME__: string
 export function getBuildInfo() {
