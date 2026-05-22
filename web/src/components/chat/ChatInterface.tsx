@@ -175,10 +175,28 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     const nearBottom = () => vp.scrollTop + vp.clientHeight >= vp.scrollHeight - 120;
 
     let userScrolledUp = false;
+    // Track upward wheel events so we can suppress auto-scroll immediately,
+    // before the user has scrolled past the 120px nearBottom() threshold.
+    // Without this, during rapid streaming the user can never escape the
+    // nearBottom() zone — each ResizeObserver tick yanks them back down.
+    let wheelUpTimer: ReturnType<typeof setTimeout> | null = null;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        userScrolledUp = true;
+        if (wheelUpTimer) clearTimeout(wheelUpTimer);
+        wheelUpTimer = setTimeout(() => {
+          wheelUpTimer = null;
+          if (nearBottom()) userScrolledUp = false;
+        }, 200);
+      }
+    };
     const onScroll = () => {
-      if (nearBottom()) {
+      // Only reset userScrolledUp when near bottom if there's no pending
+      // upward-wheel timer — otherwise the onWheel handler's timer will
+      // decide once the user stops scrolling.
+      if (!wheelUpTimer && nearBottom()) {
         userScrolledUp = false;
-      } else {
+      } else if (!nearBottom()) {
         userScrolledUp = true;
       }
       setShowScrollToBottom(vp.scrollTop + vp.clientHeight < vp.scrollHeight - 200);
@@ -189,6 +207,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       }
     };
     vp.addEventListener("scroll", onScroll, { passive: true });
+    vp.addEventListener("wheel", onWheel, { passive: true });
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let suppressScroll = false;
@@ -227,7 +246,9 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);
+      if (wheelUpTimer) clearTimeout(wheelUpTimer);
       vp.removeEventListener("scroll", onScroll);
+      vp.removeEventListener("wheel", onWheel);
     };
   }, []);
   // When history finishes loading, do one final snap to bottom and finalize
