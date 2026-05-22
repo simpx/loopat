@@ -55,7 +55,9 @@ export function NewLoopDialog({
       await onCreate({
         title: title.trim() || "untitled",
         repo: repo || undefined,
-        sandbox: sandbox || undefined,
+        // Pass sandbox even when empty: the server distinguishes
+        // missing (apply default) from present-but-empty (explicit "(none)").
+        sandbox,
         vault: vault || undefined,
       })
     } finally {

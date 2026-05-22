@@ -932,7 +932,16 @@ app.post("/api/loops", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
-  const sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
+  // Sandbox semantics: key missing → caller has no opinion, pick the default
+  // (only when exactly one exists). Key present-but-empty → explicit "(none)",
+  // honor it. This lets NewLoopDialog's "(none)" choice survive while
+  // headless callers (ContextPage distill/edit/repo buttons) get the default.
+  let sandbox: string | undefined
+  if (!("sandbox" in body)) {
+    sandbox = await pickDefaultSandbox()
+  } else {
+    sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
+  }
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
   const knowledgeRw = body.knowledge_rw === true
   try {
