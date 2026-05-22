@@ -163,9 +163,15 @@ function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
   const out: RawMsg[] = []
   for (const m of raw) {
     if (m.role === "user") {
-      const textBlocks = m.content.filter((b: any) => b?.type === "text" && (b.text ?? "").trim())
-      if (textBlocks.length === 0) continue
-      out.push({ ...m, content: textBlocks })
+      // Keep both text and image blocks so pasted screenshots stay visible
+      // in the chat history (image blocks are rendered by UserMessage).
+      const visibleBlocks = m.content.filter(
+        (b: any) =>
+          (b?.type === "text" && (b.text ?? "").trim()) ||
+          b?.type === "image",
+      )
+      if (visibleBlocks.length === 0) continue
+      out.push({ ...m, content: visibleBlocks })
     } else {
       const enriched = m.content.map((b: any) => {
         if (b?.type === "tool_use") {
@@ -195,6 +201,18 @@ export function convertMessage(raw: RawMsg) {
     if (b?.type === "text") {
       const txt = (b.text ?? "").trim()
       if (txt) parts.push({ type: "text", text: txt })
+    } else if (b?.type === "image") {
+      // Anthropic image blocks come as { source: { type: "base64", media_type, data } }
+      // or { source: { type: "url", url } }. Convert to the assistant-ui
+      // ImageMessagePart shape so MessagePrimitive.Parts can render it.
+      const src = b.source ?? {}
+      let url: string | undefined
+      if (src.type === "base64" && src.data && src.media_type) {
+        url = `data:${src.media_type};base64,${src.data}`
+      } else if (src.type === "url" && typeof src.url === "string") {
+        url = src.url
+      }
+      if (url) parts.push({ type: "image", image: url })
     } else if (b?.type === "clear-divider") {
       const ts = (b as any).ts
       const by = (b as any).by
@@ -306,6 +324,15 @@ export interface ContextUsage {
   model: string
 }
 
+/** Image attached to an outgoing user message. `data` is base64 *without* the
+ *  `data:<mime>;base64,` prefix — the wire format mirrors Anthropic's
+ *  Base64ImageSource so the server can pass it straight to the SDK. */
+export interface ImageInput {
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+  data: string
+  filename?: string
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
@@ -340,8 +367,10 @@ export interface LoopRuntimeExtra {
   childMessagesByAgentId: ReadonlyMap<string, RawMsg[]>
   /** True while SDK is generating. */
   isRunning: boolean
-  /** Enqueue a message to be sent after current generation completes. */
-  enqueueMessage: (text: string) => void
+  /** Enqueue a message to be sent after current generation completes.
+   *  Optional images are forwarded as `image` content blocks so the SDK
+   *  can see screenshots pasted into the composer. */
+  enqueueMessage: (text: string, images?: ImageInput[]) => void
   /** Messages waiting in the server queue. */
   queue: string[]
   /** Clear the pending message queue. */
@@ -713,10 +742,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string) {
     ws.send(JSON.stringify({ type: "queue_remove", index }))
   }, [])
 
-  const enqueueMessage = useCallback((text: string) => {
+  const enqueueMessage = useCallback((text: string, images?: ImageInput[]) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
+    const payload: Record<string, unknown> = {
+      type: "user",
+      text,
+      permissionMode: permissionModeRef.current,
+    }
+    if (images && images.length > 0) payload.images = images
+    ws.send(JSON.stringify(payload))
   }, [])
 
   const toggleShowHistory = useCallback(() => {
