@@ -51,9 +51,8 @@ import {
   loopHomeMerged,
   workspaceHomeSkelDir,
 } from "./paths"
-// resolveSandboxFile removed — mise toolchain integration was tied to the
-// pre-profile sandbox model. Kept the sandboxName parameter of buildBwrapArgs
-// for now (always undefined under the profile model), so callers don't change.
+// mise toolchain integration now keys off the loop's merged .claude/mise.toml
+// (compose.ts writes it from team + profile + personal sources).
 import { loadConfig, loadPersonalConfig } from "./config"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
@@ -172,17 +171,14 @@ export type SandboxExtraEnv = Record<string, string>
 /**
  * Build bwrap argv list. Caller appends `[, "--", cmd, ...args]` and spawns.
  *
- * `sandboxName` (optional): a workspace sandbox catalog entry. When set,
- * `mise install` + `mise env --json` run on the host; the env vars mise
- * produces (PATH plus any [env] keys) are injected via --setenv, and
- * `$HOME/.local/share/mise` is bound RO into the sandbox so the tool
- * binaries those PATH entries point to are visible inside.
+ * Mise toolchain: if the loop's merged `.claude/mise.toml` exists (compose.ts
+ * wrote it from team + profile + personal sources), run `mise install` +
+ * `mise env --json`; inject mise's PATH/env via --setenv. Otherwise skip.
  */
 export async function buildBwrapArgs(
   loopId: string,
   createdBy: string,
   extraSetenv: SandboxExtraEnv = {},
-  sandboxName?: string,
   vaultName?: string,
   knowledgeRw?: boolean,
   homeOverlay: boolean = true,
@@ -190,11 +186,7 @@ export async function buildBwrapArgs(
 ): Promise<string[]> {
   const home = homedir()
 
-  // sandboxName parameter retained as legacy (callers pass undefined).
-  void sandboxName
-  // Mise toolchain integration: if the loop's merged .claude/mise.toml exists
-  // (compose.ts wrote it from the team + profile + personal layers), activate
-  // it now. mise auto-discovers mise.toml in the cwd we pass.
+  // Mise toolchain integration: activate from loop's merged .claude/mise.toml.
   let miseEnv: Record<string, string> | null = null
   const loopClaudePath = loopClaudeDir(loopId)
   if (existsSync(join(loopClaudePath, "mise.toml"))) {

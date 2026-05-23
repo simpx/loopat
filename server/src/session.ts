@@ -408,11 +408,7 @@ class LoopSession {
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
     const useOverlay = await isHomeOverlaySupported()
-    // Profile model has no mise sandbox — pass undefined for the sandboxName
-    // arg so buildBwrapArgs skips mise activation. Profile-knowledge dirs
-    // live under loops/<id>/context/profile-knowledge/ (mounted via existing
-    // loopContext bind, no extra wiring needed).
-    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, undefined, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
+    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
     // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)

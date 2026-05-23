@@ -8,7 +8,7 @@ import {
   personalTokenUsagePath,
   personalVaultDir,
   workspaceDir,
-  personalClaudeJsonPath,
+  personalSettingsPath,
 } from "./paths"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
@@ -510,7 +510,7 @@ export function getActiveProvider(cfg: PersonalConfig): { name: string; provider
  * wins over admin-tier — consistent with the skill/plugin compose model).
  */
 export async function loadPersonalClaudeJson(user: string): Promise<WorkspaceClaudeJson> {
-  const p = personalClaudeJsonPath(user)
+  const p = personalSettingsPath(user)
   if (!existsSync(p)) return {}
   try {
     return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson

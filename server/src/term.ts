@@ -69,7 +69,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
-    }, undefined, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
+    }, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
     // Overlay path: unshare -Umr + overlayfs $HOME + bwrap nested-userns uid
     // drop. Tmpfs path: bwrap directly (older bwrap / restricted envs).
     let binary: string

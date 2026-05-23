@@ -93,9 +93,6 @@ export const personalClaudeMdPath = (user: string) => join(personalClaudeDir(use
 export const personalSettingsPath = (user: string) => join(personalClaudeDir(user), "settings.json")
 export const personalSkillsDir = (user: string) => join(personalClaudeDir(user), "skills")
 export const personalAgentsDir = (user: string) => join(personalClaudeDir(user), "agents")
-/** Per-user mcpServers / settings — same JSON shape as workspace settings.json.
- *  Personal entries shadow workspace entries by name (user > workspace tier). */
-export const personalClaudeJsonPath = (user: string) => personalSettingsPath(user)
 // Composed output inside each loop's .claude/. Regenerated every spawn.
 // Plugin loading does NOT touch the loop's .claude/ — SDK loads plugins via
 // its `plugins` option (resolved from server cache; see plugin-installer.ts).
