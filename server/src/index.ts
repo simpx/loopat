@@ -637,15 +637,25 @@ function publicBaseUrl(c: any): string {
   return `${proto}://${host}`
 }
 
-// Lists MCP servers declared at every tier visible to this user, grouped by
-// source. Each tier reports its config-file path even when empty, so the UI
-// can tell users "add servers here if you want a personal-tier one".
-// Personal-tier shadows workspace-tier on name collision (matches spawn merge).
+// Lists MCP servers visible to a loop, grouped by source tier:
+//   sandbox: from <sandbox>/.claude/.claude.json (admin-set, sandbox-chain merged)
+//   plugin:  from each installed plugin's .mcp.json (loaded automatically by CC
+//            when the plugin loads — surfaced here so the UI panel is complete)
+//   personal: per-user overrides (shadows same-name sandbox entries at spawn)
+//
+// Query param `loopId` selects which loop's sandbox to use. Without it,
+// falls back to the "default" sandbox (e.g. settings page where no specific
+// loop is in scope).
 app.get("/api/mcp-servers", requireAuth, async (c) => {
   const userId = c.get("userId") as string
-  // MCP servers now live per-sandbox. Until the MCP page supports per-sandbox
-  // routing, surface the default sandbox's servers as the "workspace" tier.
-  const ws = await loadSandboxClaudeJson("default")
+  const loopId = c.req.query("loopId")
+  // Resolve which sandbox this loop uses (or fall back to default).
+  let sandboxName = "default"
+  if (loopId) {
+    const loop = await getLoop(loopId)
+    if (loop?.config?.sandbox) sandboxName = loop.config.sandbox
+  }
+  const ws = await loadSandboxClaudeJson(sandboxName)
   const ps = await loadPersonalClaudeJson(userId)
 
   const shape = (srv: any) => ({
@@ -660,17 +670,45 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
   const personalTier = Object.entries(ps.mcpServers ?? {}).map(([name, srv]) => ({
     name,
     ...shape(srv),
-    /** Same-name in workspace will be shadowed by this entry at spawn time. */
     shadowsWorkspace: !!ws.mcpServers?.[name],
   }))
+
+  // Plugin tier: scan each resolved plugin's .mcp.json. CC auto-registers
+  // these at runtime when the plugin loads; we surface them here so users
+  // can see + reason about them without spawning a session.
+  const { resolveLoopPlugins } = await import("./plugin-installer")
+  const { readFile: rf } = await import("node:fs/promises")
+  const { existsSync: esync } = await import("node:fs")
+  const { join: pjoin } = await import("node:path")
+  const resolved = await resolveLoopPlugins(sandboxName)
+  type PluginEntry = { name: string; type: string; url?: string; pluginSource: string }
+  const pluginTier: PluginEntry[] = []
+  for (const p of resolved) {
+    const mcpPath = pjoin(p.path, ".mcp.json")
+    if (!esync(mcpPath)) continue
+    try {
+      const j = JSON.parse(await rf(mcpPath, "utf8"))
+      for (const [srvName, srv] of Object.entries((j?.mcpServers ?? {}) as Record<string, any>)) {
+        pluginTier.push({ name: srvName, ...shape(srv), pluginSource: p.name })
+      }
+    } catch (e: any) {
+      console.warn(`[mcp] plugin ${p.name} .mcp.json unreadable: ${e?.message ?? e}`)
+    }
+  }
 
   return c.json({
     tiers: [
       {
         id: "workspace",
-        label: "Workspace MCPs (team-shared, admin-pushed)",
-        path: "context/knowledge/.loopat/claude/claude.json",
+        label: `Sandbox MCPs (${sandboxName})`,
+        path: `context/knowledge/.loopat/sandboxes/${sandboxName}/.claude/.claude.json`,
         servers: workspaceTier,
+      },
+      {
+        id: "plugin",
+        label: "Plugin MCPs (auto-loaded from installed plugins)",
+        path: "",
+        servers: pluginTier,
       },
       {
         id: "personal",

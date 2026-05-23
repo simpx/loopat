@@ -47,11 +47,11 @@ export function McpStatusPanel({
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [inv, st] = await Promise.all([listMcpServers(), getMcpAuth(vault)])
+    const [inv, st] = await Promise.all([listMcpServers(loopId), getMcpAuth(vault)])
     setInventory(inv)
     setStatus(st)
     setLoading(false)
-  }, [vault])
+  }, [vault, loopId])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -174,7 +174,11 @@ export function McpStatusPanel({
               {/* Empty state */}
               {tier.servers.length === 0 ? (
                 <div className={`${variant === "popover" ? "px-3 py-1.5" : "py-2"} text-[12px] text-gray-400 italic`}>
-                  No servers yet. Add to <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">{tier.path}</code>.
+                  {tier.id === "plugin" ? (
+                    <>No plugin-provided MCP servers (none of the installed plugins carry <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">.mcp.json</code>).</>
+                  ) : (
+                    <>No servers yet. Add to <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">{tier.path}</code>.</>
+                  )}
                 </div>
               ) : (
                 <ServerRows
@@ -225,7 +229,7 @@ function ServerRows({
   onConnect,
   onDisconnect,
 }: {
-  tier: "workspace" | "personal"
+  tier: "workspace" | "plugin" | "personal"
   servers: import("@/api").McpServerEntry[]
   status: McpAuthStatus
   variant: Variant
@@ -261,6 +265,11 @@ function ServerRows({
                 {tier === "personal" && s.shadowsWorkspace && (
                   <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded" title="shadows a same-named workspace entry">
                     shadows ws
+                  </span>
+                )}
+                {tier === "plugin" && s.pluginSource && (
+                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 rounded" title={`from plugin ${s.pluginSource}`}>
+                    {s.pluginSource.split("@")[0]}
                   </span>
                 )}
               </div>

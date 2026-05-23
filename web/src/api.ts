@@ -1547,20 +1547,23 @@ export type McpServerEntry = {
   url?: string
   /** Personal-tier only: this entry shadows a same-named workspace entry. */
   shadowsWorkspace?: boolean
+  /** Plugin-tier only: which plugin contributes this server (e.g. "privacy-legal@claude-for-legal"). */
+  pluginSource?: string
 }
 
 export type McpServerTier = {
-  id: "workspace" | "personal"
+  id: "workspace" | "plugin" | "personal"
   label: string
-  /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. */
+  /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. Empty for plugin tier. */
   path: string
   servers: McpServerEntry[]
 }
 
 export type McpServerInventory = { tiers: McpServerTier[] }
 
-export async function listMcpServers(): Promise<McpServerInventory> {
-  const r = await apiFetch("/api/mcp-servers")
+export async function listMcpServers(loopId?: string): Promise<McpServerInventory> {
+  const q = loopId ? `?loopId=${encodeURIComponent(loopId)}` : ""
+  const r = await apiFetch(`/api/mcp-servers${q}`)
   if (!r.ok) return { tiers: [] }
   return (await r.json()) as McpServerInventory
 }
