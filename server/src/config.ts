@@ -23,8 +23,18 @@ export type McpServerConfig =
   | { type: "http"; url: string; headers?: Record<string, string> }
   | { type: "sse"; url: string; headers?: Record<string, string> }
 
+/** CC-native marketplace source. We support local + git + github in step 3. */
+export type MarketplaceSource =
+  | { source: "local"; path: string }
+  | { source: "git"; url: string }
+  | { source: "github"; repo: string }
+
 export type WorkspaceClaudeJson = {
   mcpServers?: Record<string, McpServerConfig>
+  /** Marketplaces to register. CC-native shape: keyed by marketplace name. */
+  extraKnownMarketplaces?: Record<string, { source: MarketplaceSource }>
+  /** Plugins to enable. CC-native shape: { "name@market": true }. */
+  enabledPlugins?: Record<string, boolean>
 }
 
 /**

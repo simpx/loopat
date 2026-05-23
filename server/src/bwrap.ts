@@ -50,6 +50,7 @@ import {
   workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
+  serverPluginCacheRoot,
   loopHomeUpper,
   loopHomeWork,
   loopHomeMerged,
@@ -242,6 +243,15 @@ export async function buildBwrapArgs(
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
+  // Server-side plugin cache (workspace + personal marketplace clones +
+  // plugin checkouts). Bound same-to-same so loop-internal symlinks (whose
+  // targets are host paths under this dir) resolve inside the sandbox. Only
+  // bind when the dir exists — empty workspaces don't need it.
+  const pluginCache = serverPluginCacheRoot()
+  if (existsSync(pluginCache)) {
+    args.push("--ro-bind", pluginCache, pluginCache)
+  }
+
   // ── vault symlink ──
   // Personal is bound wholesale above, so all named vaults under
   // .loopat/vaults/ are visible inside the sandbox (no isolation between
@@ -263,11 +273,12 @@ export async function buildBwrapArgs(
     console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
   }
 
-  // skills + plugins: composed into loops/<id>/.claude/{skills,plugins/cache}/
-  // by `composeLoopClaudeConfig()` (see compose.ts) BEFORE this argv is built.
-  // The whole .claude/ dir is already rw-bound above (V_LOOP_CLAUDE), so the
-  // composed symlinks are visible inside the sandbox without further binds.
-  // Plugin loading: spawn callback passes `--plugin-dir=.../plugins/cache`.
+  // skills + agents: composed into loops/<id>/.claude/{skills,agents}/ by
+  // `composeLoopClaudeConfig()` (see compose.ts) BEFORE this argv is built.
+  // Plugins: SDK passes `--plugin-dir <path>` per resolved plugin from the
+  // server-side cache (see plugin-installer.ts + session.ts plugins option);
+  // nothing is written into the loop's .claude/plugins/.
+  // The whole .claude/ dir is already rw-bound above (V_LOOP_CLAUDE).
 
   // workspace CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
   // Code natively loads it as user-tier (settingSources includes "user").

@@ -9,6 +9,7 @@ import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
+import { resolveLoopPlugins } from "./plugin-installer"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
@@ -319,11 +320,14 @@ class LoopSession {
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
 
-    // Compose multi-tier claude config (skills + plugins) into the loop's
+    // Compose multi-tier claude config (skills + agents) into the loop's
     // private .claude/. Re-run every spawn so newly-added workspace/personal
     // entries show up at next session start.
-    const { enabledPlugins } = await composeLoopClaudeConfig(loopId, driver)
-    await writeLoopSettings(loopId, enabledPlugins)
+    await composeLoopClaudeConfig(loopId, driver)
+    await writeLoopSettings(loopId)
+    // Resolve plugins from builtin + workspace + personal claude.json. Cheap
+    // when server-side cache is warm; passed to SDK below as `plugins`.
+    const resolvedPlugins = await resolveLoopPlugins(driver)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
     //
@@ -419,6 +423,10 @@ class LoopSession {
         ...(this.currentPermissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
         mcpServers,
+        // SDK turns each into `--plugin-dir <path>`. Only type:"local" is
+        // supported by the SDK (sdk.mjs throws on others). Paths are host
+        // absolute and sandbox-visible via existing bwrap ro-binds.
+        plugins: resolvedPlugins.map((p) => ({ type: "local" as const, path: p.path })),
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         canUseTool: async (toolName, input, { toolUseID, signal, title, displayName }) => {
@@ -522,22 +530,16 @@ class LoopSession {
         sandbox: { enabled: false },
         // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
-          // CC's --plugin-dir flag points at a SINGLE plugin's root (uses the
-          // dir's basename as the plugin name), not a parent directory of
-          // multiple plugins. So enumerate the composed cache and pass one
-          // flag per plugin. Empty enabledPlugins → no extra flags.
-          const pluginDirArgs = enabledPlugins.flatMap((name) => [
-            "--plugin-dir",
-            `${V_LOOP_CLAUDE(loopId)}/plugins/cache/${name}`,
-          ])
-          const augmentedArgs = [...args, ...pluginDirArgs]
+          // SDK has already injected the resolved plugins via its `plugins`
+          // option → `--plugin-dir <path>` flags in `args`. We just wrap +
+          // spawn here.
           // Overlay path: unshare wrapper mounts overlayfs at $HOME, bwrap drops
           // uid via nested userns. Tmpfs path: bwrap directly (when host bwrap
           // can't do the nested-userns uid drop, see isHomeOverlaySupported).
           const spawnBinary = sandboxOverlay ? "unshare" : "bwrap"
           const fullArgs = sandboxOverlay
-            ? buildSandboxSpawnArgv(sandboxOverlay, bwrapBase, command, augmentedArgs)
-            : [...bwrapBase, "--", command, ...augmentedArgs]
+            ? buildSandboxSpawnArgv(sandboxOverlay, bwrapBase, command, args)
+            : [...bwrapBase, "--", command, ...args]
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed
@@ -794,11 +796,17 @@ class LoopSession {
     }
   }
 
-  /** Read subdirectory names from a path — silently returns [] if missing. */
+  /**
+   * Read subdirectory names from a path — silently returns [] if missing.
+   * Includes symlinks (composeTier creates symlinks-to-dirs under
+   * .claude/plugins/cache/, which isDirectory() reports as false).
+   */
   private async listDirNames(dir: string): Promise<string[]> {
     try {
       const entries = await readdir(dir, { withFileTypes: true })
-      return entries.filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name)
+      return entries
+        .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith("."))
+        .map((e) => e.name)
     } catch {
       return []
     }
@@ -807,9 +815,10 @@ class LoopSession {
   /**
    * Build a best-effort list of slash commands from the loop's workspace /
    * personal config. Used to seed the frontend before CC's real init arrives.
-   * Includes well-known CC builtins + skill names from knowledge/personal dirs.
-   * Plugin names are excluded because we don't know their sub-commands without
-   * reading manifests — CC will report the full list when it starts.
+   * Includes well-known CC builtins, loose skills from knowledge/personal,
+   * AND plugin sub-commands (<plugin>:<skill>) read from the same paths the
+   * SDK is about to load — so the menu is complete on first open, not after
+   * the first message has triggered a spawn.
    */
   private async buildInitialSlashCommands(user: string): Promise<{ name: string; description: string }[]> {
     const map = new Map<string, string>()
@@ -826,6 +835,23 @@ class LoopSession {
     // Personal skills (higher precedence)
     for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
       map.set(name, await readSkillDescription(personalLoopatSkillsDir(user), name))
+    }
+    // Plugin sub-commands: scan each resolved plugin's skills/ dir and surface
+    // as `<plugin-name>:<skill-name>`. resolveLoopPlugins returns the same
+    // paths the SDK will pass via `--plugin-dir` at spawn, so the seed
+    // exactly matches what CC will report on init.
+    try {
+      const resolvedPlugins = await resolveLoopPlugins(user)
+      for (const plugin of resolvedPlugins) {
+        const skillsDir = join(plugin.path, "skills")
+        for (const skill of await this.listDirNames(skillsDir)) {
+          map.set(`${plugin.name}:${skill}`, await readSkillDescription(skillsDir, skill))
+        }
+      }
+    } catch (e: any) {
+      // Plugin resolution can fail (e.g. marketplace unreachable). Seed list
+      // is best-effort; CC's init payload will fill in the truth.
+      console.warn(`[session ${this.id.slice(0,8)}] seed plugin scan failed: ${e?.message ?? e}`)
     }
     return [...map.entries()]
       .map(([name, description]) => ({ name, description }))

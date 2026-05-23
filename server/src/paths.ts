@@ -59,10 +59,6 @@ export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "
 // per Claude Code's subagent convention. Composed into the loop's
 // $CLAUDE_CONFIG_DIR/agents/ alongside personal agents.
 export const workspaceLoopatAgentsDir = () => join(workspaceLoopatClaudeDir(), "agents")
-// Workspace plugins (admin-managed, lives under knowledge/.loopat/plugins/).
-// Sibling of claude/ — plugins are namespaced (loaded by CC via plugin manifest)
-// whereas claude/skills/ are flat user-tier skills (composed by loopat).
-export const workspaceLoopatPluginsDir = () => join(workspaceLoopatReservedDir(), "plugins")
 // Workspace-shared Claude Code config (mcpServers, future: hooks, ...).
 // Shape mirrors `.claude.json`. Workspace-versioned in knowledge repo.
 export const workspaceClaudeJsonPath = () => join(workspaceLoopatClaudeDir(), "claude.json")
@@ -105,11 +101,6 @@ export const workspaceHomeSkelDir = () => join(LOOPAT_HOME, "sandbox-home-skel")
 // Bundled platform doctrine — ships with loopat code, always present.
 export const bundledDoctrinePath = () => join(TEMPLATES_DIR, "CLAUDE.md")
 
-// Builtin plugins (ship with loopat install). Composed into every loop's
-// plugin cache as the lowest-priority tier — workspace and personal plugins
-// can shadow them by name. See server/src/compose.ts.
-export const builtinPluginsDir = () => join(TEMPLATES_DIR, "plugins")
-
 // Per-loop-kind templates (distill, future: review, plan, etc.). Each kind
 // has its own dir; createLoop / distillLoop copies the kind's CLAUDE.md into
 // the new loop's workdir as the L2++ project-tier doctrine.
@@ -140,12 +131,29 @@ export const personalLoopatAgentsDir = (user: string) => join(personalLoopatClau
  *  knowledge/.loopat/claude/claude.json. Same JSON shape; personal entries
  *  shadow workspace entries by name (user > admin tier ordering). */
 export const personalClaudeJsonPath = (user: string) => join(personalLoopatClaudeDir(user), "claude.json")
-// Personal plugins (sibling of claude/), per-user namespaced.
-export const personalLoopatPluginsDir = (user: string) => join(personalLoopatDir(user), "plugins")
 // Composed output inside each loop's .claude/. Regenerated every spawn.
+// Plugin loading does NOT touch the loop's .claude/ — SDK loads plugins via
+// its `plugins` option (resolved from server cache; see plugin-installer.ts).
 export const loopComposedSkillsDir = (id: string) => join(loopDir(id), ".claude", "skills")
 export const loopComposedAgentsDir = (id: string) => join(loopDir(id), ".claude", "agents")
-export const loopComposedPluginsCacheDir = (id: string) => join(loopDir(id), ".claude", "plugins", "cache")
+
+// Builtin marketplace catalog (ships with loopat install). Local source —
+// plugin-installer reads marketplace.json directly from this path; plugins
+// live under TEMPLATES_DIR/plugins/<name>/.
+export const builtinMarketplaceDir = () => TEMPLATES_DIR
+export const builtinMarketplaceManifestPath = () =>
+  join(TEMPLATES_DIR, ".claude-plugin", "marketplace.json")
+
+// Server-side marketplace cache. Shared across loops + users — each marketplace
+// cloned once into _marketplace/. Plugins with "./..."-relative source live
+// inside that clone; future per-sha checkouts (git-subdir/url sources) would
+// go under <plugin>/<sha>/. Bound same-to-same into the sandbox so SDK-passed
+// plugin paths resolve inside CC.
+export const serverPluginCacheRoot = () => join(LOOPAT_HOME, "plugin-cache")
+export const serverMarketplaceCloneDir = (market: string) =>
+  join(serverPluginCacheRoot(), market, "_marketplace")
+export const serverPluginCheckoutDir = (market: string, plugin: string, sha: string) =>
+  join(serverPluginCacheRoot(), market, plugin, sha)
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
 /** Sandbox-internal path: symlink to the active vault's real dir under
  *  personal/.loopat/vaults/<active>/. AI is taught to use this entrypoint. */

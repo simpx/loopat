@@ -16,6 +16,7 @@ import ClaudeStatus from "./ClaudeStatus";
 
 import PlanModeToggle from "./PlanModeToggle";
 import ModelSelector from "./ModelSelector";
+import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
@@ -193,6 +194,17 @@ export default function Composer() {
               />
 
               <ModelSelector />
+
+              <PluginsButton
+                onPick={(slashCommand) => {
+                  // Insert at end + a trailing space so user can keep typing args.
+                  const current = textRef.current
+                  const next = current.length === 0 || current.endsWith(" ")
+                    ? `${current}${slashCommand}`
+                    : `${current} ${slashCommand}`
+                  aui.composer().setText(next)
+                }}
+              />
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">

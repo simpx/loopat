@@ -1,25 +1,16 @@
 /**
- * Compose multi-tier Claude Code config (skills + plugins) into each loop's
+ * Compose multi-tier Claude Code config (skills + agents) into each loop's
  * private .claude/ dir.
  *
  * Tiers (low → high precedence; later writes shadow earlier):
- *   - builtin   (ships in `server/templates/`)
  *   - workspace (admin-pushed into knowledge/.loopat/)
  *   - personal  (per-user under personal/<user>/.loopat/)
  *
- * Two compose surfaces:
- *
- *   1. Skills → `loops/<id>/.claude/skills/`
- *      Composed from workspace + personal (no builtin loose-skill tier — builtin
- *      ships as a plugin so it gets natural `loopat:*` namespacing).
- *      Bound into the sandbox at $CLAUDE_CONFIG_DIR/skills/ via the loop's
- *      .claude/ rw-bind. CC scans the dir as user-tier skills.
- *
- *   2. Plugins → `loops/<id>/.claude/plugins/cache/`
- *      Composed from builtin + workspace + personal.
- *      CC is told to look here via `--plugin-dir` flag at spawn time (see
- *      session.ts). The plugin manifest's `name` is the namespace prefix in
- *      the `/<plugin>:<skill>` invocation syntax.
+ * Plugins are NOT composed here. The Agent SDK loads plugins via its
+ * `plugins` option (one `--plugin-dir <path>` per entry); the resolver
+ * lives in plugin-installer.ts and points at server-side cache paths.
+ * Skills here are CC's loose user-tier skills (flat directory), not the
+ * namespaced plugin-internal skills.
  *
  * Symlinks point at **sandbox virtual paths**, not host paths. Inside the
  * sandbox, virtual paths resolve to the bound directories; host-side `ls`
@@ -33,17 +24,12 @@ import { existsSync } from "node:fs"
 import { mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
-  LOOPAT_INSTALL_DIR,
-  builtinPluginsDir,
   loopClaudeDir,
   loopComposedAgentsDir,
-  loopComposedPluginsCacheDir,
   loopComposedSkillsDir,
   personalLoopatAgentsDir,
-  personalLoopatPluginsDir,
   personalLoopatSkillsDir,
   workspaceLoopatAgentsDir,
-  workspaceLoopatPluginsDir,
   workspaceLoopatSkillsDir,
 } from "./paths"
 
@@ -98,15 +84,14 @@ async function composeTier(dst: string, tiers: Tier[], opts: ComposeOpts = { kin
 }
 
 /**
- * Compose all Claude config artifacts for a given loop. Run on every spawn.
- *
- * Returns the list of enabled plugin names so the caller can write them into
- * `settings.json` for CC's `enabledPlugins` field.
+ * Compose skills + agents into a given loop's .claude/. Run on every spawn.
+ * Plugins are handled separately by plugin-installer.ts (resolved at spawn
+ * and passed to the SDK via its `plugins` option).
  */
 export async function composeLoopClaudeConfig(
   loopId: string,
   user: string,
-): Promise<{ enabledPlugins: string[] }> {
+): Promise<void> {
   // Ensure the loop's .claude/ exists (caller may have already done this).
   await mkdir(loopClaudeDir(loopId), { recursive: true })
 
@@ -140,38 +125,13 @@ export async function composeLoopClaudeConfig(
     ],
     { kind: "file", filter: (name) => name.endsWith(".md") },
   )
-
-  // Plugins tier — namespaced by plugin.name in each manifest.
-  // builtin is bound same-to-same via LOOPAT_INSTALL_DIR, so its virtual path
-  // equals its host path.
-  const enabledPlugins = await composeTier(loopComposedPluginsCacheDir(loopId), [
-    {
-      rootHostPath: builtinPluginsDir(),
-      virtualPath: join(LOOPAT_INSTALL_DIR, "server", "templates", "plugins"),
-    },
-    {
-      rootHostPath: workspaceLoopatPluginsDir(),
-      virtualPath: "/loopat/context/knowledge/.loopat/plugins",
-    },
-    {
-      rootHostPath: personalLoopatPluginsDir(user),
-      virtualPath: "/loopat/context/personal/.loopat/plugins",
-    },
-  ])
-
-  return { enabledPlugins }
 }
 
 /**
  * Write settings.json under the loop's .claude/. Merges with existing fields
- * (auto-memory etc.) so we don't clobber other writers.
- *
- * Called after composeLoopClaudeConfig so enabledPlugins is fresh.
+ * (auto-memory + anything CC itself may have written) so we don't clobber.
  */
-export async function writeLoopSettings(
-  loopId: string,
-  enabledPlugins: string[],
-): Promise<void> {
+export async function writeLoopSettings(loopId: string): Promise<void> {
   const path = join(loopClaudeDir(loopId), "settings.json")
   let existing: Record<string, unknown> = {}
   if (existsSync(path)) {
@@ -184,7 +144,6 @@ export async function writeLoopSettings(
     autoMemoryEnabled: true,
     autoMemoryDirectory: "/loopat/context/personal/memory",
     ...existing,
-    enabledPlugins,
   }
   await writeFile(path, JSON.stringify(merged, null, 2))
 }

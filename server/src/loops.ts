@@ -42,6 +42,7 @@ import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { pickDefaultSandbox } from "./sandboxes"
+import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 
 const execFileP = promisify(execFile)
 
@@ -1459,13 +1460,11 @@ export async function createLoop(opts: {
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
-  // Write per-loop settings.json so SDK auto-memory points at the virtual
-  // /loopat/context/personal/memory/ path (which exists inside outer sandbox).
-  const settings = {
-    autoMemoryEnabled: true,
-    autoMemoryDirectory: "/loopat/context/personal/memory",
-  }
-  await writeFile(`${loopClaudeDir(id)}/settings.json`, JSON.stringify(settings, null, 2))
+  // Compose skills/agents into .claude/ and write settings.json (autoMemory).
+  // Plugin resolution happens at spawn time (see session.ts) — SDK loads
+  // plugins via its `plugins` option, no loop-local install state needed.
+  await composeLoopClaudeConfig(id, opts.createdBy)
+  await writeLoopSettings(id)
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {

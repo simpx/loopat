@@ -52,6 +52,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
+import { prewarmWorkspaceMarketplaces } from "./plugin-installer"
 import {
   createUser,
   findUser,
@@ -2717,6 +2718,11 @@ const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
 import { isHomeOverlaySupported } from "./bwrap"
 const overlayOk = await isHomeOverlaySupported()
 console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled (tmpfs fallback)"}`)
+
+// Prewarm workspace marketplaces so first loop create after boot doesn't pay
+// clone latency. Failures here are warned, not fatal — admin can fix the URL
+// and the next loop create will retry (ensureMarketplaceCached is idempotent).
+await prewarmWorkspaceMarketplaces()
 
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
 console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
