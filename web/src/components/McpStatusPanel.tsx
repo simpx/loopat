@@ -59,7 +59,7 @@ export function McpStatusPanel({
     if (busyFor) return
     setBusyFor(serverName)
     setError(null)
-    const r = await startMcpAuth(serverName, vault)
+    const r = await startMcpAuth(serverName, vault, loopId)
     setBusyFor(null)
     if (r.error || !r.authorizationUrl) {
       setError(r.error ?? "start failed")
@@ -240,6 +240,9 @@ function ServerRows({
   return (
     <div className={variant === "settings" ? "border border-gray-200 rounded overflow-hidden" : ""}>
       {servers.map((s, i) => {
+        // Plugin tier can have duplicate names (e.g. Slack from multiple
+        // plugins); composite key keeps each row distinct.
+        const rowKey = tier === "plugin" ? `${s.pluginSource ?? ""}::${s.name}` : s.name
         const st = status[s.name]
         const isConnected = !!st?.connected
         const isHttp = s.type === "http" || s.type === "sse"
@@ -248,7 +251,7 @@ function ServerRows({
 
         return (
           <div
-            key={s.name}
+            key={rowKey}
             className={
               variant === "settings"
                 ? `flex items-center gap-3 px-3 py-2 ${i > 0 ? "border-t border-gray-100" : ""}`

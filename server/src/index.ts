@@ -737,17 +737,22 @@ app.get("/api/mcp-auth", requireAuth, async (c) => {
   return c.json(summary)
 })
 
+// Server names from plugin .mcp.json can have spaces, dots etc. ("Google Drive",
+// "Solve Intelligence"). Allow common printable chars; reject path/shell metas.
+const SERVER_NAME_RE = /^[A-Za-z0-9 ._-]{1,64}$/
 app.post("/api/mcp-auth/start", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
   const serverName = typeof body.serverName === "string" ? body.serverName.trim() : ""
   const vault = typeof body.vault === "string" && body.vault ? body.vault.trim() : "default"
-  if (!serverName || !VAULT_RE.test(serverName)) return c.json({ error: "invalid serverName" }, 400)
+  const loopId = typeof body.loopId === "string" ? body.loopId.trim() : ""
+  if (!serverName || !SERVER_NAME_RE.test(serverName)) return c.json({ error: "invalid serverName" }, 400)
   if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
   const r = await startMcpAuth({
     user: userId,
     vault,
     serverName,
+    loopId,
     publicBaseUrl: publicBaseUrl(c),
   })
   if (!r.ok) return c.json({ error: r.error }, 400)

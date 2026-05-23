@@ -233,16 +233,45 @@ export async function startMcpAuth(opts: {
   user: string
   vault: string
   serverName: string
+  /** Loop the auth request originates from — determines which sandbox to
+   *  look up. Empty string falls back to "default" (e.g. Settings page). */
+  loopId?: string
   publicBaseUrl: string
 }): Promise<StartResult> {
-  const { user, vault, serverName, publicBaseUrl } = opts
+  const { user, vault, serverName, loopId, publicBaseUrl } = opts
 
-  // MCP servers now live per-sandbox (in .claude/.claude.json). Pre-sandbox-
-  // routing UI, default to "default" sandbox — TODO: thread sandbox name
-  // from the OAuth flow caller once MCP page learns about sandboxes.
-  const sandbox = await loadSandboxClaudeJson("default")
-  const srv: McpServerConfig | undefined = sandbox.mcpServers?.[serverName]
-  if (!srv) return { ok: false, error: `server "${serverName}" not configured in default sandbox` }
+  // Resolve sandbox from loop, fall back to "default" if no loopId.
+  let sandboxName = "default"
+  if (loopId) {
+    const { getLoop } = await import("./loops")
+    const loop = await getLoop(loopId)
+    if (loop?.config?.sandbox) sandboxName = loop.config.sandbox
+  }
+
+  // Search order matches resolveLoopPlugins semantics: sandbox-tier first,
+  // then plugin-tier from each plugin's .mcp.json. First hit wins.
+  let srv: McpServerConfig | undefined
+  const sandbox = await loadSandboxClaudeJson(sandboxName)
+  srv = sandbox.mcpServers?.[serverName]
+  if (!srv) {
+    const { resolveLoopPlugins } = await import("./plugin-installer")
+    const { existsSync } = await import("node:fs")
+    const { readFile: rf } = await import("node:fs/promises")
+    const { join: pjoin } = await import("node:path")
+    for (const p of await resolveLoopPlugins(sandboxName)) {
+      const mcpPath = pjoin(p.path, ".mcp.json")
+      if (!existsSync(mcpPath)) continue
+      try {
+        const j = JSON.parse(await rf(mcpPath, "utf8"))
+        const candidate = (j?.mcpServers ?? {})[serverName] as McpServerConfig | undefined
+        if (candidate) {
+          srv = candidate
+          break
+        }
+      } catch {}
+    }
+  }
+  if (!srv) return { ok: false, error: `server "${serverName}" not found in sandbox "${sandboxName}" or any plugin` }
   if (srv.type !== "http" && srv.type !== "sse") {
     return { ok: false, error: `server "${serverName}" is type "${srv.type}"; only http/sse support OAuth` }
   }

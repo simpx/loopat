@@ -1521,11 +1521,12 @@ export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStat
 export async function startMcpAuth(
   serverName: string,
   vault: string = "default",
+  loopId?: string,
 ): Promise<{ authorizationUrl?: string; error?: string }> {
   const r = await apiFetch("/api/mcp-auth/start", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ serverName, vault }),
+    body: JSON.stringify({ serverName, vault, ...(loopId ? { loopId } : {}) }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { error: j.error ?? "start failed" }
