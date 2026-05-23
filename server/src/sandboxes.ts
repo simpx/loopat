@@ -123,6 +123,130 @@ export function isValidSandboxName(name: string): boolean {
   return NAME_RE.test(name)
 }
 
+/** Plugin info surfaced to the UI — derived from a sandbox's installed_plugins.json. */
+export type SandboxInstalledPlugin = {
+  /** Full `name@marketplace` key (as stored in installed_plugins.json). */
+  key: string
+  /** Plugin name only (before "@"). */
+  name: string
+  /** Marketplace name (after "@"). */
+  marketplace: string
+  version: string
+  gitCommitSha: string
+  installPath: string
+  /** True when installPath dir is present on disk. */
+  cachePresent: boolean
+}
+
+export type SandboxMarketplaceCatalogEntry = {
+  name: string
+  description?: string
+  /** True when this plugin is in installed_plugins.json for the sandbox. */
+  installed: boolean
+}
+
+export type SandboxMarketplace = {
+  name: string
+  source: any /* {source:"git"|"github"|"local"|...; url?:string; repo?:string; path?:string} */
+  installLocation?: string
+  lastUpdated?: string
+  /** Plugin entries from the marketplace's marketplace.json (if local copy
+   *  is present after `claude plugin marketplace add`). Empty when CC
+   *  hasn't cloned the marketplace yet. */
+  catalogPlugins: SandboxMarketplaceCatalogEntry[]
+}
+
+export type SandboxPluginInventory = {
+  plugins: SandboxInstalledPlugin[]
+  marketplaces: SandboxMarketplace[]
+}
+
+/**
+ * Run a `claude plugin ...` subcommand against a sandbox's .claude/. Output
+ * (combined stdout + stderr) is returned for the UI to surface; non-zero
+ * exit becomes ok:false.
+ *
+ * Used by the admin UI to install / uninstall / update plugins and add
+ * marketplaces without SSH.
+ */
+export async function runSandboxClaudeCommand(
+  name: string,
+  args: string[],
+  opts: { timeoutMs?: number } = {},
+): Promise<{ ok: boolean; output: string; error?: string }> {
+  if (!isValidSandboxName(name)) return { ok: false, output: "", error: "invalid sandbox name" }
+  const { resolveClaudeBinary } = await import("./claude-binary")
+  const claudeBin = resolveClaudeBinary()
+  const claudeConfigDir = `${workspaceLoopatSandboxDir(name)}/.claude`
+  await mkdir(claudeConfigDir, { recursive: true })
+  try {
+    const { stdout, stderr } = await execFileP(claudeBin, args, {
+      env: { ...process.env, CLAUDE_CONFIG_DIR: claudeConfigDir },
+      timeout: opts.timeoutMs ?? 120_000,
+    })
+    return { ok: true, output: (stdout || "") + (stderr || "") }
+  } catch (e: any) {
+    return {
+      ok: false,
+      output: ((e?.stdout as string) || "") + ((e?.stderr as string) || ""),
+      error: e?.message ?? String(e),
+    }
+  }
+}
+
+/** Read the plugin inventory CC wrote into a sandbox's .claude/ dir,
+ *  enriched with each marketplace's catalog so the UI can offer "install"
+ *  buttons for plugins the admin hasn't installed yet. */
+export async function readSandboxPluginInventory(name: string): Promise<SandboxPluginInventory> {
+  if (!isValidSandboxName(name)) return { plugins: [], marketplaces: [] }
+  const claudeDir = `${workspaceLoopatSandboxDir(name)}/.claude`
+  const readJson = async (p: string): Promise<any | null> => {
+    if (!existsSync(p)) return null
+    try { return JSON.parse(await readFile(p, "utf8")) } catch { return null }
+  }
+  const ip = await readJson(`${claudeDir}/plugins/installed_plugins.json`)
+  const km = await readJson(`${claudeDir}/plugins/known_marketplaces.json`) ?? {}
+  const installedKeys = new Set(Object.keys((ip?.plugins ?? {}) as Record<string, any>))
+  const plugins: SandboxInstalledPlugin[] = []
+  for (const [key, entries] of Object.entries((ip?.plugins ?? {}) as Record<string, any[]>)) {
+    const e = entries?.[0]
+    if (!e) continue
+    const at = key.lastIndexOf("@")
+    plugins.push({
+      key,
+      name: at < 0 ? key : key.slice(0, at),
+      marketplace: at < 0 ? "" : key.slice(at + 1),
+      version: e.version ?? "",
+      gitCommitSha: e.gitCommitSha ?? "",
+      installPath: e.installPath ?? "",
+      cachePresent: e.installPath ? existsSync(e.installPath) : false,
+    })
+  }
+  const marketplaces: SandboxMarketplace[] = []
+  for (const [mName, v] of Object.entries(km as Record<string, any>)) {
+    const catalog = v.installLocation
+      ? await readJson(`${v.installLocation}/.claude-plugin/marketplace.json`)
+      : null
+    const catalogPlugins: SandboxMarketplaceCatalogEntry[] = []
+    for (const p of (catalog?.plugins ?? []) as any[]) {
+      if (!p?.name) continue
+      catalogPlugins.push({
+        name: p.name,
+        description: typeof p.description === "string" ? p.description : undefined,
+        installed: installedKeys.has(`${p.name}@${mName}`),
+      })
+    }
+    marketplaces.push({
+      name: mName,
+      source: v.source,
+      installLocation: v.installLocation,
+      lastUpdated: v.lastUpdated,
+      catalogPlugins,
+    })
+  }
+  return { plugins, marketplaces }
+}
+
 /** List all sandboxes (subdirs containing a mise.toml). */
 export async function listSandboxes(): Promise<SandboxEntry[]> {
   const root = workspaceLoopatSandboxesDir()
@@ -166,8 +290,8 @@ export function resolveSandboxFile(name: string): string | null {
  * so a malicious `?file=../../../etc/passwd` can't escape — only these
  * basenames resolve to a path inside the sandbox dir.
  */
-export type SandboxFile = "mise.toml" | "sandbox.json"
-const SANDBOX_FILES: readonly SandboxFile[] = ["mise.toml", "sandbox.json"]
+export type SandboxFile = "mise.toml" | "sandbox.json" | "CLAUDE.md"
+const SANDBOX_FILES: readonly SandboxFile[] = ["mise.toml", "sandbox.json", "CLAUDE.md"]
 export function isValidSandboxFile(file: string): file is SandboxFile {
   return (SANDBOX_FILES as readonly string[]).includes(file)
 }

@@ -528,7 +528,7 @@ export async function listSandboxes(): Promise<SandboxEntry[]> {
 }
 
 /** Files inside a sandbox dir that the editor can address. Mirrors server SandboxFile. */
-export type SandboxFile = "mise.toml" | "sandbox.json"
+export type SandboxFile = "mise.toml" | "sandbox.json" | "CLAUDE.md"
 
 export async function readSandbox(name: string, file: SandboxFile = "mise.toml"): Promise<string | null> {
   const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`)
@@ -607,6 +607,67 @@ export async function writeSandbox(name: string, content: string, file: SandboxF
     commitSha: j.commitSha,
     commitError: j.commitError,
   }
+}
+
+export type SandboxInstalledPlugin = {
+  key: string
+  name: string
+  marketplace: string
+  version: string
+  gitCommitSha: string
+  installPath: string
+  cachePresent: boolean
+}
+export type SandboxMarketplaceCatalogEntry = {
+  name: string
+  description?: string
+  installed: boolean
+}
+export type SandboxMarketplace = {
+  name: string
+  source: any
+  installLocation?: string
+  lastUpdated?: string
+  catalogPlugins: SandboxMarketplaceCatalogEntry[]
+}
+export type SandboxPluginInventory = {
+  plugins: SandboxInstalledPlugin[]
+  marketplaces: SandboxMarketplace[]
+}
+export async function listSandboxPlugins(name: string): Promise<SandboxPluginInventory> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins`)
+  if (!r.ok) return { plugins: [], marketplaces: [] }
+  return (await r.json()) as SandboxPluginInventory
+}
+
+export type ClaudeCmdResult = { ok: boolean; output: string; error?: string }
+export async function installSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ plugin }),
+  })
+  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
+}
+export async function uninstallSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins/${encodeURIComponent(plugin)}`, {
+    method: "DELETE",
+  })
+  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
+}
+export async function updateSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins/${encodeURIComponent(plugin)}/update`, {
+    method: "POST",
+  })
+  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
+}
+export async function addSandboxMarketplace(name: string, source: string): Promise<ClaudeCmdResult> {
+  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/marketplaces`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source }),
+  })
+  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
 }
 
 export type RepoDetail = RepoEntry & {

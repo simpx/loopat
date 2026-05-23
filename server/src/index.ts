@@ -1924,6 +1924,68 @@ app.put("/api/sandboxes/:name", requireAuth, async (c) => {
   })
 })
 
+// Read-only plugin inventory for a sandbox — surfaces installed_plugins.json
+// + known_marketplaces.json (CC writes both when admin runs `claude plugin
+// install / marketplace add` against the sandbox's .claude/).
+app.get("/api/sandboxes/:name/plugins", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  const { readSandboxPluginInventory } = await import("./sandboxes")
+  const inv = await readSandboxPluginInventory(name)
+  return c.json(inv)
+})
+
+// Mutation endpoints — each shells out to `claude plugin <verb>` against
+// the sandbox's .claude/ so CC owns the install machinery (cache, lock,
+// SHA pinning). Output captured for the UI to display.
+
+// Install: body {plugin: "foo@bar"}.
+app.post("/api/sandboxes/:name/plugins", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  const body = await c.req.json().catch(() => ({}))
+  const plugin = String(body.plugin ?? "").trim()
+  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
+  const { runSandboxClaudeCommand } = await import("./sandboxes")
+  const r = await runSandboxClaudeCommand(name, ["plugin", "install", plugin])
+  return c.json(r)
+})
+
+// Uninstall: DELETE /api/sandboxes/:name/plugins/:plugin (URL-encoded "foo@bar").
+app.delete("/api/sandboxes/:name/plugins/:plugin", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  const plugin = decodeURIComponent(c.req.param("plugin") ?? "")
+  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
+  const { runSandboxClaudeCommand } = await import("./sandboxes")
+  const r = await runSandboxClaudeCommand(name, ["plugin", "uninstall", plugin])
+  return c.json(r)
+})
+
+// Update: POST /api/sandboxes/:name/plugins/:plugin/update (re-resolve to current marketplace HEAD).
+app.post("/api/sandboxes/:name/plugins/:plugin/update", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  const plugin = decodeURIComponent(c.req.param("plugin") ?? "")
+  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
+  const { runSandboxClaudeCommand } = await import("./sandboxes")
+  const r = await runSandboxClaudeCommand(name, ["plugin", "update", plugin])
+  return c.json(r)
+})
+
+// Marketplace add: body {source: "<github-shortcut|git-url|local-path>"}.
+app.post("/api/sandboxes/:name/marketplaces", requireAuth, async (c) => {
+  const name = c.req.param("name") ?? ""
+  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
+  const body = await c.req.json().catch(() => ({}))
+  const source = String(body.source ?? "").trim()
+  // Accept org/repo, ssh/https git URLs, file paths. No shell metachars.
+  if (!source || /[\s;&|`$<>"']/.test(source)) return c.json({ error: "invalid source" }, 400)
+  const { runSandboxClaudeCommand } = await import("./sandboxes")
+  const r = await runSandboxClaudeCommand(name, ["plugin", "marketplace", "add", source])
+  return c.json(r)
+})
+
 // Remove a sandbox from the catalog. Per-loop snapshots already copied stay
 // intact (they're standalone), so deleting "default" doesn't break loops
 // that already use it — they keep running off their own sandbox/ dir.

@@ -23,6 +23,11 @@ import {
   pullRepo,
   addRepo,
   listSandboxes,
+  listSandboxPlugins,
+  installSandboxPlugin,
+  uninstallSandboxPlugin,
+  updateSandboxPlugin,
+  addSandboxMarketplace,
   readSandbox,
   writeSandbox,
   deleteSandbox,
@@ -36,6 +41,7 @@ import {
   type Backlink,
   type SandboxEntry,
   type SandboxFile,
+  type SandboxPluginInventory,
   type SyncResource,
   type RepoSyncStatus,
 } from "../api"
@@ -1397,7 +1403,11 @@ function RepoView({ repo, onSpawnLoop, onPulled }: { repo: RepoDetail; onSpawnLo
 
 const SANDBOX_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
 
-const SANDBOX_FILES: SandboxFile[] = ["mise.toml", "sandbox.json"]
+const SANDBOX_FILES: SandboxFile[] = ["mise.toml", "sandbox.json", "CLAUDE.md"]
+
+/** Tabs in the SandboxesPane editor — file tabs + a structured plugins view. */
+type SandboxTab = SandboxFile | "Plugins"
+const SANDBOX_TABS: SandboxTab[] = [...SANDBOX_FILES, "Plugins"]
 
 // Seeded into new sandboxes. Picks a small useful set so terminals work out of
 // the box; users can edit / delete any line they don't want.
@@ -1418,14 +1428,231 @@ const NEW_SANDBOX_META_JSON = `{
 }
 `
 
+/**
+ * Read-only view of a sandbox's installed plugins (from CC's installed_plugins.json
+ * + known_marketplaces.json — admin writes these via `claude plugin install /
+ * marketplace add` in the sandbox dir). Surfaces version + git SHA per plugin
+ * so admin can verify what's deployed without SSH.
+ */
+function PluginsView({ sandbox }: { sandbox: string }) {
+  const [inv, setInv] = useState<SandboxPluginInventory | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [log, setLog] = useState<string | null>(null)
+  const [newMarketplace, setNewMarketplace] = useState("")
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const i = await listSandboxPlugins(sandbox)
+    setInv(i)
+    setLoading(false)
+  }, [sandbox])
+  useEffect(() => { refresh() }, [refresh])
+
+  const run = async (label: string, fn: () => Promise<{ ok: boolean; output: string; error?: string }>) => {
+    setBusy(label)
+    setLog(null)
+    const r = await fn()
+    setLog((r.output || r.error || "(no output)").trim())
+    setBusy(null)
+    refresh()
+  }
+
+  if (loading && !inv) return <div className="p-3 text-[13px] text-gray-400 italic">loading…</div>
+  if (!inv) return null
+
+  /** Lookup installed plugin record by `name@market` key. */
+  const installedByKey = new Map(inv.plugins.map((p) => [p.key, p]))
+
+  return (
+    <div className="h-full overflow-y-auto p-3 space-y-5">
+      {/* Per-marketplace browse + install. */}
+      {inv.marketplaces.map((m) => {
+        const isOpen = expanded[m.name] !== false // default expanded
+        const installedCount = m.catalogPlugins.filter((p) => p.installed).length
+        const totalCount = m.catalogPlugins.length
+        return (
+          <section key={m.name}>
+            <header className="flex items-baseline gap-2 mb-1.5">
+              <button
+                type="button"
+                onClick={() => setExpanded((prev) => ({ ...prev, [m.name]: !isOpen }))}
+                className="text-[11px] text-gray-400 hover:text-gray-700 w-3 text-center"
+                title={isOpen ? "collapse" : "expand"}
+              >
+                {isOpen ? "▾" : "▸"}
+              </button>
+              <h3 className="text-[12px] font-medium text-gray-800">{m.name}</h3>
+              <span className="text-[11px] text-gray-400">
+                {m.source?.source === "github" && `github:${m.source.repo}`}
+                {m.source?.source === "git" && `git:${m.source.url}`}
+                {m.source?.source === "local" && `local:${m.source.path}`}
+              </span>
+              <span className="text-[11px] text-gray-400 ml-auto">
+                {installedCount} / {totalCount} installed
+              </span>
+            </header>
+            {isOpen && (
+              totalCount === 0 ? (
+                <div className="text-[12px] text-gray-400 italic pl-5">
+                  marketplace catalog empty or not yet cloned.
+                </div>
+              ) : (
+                <table className="w-full text-[12px]">
+                  <tbody>
+                    {m.catalogPlugins.map((p) => {
+                      const key = `${p.name}@${m.name}`
+                      const installed = installedByKey.get(key)
+                      return (
+                        <tr key={p.name} className="border-t border-gray-100 align-top">
+                          <td className="py-1.5 pl-5 pr-2 w-1/3">
+                            <div className="font-mono text-gray-900">{p.name}</div>
+                            {installed && (
+                              <div className="text-[10px] text-gray-400 font-mono">
+                                v{installed.version}
+                                {installed.gitCommitSha && ` · ${installed.gitCommitSha.slice(0, 12)}`}
+                                {!installed.cachePresent && <span className="text-amber-600 ml-1" title="cache missing">⚠</span>}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-1.5 pr-2 text-[11px] text-gray-500">
+                            <div className="line-clamp-2">{p.description ?? ""}</div>
+                          </td>
+                          <td className="py-1.5 pr-2 text-right whitespace-nowrap">
+                            {installed ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={!!busy}
+                                  onClick={() => run(`update ${key}`, () => updateSandboxPlugin(sandbox, key))}
+                                  className="px-1.5 py-0.5 text-[11px] rounded text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                                >
+                                  update
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!!busy}
+                                  onClick={() => {
+                                    if (!window.confirm(`Uninstall ${key}?`)) return
+                                    run(`uninstall ${key}`, () => uninstallSandboxPlugin(sandbox, key))
+                                  }}
+                                  className="px-1.5 py-0.5 text-[11px] rounded text-red-600 hover:bg-red-50 disabled:opacity-40 ml-1"
+                                >
+                                  uninstall
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={!!busy}
+                                onClick={() => run(`install ${key}`, () => installSandboxPlugin(sandbox, key))}
+                                className="px-2 py-0.5 text-[11px] rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+                              >
+                                install
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              )
+            )}
+          </section>
+        )
+      })}
+
+      {/* Add marketplace */}
+      <section>
+        <h3 className="text-[11px] uppercase tracking-wide text-gray-500 font-medium mb-1.5">
+          Add marketplace
+        </h3>
+        <form
+          className="flex gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!newMarketplace.trim()) return
+            run("add marketplace", () => addSandboxMarketplace(sandbox, newMarketplace.trim())).then(() =>
+              setNewMarketplace(""),
+            )
+          }}
+        >
+          <input
+            type="text"
+            value={newMarketplace}
+            onChange={(e) => setNewMarketplace(e.target.value)}
+            placeholder="org/repo  ·  git@host:path  ·  /local/path"
+            className="flex-1 px-2 py-1 text-[12px] border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
+            disabled={!!busy}
+          />
+          <button
+            type="submit"
+            disabled={!newMarketplace.trim() || !!busy}
+            className="px-2.5 py-1 text-[11px] rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40"
+          >
+            add
+          </button>
+        </form>
+      </section>
+
+      {/* Orphaned installed plugins — installed but not in any current marketplace catalog. */}
+      {(() => {
+        const catalogKeys = new Set(
+          inv.marketplaces.flatMap((m) => m.catalogPlugins.map((p) => `${p.name}@${m.name}`)),
+        )
+        const orphans = inv.plugins.filter((p) => !catalogKeys.has(p.key))
+        if (orphans.length === 0) return null
+        return (
+          <section>
+            <h3 className="text-[11px] uppercase tracking-wide text-gray-500 font-medium mb-1.5">
+              Installed but not in any marketplace catalog ({orphans.length})
+            </h3>
+            <ul className="space-y-0.5 pl-5">
+              {orphans.map((p) => (
+                <li key={p.key} className="text-[12px] flex items-baseline gap-2">
+                  <span className="font-mono text-gray-900">{p.key}</span>
+                  <span className="text-[11px] text-gray-500">v{p.version}</span>
+                  <button
+                    type="button"
+                    disabled={!!busy}
+                    onClick={() => {
+                      if (!window.confirm(`Uninstall ${p.key}?`)) return
+                      run(`uninstall ${p.key}`, () => uninstallSandboxPlugin(sandbox, p.key))
+                    }}
+                    className="ml-2 px-1.5 py-0.5 text-[11px] rounded text-red-600 hover:bg-red-50 disabled:opacity-40"
+                  >
+                    uninstall
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })()}
+
+      {busy && <div className="text-[12px] text-amber-700">running: {busy}…</div>}
+      {log && (
+        <pre className="text-[11px] font-mono bg-gray-50 border border-gray-200 rounded p-2 max-h-48 overflow-y-auto whitespace-pre-wrap">
+          {log}
+        </pre>
+      )}
+    </div>
+  )
+}
+
 function SandboxesPane() {
   const [sandboxes, setSandboxes] = useState<SandboxEntry[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   // Per-file state — switching tabs doesn't lose unsaved edits in the other.
   // null = file doesn't exist yet (e.g. sandbox created before sandbox.json was a thing)
-  const [contents, setContents] = useState<Record<SandboxFile, string>>({ "mise.toml": "", "sandbox.json": "" })
-  const [originals, setOriginals] = useState<Record<SandboxFile, string | null>>({ "mise.toml": null, "sandbox.json": null })
-  const [activeFile, setActiveFile] = useState<SandboxFile>("mise.toml")
+  const [contents, setContents] = useState<Record<SandboxFile, string>>({ "mise.toml": "", "sandbox.json": "", "CLAUDE.md": "" })
+  const [originals, setOriginals] = useState<Record<SandboxFile, string | null>>({ "mise.toml": null, "sandbox.json": null, "CLAUDE.md": null })
+  const [activeTab, setActiveTab] = useState<SandboxTab>("mise.toml")
+  // Narrowing helper — activeTab is a file vs the plugins view.
+  const activeFile = (SANDBOX_FILES.includes(activeTab as SandboxFile) ? activeTab : "mise.toml") as SandboxFile
+  const isPluginsTab = activeTab === "Plugins"
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -1449,18 +1676,18 @@ function SandboxesPane() {
 
   useEffect(() => {
     if (!selected) {
-      setContents({ "mise.toml": "", "sandbox.json": "" })
-      setOriginals({ "mise.toml": null, "sandbox.json": null })
+      setContents({ "mise.toml": "", "sandbox.json": "", "CLAUDE.md": "" })
+      setOriginals({ "mise.toml": null, "sandbox.json": null, "CLAUDE.md": null })
       return
     }
     setLoading(true)
     setErr(null)
-    setActiveFile("mise.toml")
+    setActiveTab("mise.toml")
     // Load both files in parallel; null original means "file doesn't exist
     // on disk yet" — first save will create it.
     Promise.all(SANDBOX_FILES.map((f) => readSandbox(selected, f))).then((vals) => {
-      const newContents: Record<SandboxFile, string> = { "mise.toml": "", "sandbox.json": "" }
-      const newOriginals: Record<SandboxFile, string | null> = { "mise.toml": null, "sandbox.json": null }
+      const newContents: Record<SandboxFile, string> = { "mise.toml": "", "sandbox.json": "", "CLAUDE.md": "" }
+      const newOriginals: Record<SandboxFile, string | null> = { "mise.toml": null, "sandbox.json": null, "CLAUDE.md": null }
       SANDBOX_FILES.forEach((f, i) => {
         const text = vals[i] ?? ""
         newContents[f] = text
@@ -1636,14 +1863,15 @@ function SandboxesPane() {
           <>
             <header className="h-9 shrink-0 border-b border-gray-200 px-3 flex items-center gap-1">
               <span className="text-[11px] text-gray-400 mr-2 font-mono">{selected}/</span>
-              {SANDBOX_FILES.map((f) => {
-                const isActive = activeFile === f
-                const dirty = isDirty(f)
+              {SANDBOX_TABS.map((tab) => {
+                const isActive = activeTab === tab
+                const isFile = SANDBOX_FILES.includes(tab as SandboxFile)
+                const dirty = isFile && isDirty(tab as SandboxFile)
                 return (
                   <button
-                    key={f}
+                    key={tab}
                     type="button"
-                    onClick={() => setActiveFile(f)}
+                    onClick={() => setActiveTab(tab)}
                     className={
                       "h-7 px-2.5 text-[12px] rounded flex items-center gap-1 " +
                       (isActive
@@ -1651,29 +1879,28 @@ function SandboxesPane() {
                         : "text-gray-500 hover:bg-gray-50 hover:text-gray-900")
                     }
                   >
-                    <span>{f}</span>
+                    <span>{tab}</span>
                     {dirty && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="unsaved" />}
                   </button>
                 )
               })}
               <div className="flex-1" />
               {err && <span className="text-[11px] text-red-600">{err}</span>}
-              <button
+              {!isPluginsTab && <button
                 type="button"
                 onClick={onSave}
                 disabled={!activeDirty || saving || loading}
                 className="px-2.5 h-7 rounded text-xs bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {saving ? "saving…" : activeDirty ? "save" : "saved"}
-              </button>
+              </button>}
             </header>
             <div className="flex-1 min-h-0">
-              {loading ? (
+              {isPluginsTab ? (
+                <PluginsView sandbox={selected} />
+              ) : loading ? (
                 <div className="p-3 text-[13px] text-gray-400 italic">loading…</div>
               ) : (
-                // path drives language detection (.toml / .json). key includes
-                // both sandbox + file so CodeMirror remounts when switching either,
-                // keeping per-file undo history clean.
                 <Suspense fallback={<div className="p-3 text-[13px] text-gray-400 italic">loading editor…</div>}>
                   <CodeEditor
                     key={`${selected}/${activeFile}`}
