@@ -248,6 +248,33 @@ describe("resolveLoopPlugins", () => {
     const plugins = await resolveLoopPlugins("empty-p")
     expect(plugins.map((p) => p.name)).toEqual(["loopat@builtin"])
   })
+
+  test("marketplace source path preferred over cache (handles symlinks)", async () => {
+    // Simulate the dashscope-skills situation: cache is incomplete (CC
+    // didn't follow a symlink during install) but marketplace source has
+    // the full plugin. Resolver should pick the source path.
+    const sb = "src-pref"
+    await makeSandbox(sb, { plugins: { "foo@m1": "1.0.0" } })
+    const claudeDir = join(workspaceLoopatSandboxDir(sb), ".claude")
+    // Build a fake local marketplace with plugin source containing skills/
+    const mpRoot = join(claudeDir, "plugins", "marketplaces", "m1")
+    await mkdir(join(mpRoot, ".claude-plugin"), { recursive: true })
+    await writeFile(
+      join(mpRoot, ".claude-plugin", "marketplace.json"),
+      JSON.stringify({ name: "m1", plugins: [{ name: "foo", source: "./plugins/foo" }] }),
+    )
+    const sourcePluginDir = join(mpRoot, "plugins", "foo")
+    await mkdir(join(sourcePluginDir, "skills", "foo"), { recursive: true })
+    await writeFile(join(sourcePluginDir, "skills", "foo", "SKILL.md"), "---\ndescription: x\n---\n")
+    // Point known_marketplaces.json at our fake marketplace
+    await writeFile(
+      join(claudeDir, "plugins", "known_marketplaces.json"),
+      JSON.stringify({ m1: { installLocation: mpRoot } }),
+    )
+    const plugins = await resolveLoopPlugins(sb)
+    const foo = plugins.find((p) => p.name === "foo@m1")!
+    expect(foo.path).toBe(sourcePluginDir) // source, not the empty cache dir
+  })
 })
 
 // ── loadSandboxClaudeJson (mcpServers + extraKnownMarketplaces merge) ──────

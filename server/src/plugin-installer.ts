@@ -51,26 +51,75 @@ type InstalledPluginsFile = {
   plugins: Record<string, Array<{ installPath: string; version: string }>>
 }
 
-/** Read ONE sandbox's installed_plugins.json (no chain walking). */
-async function readSandboxOwnPlugins(sandboxName: string): Promise<ResolvedLoopPlugin[]> {
-  const path = join(workspaceLoopatSandboxDir(sandboxName), ".claude", "plugins", "installed_plugins.json")
-  if (!existsSync(path)) return []
-  let data: InstalledPluginsFile
+type KnownMarketplacesFile = Record<string, { installLocation?: string }>
+
+type MarketplaceCatalog = {
+  plugins?: Array<{ name: string; source: string | { source: string; [k: string]: any } }>
+}
+
+async function readJsonOpt<T>(path: string): Promise<T | null> {
+  if (!existsSync(path)) return null
   try {
-    data = JSON.parse(await readFile(path, "utf8"))
-  } catch (e: any) {
-    console.warn(`[plugins] sandbox "${sandboxName}" installed_plugins.json unreadable: ${e?.message ?? e}`)
-    return []
+    return JSON.parse(await readFile(path, "utf8")) as T
+  } catch {
+    return null
   }
+}
+
+/**
+ * Resolve the marketplace source path for a plugin, if the marketplace is
+ * locally cloned AND the plugin uses a relative "./..." source. This is the
+ * path that handles symlinks correctly — `claude plugin install` doesn't
+ * follow symlinks when copying to its cache, so for plugins with symlinked
+ * subdirs (common in dashscope-skills) the cache is incomplete.
+ *
+ * Returns null when the marketplace isn't local, the catalog can't be read,
+ * the plugin's source isn't a relative path, or the resolved dir is missing.
+ * Callers fall back to the installed cache path in those cases.
+ */
+async function resolveMarketplaceSourcePath(
+  km: KnownMarketplacesFile | null,
+  marketName: string,
+  pluginName: string,
+): Promise<string | null> {
+  const market = km?.[marketName]
+  if (!market?.installLocation) return null
+  const catalog = await readJsonOpt<MarketplaceCatalog>(
+    join(market.installLocation, ".claude-plugin", "marketplace.json"),
+  )
+  const entry = catalog?.plugins?.find((p) => p.name === pluginName)
+  if (!entry) return null
+  const src = entry.source
+  if (typeof src !== "string" || !src.startsWith("./")) return null
+  const path = join(market.installLocation, src)
+  return existsSync(path) ? path : null
+}
+
+/** Read ONE sandbox's installed_plugins.json + map each to a usable path. */
+async function readSandboxOwnPlugins(sandboxName: string): Promise<ResolvedLoopPlugin[]> {
+  const claudeDir = join(workspaceLoopatSandboxDir(sandboxName), ".claude")
+  const ip = await readJsonOpt<InstalledPluginsFile>(join(claudeDir, "plugins", "installed_plugins.json"))
+  if (!ip) return []
+  const km = await readJsonOpt<KnownMarketplacesFile>(join(claudeDir, "plugins", "known_marketplaces.json"))
   const out: ResolvedLoopPlugin[] = []
-  for (const [key, entries] of Object.entries(data.plugins ?? {})) {
+  for (const [key, entries] of Object.entries(ip.plugins ?? {})) {
     const entry = entries?.[0]
-    if (!entry?.installPath) continue
-    if (!existsSync(entry.installPath)) {
-      console.warn(`[plugins] sandbox "${sandboxName}" plugin "${key}": installPath missing (${entry.installPath})`)
+    if (!entry) continue
+    const atIdx = key.lastIndexOf("@")
+    const pluginName = atIdx < 0 ? key : key.slice(0, atIdx)
+    const marketName = atIdx < 0 ? "" : key.slice(atIdx + 1)
+    // Prefer marketplace source path (handles symlinks). Cache is a fallback
+    // for non-local marketplaces (git-subdir / url / npm sources).
+    const sourcePath = marketName ? await resolveMarketplaceSourcePath(km, marketName, pluginName) : null
+    if (sourcePath) {
+      out.push({ name: key, path: sourcePath })
       continue
     }
-    out.push({ name: key, path: entry.installPath })
+    if (entry.installPath && existsSync(entry.installPath)) {
+      out.push({ name: key, path: entry.installPath })
+      continue
+    }
+    console.warn(`[plugins] sandbox "${sandboxName}" plugin "${key}": no resolvable path (cache + marketplace both missing)`)
   }
   return out
 }
