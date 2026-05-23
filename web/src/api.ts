@@ -1550,6 +1550,10 @@ export type McpServerEntry = {
   shadowsWorkspace?: boolean
   /** Plugin-tier only: which plugin contributes this server (e.g. "privacy-legal@claude-for-legal"). */
   pluginSource?: string
+  /** OAuth capability probe result. dcr=loopat can auto-auth; manual=admin
+   *  must register an app (loopat can't); none=no OAuth (CC handles directly);
+   *  unreachable=probe failed. */
+  oauthSupport?: "dcr" | "manual" | "none" | "unreachable"
 }
 
 export type McpServerTier = {
@@ -1561,6 +1565,14 @@ export type McpServerTier = {
 }
 
 export type McpServerInventory = { tiers: McpServerTier[] }
+
+export async function reprobeMcpServers(url?: string): Promise<void> {
+  await apiFetch("/api/mcp-servers/reprobe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(url ? { url } : {}),
+  })
+}
 
 export async function listMcpServers(loopId?: string): Promise<McpServerInventory> {
   const q = loopId ? `?loopId=${encodeURIComponent(loopId)}` : ""

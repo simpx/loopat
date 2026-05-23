@@ -181,6 +181,70 @@ async function discoverAuthServer(authServerUrl: string): Promise<AuthServerMeta
   return json as AuthServerMetadata
 }
 
+// ── OAuth capability probe ─────────────────────────────────────────────
+//
+// Tells the UI in advance whether loopat can OAuth into a given MCP server,
+// so a "needs auth" button isn't shown for servers it can't actually handle
+// (Slack / Google Drive / other consumer providers that don't expose DCR).
+
+export type OAuthSupport =
+  /** Auth server exposes registration_endpoint — loopat can DCR + auto-auth. */
+  | "dcr"
+  /** OAuth flow exists but DCR isn't available — admin would need to manually
+   *  register an app with the provider; loopat doesn't (yet) accept static
+   *  client_id input, so this is effectively unsupported. */
+  | "manual"
+  /** Server doesn't advertise OAuth (no .well-known/oauth-protected-resource).
+   *  Either public, API-key-based, or some other auth scheme — loopat has
+   *  nothing to do; CC connects directly. */
+  | "none"
+  /** Probe failed — server unreachable, malformed metadata, etc. */
+  | "unreachable"
+
+type ProbeResult = { support: OAuthSupport; probedAt: number }
+
+// In-memory cache. Keyed by server URL. TTL differs by result class so a
+// transient "unreachable" doesn't get stuck for a day.
+const probeCache = new Map<string, ProbeResult>()
+const TTL_OK_MS = 24 * 60 * 60 * 1000
+const TTL_NEG_MS = 5 * 60 * 1000
+
+export async function probeOAuthSupport(serverUrl: string, opts: { force?: boolean } = {}): Promise<OAuthSupport> {
+  const cached = probeCache.get(serverUrl)
+  if (!opts.force && cached) {
+    const ttl = cached.support === "dcr" || cached.support === "manual" ? TTL_OK_MS : TTL_NEG_MS
+    if (Date.now() - cached.probedAt < ttl) return cached.support
+  }
+  const support = await runProbe(serverUrl)
+  probeCache.set(serverUrl, { support, probedAt: Date.now() })
+  return support
+}
+
+async function runProbe(serverUrl: string): Promise<OAuthSupport> {
+  let prm
+  try {
+    prm = await discoverProtectedResource(serverUrl)
+  } catch {
+    return "unreachable"
+  }
+  if (!prm) return "none"
+  const authServerUrl = prm.authorization_servers[0]
+  let asm
+  try {
+    asm = await discoverAuthServer(authServerUrl)
+  } catch {
+    return "unreachable"
+  }
+  if (!asm) return "unreachable"
+  return asm.registration_endpoint ? "dcr" : "manual"
+}
+
+/** Clear cached probe result(s). url omitted → clear everything. */
+export function evictOAuthProbe(url?: string): void {
+  if (url) probeCache.delete(url)
+  else probeCache.clear()
+}
+
 // ── RFC 7591 dynamic client registration ───────────────────────────────
 
 type DcrResponse = {

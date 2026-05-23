@@ -296,6 +296,21 @@ function ServerRows({
                 </span>
               ) : !isHttp ? (
                 <span className="text-[11px] text-gray-400">stdio</span>
+              ) : s.oauthSupport === "manual" ? (
+                <span
+                  className="text-[11px] text-gray-500 italic"
+                  title="This provider requires admin to register an OAuth app (no DCR). Loopat doesn't support manual client_id setup; use local Claude Code for these MCPs."
+                >
+                  external setup required
+                </span>
+              ) : s.oauthSupport === "none" ? (
+                <span className="text-[11px] text-gray-400" title="No OAuth metadata — server is public or uses non-OAuth auth (e.g. API key in plugin config).">
+                  no oauth
+                </span>
+              ) : s.oauthSupport === "unreachable" ? (
+                <span className="text-[11px] text-red-500" title="Probe failed — server unreachable or returned malformed metadata.">
+                  unreachable
+                </span>
               ) : (
                 <button
                   onClick={() => onConnect(s.name)}

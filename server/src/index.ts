@@ -7,7 +7,7 @@ import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
-import { startMcpAuth, completeMcpAuth } from "./mcp-oauth"
+import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, type OAuthSupport } from "./mcp-oauth"
 import {
   initChat,
   listChannels,
@@ -663,15 +663,28 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
     ...(srv?.url ? { url: srv.url as string } : {}),
   })
 
-  const workspaceTier = Object.entries(ws.mcpServers ?? {}).map(([name, srv]) => ({
-    name,
-    ...shape(srv),
-  }))
-  const personalTier = Object.entries(ps.mcpServers ?? {}).map(([name, srv]) => ({
-    name,
-    ...shape(srv),
-    shadowsWorkspace: !!ws.mcpServers?.[name],
-  }))
+  // Probe OAuth support for any HTTP/SSE server with a URL. In-memory cache
+  // makes second+ calls instant; first call pays ~1-2s for N servers in
+  // parallel. Errors degrade to "unreachable" — never throw.
+  async function withOAuthSupport<T extends { type: string; url?: string }>(s: T): Promise<T & { oauthSupport?: OAuthSupport }> {
+    if (!s.url || (s.type !== "http" && s.type !== "sse")) return s
+    try {
+      return { ...s, oauthSupport: await probeOAuthSupport(s.url) }
+    } catch {
+      return { ...s, oauthSupport: "unreachable" as OAuthSupport }
+    }
+  }
+
+  const workspaceTier = await Promise.all(
+    Object.entries(ws.mcpServers ?? {}).map(async ([name, srv]) =>
+      withOAuthSupport({ name, ...shape(srv) }),
+    ),
+  )
+  const personalTier = await Promise.all(
+    Object.entries(ps.mcpServers ?? {}).map(async ([name, srv]) =>
+      withOAuthSupport({ name, ...shape(srv), shadowsWorkspace: !!ws.mcpServers?.[name] }),
+    ),
+  )
 
   // Plugin tier: scan each resolved plugin's .mcp.json. CC auto-registers
   // these at runtime when the plugin loads; we surface them here so users
@@ -681,20 +694,21 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
   const { existsSync: esync } = await import("node:fs")
   const { join: pjoin } = await import("node:path")
   const resolved = await resolveLoopPlugins(sandboxName)
-  type PluginEntry = { name: string; type: string; url?: string; pluginSource: string }
-  const pluginTier: PluginEntry[] = []
+  type PluginEntry = { name: string; type: string; url?: string; pluginSource: string; oauthSupport?: OAuthSupport }
+  const pluginTierRaw: PluginEntry[] = []
   for (const p of resolved) {
     const mcpPath = pjoin(p.path, ".mcp.json")
     if (!esync(mcpPath)) continue
     try {
       const j = JSON.parse(await rf(mcpPath, "utf8"))
       for (const [srvName, srv] of Object.entries((j?.mcpServers ?? {}) as Record<string, any>)) {
-        pluginTier.push({ name: srvName, ...shape(srv), pluginSource: p.name })
+        pluginTierRaw.push({ name: srvName, ...shape(srv), pluginSource: p.name })
       }
     } catch (e: any) {
       console.warn(`[mcp] plugin ${p.name} .mcp.json unreadable: ${e?.message ?? e}`)
     }
   }
+  const pluginTier = await Promise.all(pluginTierRaw.map((e) => withOAuthSupport(e)))
 
   return c.json({
     tiers: [
@@ -740,6 +754,16 @@ app.get("/api/mcp-auth", requireAuth, async (c) => {
 // Server names from plugin .mcp.json can have spaces, dots etc. ("Google Drive",
 // "Solve Intelligence"). Allow common printable chars; reject path/shell metas.
 const SERVER_NAME_RE = /^[A-Za-z0-9 ._-]{1,64}$/
+// Force re-probe of OAuth support. POST with no body clears entire cache;
+// body {url: ...} evicts just that URL. Useful after admin fixes a server
+// URL or adds a previously-unreachable server.
+app.post("/api/mcp-servers/reprobe", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const url = typeof body.url === "string" ? body.url : undefined
+  evictOAuthProbe(url)
+  return c.json({ ok: true })
+})
+
 app.post("/api/mcp-auth/start", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
