@@ -10,7 +10,7 @@ import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, getLoopSandbox, refreshLoopSandbox, distillLoop, type ContextMount, type LoopSandboxInfo, type LoopMeta, markLoopViewed } from "../api"
+import { getContext, distillLoop, type ContextMount, type LoopMeta, markLoopViewed } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { useLoopStatus } from "../useLoopStatus"
@@ -287,8 +287,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const [openPanels, setOpenPanels] = useState<RightMode[]>([])
   const [pickedFile, setPickedFile] = useState<string | null>(null)
   const [mounts, setMounts] = useState<ContextMount[]>([])
-  const [sandboxInfo, setSandboxInfo] = useState<LoopSandboxInfo | null>(null)
-  const [refreshingSandbox, setRefreshingSandbox] = useState(false)
+  // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
+  // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
   const [chatSize, setChatSize] = useState(() => {
     const saved = localStorage.getItem("loopat:chatSize")
@@ -301,7 +301,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
 
   useEffect(() => {
     getContext(meta.id).then(setMounts)
-    getLoopSandbox(meta.id).then(setSandboxInfo)
     markLoopViewed(meta.id)
   }, [meta.id])
 
@@ -318,18 +317,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     navigate(location.pathname, { replace: true, state: null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kickoff, connected])
-
-  const onRefreshSandbox = async () => {
-    if (refreshingSandbox) return
-    setRefreshingSandbox(true)
-    const r = await refreshLoopSandbox(meta.id)
-    if (r.ok) {
-      // Re-fetch so versions update; sandbox restart is handled server-side
-      // (next attach respawns with the new lock).
-      setSandboxInfo(await getLoopSandbox(meta.id))
-    }
-    setRefreshingSandbox(false)
-  }
 
   const toggleMode = (m: RightMode) => {
     setOpenPanels((prev) => {
@@ -410,9 +397,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
       <LoopHeader
         meta={meta}
         mounts={mounts}
-        sandboxInfo={sandboxInfo}
-        onRefreshSandbox={onRefreshSandbox}
-        refreshingSandbox={refreshingSandbox}
         connected={connected}
         reconnecting={reconnecting}
         running={running}
@@ -541,9 +525,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
 function LoopHeader({
   meta,
   mounts,
-  sandboxInfo,
-  onRefreshSandbox,
-  refreshingSandbox,
   connected,
   reconnecting,
   running,
@@ -556,9 +537,6 @@ function LoopHeader({
 }: {
   meta: LoopMeta
   mounts: ContextMount[]
-  sandboxInfo: LoopSandboxInfo | null
-  onRefreshSandbox: () => Promise<void>
-  refreshingSandbox: boolean
   connected: boolean
   reconnecting: boolean
   running: boolean
@@ -731,27 +709,14 @@ function LoopHeader({
         ))}
       </div>
 
-      {/* sandbox row — name + version. When catalog is newer, a muted text link
-          offers refresh (intentionally low-key: pinning is the default, users
-          don't need to chase latest). */}
-      {sandboxInfo && sandboxInfo.name && (
+      {/* profile row — which profiles are active. Profile model re-composes
+          on every spawn, so no "update available" prompt is needed. */}
+      {meta.config?.profiles && meta.config.profiles.length > 0 && (
         <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
-          <span className="text-gray-400">sandbox:</span>
-          <ContextChip
-            label={sandboxInfo.name}
-            value={sandboxInfo.loopVersion ?? "unversioned"}
-          />
-          {sandboxInfo.catalogVersion && sandboxInfo.catalogVersion !== sandboxInfo.loopVersion && (
-            <button
-              type="button"
-              onClick={onRefreshSandbox}
-              disabled={refreshingSandbox}
-              className="text-gray-400 hover:text-gray-700 disabled:opacity-50 underline decoration-dotted underline-offset-2"
-              title={`catalog has ${sandboxInfo.catalogVersion}; click to update + respawn sandbox`}
-            >
-              {refreshingSandbox ? "refreshing…" : `→ ${sandboxInfo.catalogVersion}`}
-            </button>
-          )}
+          <span className="text-gray-400">profiles:</span>
+          {meta.config.profiles.map((p) => (
+            <ContextChip key={p} label={p} value="active" />
+          ))}
         </div>
       )}
 

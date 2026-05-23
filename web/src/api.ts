@@ -28,7 +28,7 @@ export type LoopMeta = {
   shareAlias?: string
   sharePort?: number
   config?: {
-    sandbox?: string
+    profiles?: string[]
     vault?: string
     [k: string]: unknown
   }
@@ -284,7 +284,16 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
   return j.loops as LoopMeta[]
 }
 
-export async function createLoop(opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean; mountAllLoops?: boolean }): Promise<LoopMeta> {
+export async function createLoop(opts: {
+  title: string
+  repo?: string
+  /** Active profiles for this loop (post-2026-05 model). Base is auto-included
+   *  server-side. Empty/undefined = base + personal CLAUDE.md only, no plugins. */
+  profiles?: string[]
+  vault?: string
+  knowledgeRw?: boolean
+  mountAllLoops?: boolean
+}): Promise<LoopMeta> {
   const { knowledgeRw, mountAllLoops, ...rest } = opts
   const body: Record<string, unknown> = { ...rest }
   if (knowledgeRw) body.knowledge_rw = true
@@ -295,6 +304,23 @@ export async function createLoop(opts: { title: string; repo?: string; sandbox?:
     body: JSON.stringify(body),
   })
   return (await r.json()) as LoopMeta
+}
+
+export type ProfileEntry = { name: string; description?: string }
+export async function listProfiles(): Promise<ProfileEntry[]> {
+  const r = await apiFetch(`/api/profiles`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.profiles ?? []) as ProfileEntry[]
+}
+
+/** Current user's default_profiles from personal config (the diff baseline
+ *  NewLoopDialog pre-checks). Empty array if config missing or field absent. */
+export async function getDefaultProfiles(): Promise<string[]> {
+  const r = await apiFetch(`/api/personal/default-profiles`)
+  if (!r.ok) return []
+  const j = await r.json()
+  return Array.isArray(j.default_profiles) ? j.default_profiles : []
 }
 
 export async function listVaults(): Promise<string[]> {
@@ -537,16 +563,8 @@ export async function readSandbox(name: string, file: SandboxFile = "mise.toml")
   return typeof j.content === "string" ? j.content : null
 }
 
-export type LoopSandboxInfo = {
-  name: string | null
-  loopVersion?: string | null
-  catalogVersion?: string | null
-}
-export async function getLoopSandbox(id: string): Promise<LoopSandboxInfo | null> {
-  const r = await apiFetch(`/api/loops/${id}/sandbox`)
-  if (!r.ok) return null
-  return (await r.json()) as LoopSandboxInfo
-}
+// LoopSandboxInfo + getLoopSandbox + refreshLoopSandbox removed — profile model
+// re-composes on every spawn, no snapshot/refresh concept.
 
 export async function getChatHistory(loopId: string): Promise<string[]> {
   const r = await apiFetch(`/api/loops/${loopId}/chat-history`)
@@ -561,13 +579,6 @@ export async function appendChatHistory(loopId: string, text: string): Promise<v
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
   })
-}
-
-export async function refreshLoopSandbox(id: string): Promise<{ ok: boolean; version?: string | null; error?: string }> {
-  const r = await apiFetch(`/api/loops/${id}/sandbox/refresh`, { method: "POST" })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
-  return { ok: true, version: j.version }
 }
 
 export async function deleteSandbox(name: string): Promise<{ ok: boolean; error?: string }> {

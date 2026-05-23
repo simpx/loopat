@@ -1,0 +1,5 @@
+{
+  "name": "base",
+  "description": "Acme baseline · always loaded for every loop",
+  "plugins": []
+}

@@ -4,13 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "serve": "bun run --hot src/serve.ts"
+    "serve": "bun run --hot src/serve.ts",
+    "test": "bun test"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.138",
     "@anthropic-ai/sandbox-runtime": "^0.0.50",
     "bun-pty": "^0.4.8",
-    "hono": "^4.12.18"
+    "hono": "^4.12.18",
+    "smol-toml": "^1.6.1"
   },
   "devDependencies": {
     "@types/bun": "latest",

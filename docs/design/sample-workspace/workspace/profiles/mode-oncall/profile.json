@@ -1,0 +1,7 @@
+{
+  "name": "mode-oncall",
+  "description": "值班模式。假设你已经加载了某个 role-eng-* profile（不强制，但缺了工具会不完整）。",
+  "plugins": [
+    "pagerduty-mcp@acme-internal"
+  ]
+}

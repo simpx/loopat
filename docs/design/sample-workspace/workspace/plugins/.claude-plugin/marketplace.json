@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "acme-internal",
+  "description": "Acme 团队私有 CC plugin marketplace（local 模式：本目录即是 registry）",
+  "owner": { "name": "Acme Platform Team" },
+  "plugins": [
+    {
+      "name": "internal-mcp",
+      "description": "Acme 内部服务 MCP wrapper",
+      "source": "./internal-mcp"
+    },
+    {
+      "name": "pagerduty-mcp",
+      "description": "PagerDuty MCP wrapper",
+      "source": "./pagerduty-mcp"
+    }
+  ]
+}

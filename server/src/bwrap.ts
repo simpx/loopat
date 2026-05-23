@@ -38,11 +38,8 @@ import {
   loopWorkdir,
   loopClaudeDir,
   loopsDir,
-  loopSandboxDir,
-  loopSandboxPath,
   loopContextChatDir,
   workspaceKnowledgeDir,
-  workspaceLoopatSandboxDir,
   workspaceNotesDir,
   workspaceReposDir,
   loopContextKnowledge,
@@ -54,7 +51,9 @@ import {
   loopHomeMerged,
   workspaceHomeSkelDir,
 } from "./paths"
-import { resolveSandboxFile } from "./sandboxes"
+// resolveSandboxFile removed — mise toolchain integration was tied to the
+// pre-profile sandbox model. Kept the sandboxName parameter of buildBwrapArgs
+// for now (always undefined under the profile model), so callers don't change.
 import { loadConfig, loadPersonalConfig } from "./config"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
 
@@ -191,21 +190,19 @@ export async function buildBwrapArgs(
 ): Promise<string[]> {
   const home = homedir()
 
-  // Resolve sandbox up front so failures surface before we've built argv.
-  // Prefer the per-loop snapshot dir (loops/<id>/sandbox/) over the workspace
-  // catalog so this loop is frozen at creation time — later catalog edits
-  // don't perturb running loops.
+  // sandboxName parameter retained as legacy (callers pass undefined).
+  void sandboxName
+  // Mise toolchain integration: if the loop's merged .claude/mise.toml exists
+  // (compose.ts wrote it from the team + profile + personal layers), activate
+  // it now. mise auto-discovers mise.toml in the cwd we pass.
   let miseEnv: Record<string, string> | null = null
-  if (sandboxName) {
-    const snapshotDir = loopSandboxDir(loopId)
-    const haveSnapshot = existsSync(loopSandboxPath(loopId))
-    const sandboxDirPath = haveSnapshot
-      ? snapshotDir
-      : (resolveSandboxFile(sandboxName) ? workspaceLoopatSandboxDir(sandboxName) : null)
-    if (!sandboxDirPath) {
-      throw new Error(`sandbox "${sandboxName}" not found (no snapshot at ${snapshotDir}, no catalog entry)`)
+  const loopClaudePath = loopClaudeDir(loopId)
+  if (existsSync(join(loopClaudePath, "mise.toml"))) {
+    try {
+      miseEnv = await activateMiseSandbox(loopClaudePath)
+    } catch (e: any) {
+      console.warn(`[bwrap] mise activation failed for loop ${loopId}: ${e?.message ?? e}`)
     }
-    miseEnv = await activateMiseSandbox(sandboxDirPath)
   }
 
   // Per-component ro-binds (NOT `--ro-bind / /`) — RO root prevents bwrap from
@@ -404,11 +401,11 @@ export async function buildBwrapArgs(
     args.push("--ro-bind-try", miseData, miseData)
   }
 
-  // If a sandbox is selected, mise's PATH already includes both the tool
-  // install bins and the host PATH; pass it through wholesale. Without a
-  // sandbox, leave PATH alone (sandbox inherits process.env.PATH).
+  // miseEnv always null in the profile model (mise toolchain integration
+  // was tied to the old sandbox concept). Block kept as a structural
+  // reminder for future toolchain re-introduction.
   if (miseEnv) {
-    for (const [k, v] of Object.entries(miseEnv)) {
+    for (const [k, v] of Object.entries(miseEnv as Record<string, string>)) {
       args.push("--setenv", k, v)
     }
   }

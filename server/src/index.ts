@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, refreshLoopSandbox, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, type OAuthSupport } from "./mcp-oauth"
@@ -31,7 +31,8 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot } from "./session"
 import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
-import { commitSandboxChange, deleteSandbox, getSandboxVersion, isValidSandboxFile, isValidSandboxName, listSandboxes, lockSandbox, pickDefaultSandbox, readSandboxFile, writeSandboxFile } from "./sandboxes"
+// sandboxes module removed — no /api/sandboxes/* routes in the profile model.
+// Use /api/profiles + /api/personal/default-profiles instead.
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
 import {
   LOOPAT_HOME,
@@ -49,7 +50,7 @@ import {
   workspaceRepoDir,
   workspaceReposDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadSandboxClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -638,24 +639,23 @@ function publicBaseUrl(c: any): string {
 }
 
 // Lists MCP servers visible to a loop, grouped by source tier:
-//   sandbox: from <sandbox>/.claude/.claude.json (admin-set, sandbox-chain merged)
-//   plugin:  from each installed plugin's .mcp.json (loaded automatically by CC
-//            when the plugin loads — surfaced here so the UI panel is complete)
-//   personal: per-user overrides (shadows same-name sandbox entries at spawn)
+//   plugin:  from each plugin's .mcp.json (auto-loaded by CC when plugin loads)
+//   personal: per-user overrides
 //
-// Query param `loopId` selects which loop's sandbox to use. Without it,
-// falls back to the "default" sandbox (e.g. settings page where no specific
-// loop is in scope).
+// Profile-model rewrite (2026-05): the old "sandbox tier" source
+// (.claude/.claude.json under each sandbox) is dropped; plugin .mcp.json is
+// the canonical source for team-shared MCPs. Personal still overlays.
+//
+// Query param `loopId` selects which loop's profiles to use. Without it,
+// only personal-tier servers are listed (e.g. Settings page with no loop).
 app.get("/api/mcp-servers", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const loopId = c.req.query("loopId")
-  // Resolve which sandbox this loop uses (or fall back to default).
-  let sandboxName = "default"
+  let profiles: string[] | undefined
   if (loopId) {
     const loop = await getLoop(loopId)
-    if (loop?.config?.sandbox) sandboxName = loop.config.sandbox
+    profiles = loop?.config?.profiles
   }
-  const ws = await loadSandboxClaudeJson(sandboxName)
   const ps = await loadPersonalClaudeJson(userId)
 
   const shape = (srv: any) => ({
@@ -675,14 +675,9 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
     }
   }
 
-  const workspaceTier = await Promise.all(
-    Object.entries(ws.mcpServers ?? {}).map(async ([name, srv]) =>
-      withOAuthSupport({ name, ...shape(srv) }),
-    ),
-  )
   const personalTier = await Promise.all(
     Object.entries(ps.mcpServers ?? {}).map(async ([name, srv]) =>
-      withOAuthSupport({ name, ...shape(srv), shadowsWorkspace: !!ws.mcpServers?.[name] }),
+      withOAuthSupport({ name, ...shape(srv) }),
     ),
   )
 
@@ -693,7 +688,11 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
   const { readFile: rf } = await import("node:fs/promises")
   const { existsSync: esync } = await import("node:fs")
   const { join: pjoin } = await import("node:path")
-  const resolved = await resolveLoopPlugins(sandboxName)
+  // resolveLoopPlugins needs the loop's materialized settings; for the
+  // /api/mcp-servers view (which runs without spawning), we just list
+  // builtins if no loopId provided. With loopId, returns the loop's
+  // currently resolved set.
+  const resolved = loopId ? await resolveLoopPlugins(loopId) : []
   type PluginEntry = { name: string; type: string; url?: string; pluginSource: string; oauthSupport?: OAuthSupport }
   const pluginTierRaw: PluginEntry[] = []
   for (const p of resolved) {
@@ -713,14 +712,8 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
   return c.json({
     tiers: [
       {
-        id: "workspace",
-        label: `Sandbox MCPs (${sandboxName})`,
-        path: `context/knowledge/.loopat/sandboxes/${sandboxName}/.claude/.claude.json`,
-        servers: workspaceTier,
-      },
-      {
         id: "plugin",
-        label: "Plugin MCPs (auto-loaded from installed plugins)",
+        label: "Plugin MCPs (auto-loaded from profile-declared plugins)",
         path: "",
         servers: pluginTier,
       },
@@ -1282,21 +1275,53 @@ app.get("/api/vaults", requireAuth, async (c) => {
   return c.json({ vaults: listVaults(userId) })
 })
 
+// Return the current user's `default_profiles` from
+// personal/<u>/.loopat/config.json. Used by NewLoopDialog to pre-check the
+// user's typical setup. Returns [] if config absent / field missing.
+app.get("/api/personal/default-profiles", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const { existsSync } = await import("node:fs")
+  const { readFile } = await import("node:fs/promises")
+  const { personalLoopatConfigPath } = await import("./paths")
+  const path = personalLoopatConfigPath(userId)
+  if (!existsSync(path)) return c.json({ default_profiles: [] })
+  try {
+    const j = JSON.parse(await readFile(path, "utf8"))
+    const arr = Array.isArray(j?.default_profiles)
+      ? j.default_profiles.filter((x: unknown): x is string => typeof x === "string")
+      : []
+    return c.json({ default_profiles: arr })
+  } catch {
+    return c.json({ default_profiles: [] })
+  }
+})
+
+// List available profiles in `<LOOPAT_HOME>/context/profiles/`. Each profile
+// is a directory with a profile.json. Returns name + description so the UI
+// can render a multi-select. Base profile is included if present — UI may
+// choose to render it as "always on" / non-toggleable.
+app.get("/api/profiles", requireAuth, async (c) => {
+  // Profile = a subdir of `.loopat/profiles/` with a `.claude/` inside.
+  // No loopat-invented metadata file (no profile.json) — descriptions, if
+  // wanted, could come from the profile's CLAUDE.md first heading. For now
+  // the UI just lists names.
+  const { listProfiles } = await import("./profiles")
+  const names = await listProfiles()
+  return c.json({ profiles: names.map((name) => ({ name })) })
+})
+
 app.post("/api/loops", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
-  // Sandbox semantics: key missing → caller has no opinion, pick the default
-  // (only when exactly one exists). Key present-but-empty → explicit "(none)",
-  // honor it. This lets NewLoopDialog's "(none)" choice survive while
-  // headless callers (ContextPage distill/edit/repo buttons) get the default.
-  let sandbox: string | undefined
-  if (!("sandbox" in body)) {
-    sandbox = await pickDefaultSandbox()
-  } else {
-    sandbox = typeof body.sandbox === "string" && body.sandbox.trim() ? body.sandbox.trim() : undefined
-  }
+  // Profile model: `profiles` body field is an array of profile names (loaded
+  // from `<LOOPAT_HOME>/context/profiles/<name>/`). The old `sandbox` body
+  // field is silently ignored — UI's NewLoopDialog still sends it for
+  // backward compat but it has no effect on the spawn flow.
+  const profiles: string[] | undefined = Array.isArray(body.profiles)
+    ? body.profiles.filter((s: unknown): s is string => typeof s === "string" && s.trim().length > 0)
+    : undefined
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
   const knowledgeRw = body.knowledge_rw === true
   const mountAllLoops = body.mount_all_loops === true
@@ -1310,7 +1335,7 @@ app.post("/api/loops", requireAuth, async (c) => {
     }
   }
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, sandbox, vault, knowledgeRw, mountAllLoops })
+    const meta = await createLoop({ title, repo, createdBy: userId, profiles, vault, knowledgeRw, mountAllLoops })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
@@ -1473,42 +1498,6 @@ app.get("/api/loops/:id/context", requireAuth, async (c) => {
   if (existsSync(loopContextPersonal(id))) mounts.push({ name: "personal", path: "context/personal" })
   if (existsSync(loopContextRepos(id))) mounts.push({ name: "repos", path: "context/repos" })
   return c.json({ mounts })
-})
-
-// Loop's active sandbox + version comparison. UI uses catalogVersion vs
-// loopVersion to surface "update available". Null sandbox = no sandbox set.
-app.get("/api/loops/:id/sandbox", requireAuth, async (c) => {
-  const id = c.req.param("id") ?? ""
-  const meta = await getLoop(id)
-  if (!meta) return c.json({ error: "not found" }, 404)
-  const name = meta.config?.sandbox
-  if (!name) return c.json({ name: null })
-  const loopVersion = meta.config?.sandbox_version ?? null
-  const catalogVersion = await getSandboxVersion(name)
-  return c.json({ name, loopVersion, catalogVersion })
-})
-
-// Refresh: re-copy catalog sandbox into this loop, then tear down SDK session
-// and PTY so next reconnect picks up the new lockfile.
-app.post("/api/loops/:id/sandbox/refresh", requireAuth, async (c) => {
-  const id = c.req.param("id") ?? ""
-  const userId = c.get("userId") as string
-  const meta = await getLoop(id)
-  if (!meta) return c.json({ error: "not found" }, 404)
-  if (meta.archived) return c.json({ error: "loop is archived" }, 403)
-  if (meta.rfdRequestedAt) return c.json({ error: "loop is in RFD state — click Drive to take over" }, 409)
-  if (!isDriver(meta, userId)) return c.json({ error: `only driver (${effectiveDriver(meta)}) can write` }, 403)
-  if (!meta.config?.sandbox) return c.json({ error: "loop has no sandbox" }, 400)
-  try {
-    const version = await refreshLoopSandbox(id)
-    // Existing bwrap argv (PATH, mise data dir bind) is baked at spawn time —
-    // forced respawn is how the new lockfile takes effect.
-    destroyLoopSession(id)
-    killTerm(id)
-    return c.json({ ok: true, version })
-  } catch (e: any) {
-    return c.json({ error: e?.message ?? "refresh failed" }, 500)
-  }
 })
 
 app.get("/api/loops/:id/files", requireAuth, async (c) => {
@@ -1952,117 +1941,10 @@ app.post("/api/workspace/repos", requireAuth, async (c) => {
   return c.json({ ok: true, name: r.name, kind: r.kind })
 })
 
-app.get("/api/sandboxes", requireAuth, async (c) => {
-  return c.json({ sandboxes: await listSandboxes() })
-})
-
-// Per-file read/write inside a sandbox dir. `file` defaults to mise.toml (the
-// "main" file). Whitelist guards path traversal — only known basenames map
-// to actual files inside the sandbox dir.
-app.get("/api/sandboxes/:name", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const file = c.req.query("file") ?? "mise.toml"
-  if (!isValidSandboxFile(file)) return c.json({ error: "invalid file" }, 400)
-  const content = await readSandboxFile(name, file)
-  if (content === null) return c.json({ error: "not found" }, 404)
-  return c.json({ name, file, content })
-})
-
-app.put("/api/sandboxes/:name", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const file = c.req.query("file") ?? "mise.toml"
-  if (!isValidSandboxFile(file)) return c.json({ error: "invalid file" }, 400)
-  const body = await c.req.json().catch(() => ({}))
-  if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
-  await writeSandboxFile(name, file, body.content)
-  // Order: write → lock (mise.toml only) → commit. Lock comes before commit
-  // so the commit captures both toml and the regenerated lockfile atomically.
-  let lockRes: { ok: boolean; error?: string } | null = null
-  if (file === "mise.toml") {
-    lockRes = await lockSandbox(name)
-  }
-  const commitRes = await commitSandboxChange(name, { kind: "update", file })
-  return c.json({
-    ok: true, name, file,
-    ...(lockRes ? { locked: lockRes.ok, lockError: lockRes.error } : {}),
-    committed: commitRes.ok, commitSha: commitRes.sha, commitError: commitRes.error,
-  })
-})
-
-// Read-only plugin inventory for a sandbox — surfaces installed_plugins.json
-// + known_marketplaces.json (CC writes both when admin runs `claude plugin
-// install / marketplace add` against the sandbox's .claude/).
-app.get("/api/sandboxes/:name/plugins", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const { readSandboxPluginInventory } = await import("./sandboxes")
-  const inv = await readSandboxPluginInventory(name)
-  return c.json(inv)
-})
-
-// Mutation endpoints — each shells out to `claude plugin <verb>` against
-// the sandbox's .claude/ so CC owns the install machinery (cache, lock,
-// SHA pinning). Output captured for the UI to display.
-
-// Install: body {plugin: "foo@bar"}.
-app.post("/api/sandboxes/:name/plugins", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const body = await c.req.json().catch(() => ({}))
-  const plugin = String(body.plugin ?? "").trim()
-  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
-  const { runSandboxClaudeCommand } = await import("./sandboxes")
-  const r = await runSandboxClaudeCommand(name, ["plugin", "install", plugin])
-  return c.json(r)
-})
-
-// Uninstall: DELETE /api/sandboxes/:name/plugins/:plugin (URL-encoded "foo@bar").
-app.delete("/api/sandboxes/:name/plugins/:plugin", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const plugin = decodeURIComponent(c.req.param("plugin") ?? "")
-  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
-  const { runSandboxClaudeCommand } = await import("./sandboxes")
-  const r = await runSandboxClaudeCommand(name, ["plugin", "uninstall", plugin])
-  return c.json(r)
-})
-
-// Update: POST /api/sandboxes/:name/plugins/:plugin/update (re-resolve to current marketplace HEAD).
-app.post("/api/sandboxes/:name/plugins/:plugin/update", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const plugin = decodeURIComponent(c.req.param("plugin") ?? "")
-  if (!plugin || !/^[A-Za-z0-9_.@-]+$/.test(plugin)) return c.json({ error: "invalid plugin spec" }, 400)
-  const { runSandboxClaudeCommand } = await import("./sandboxes")
-  const r = await runSandboxClaudeCommand(name, ["plugin", "update", plugin])
-  return c.json(r)
-})
-
-// Marketplace add: body {source: "<github-shortcut|git-url|local-path>"}.
-app.post("/api/sandboxes/:name/marketplaces", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  const body = await c.req.json().catch(() => ({}))
-  const source = String(body.source ?? "").trim()
-  // Accept org/repo, ssh/https git URLs, file paths. No shell metachars.
-  if (!source || /[\s;&|`$<>"']/.test(source)) return c.json({ error: "invalid source" }, 400)
-  const { runSandboxClaudeCommand } = await import("./sandboxes")
-  const r = await runSandboxClaudeCommand(name, ["plugin", "marketplace", "add", source])
-  return c.json(r)
-})
-
-// Remove a sandbox from the catalog. Per-loop snapshots already copied stay
-// intact (they're standalone), so deleting "default" doesn't break loops
-// that already use it — they keep running off their own sandbox/ dir.
-app.delete("/api/sandboxes/:name", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  if (!isValidSandboxName(name)) return c.json({ error: "invalid sandbox name" }, 400)
-  await deleteSandbox(name)
-  const commitRes = await commitSandboxChange(name, { kind: "delete" })
-  return c.json({ ok: true, name, committed: commitRes.ok, commitSha: commitRes.sha, commitError: commitRes.error })
-})
+// /api/sandboxes/* routes removed — sandbox concept replaced by profiles
+// (post-2026-05). Profile management uses /api/profiles + per-profile
+// .claude/settings.json edited via CC's own commands (cd .loopat/profiles/<n>
+// && claude plugin install --scope=project ...).
 
 app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
   const name = c.req.param("name") ?? ""
@@ -2474,7 +2356,7 @@ app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
     : defaultTitle
   let meta
   try {
-    meta = await createLoop({ title, createdBy: userId, sandbox: await pickDefaultSandbox() })
+    meta = await createLoop({ title, createdBy: userId })
   } catch (e: any) {
     return c.json({ error: e?.message ?? "loop create failed" }, 400)
   }

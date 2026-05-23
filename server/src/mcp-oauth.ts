@@ -34,7 +34,7 @@
  */
 import { createHash, randomBytes } from "node:crypto"
 
-import { loadSandboxClaudeJson, type McpServerConfig } from "./config"
+import { type McpServerConfig } from "./config"
 import { putMcpToken, type McpServerToken } from "./mcp-tokens"
 
 const STATE_TTL_MS = 10 * 60 * 1000 // 10 minutes — generous; OAuth flows are slow
@@ -297,45 +297,39 @@ export async function startMcpAuth(opts: {
   user: string
   vault: string
   serverName: string
-  /** Loop the auth request originates from — determines which sandbox to
-   *  look up. Empty string falls back to "default" (e.g. Settings page). */
+  /** Loop the auth request originates from — determines which profiles to
+   *  look up. Empty string = no profile context (e.g. Settings page). */
   loopId?: string
   publicBaseUrl: string
 }): Promise<StartResult> {
   const { user, vault, serverName, loopId, publicBaseUrl } = opts
 
-  // Resolve sandbox from loop, fall back to "default" if no loopId.
-  let sandboxName = "default"
-  if (loopId) {
-    const { getLoop } = await import("./loops")
-    const loop = await getLoop(loopId)
-    if (loop?.config?.sandbox) sandboxName = loop.config.sandbox
-  }
-
-  // Search order matches resolveLoopPlugins semantics: sandbox-tier first,
-  // then plugin-tier from each plugin's .mcp.json. First hit wins.
+  // Walk plugin-bundled .mcp.json files (from the loop's resolved plugins).
+  // resolveLoopPlugins reads loop's merged settings.json — needs the loop
+  // to have been spawned at least once (so compose has materialized it).
+  // Returns [] if no loopId (settings page case).
   let srv: McpServerConfig | undefined
-  const sandbox = await loadSandboxClaudeJson(sandboxName)
-  srv = sandbox.mcpServers?.[serverName]
-  if (!srv) {
+  const resolved: Array<{ name: string; path: string }> = []
+  if (loopId) {
     const { resolveLoopPlugins } = await import("./plugin-installer")
-    const { existsSync } = await import("node:fs")
-    const { readFile: rf } = await import("node:fs/promises")
-    const { join: pjoin } = await import("node:path")
-    for (const p of await resolveLoopPlugins(sandboxName)) {
-      const mcpPath = pjoin(p.path, ".mcp.json")
-      if (!existsSync(mcpPath)) continue
-      try {
-        const j = JSON.parse(await rf(mcpPath, "utf8"))
-        const candidate = (j?.mcpServers ?? {})[serverName] as McpServerConfig | undefined
-        if (candidate) {
-          srv = candidate
-          break
-        }
-      } catch {}
-    }
+    resolved.push(...(await resolveLoopPlugins(loopId)))
   }
-  if (!srv) return { ok: false, error: `server "${serverName}" not found in sandbox "${sandboxName}" or any plugin` }
+  const { existsSync } = await import("node:fs")
+  const { readFile: rf } = await import("node:fs/promises")
+  const { join: pjoin } = await import("node:path")
+  for (const p of resolved) {
+    const mcpPath = pjoin(p.path, ".mcp.json")
+    if (!existsSync(mcpPath)) continue
+    try {
+      const j = JSON.parse(await rf(mcpPath, "utf8"))
+      const candidate = (j?.mcpServers ?? {})[serverName] as McpServerConfig | undefined
+      if (candidate) {
+        srv = candidate
+        break
+      }
+    } catch {}
+  }
+  if (!srv) return { ok: false, error: `server "${serverName}" not found in any plugin for this loop's profiles` }
   if (srv.type !== "http" && srv.type !== "sse") {
     return { ok: false, error: `server "${serverName}" is type "${srv.type}"; only http/sse support OAuth` }
   }

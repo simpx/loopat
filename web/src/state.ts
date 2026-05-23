@@ -23,7 +23,7 @@ export type WorkspaceState = {
   showArchived: boolean
   setShowArchived: (b: boolean) => void
   refresh: () => Promise<void>
-  createLoop: (opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean; mountAllLoops?: boolean }) => Promise<LoopMeta>
+  createLoop: (opts: { title: string; repo?: string; profiles?: string[]; vault?: string; knowledgeRw?: boolean; mountAllLoops?: boolean }) => Promise<LoopMeta>
   setLoopArchived: (id: string, archived: boolean) => Promise<void>
   setLoopPublic: (id: string, isPublic: boolean) => Promise<void>
   setLoopTitle: (id: string, title: string) => Promise<LoopMeta | null>
@@ -82,7 +82,7 @@ export function useWorkspaceState(): WorkspaceState {
     refresh()
   }, [showArchived, currentUser])
 
-  const createLoop = useCallback(async (opts: { title: string; repo?: string; sandbox?: string; vault?: string; knowledgeRw?: boolean; mountAllLoops?: boolean }) => {
+  const createLoop = useCallback(async (opts: { title: string; repo?: string; profiles?: string[]; vault?: string; knowledgeRw?: boolean; mountAllLoops?: boolean }) => {
     const m = await apiCreateLoop(opts)
     setLoops((prev) => [m, ...prev])
     return m

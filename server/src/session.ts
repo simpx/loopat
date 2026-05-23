@@ -4,9 +4,9 @@ import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/pro
 import { createWriteStream, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
+import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadSandboxClaudeJson, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { resolveLoopPlugins } from "./plugin-installer"
@@ -320,15 +320,18 @@ class LoopSession {
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
 
-    // Compose skills + agents + sandbox-chain doctrine into the loop's
+    // Compose skills + agents + profile doctrine into the loop's
     // private .claude/. Re-run every spawn so newly-added workspace/personal
-    // skills + sandbox CLAUDE.md edits show up.
-    await composeLoopClaudeConfig(loopId, driver, meta.config?.sandbox)
-    await writeLoopSettings(loopId)
-    // Resolve plugins from the loop's chosen sandbox + builtins. Sandbox's
-    // .claude/plugins/installed_plugins.json (CC-managed) is the source of
-    // truth — no loopat-side install or marketplace logic.
-    const resolvedPlugins = await resolveLoopPlugins(meta.config?.sandbox)
+    // skills + profile CLAUDE.md edits show up.
+    // Pass loopWorkdir as the 5th-layer source — if it has a .claude/, it
+    // gets merged in as repo-tier (CC project-tier semantics).
+    const { loopWorkdir } = await import("./paths")
+    await composeLoopClaudeConfig(loopId, driver, meta.config?.profiles, loopWorkdir(loopId))
+    // Resolve plugins from the loop's merged settings.json (just written by
+    // composeLoopClaudeConfig). Loopat orchestrates marketplace registration
+    // + `claude plugin install --scope=user` based on enabledPlugins /
+    // extraKnownMarketplaces from the merged config. See plugin-installer.ts.
+    const resolvedPlugins = await resolveLoopPlugins(loopId)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
     //
@@ -352,17 +355,14 @@ class LoopSession {
       } catch {}
     }
 
-    // Sandbox-level mcpServers live in the sandbox's .claude/.claude.json
-    // (CC writes this when admin sets up the sandbox). Personal mcpServers
-    // overlay per-user. Passed through to SDK as-is — static-auth servers
-    // should keep their token in `env`/`headers` directly.
-    const sandboxClaudeJson = await loadSandboxClaudeJson(meta.config?.sandbox)
+    // mcpServers come from two sources in the profile model:
+    //   - plugin-bundled .mcp.json (auto-registered by CC when the plugin is
+    //     loaded; we don't merge those here — CC handles them)
+    //   - personal .claude.json (per-user overlay; same as before)
+    // The old sandbox-level mcpServers source is dropped — profile model uses
+    // plugin `.mcp.json` instead.
     const personalClaude = await loadPersonalClaudeJson(driver)
-    // Merge sandbox + personal mcpServers (personal wins on name collision).
-    const mergedServers: Record<string, any> = {
-      ...(sandboxClaudeJson.mcpServers ?? {}),
-      ...(personalClaude.mcpServers ?? {}),
-    }
+    const mergedServers: Record<string, any> = { ...(personalClaude.mcpServers ?? {}) }
     // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
     // `Authorization: Bearer <token>` headers on matching servers. This is
     // the SDK-recommended pattern for headless MCP auth — CC sees pre-
@@ -408,7 +408,11 @@ class LoopSession {
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
     const useOverlay = await isHomeOverlaySupported()
-    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
+    // Profile model has no mise sandbox — pass undefined for the sandboxName
+    // arg so buildBwrapArgs skips mise activation. Profile-knowledge dirs
+    // live under loops/<id>/context/profile-knowledge/ (mounted via existing
+    // loopContext bind, no extra wiring needed).
+    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, undefined, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
     // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)
@@ -840,14 +844,14 @@ class LoopSession {
       if (!map.has(c)) map.set(c, "")
     }
     // Workspace skills
-    for (const name of await this.listDirNames(workspaceLoopatSkillsDir())) {
+    for (const name of await this.listDirNames(workspaceTeamSkillsDir())) {
       if (!map.has(name)) {
-        map.set(name, await readSkillDescription(workspaceLoopatSkillsDir(), name))
+        map.set(name, await readSkillDescription(workspaceTeamSkillsDir(), name))
       }
     }
     // Personal skills (higher precedence)
-    for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
-      map.set(name, await readSkillDescription(personalLoopatSkillsDir(user), name))
+    for (const name of await this.listDirNames(personalSkillsDir(user))) {
+      map.set(name, await readSkillDescription(personalSkillsDir(user), name))
     }
     // Plugin sub-commands: scan each resolved plugin's skills/ dir and
     // surface as `<plugin>:<skill>`. resolveLoopPlugins returns the same
@@ -855,8 +859,11 @@ class LoopSession {
     // matches what CC will report on init. Names from the resolver are
     // `plugin@marketplace`; strip the marketplace suffix for the slash form.
     try {
-      const meta = await getLoop(this.id)
-      const resolvedPlugins = await resolveLoopPlugins(meta?.config?.sandbox)
+      // resolveLoopPlugins reads loop's merged settings.json — only meaningful
+      // post-compose. For pre-spawn skill seeding here, this returns just
+      // builtins if loop's .claude/ hasn't been materialized yet (acceptable;
+      // SDK's init payload will provide accurate skill list post-spawn).
+      const resolvedPlugins = await resolveLoopPlugins(this.id)
       for (const plugin of resolvedPlugins) {
         const pluginName = plugin.name.split("@")[0]
         const skillsDir = join(plugin.path, "skills")

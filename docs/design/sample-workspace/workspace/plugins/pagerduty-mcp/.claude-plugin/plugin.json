@@ -1,0 +1,6 @@
+{
+  "name": "pagerduty-mcp",
+  "version": "1.5.0",
+  "description": "PagerDuty MCP wrapper。被 mode-oncall profile 引用。",
+  "author": { "name": "Acme SRE" }
+}

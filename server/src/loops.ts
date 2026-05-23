@@ -16,15 +16,8 @@ import {
   loopContextPersonal,
   loopContextRepos,
   loopMetaPath,
-  loopSandboxDir,
-  loopSandboxPath,
-  loopSandboxLockPath,
-  loopSandboxMetaPath,
   workspaceDir,
   workspaceKnowledgeDir,
-  workspaceLoopatSandboxPath,
-  workspaceLoopatSandboxLockPath,
-  workspaceLoopatSandboxMetaPath,
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
@@ -41,7 +34,6 @@ import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
-import { pickDefaultSandbox } from "./sandboxes"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 
 const execFileP = promisify(execFile)
@@ -92,19 +84,22 @@ export type LoopMeta = {
     default_model_id?: string
     permission_mode?: string
     /**
-     * Workspace sandbox (knowledge/.loopat/sandboxes/<sandbox>/) activated
-     * for this loop. The dir's mise.toml + mise.lock get snapshotted into
-     * loops/<id>/sandbox/ at create time; `mise install` runs in that dir
-     * on spawn. Unset = host PATH inherited (no sandbox).
+     * Active profiles for this loop (post-2026-05 composition model).
+     * Profiles live in `<LOOPAT_HOME>/context/profiles/<name>/`; each has a
+     * profile.json (lists plugin specs) + sibling CLAUDE.md + optional
+     * knowledge/. On spawn, loopat orchestrates `claude plugin install` for
+     * the union of plugins, concats CLAUDE.mds, mounts knowledge.
+     *
+     * Order matters: CLAUDE.md fragments concat in declared order (later
+     * shadows earlier). "base" profile is always implicit if present, even
+     * when this list is empty. Personal CLAUDE.md appends last.
+     *
+     * Empty / undefined = no profile-driven plugins, base CLAUDE.md only
+     * (if it exists), personal CLAUDE.md only. CC still runs.
+     *
+     * See docs/design/composition-model.md.
      */
-    sandbox?: string
-    /**
-     * Catalog commit id (short sha) of the sandbox at the time it was
-     * snapshotted into this loop. UI compares against the catalog's current
-     * commit to surface "update available". Null if knowledge isn't a git
-     * repo or the sandbox wasn't committed.
-     */
-    sandbox_version?: string | null
+    profiles?: string[]
     /**
      * Vault selected for this loop. The named vault under
      * `personal/<user>/.loopat/vaults/<vault>/` provides this loop's
@@ -1364,69 +1359,7 @@ export async function listLoops(): Promise<LoopMeta[]> {
   }
 }
 
-/**
- * Copy sandbox catalog (mise.toml + optional mise.lock + sandbox.json) into
- * loop's sandbox dir. Returns the catalog's git commit id at copy time (the
- * loop's "sandbox version"), or null if unavailable. Used by createLoop and
- * refreshLoopSandbox.
- *
- * Sandbox extends: each file is looked up by walking the chain from child
- * to oldest ancestor — first match wins (toolchain is atomic, no merging).
- * Child sandbox with no mise.toml inherits parent's.
- */
-async function snapshotSandboxIntoLoop(id: string, sandboxName: string): Promise<string | null> {
-  const { getSandboxVersion, resolveSandboxChain } = await import("./sandboxes")
-  const chain = await resolveSandboxChain(sandboxName)
-  // Walk leaf → root to find first existing file (child wins).
-  const findInChain = (locator: (n: string) => string): string | null => {
-    for (const n of [...chain].reverse()) {
-      const p = locator(n)
-      if (existsSyncBase(p)) return p
-    }
-    return null
-  }
-  const srcToml = findInChain(workspaceLoopatSandboxPath)
-  const srcLock = findInChain(workspaceLoopatSandboxLockPath)
-  const srcMeta = findInChain(workspaceLoopatSandboxMetaPath)
-  if (!srcToml) {
-    throw new Error(`sandbox "${sandboxName}" (and its extends chain) has no mise.toml`)
-  }
-  await mkdir(loopSandboxDir(id), { recursive: true })
-  await copyFile(srcToml, loopSandboxPath(id))
-  if (srcLock) {
-    await copyFile(srcLock, loopSandboxLockPath(id))
-  } else {
-    await rm(loopSandboxLockPath(id), { force: true })
-  }
-  if (srcMeta) {
-    await copyFile(srcMeta, loopSandboxMetaPath(id))
-  } else {
-    await rm(loopSandboxMetaPath(id), { force: true })
-  }
-  // Version is the leaf sandbox's own commit (refresh tracks the leaf).
-  return await getSandboxVersion(sandboxName)
-}
-
-/**
- * Refresh a loop's sandbox snapshot to the catalog's current state. Caller
- * is responsible for tearing down the loop's PTY + SDK session so the next
- * spawn picks up the new lockfile (existing bwrap argv has the old PATH
- * baked in). Updates meta.config.sandbox_version to the new catalog commit.
- *
- * Returns the new version (or null) for the API response. Throws if the
- * loop has no sandbox or the catalog entry is missing.
- */
-export async function refreshLoopSandbox(id: string): Promise<string | null> {
-  const meta = await getLoop(id)
-  if (!meta) throw new Error(`loop ${id} not found`)
-  const sandboxName = meta.config?.sandbox
-  if (!sandboxName) throw new Error(`loop ${id} has no sandbox`)
-  const version = await snapshotSandboxIntoLoop(id, sandboxName)
-  await patchLoopMeta(id, {
-    config: { ...(meta.config ?? {}), sandbox: sandboxName, sandbox_version: version },
-  })
-  return version
-}
+// refreshLoopSandbox removed entirely — profile model re-composes every spawn.
 
 async function shortBranchSlug(title: string): Promise<string> {
   const base = title
@@ -1441,7 +1374,7 @@ export async function createLoop(opts: {
   title: string
   repo?: string
   createdBy: string
-  sandbox?: string
+  profiles?: string[]
   vault?: string
   knowledgeRw?: boolean
   mountAllLoops?: boolean
@@ -1457,9 +1390,8 @@ export async function createLoop(opts: {
     driver: opts.createdBy,
     driverHistory: [{ driver: opts.createdBy, since: createdAt }],
   }
-  if (opts.sandbox) {
-    const version = await snapshotSandboxIntoLoop(id, opts.sandbox)
-    meta.config = { ...(meta.config ?? {}), sandbox: opts.sandbox, sandbox_version: version }
+  if (opts.profiles && opts.profiles.length > 0) {
+    meta.config = { ...(meta.config ?? {}), profiles: opts.profiles }
   }
   if (opts.vault && opts.vault !== "default") {
     meta.config = { ...(meta.config ?? {}), vault: opts.vault }
@@ -1472,11 +1404,11 @@ export async function createLoop(opts: {
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
-  // Compose skills/agents + sandbox-chain doctrine into .claude/, write
+  // Compose skills/agents + profile-chain doctrine into .claude/, write
   // settings.json (autoMemory). Plugin resolution happens at spawn time
   // (see session.ts) — SDK loads plugins via its `plugins` option, no
   // loop-local install state needed.
-  await composeLoopClaudeConfig(id, opts.createdBy, opts.sandbox)
+  await composeLoopClaudeConfig(id, opts.createdBy, opts.profiles)
   await writeLoopSettings(id)
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
@@ -1522,7 +1454,6 @@ export async function distillLoop(sourceId: string, byUser: string): Promise<Loo
     title: `distill: ${shortId} ${source.title}`,
     createdBy: byUser,
     knowledgeRw: true,
-    sandbox: await pickDefaultSandbox(),
   })
 
   // Snapshot the source's conversation into the child's workdir.

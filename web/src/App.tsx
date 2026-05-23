@@ -130,7 +130,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     return <AuthPage />
   }
 
-  const handleCreate = async (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => {
+  const handleCreate = async (opts: { title: string; repo?: string; profiles?: string[]; vault?: string }) => {
     const m = await ws.createLoop(opts)
     if (ws.kanbanCreateCtx) {
       await linkKanbanLoop(ws.kanbanCreateCtx.board, ws.kanbanCreateCtx.filename, ws.kanbanCreateCtx.cid, m.id)

@@ -1,0 +1,5 @@
+{
+  "name": "mode-review",
+  "description": "Code review 模式。叠加 reviewer agent + review checklist。",
+  "plugins": []
+}

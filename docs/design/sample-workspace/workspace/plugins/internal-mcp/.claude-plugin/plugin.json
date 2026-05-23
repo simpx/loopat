@@ -1,0 +1,6 @@
+{
+  "name": "internal-mcp",
+  "version": "2.0.0",
+  "description": "Acme 内部服务 MCP 接口。被 role-eng-* profiles 引用。",
+  "author": { "name": "Acme Platform Team" }
+}

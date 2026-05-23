@@ -45,47 +45,10 @@ export const chatDbPath = () => join(LOOPAT_HOME, "chat.db")
 
 export const personalMemoryDir = (user: string) => join(personalDir(user), "memory")
 export const workspaceMemoryDir = () => join(workspaceNotesDir(), "memory")
-// `.loopat/` is a reserved namespace under knowledge — slots for workspace Claude
-// supplements (skills, optional workspace CLAUDE.md). Everything else under
-// knowledge/ is plain workspace-owned docs.
-export const workspaceLoopatReservedDir = () => join(workspaceKnowledgeDir(), ".loopat")
-export const workspaceLoopatClaudeDir = () => join(workspaceLoopatReservedDir(), "claude")
-// Optional. If present, appended after the bundled platform doctrine.
-export const workspaceClaudePath = () => join(workspaceLoopatClaudeDir(), "CLAUDE.md")
-export const workspaceLoopatSkillsDir = () => join(workspaceLoopatClaudeDir(), "skills")
-// Workspace agents (admin-managed subagent .md files, lives under
-// knowledge/.loopat/claude/agents/). Each entry is a SINGLE .md file with
-// YAML frontmatter (name, description, tools, model + body = system prompt),
-// per Claude Code's subagent convention. Composed into the loop's
-// $CLAUDE_CONFIG_DIR/agents/ alongside personal agents.
-export const workspaceLoopatAgentsDir = () => join(workspaceLoopatClaudeDir(), "agents")
-// Sandbox-shared Claude Code state lives at
-// knowledge/.loopat/sandboxes/<name>/.claude/.claude.json — CC writes it
-// when admin runs `claude plugin install / marketplace add`. Loopat reads
-// mcpServers from there; helper in config.ts:loadSandboxClaudeJson.
-// Workspace sandbox catalog: each sandbox is a SUBDIRECTORY containing a
-// `mise.toml` (the runtime declaration mise reads) and optional `mise.lock`
-// (version pinning). mise's lockfile generation requires cwd-based config
-// discovery + `mise.toml` naming, which is why each sandbox is its own dir
-// rather than a flat `<name>.toml` file. The dir also leaves room for future
-// siblings like `mcp.json` / `AGENTS.md`. Personal sandboxes come later.
-export const workspaceLoopatSandboxesDir = () => join(workspaceLoopatReservedDir(), "sandboxes")
-export const workspaceLoopatSandboxDir = (name: string) =>
-  join(workspaceLoopatSandboxesDir(), name)
-export const workspaceLoopatSandboxPath = (name: string) =>
-  join(workspaceLoopatSandboxDir(name), "mise.toml")
-export const workspaceLoopatSandboxLockPath = (name: string) =>
-  join(workspaceLoopatSandboxDir(name), "mise.lock")
-// sandbox.json holds loopat-side metadata (shell etc.) — kept separate from
-// mise.toml so neither tool's file mixes concepts from the other.
-export const workspaceLoopatSandboxMetaPath = (name: string) =>
-  join(workspaceLoopatSandboxDir(name), "sandbox.json")
-
-// Per-loop sandbox snapshot: copy of catalog sandbox dir. cwd-discovered by mise.
-export const loopSandboxDir = (id: string) => join(loopDir(id), "sandbox")
-export const loopSandboxPath = (id: string) => join(loopSandboxDir(id), "mise.toml")
-export const loopSandboxLockPath = (id: string) => join(loopSandboxDir(id), "mise.lock")
-export const loopSandboxMetaPath = (id: string) => join(loopSandboxDir(id), "sandbox.json")
+// (Old `workspaceLoopat{Reserved,Claude,Skills,Agents,Sandbox*}` helpers
+// deleted — superseded by the tiered .claude/ model. Workspace CC config now
+// lives at `<knowledge>/.loopat/.claude/` and is accessed via
+// `workspaceTeamClaudeDir/SettingsPath/ClaudeMdPath/SkillsDir/AgentsDir` below.)
 
 // Per-loop $HOME overlay (docker container layer for home). The sandbox's
 // $HOME is an overlayfs mount: lower = workspaceHomeSkelDir (shared skeleton,
@@ -122,16 +85,17 @@ export const personalVaultsDir = (user: string) => join(personalLoopatDir(user),
  *  by git-crypt — content is per-active-vault, never seen across vaults. */
 export const personalMcpTokensPath = (user: string, vault: string) =>
   join(personalVaultsDir(user), vault, "mcp-tokens.json")
-// Personal claude/ namespace: mirrors knowledge/.loopat/claude/ for per-user
-// supplements. skills/ here become user-tier skills composed in.
-export const personalLoopatClaudeDir = (user: string) => join(personalLoopatDir(user), "claude")
-export const personalLoopatSkillsDir = (user: string) => join(personalLoopatClaudeDir(user), "skills")
-// Personal agents (per-user subagent .md files, mirrors workspace agents).
-export const personalLoopatAgentsDir = (user: string) => join(personalLoopatClaudeDir(user), "agents")
-/** Per-user Claude config (mcpServers etc.) — sibling of the workspace
- *  knowledge/.loopat/claude/claude.json. Same JSON shape; personal entries
- *  shadow workspace entries by name (user > admin tier ordering). */
-export const personalClaudeJsonPath = (user: string) => join(personalLoopatClaudeDir(user), "claude.json")
+// Personal `.claude/` — CC-native shape, mirrors `~/.claude/`. The 4th layer
+// in loopat's tiered .claude merge (workspace + profiles + personal + repo).
+// Contains: settings.json, CLAUDE.md, skills/, agents/.
+export const personalClaudeDir = (user: string) => join(personalDir(user), ".claude")
+export const personalClaudeMdPath = (user: string) => join(personalClaudeDir(user), "CLAUDE.md")
+export const personalSettingsPath = (user: string) => join(personalClaudeDir(user), "settings.json")
+export const personalSkillsDir = (user: string) => join(personalClaudeDir(user), "skills")
+export const personalAgentsDir = (user: string) => join(personalClaudeDir(user), "agents")
+/** Per-user mcpServers / settings — same JSON shape as workspace settings.json.
+ *  Personal entries shadow workspace entries by name (user > workspace tier). */
+export const personalClaudeJsonPath = (user: string) => personalSettingsPath(user)
 // Composed output inside each loop's .claude/. Regenerated every spawn.
 // Plugin loading does NOT touch the loop's .claude/ — SDK loads plugins via
 // its `plugins` option (resolved from server cache; see plugin-installer.ts).
@@ -159,3 +123,51 @@ export const hostDeployKeyPubPath = (user: string) => join(hostSecretsDir(user),
 export const personalGitCryptKeyPath = (user: string) => join(hostSecretsDir(user), "git-crypt.key")
 export const personalTokenUsagePath = (user: string) => join(personalLoopatDir(user), "token-usage.json")
 export const workspaceSecretsDir = () => join(workspaceDir(), "secrets")
+
+// ─── Profile composition model (post-2026-05 design, CC-native refactor) ─
+//
+// See docs/design/composition-model.md. The team workspace lives inside the
+// knowledge git repo at `.loopat/`, structured as a stack of CC-native
+// `.claude/` directories — one per tier (team / profile). loopat materializes
+// a merge of selected tiers into each loop's `.claude/`.
+//
+//   knowledge/.loopat/
+//     .claude/                                ← team-tier CC config
+//       settings.json (enabledPlugins, extraKnownMarketplaces)
+//       CLAUDE.md, skills/, agents/
+//     profiles/<name>/.claude/                ← profile-tier CC config
+//       settings.json, CLAUDE.md, skills/, agents/
+//     marketplace/                            ← team's local CC marketplace
+//       .claude-plugin/marketplace.json
+//       <plugin>/...
+//
+// No loopat-invented schema (profile.json gone). Admins use CC's own
+// commands (`claude plugin install --scope=project` etc.) inside these
+// dirs to edit team / profile configuration.
+export const workspaceLoopatRoot = () => join(workspaceKnowledgeDir(), ".loopat")
+
+// Team-tier .claude/ — analogous to ~/.claude/ but shared across team via git.
+export const workspaceTeamClaudeDir = () => join(workspaceLoopatRoot(), ".claude")
+export const workspaceTeamSettingsPath = () => join(workspaceTeamClaudeDir(), "settings.json")
+export const workspaceTeamClaudeMdPath = () => join(workspaceTeamClaudeDir(), "CLAUDE.md")
+export const workspaceTeamSkillsDir = () => join(workspaceTeamClaudeDir(), "skills")
+export const workspaceTeamAgentsDir = () => join(workspaceTeamClaudeDir(), "agents")
+
+// Profiles — each is a dir with a `.claude/` subdir (CC project-tier shape).
+export const workspaceProfilesDir = () => join(workspaceLoopatRoot(), "profiles")
+export const workspaceProfileDir = (name: string) => join(workspaceProfilesDir(), name)
+export const workspaceProfileClaudeDir = (name: string) =>
+  join(workspaceProfileDir(name), ".claude")
+export const workspaceProfileSettingsPath = (name: string) =>
+  join(workspaceProfileClaudeDir(name), "settings.json")
+export const workspaceProfileClaudeMdPath = (name: string) =>
+  join(workspaceProfileClaudeDir(name), "CLAUDE.md")
+export const workspaceProfileSkillsDir = (name: string) =>
+  join(workspaceProfileClaudeDir(name), "skills")
+export const workspaceProfileAgentsDir = (name: string) =>
+  join(workspaceProfileClaudeDir(name), "agents")
+
+// (Marketplace location is NOT a loopat convention. Teams choose where to
+// host private plugins — typically `<knowledge>/marketplace/` — and declare
+// it via `extraKnownMarketplaces` in their team `.claude/settings.json`.
+// loopat just registers whatever's declared; it doesn't probe fixed paths.)

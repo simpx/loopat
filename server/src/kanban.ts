@@ -5,7 +5,6 @@ import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { workspaceNotesDir } from "./paths"
 import { createLoop, patchLoopMeta, type LoopMeta } from "./loops"
-import { pickDefaultSandbox } from "./sandboxes"
 
 const execFileP = promisify(execFile)
 
@@ -596,7 +595,9 @@ export async function createLoopFromCard(
   const loop = await createLoop({
     title: card.text,
     createdBy: userId,
-    sandbox: await pickDefaultSandbox(),
+    // profiles: undefined → loop runs with base + personal CLAUDE.md only.
+    // Kanban-spawned loops can be promoted to specific profiles later by
+    // editing meta.config.profiles. (Was: sandbox: pickDefaultSandbox().)
   })
   // Set driver to the creating user
   await patchLoopMeta(loop.id, { driver: userId } as Partial<LoopMeta>)

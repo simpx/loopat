@@ -1,10 +1,12 @@
 /**
- * New Loop dialog. Layout/structure ported from phase1-prototype's
- * NewLoopDialog (DialogField + repo dropdown + slug preview). v5 has
- * the repo picker (5.3); personal-context picker comes later.
+ * New Loop dialog. Post-2026-05 profile model: pick zero or more profiles
+ * from the workspace (`context/profiles/<name>/`). `base` is implicit and
+ * shown as "always on". Empty selection still works (base + personal only).
+ *
+ * See docs/design/composition-model.md for the model.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { listSandboxes, listRepos, listVaults, type SandboxEntry, type RepoEntry } from "../../api"
+import { getDefaultProfiles, listProfiles, listRepos, listVaults, type ProfileEntry, type RepoEntry } from "../../api"
 
 export function NewLoopDialog({
   onClose,
@@ -12,40 +14,63 @@ export function NewLoopDialog({
   initialTitle,
 }: {
   onClose: () => void
-  onCreate: (opts: { title: string; repo?: string; sandbox?: string; vault?: string }) => Promise<string> | string
+  onCreate: (opts: { title: string; repo?: string; profiles?: string[]; vault?: string }) => Promise<string> | string
   initialTitle?: string
 }) {
   const [title, setTitle] = useState(initialTitle ?? "")
   const [repo, setRepo] = useState("")
-  const [sandbox, setSandbox] = useState("")
+  const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set())
+  const [defaultProfileNames, setDefaultProfileNames] = useState<string[]>([])
   const [vault, setVault] = useState("default")
   const [repos, setRepos] = useState<RepoEntry[]>([])
-  const [sandboxes, setSandboxes] = useState<SandboxEntry[]>([])
+  const [profiles, setProfiles] = useState<ProfileEntry[]>([])
   const [vaults, setVaults] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     listRepos().then(setRepos)
-    listSandboxes().then((xs) => {
-      setSandboxes(xs)
-      // Auto-pick a default when sandboxes exist. Preference: explicit "default"
-      // (the conventional name), else the alphabetical first (server already
-      // sorts). User can still pick "(none)" to opt out.
-      if (xs.length > 0) {
-        const preferred = xs.find((e) => e.name === "default") ?? xs[0]
-        setSandbox(preferred.name)
-      }
+    // Pre-check the user's default_profiles from personal config (diff style:
+    // dialog opens with the user's typical setup, they add/remove from there).
+    Promise.all([listProfiles(), getDefaultProfiles()]).then(([allProfiles, defaults]) => {
+      setProfiles(allProfiles)
+      setDefaultProfileNames(defaults)
+      // Only pre-check defaults that actually exist as profiles in the workspace
+      const available = new Set(allProfiles.map((p) => p.name))
+      setSelectedProfiles(new Set(defaults.filter((n) => available.has(n) && n !== "base")))
     })
     listVaults().then((vs) => {
       setVaults(vs)
-      // Preferred default = "default" if available, else first vault, else
-      // leave empty (server will warn but loop still spawns).
       if (vs.includes("default")) setVault("default")
       else if (vs.length > 0) setVault(vs[0])
     })
     inputRef.current?.focus()
   }, [])
+
+  function resetToDefaults() {
+    const available = new Set(profiles.map((p) => p.name))
+    setSelectedProfiles(new Set(defaultProfileNames.filter((n) => available.has(n) && n !== "base")))
+  }
+
+  const isDirtyFromDefaults = (() => {
+    const defaults = new Set(defaultProfileNames.filter((n) => n !== "base"))
+    if (defaults.size !== selectedProfiles.size) return true
+    for (const d of defaults) if (!selectedProfiles.has(d)) return true
+    return false
+  })()
+
+  // base is implicit (always-on per server). Show it but make it non-toggleable.
+  const baseEntry = profiles.find((p) => p.name === "base")
+  const nonBase = profiles.filter((p) => p.name !== "base")
+
+  function toggleProfile(name: string) {
+    setSelectedProfiles((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -55,9 +80,7 @@ export function NewLoopDialog({
       await onCreate({
         title: title.trim() || "untitled",
         repo: repo || undefined,
-        // Pass sandbox even when empty: the server distinguishes
-        // missing (apply default) from present-but-empty (explicit "(none)").
-        sandbox,
+        profiles: selectedProfiles.size > 0 ? [...selectedProfiles] : undefined,
         vault: vault || undefined,
       })
     } finally {
@@ -76,7 +99,7 @@ export function NewLoopDialog({
       >
         <div className="text-base font-semibold text-gray-900 mb-4">New loop</div>
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <DialogField label="Repo" hint="决定 workdir。可选 — 不选就是空 workdir。">
+          <DialogField label="Repo" hint="Sets the workdir. Optional — leave (none) for an empty workdir.">
             <select
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
@@ -92,32 +115,89 @@ export function NewLoopDialog({
             </select>
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
-                还没注册的 repo。在 ~/.loopat/context/repos/ 下 git clone 一个进来。
+                No repos registered. Run `git clone` into context/repos/&lt;name&gt;/.
               </div>
             )}
           </DialogField>
 
-          <DialogField label="Sandbox" hint="runtime toolchain (mise.toml). Not selected = inherit host PATH.">
-            <select
-              value={sandbox}
-              onChange={(e) => setSandbox(e.target.value)}
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
-            >
-              <option value="">(none)</option>
-              {sandboxes.map((e) => (
-                <option key={e.name} value={e.name}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
-            {sandboxes.length === 0 && (
-              <div className="text-[11px] text-gray-400 mt-1">
-                No sandboxes. Create one in Context → Sandboxes.
-              </div>
-            )}
+          <DialogField
+            label="Profiles"
+            hint="Each profile contributes plugins + a CLAUDE.md fragment. Empty = base + personal only."
+          >
+            <div className="border border-gray-300 rounded p-2 max-h-44 overflow-y-auto bg-white flex flex-col gap-1">
+              {baseEntry && (
+                <label className="flex items-start gap-2 px-1.5 py-1 rounded text-sm text-gray-500 cursor-not-allowed bg-gray-50">
+                  <input type="checkbox" checked disabled className="mt-0.5" />
+                  <span className="flex-1">
+                    <span className="font-medium">base</span>
+                    <span className="ml-1 text-[11px] text-gray-400">(always on)</span>
+                    {baseEntry.description && (
+                      <span className="block text-[11px] text-gray-400 mt-0.5">{baseEntry.description}</span>
+                    )}
+                  </span>
+                </label>
+              )}
+              {nonBase.map((p) => {
+                const checked = selectedProfiles.has(p.name)
+                const isDefault = defaultProfileNames.includes(p.name)
+                return (
+                  <label
+                    key={p.name}
+                    className={`flex items-start gap-2 px-1.5 py-1 rounded text-sm cursor-pointer hover:bg-gray-50 ${
+                      checked ? "bg-blue-50" : ""
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleProfile(p.name)}
+                      className="mt-0.5"
+                    />
+                    <span className="flex-1">
+                      <span className="font-medium text-gray-900">{p.name}</span>
+                      {isDefault && (
+                        <span
+                          className="ml-1.5 px-1 py-px text-[10px] rounded bg-gray-200 text-gray-600"
+                          title="In your default_profiles (personal config)"
+                        >
+                          default
+                        </span>
+                      )}
+                      {p.description && (
+                        <span className="block text-[11px] text-gray-500 mt-0.5">{p.description}</span>
+                      )}
+                    </span>
+                  </label>
+                )
+              })}
+              {nonBase.length === 0 && !baseEntry && (
+                <div className="text-[11px] text-gray-400 p-1.5">
+                  No profiles in workspace. Create directories under{" "}
+                  <code className="bg-gray-100 px-1 rounded">context/profiles/&lt;name&gt;/</code> with a
+                  profile.json.
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-[11px] text-gray-500">
+                {selectedProfiles.size > 0
+                  ? `Selected: ${[...selectedProfiles].join(", ")}`
+                  : "No profiles selected (base + personal only)"}
+              </span>
+              {isDirtyFromDefaults && defaultProfileNames.length > 0 && (
+                <button
+                  type="button"
+                  onClick={resetToDefaults}
+                  className="text-[11px] text-gray-500 hover:text-gray-900 underline"
+                  title="Restore default_profiles from your personal config"
+                >
+                  reset to defaults
+                </button>
+              )}
+            </div>
           </DialogField>
 
-          <DialogField label="Vault" hint="which keychain to inject — only this vault's secrets are visible inside the loop's sandbox.">
+          <DialogField label="Vault" hint="Which credential set to inject. Only this vault is visible inside the loop.">
             <select
               value={vault}
               onChange={(e) => setVault(e.target.value)}
@@ -132,14 +212,14 @@ export function NewLoopDialog({
             </select>
             {vaults.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
-                No vaults yet — using the default. Create more under{" "}
+                No vaults yet — using default. Create more under{" "}
                 <code className="bg-gray-100 px-1 rounded">personal/.loopat/vaults/&lt;name&gt;/</code>{" "}
                 to isolate prod / test credentials.
               </div>
             )}
           </DialogField>
 
-          <DialogField label="Name" hint="optional · 不填时显示 untitled">
+          <DialogField label="Name" hint="Optional — defaults to 'untitled'.">
             <input
               ref={inputRef}
               type="text"
@@ -149,10 +229,6 @@ export function NewLoopDialog({
               className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
             />
           </DialogField>
-
-          <div className="text-[11px] text-gray-400 -mt-2">
-            context (knowledge / notes / personal) 默认全挂；personal 子集 picker 后续 phase 再加
-          </div>
 
           <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-100">
             <button

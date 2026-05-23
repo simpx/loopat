@@ -1,0 +1,23 @@
+# Acme loopat workspace · ownership
+
+/profiles/base/                     @platform-team
+/knowledge/                         @platform-team
+/notes/                             @platform-team
+
+/profiles/role-eng-backend/         @eng-backend-leads
+/profiles/role-eng-frontend/        @eng-frontend-leads
+/profiles/role-eng-ml/              @eng-ml-leads
+/profiles/role-security/            @security-team
+/profiles/role-legal/               @legal-leads
+/profiles/role-pm/                  @pm-leads
+
+/profiles/mode-oncall/              @sre-team
+/profiles/mode-review/              @platform-team
+/profiles/mode-incident/            @sre-team
+/profiles/mode-planning/            @pm-leads
+
+/plugins/.claude-plugin/            @platform-team
+/plugins/internal-mcp/              @platform-team
+/plugins/pagerduty-mcp/             @sre-team
+/plugins/audit-mcp/                 @security-team
+/plugins/deploy-cli/                @platform-team

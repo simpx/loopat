@@ -15,7 +15,7 @@ import {
   workspaceKnowledgeDir,
   workspaceNotesDir,
   workspaceRepoDir,
-  workspaceClaudePath,
+  workspaceTeamClaudeMdPath,
 } from "./paths"
 import { listUsers } from "./auth"
 
@@ -84,7 +84,7 @@ async function checkUsers(): Promise<Check> {
 export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
-    { ok: true, label: `workspace supplement: knowledge/.loopat/claude/CLAUDE.md (${existsSync(workspaceClaudePath()) ? "present" : "absent"})` },
+    { ok: true, label: `team .claude/CLAUDE.md (${existsSync(workspaceTeamClaudeMdPath()) ? "present" : "absent"})` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
     describeRepos(cfg),

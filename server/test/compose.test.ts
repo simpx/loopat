@@ -1,472 +1,653 @@
 /**
- * Tests for sandbox extends + loop compose pipeline.
+ * Tests for the tiered .claude/ merge — loopat's core composition logic.
  *
- * Covers:
- *   - resolveSandboxChain (cycles, depth cap, multi-level)
- *   - resolveLoopPlugins (builtin always, sandbox plugins, chain union + child-wins)
- *   - loadSandboxClaudeJson (mcpServers + extraKnownMarketplaces chain merge)
- *   - composeSandboxDoctrine (concat order, missing files, idempotent cleanup)
- *   - snapshotSandboxIntoLoop (mise.toml/lock/json fallback up the chain)
- *   - createLoop integration: full materialized loop dir
+ * What we're testing:
+ *   1. mergeSettings: enabledPlugins / extraKnownMarketplaces union + last-wins
+ *   2. normalizeMarketplaceEntry: relative path resolution against source dir
+ *   3. composeSubdir: skills/agents symlink union with later-wins shadowing
+ *   4. composeFromPlan: full E2E with team + N profiles + personal + repo layers
+ *   5. Stress: 12+ .claude sources merging cleanly
+ *   6. Edge cases: empty sources, missing files, plugin disable overriding enable
  *
- * IMPORTANT: LOOPAT_HOME must be set BEFORE the source modules are imported
- * because paths.ts reads it at module load time. Tests then build fixture
- * sandboxes under that home; afterAll wipes it.
+ * NOTE: LOOPAT_HOME must be set BEFORE source imports — paths.ts reads it
+ * at module load time. Fixtures live under that home; afterAll wipes it.
  */
-import { test, expect, describe, beforeAll, afterAll, afterEach } from "bun:test"
-import { mkdir, rm, writeFile, readFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
+import { test, expect, describe, beforeAll, afterAll, beforeEach } from "bun:test"
+import { mkdir, rm, writeFile, readFile, readdir } from "node:fs/promises"
+import { existsSync, readlinkSync } from "node:fs"
 import { join } from "node:path"
 
-const TEST_HOME = `/tmp/loopat-compose-test-${process.pid}`
+const TEST_HOME = `/tmp/loopat-merge-test-${process.pid}`
 process.env.LOOPAT_HOME = TEST_HOME
 
-// Source imports happen AFTER LOOPAT_HOME is set so paths.ts captures it.
-const { resolveSandboxChain } = await import("../src/sandboxes")
-const { resolveLoopPlugins } = await import("../src/plugin-installer")
-const { loadSandboxClaudeJson } = await import("../src/config")
+// Imports AFTER LOOPAT_HOME is set
 const { composeLoopClaudeConfig } = await import("../src/compose")
-const { createLoop } = await import("../src/loops")
+const { resolveLoopPlan, listProfiles } = await import("../src/profiles")
 const {
-  workspaceLoopatSandboxDir,
-  workspaceLoopatSandboxesDir,
-  workspaceLoopatSandboxPath,
-  workspaceLoopatSandboxMetaPath,
   loopClaudeDir,
-  loopSandboxPath,
-  loopWorkdir,
-  TEMPLATES_DIR,
+  workspaceTeamClaudeDir,
+  workspaceProfileClaudeDir,
+  personalClaudeDir,
+  personalLoopatConfigPath,
 } = await import("../src/paths")
+// Avoid unused-var warning when tests below don't use this in every block
+void loopClaudeDir
 
-// ── fixture helpers ─────────────────────────────────────────────────────────
+// ─── fixture helpers ───────────────────────────────────────────────────
 
-type SandboxSpec = {
-  /** extends field for sandbox.json */
-  extendsName?: string
-  /** mise.toml content (omit = no file) */
-  miseToml?: string
-  /** CLAUDE.md content (omit = no file) */
+async function writeJson(path: string, obj: unknown) {
+  await mkdir(join(path, ".."), { recursive: true })
+  await writeFile(path, JSON.stringify(obj, null, 2))
+}
+
+async function writeMd(path: string, content: string) {
+  await mkdir(join(path, ".."), { recursive: true })
+  await writeFile(path, content)
+}
+
+/** Create a `.claude/` dir with given settings, CLAUDE.md, skill names, agent names. */
+async function makeClaudeDir(opts: {
+  dir: string
+  settings?: Record<string, any>
   claudeMd?: string
-  /** mcpServers — written to .claude/.claude.json */
-  mcpServers?: Record<string, { type: string; url: string }>
-  /** extraKnownMarketplaces — written to .claude/.claude.json (kept here for
-   *  test simplicity even though CC normally writes it to settings.json). */
-  extraKnownMarketplaces?: Record<string, any>
-  /** Plugins (name@market → version) — sets up .claude/plugins/installed_plugins.json
-   *  and creates dummy installPath dirs so resolver's existsSync passes. */
-  plugins?: Record<string, string>
-}
-
-/** Build a fixture sandbox at TEST_HOME/context/knowledge/.loopat/sandboxes/<name>/. */
-async function makeSandbox(name: string, spec: SandboxSpec = {}): Promise<void> {
-  const dir = workspaceLoopatSandboxDir(name)
-  await mkdir(dir, { recursive: true })
-  // sandbox.json
-  const meta: any = { shell: "bash" }
-  if (spec.extendsName) meta.extends = spec.extendsName
-  await writeFile(workspaceLoopatSandboxMetaPath(name), JSON.stringify(meta))
-  // mise.toml
-  if (spec.miseToml !== undefined) {
-    await writeFile(workspaceLoopatSandboxPath(name), spec.miseToml)
+  skills?: string[]
+  agents?: string[]
+}) {
+  await mkdir(opts.dir, { recursive: true })
+  if (opts.settings !== undefined) {
+    await writeJson(join(opts.dir, "settings.json"), opts.settings)
   }
-  // CLAUDE.md
-  if (spec.claudeMd !== undefined) {
-    await writeFile(join(dir, "CLAUDE.md"), spec.claudeMd)
+  if (opts.claudeMd !== undefined) {
+    await writeMd(join(opts.dir, "CLAUDE.md"), opts.claudeMd)
   }
-  // .claude/.claude.json (mcpServers + extraKnownMarketplaces)
-  if (spec.mcpServers || spec.extraKnownMarketplaces) {
-    await mkdir(join(dir, ".claude"), { recursive: true })
-    const claudeJson: any = {}
-    if (spec.mcpServers) claudeJson.mcpServers = spec.mcpServers
-    if (spec.extraKnownMarketplaces) claudeJson.extraKnownMarketplaces = spec.extraKnownMarketplaces
-    await writeFile(join(dir, ".claude", ".claude.json"), JSON.stringify(claudeJson))
+  for (const s of opts.skills ?? []) {
+    const skillDir = join(opts.dir, "skills", s)
+    await mkdir(skillDir, { recursive: true })
+    await writeMd(join(skillDir, "SKILL.md"), `---\nname: ${s}\ndescription: test skill ${s}\n---\n\n${s} body`)
   }
-  // installed_plugins.json + fake plugin install dirs (resolver checks existsSync)
-  if (spec.plugins) {
-    const pluginsDir = join(dir, ".claude", "plugins")
-    await mkdir(pluginsDir, { recursive: true })
-    const ip: any = { version: 2, plugins: {} }
-    for (const [key, version] of Object.entries(spec.plugins)) {
-      const [pluginName, marketName] = key.split("@")
-      const installPath = join(pluginsDir, "cache", marketName, pluginName, version)
-      await mkdir(installPath, { recursive: true })
-      // Drop a marker so the dir's not pretending to be empty.
-      await writeFile(join(installPath, "marker"), key)
-      ip.plugins[key] = [{ installPath, version, gitCommitSha: "fake" + key }]
-    }
-    await writeFile(join(pluginsDir, "installed_plugins.json"), JSON.stringify(ip))
+  for (const a of opts.agents ?? []) {
+    await writeMd(join(opts.dir, "agents", `${a}.md`), `---\nname: ${a}\n---\n\n${a} body`)
   }
 }
 
-// ── lifecycle ──────────────────────────────────────────────────────────────
+async function makeProfile(name: string, opts: Omit<Parameters<typeof makeClaudeDir>[0], "dir">) {
+  await makeClaudeDir({ ...opts, dir: workspaceProfileClaudeDir(name) })
+}
 
-beforeAll(async () => {
+async function makeTeam(opts: Omit<Parameters<typeof makeClaudeDir>[0], "dir">) {
+  await makeClaudeDir({ ...opts, dir: workspaceTeamClaudeDir() })
+}
+
+async function makePersonal(user: string, opts: Omit<Parameters<typeof makeClaudeDir>[0], "dir"> & {
+  defaultProfiles?: string[]
+}) {
+  await makeClaudeDir({ ...opts, dir: personalClaudeDir(user) })
+  await writeJson(personalLoopatConfigPath(user), {
+    default_profiles: opts.defaultProfiles ?? [],
+    default_vault: "default",
+  })
+}
+
+async function reset() {
   await rm(TEST_HOME, { recursive: true, force: true })
-  await mkdir(workspaceLoopatSandboxesDir(), { recursive: true })
-  // Base dirs the resolver / createLoop touch.
-  await mkdir(`${TEST_HOME}/loops`, { recursive: true })
-  await mkdir(`${TEST_HOME}/context/knowledge/.loopat/claude/skills`, { recursive: true })
-  await mkdir(`${TEST_HOME}/context/knowledge/.loopat/claude/agents`, { recursive: true })
-  await mkdir(`${TEST_HOME}/context/notes`, { recursive: true })
-  await mkdir(`${TEST_HOME}/personal/testuser/.loopat/claude/skills`, { recursive: true })
-  // Pre-write workspace config so loadConfig() doesn't lazy-create the
-  // default template (which lists simpx/loopat as a repo to auto-clone —
-  // would hang the test on git network IO).
-  await writeFile(`${TEST_HOME}/config.json`, JSON.stringify({
-    providers: {},
-    knowledge: { git: "" },
-    notes: { git: "" },
-    repos: [],
-  }))
+  await mkdir(TEST_HOME, { recursive: true })
+}
+
+beforeAll(async () => { await reset() })
+afterAll(async () => { await rm(TEST_HOME, { recursive: true, force: true }) })
+beforeEach(async () => { await reset() })
+
+// ─── 1. enabledPlugins union ───────────────────────────────────────────
+
+describe("mergeSettings — enabledPlugins union", () => {
+  test("union across sources, all preserved", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "team-plugin@mp": true } } })
+    await makeProfile("p1", { settings: { enabledPlugins: { "p1-plugin@mp": true } } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-test-1", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.enabledPlugins).toEqual({
+      "team-plugin@mp": true,
+      "p1-plugin@mp": true,
+    })
+  })
+
+  test("later source can DISABLE a plugin enabled earlier", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "foo@mp": true } } })
+    await makeProfile("p1", { settings: { enabledPlugins: { "foo@mp": false } } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-test-2", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.enabledPlugins["foo@mp"]).toBe(false)
+    expect(result.enabledPlugins).not.toContain("foo@mp")
+  })
+
+  test("disabled plugin can be re-enabled by later source", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "foo@mp": false } } })
+    await makeProfile("p1", { settings: { enabledPlugins: { "foo@mp": true } } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-test-3", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.enabledPlugins["foo@mp"]).toBe(true)
+    expect(result.enabledPlugins).toContain("foo@mp")
+  })
 })
 
-afterEach(async () => {
-  // Clear sandboxes between tests so names don't collide across describes.
-  await rm(workspaceLoopatSandboxesDir(), { recursive: true, force: true })
-  await mkdir(workspaceLoopatSandboxesDir(), { recursive: true })
+// ─── 2. extraKnownMarketplaces — union + path normalization ────────────
+
+describe("mergeSettings — extraKnownMarketplaces", () => {
+  test("union across sources", async () => {
+    await makeTeam({ settings: { extraKnownMarketplaces: { mp1: { source: { source: "github", repo: "x/y" } } } } })
+    await makeProfile("p1", { settings: { extraKnownMarketplaces: { mp2: { source: { source: "github", repo: "a/b" } } } } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-mp-1", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(Object.keys(merged.extraKnownMarketplaces ?? {}).sort()).toEqual(["mp1", "mp2"])
+  })
+
+  test("relative directory path resolves against source settings.json dir", async () => {
+    // team settings at <knowledge>/.loopat/.claude/ → "../../marketplace" = <knowledge>/marketplace/
+    await makeTeam({
+      settings: {
+        extraKnownMarketplaces: {
+          "team-mp": { source: { source: "directory", path: "../../marketplace" } },
+        },
+      },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-mp-2", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    const path = merged.extraKnownMarketplaces["team-mp"].source.path
+    expect(path).toMatch(/^\//)
+    expect(path.endsWith("/knowledge/marketplace")).toBe(true)
+  })
+
+  test("absolute directory path preserved as-is", async () => {
+    await makeTeam({
+      settings: {
+        extraKnownMarketplaces: { "abs-mp": { source: { source: "directory", path: "/some/abs/path" } } },
+      },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-mp-3", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.extraKnownMarketplaces["abs-mp"].source.path).toBe("/some/abs/path")
+  })
+
+  test("non-directory sources (github, url) pass through unchanged", async () => {
+    await makeTeam({
+      settings: {
+        extraKnownMarketplaces: {
+          "gh-mp": { source: { source: "github", repo: "anthropics/claude-plugins-official" } },
+          "url-mp": { source: { source: "url", url: "https://example.com/m.json" } },
+        },
+      },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-mp-4", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.extraKnownMarketplaces["gh-mp"]).toEqual({
+      source: { source: "github", repo: "anthropics/claude-plugins-official" },
+    })
+    expect(merged.extraKnownMarketplaces["url-mp"]).toEqual({
+      source: { source: "url", url: "https://example.com/m.json" },
+    })
+  })
+
+  test("each source resolves relative paths against ITS OWN settings dir", async () => {
+    await makeTeam({
+      settings: { extraKnownMarketplaces: { "team-rel": { source: { source: "directory", path: "../foo" } } } },
+    })
+    await makeProfile("p1", {
+      settings: { extraKnownMarketplaces: { "p1-rel": { source: { source: "directory", path: "../foo" } } } },
+    })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-mp-5", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    const teamPath = merged.extraKnownMarketplaces["team-rel"].source.path
+    const p1Path = merged.extraKnownMarketplaces["p1-rel"].source.path
+    expect(teamPath).not.toBe(p1Path)
+    expect(teamPath.endsWith("/.loopat/foo")).toBe(true)
+    expect(p1Path.endsWith("/profiles/p1/foo")).toBe(true)
+  })
 })
 
-afterAll(async () => {
-  await rm(TEST_HOME, { recursive: true, force: true })
+// ─── 3. Other settings field semantics ─────────────────────────────────
+
+describe("mergeSettings — other fields", () => {
+  test("primitives: later source wins", async () => {
+    await makeTeam({ settings: { someInt: 1, someStr: "team" } })
+    await makeProfile("p1", { settings: { someInt: 2, someStr: "p1" } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-prim-1", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.someInt).toBe(2)
+    expect(merged.someStr).toBe("p1")
+  })
+
+  test("arrays: later source replaces", async () => {
+    await makeTeam({ settings: { someArr: ["a", "b"] } })
+    await makeProfile("p1", { settings: { someArr: ["c"] } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-arr-1", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.someArr).toEqual(["c"])
+  })
+
+  test("_comment field stripped", async () => {
+    await makeTeam({ settings: { _comment: "team", enabledPlugins: {} } })
+    await makeProfile("p1", { settings: { _comment: "p1" } })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-comment", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged._comment).toBeUndefined()
+  })
+
+  test("loopat injects autoMemory fields", async () => {
+    await makePersonal("alice", { defaultProfiles: [] })
+    const result = await composeLoopClaudeConfig("loop-auto", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.autoMemoryEnabled).toBe(true)
+    expect(merged.autoMemoryDirectory).toBeDefined()
+  })
 })
 
-// ── resolveSandboxChain ────────────────────────────────────────────────────
+// ─── 4. CLAUDE.md concat ────────────────────────────────────────────────
 
-describe("resolveSandboxChain", () => {
-  test("single sandbox without extends → 1-element chain", async () => {
-    await makeSandbox("solo")
-    expect(await resolveSandboxChain("solo")).toEqual(["solo"])
+describe("CLAUDE.md concat", () => {
+  test("order: team → profile → personal", async () => {
+    await makeTeam({ claudeMd: "# Team" })
+    await makeProfile("p1", { claudeMd: "# P1" })
+    await makePersonal("alice", { claudeMd: "# Alice", defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-md-1", "alice")
+    const body = await readFile(result.claudeMdPath, "utf8")
+    expect(body.indexOf("# Team")).toBeLessThan(body.indexOf("# P1"))
+    expect(body.indexOf("# P1")).toBeLessThan(body.indexOf("# Alice"))
   })
 
-  test("2-level: child → parent, returned oldest-first", async () => {
-    await makeSandbox("parent")
-    await makeSandbox("child", { extendsName: "parent" })
-    expect(await resolveSandboxChain("child")).toEqual(["parent", "child"])
+  test("section markers identify each source", async () => {
+    await makeTeam({ claudeMd: "Team body" })
+    await makeProfile("p1", { claudeMd: "P1 body" })
+    await makePersonal("alice", { claudeMd: "Alice body", defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-md-2", "alice")
+    const body = await readFile(result.claudeMdPath, "utf8")
+    expect(body).toContain("<!-- ========== team ========== -->")
+    expect(body).toContain("<!-- ========== profile:p1 ========== -->")
+    expect(body).toContain("<!-- ========== personal:alice ========== -->")
   })
 
-  test("3-level: grandparent → parent → child", async () => {
-    await makeSandbox("gp")
-    await makeSandbox("p", { extendsName: "gp" })
-    await makeSandbox("c", { extendsName: "p" })
-    expect(await resolveSandboxChain("c")).toEqual(["gp", "p", "c"])
+  test("missing source files silently skipped", async () => {
+    await makeTeam({ claudeMd: "Team body" })
+    await makeProfile("p2", {}) // no CLAUDE.md
+    await makePersonal("alice", { defaultProfiles: ["p2"] })
+
+    const result = await composeLoopClaudeConfig("loop-md-3", "alice")
+    const body = await readFile(result.claudeMdPath, "utf8")
+    expect(body).toContain("Team body")
+    expect(body).not.toContain("profile:p2")
   })
 
-  test("self-loop is detected, chain stops at self", async () => {
-    await makeSandbox("self", { extendsName: "self" })
-    expect(await resolveSandboxChain("self")).toEqual(["self"])
+  test("no CLAUDE.md anywhere → file does not exist", async () => {
+    await makePersonal("alice", { defaultProfiles: [] })
+    const result = await composeLoopClaudeConfig("loop-md-4", "alice")
+    expect(existsSync(result.claudeMdPath)).toBe(false)
+  })
+})
+
+// ─── 5. skills/agents symlink union ─────────────────────────────────────
+
+describe("skills/agents symlink union", () => {
+  test("skills from all sources union'd", async () => {
+    await makeTeam({ skills: ["s-team-1", "s-team-2"] })
+    await makeProfile("p1", { skills: ["s-p1"] })
+    await makePersonal("alice", { skills: ["s-alice"], defaultProfiles: ["p1"] })
+
+    await composeLoopClaudeConfig("loop-skills-1", "alice")
+    const entries = await readdir(join(loopClaudeDir("loop-skills-1"), "skills"))
+    expect(entries.sort()).toEqual(["s-alice", "s-p1", "s-team-1", "s-team-2"])
   })
 
-  test("mutual cycle (a→b→a) is detected", async () => {
-    await makeSandbox("a", { extendsName: "b" })
-    await makeSandbox("b", { extendsName: "a" })
-    const chain = await resolveSandboxChain("a")
-    // Both names appear once; no infinite loop.
-    expect(chain.length).toBe(2)
-    expect(new Set(chain)).toEqual(new Set(["a", "b"]))
+  test("same-name skill from later source shadows earlier", async () => {
+    await makeTeam({ skills: ["dup"] })
+    await makeProfile("p1", { skills: ["dup"] })
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    await composeLoopClaudeConfig("loop-skills-2", "alice")
+    const dupLink = readlinkSync(join(loopClaudeDir("loop-skills-2"), "skills", "dup"))
+    expect(dupLink).toContain("/profiles/p1/.claude/skills/dup")
   })
 
-  test("depth limit (5): 7-deep chain truncates", async () => {
-    for (let i = 0; i < 7; i++) {
-      await makeSandbox(`d${i}`, i === 0 ? {} : { extendsName: `d${i - 1}` })
+  test("agents are .md files", async () => {
+    await makeTeam({ agents: ["a1"] })
+    await makeProfile("p1", { agents: ["a2"] })
+    await makePersonal("alice", { agents: ["a3"], defaultProfiles: ["p1"] })
+
+    await composeLoopClaudeConfig("loop-agents-1", "alice")
+    const entries = await readdir(join(loopClaudeDir("loop-agents-1"), "agents"))
+    expect(entries.sort()).toEqual(["a1.md", "a2.md", "a3.md"])
+  })
+})
+
+// ─── 6. Profile selection ──────────────────────────────────────────────
+
+describe("resolveLoopPlan — profile selection", () => {
+  test("default_profiles loaded from personal config", async () => {
+    await makeProfile("role-a", {})
+    await makeProfile("role-b", {})
+    await makePersonal("alice", { defaultProfiles: ["role-a", "role-b"] })
+
+    const plan = await resolveLoopPlan({ user: "alice" })
+    expect(plan.profiles).toEqual(["role-a", "role-b"])
+  })
+
+  test("cliAdded appends", async () => {
+    await makeProfile("role-a", {})
+    await makeProfile("mode-c", {})
+    await makePersonal("alice", { defaultProfiles: ["role-a"] })
+
+    const plan = await resolveLoopPlan({ user: "alice", cliAdded: ["mode-c"] })
+    expect(plan.profiles).toEqual(["role-a", "mode-c"])
+  })
+
+  test("cliRemoved drops", async () => {
+    await makeProfile("role-a", {})
+    await makeProfile("role-b", {})
+    await makePersonal("alice", { defaultProfiles: ["role-a", "role-b"] })
+
+    const plan = await resolveLoopPlan({ user: "alice", cliRemoved: ["role-a"] })
+    expect(plan.profiles).toEqual(["role-b"])
+  })
+
+  test("overrideProfiles replaces defaults", async () => {
+    await makeProfile("role-a", {})
+    await makeProfile("mode-x", {})
+    await makePersonal("alice", { defaultProfiles: ["role-a"] })
+
+    const plan = await resolveLoopPlan({ user: "alice", overrideProfiles: ["mode-x"] })
+    expect(plan.profiles).toEqual(["mode-x"])
+  })
+
+  test("missing profile errors", async () => {
+    // Create at least one profile so profiles/ dir exists; then ask for a missing one
+    await makeProfile("real-profile", {})
+    await makePersonal("alice", { defaultProfiles: ["does-not-exist"] })
+    await expect(resolveLoopPlan({ user: "alice" })).rejects.toThrow(/does-not-exist/)
+  })
+
+  test("workdir/.claude/ becomes 5th source layer", async () => {
+    await makeProfile("role-a", {})
+    await makePersonal("alice", { defaultProfiles: ["role-a"] })
+    const workdir = join(TEST_HOME, "fake-workdir")
+    await makeClaudeDir({ dir: join(workdir, ".claude"), claudeMd: "# Repo" })
+
+    const plan = await resolveLoopPlan({ user: "alice", workdir })
+    expect(plan.claudeSources.map((s) => s.source)).toContain(`repo:${workdir}`)
+  })
+})
+
+// ─── 7. STRESS: 12+ .claude sources merge cleanly ──────────────────────
+
+describe("stress — 12 .claude sources", () => {
+  test("12 profiles + team + personal merge without breaking", async () => {
+    await makeTeam({
+      settings: { enabledPlugins: { "team-base@mp": true } },
+      claudeMd: "# Team",
+      skills: ["team-skill"],
+    })
+
+    const profileNames: string[] = []
+    for (let i = 0; i < 12; i++) {
+      const name = `mode-${i.toString().padStart(2, "0")}`
+      profileNames.push(name)
+      await makeProfile(name, {
+        settings: { enabledPlugins: { [`p${i}@mp`]: true } },
+        claudeMd: `# Profile ${i}`,
+        skills: [`skill-${i}`],
+      })
     }
-    const chain = await resolveSandboxChain("d6")
-    expect(chain.length).toBeLessThanOrEqual(5)
-  })
+    await makePersonal("alice", {
+      defaultProfiles: profileNames,
+      skills: ["personal-skill"],
+      claudeMd: "# Personal",
+    })
 
-  test("invalid extends target (bad name) stops the walk", async () => {
-    await makeSandbox("ok", { extendsName: "../escape" })
-    expect(await resolveSandboxChain("ok")).toEqual(["ok"])
-  })
+    const result = await composeLoopClaudeConfig("loop-stress", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
 
-  test("dangling extends (parent dir doesn't exist) is tolerated", async () => {
-    await makeSandbox("orphan", { extendsName: "nonexistent" })
-    // Chain walks until readSandboxMeta returns null. Both names appear
-    // (oldest-first). Downstream readers skip missing files gracefully —
-    // admin error doesn't crash the resolver.
-    const chain = await resolveSandboxChain("orphan")
-    expect(chain).toEqual(["nonexistent", "orphan"])
+    // 13 plugins enabled (team-base + 12 profile plugins)
+    const enabledKeys = Object.entries(merged.enabledPlugins ?? {})
+      .filter(([_, v]) => v).map(([k]) => k)
+    expect(enabledKeys.length).toBe(13)
+    expect(enabledKeys).toContain("team-base@mp")
+    for (let i = 0; i < 12; i++) {
+      expect(enabledKeys).toContain(`p${i}@mp`)
+    }
+
+    // 14 distinct skills
+    const skills = await readdir(join(loopClaudeDir("loop-stress"), "skills"))
+    expect(skills.length).toBe(14)
+
+    // 14 CLAUDE.md sections (team + 12 + personal)
+    const md = await readFile(result.claudeMdPath, "utf8")
+    const markers = md.match(/<!-- ========== /g) ?? []
+    expect(markers.length).toBe(14)
+
+    // result lists also reflect this
+    expect(result.enabledPlugins.length).toBe(13)
+    expect(result.sources.length).toBe(14)
   })
 })
 
-// ── resolveLoopPlugins ─────────────────────────────────────────────────────
+// ─── 8. ComposeResult shape ─────────────────────────────────────────────
 
-describe("resolveLoopPlugins", () => {
-  test("no sandbox → builtin loopat only", async () => {
-    const plugins = await resolveLoopPlugins(undefined)
-    expect(plugins).toHaveLength(1)
-    expect(plugins[0].name).toBe("loopat@builtin")
-    expect(plugins[0].path).toBe(join(TEMPLATES_DIR, "plugins", "loopat"))
-  })
-
-  test("sandbox with plugins: builtin + sandbox", async () => {
-    await makeSandbox("with-plugins", {
-      plugins: { "foo@m1": "1.0.0", "bar@m2": "2.0.0" },
+describe("composeFromPlan E2E", () => {
+  test("returns enabledPlugins (true only) and extraMarketplaces list", async () => {
+    await makeTeam({
+      settings: {
+        enabledPlugins: { "a@mp": true, "b@mp": false },
+        extraKnownMarketplaces: {
+          "mp": { source: { source: "directory", path: "../mp-here" } },
+          "remote": { source: { source: "github", repo: "x/y" } },
+        },
+      },
     })
-    const plugins = await resolveLoopPlugins("with-plugins")
-    const names = plugins.map((p) => p.name).sort()
-    expect(names).toEqual(["bar@m2", "foo@m1", "loopat@builtin"])
-  })
+    await makePersonal("alice", { defaultProfiles: [] })
 
-  test("extends: child adds plugins, parent's also included", async () => {
-    await makeSandbox("base-p", { plugins: { "a@m1": "1.0.0" } })
-    await makeSandbox("ext-p", { extendsName: "base-p", plugins: { "b@m1": "1.0.0" } })
-    const plugins = await resolveLoopPlugins("ext-p")
-    const names = plugins.map((p) => p.name).sort()
-    expect(names).toEqual(["a@m1", "b@m1", "loopat@builtin"])
-  })
-
-  test("extends: child overrides parent with same name@market (child path wins)", async () => {
-    await makeSandbox("parent-ovr", { plugins: { "foo@m1": "1.0.0" } })
-    await makeSandbox("child-ovr", { extendsName: "parent-ovr", plugins: { "foo@m1": "2.0.0" } })
-    const plugins = await resolveLoopPlugins("child-ovr")
-    const foo = plugins.find((p) => p.name === "foo@m1")!
-    expect(foo.path).toContain("/2.0.0") // child's version dir, not parent's 1.0.0
-  })
-
-  test("3-level: grandparent contributes too", async () => {
-    await makeSandbox("gp-p", { plugins: { "a@m": "1" } })
-    await makeSandbox("p-p", { extendsName: "gp-p", plugins: { "b@m": "1" } })
-    await makeSandbox("c-p", { extendsName: "p-p", plugins: { "c@m": "1" } })
-    const plugins = await resolveLoopPlugins("c-p")
-    const names = plugins.map((p) => p.name).sort()
-    expect(names).toEqual(["a@m", "b@m", "c@m", "loopat@builtin"])
-  })
-
-  test("missing installPath warns and is skipped", async () => {
-    await makeSandbox("broken", { plugins: { "ok@m": "1" } })
-    // Manually corrupt installed_plugins.json with bad path
-    const ipPath = join(workspaceLoopatSandboxDir("broken"), ".claude", "plugins", "installed_plugins.json")
-    const ip = JSON.parse(await readFile(ipPath, "utf8"))
-    ip.plugins["ghost@m"] = [{ installPath: "/nonexistent/abc", version: "x", gitCommitSha: "x" }]
-    await writeFile(ipPath, JSON.stringify(ip))
-    const plugins = await resolveLoopPlugins("broken")
-    expect(plugins.map((p) => p.name).sort()).toEqual(["loopat@builtin", "ok@m"])
-  })
-
-  test("sandbox with no plugins file → just builtin", async () => {
-    await makeSandbox("empty-p")
-    const plugins = await resolveLoopPlugins("empty-p")
-    expect(plugins.map((p) => p.name)).toEqual(["loopat@builtin"])
-  })
-
-  test("marketplace source path preferred over cache (handles symlinks)", async () => {
-    // Simulate the dashscope-skills situation: cache is incomplete (CC
-    // didn't follow a symlink during install) but marketplace source has
-    // the full plugin. Resolver should pick the source path.
-    const sb = "src-pref"
-    await makeSandbox(sb, { plugins: { "foo@m1": "1.0.0" } })
-    const claudeDir = join(workspaceLoopatSandboxDir(sb), ".claude")
-    // Build a fake local marketplace with plugin source containing skills/
-    const mpRoot = join(claudeDir, "plugins", "marketplaces", "m1")
-    await mkdir(join(mpRoot, ".claude-plugin"), { recursive: true })
-    await writeFile(
-      join(mpRoot, ".claude-plugin", "marketplace.json"),
-      JSON.stringify({ name: "m1", plugins: [{ name: "foo", source: "./plugins/foo" }] }),
-    )
-    const sourcePluginDir = join(mpRoot, "plugins", "foo")
-    await mkdir(join(sourcePluginDir, "skills", "foo"), { recursive: true })
-    await writeFile(join(sourcePluginDir, "skills", "foo", "SKILL.md"), "---\ndescription: x\n---\n")
-    // Point known_marketplaces.json at our fake marketplace
-    await writeFile(
-      join(claudeDir, "plugins", "known_marketplaces.json"),
-      JSON.stringify({ m1: { installLocation: mpRoot } }),
-    )
-    const plugins = await resolveLoopPlugins(sb)
-    const foo = plugins.find((p) => p.name === "foo@m1")!
-    expect(foo.path).toBe(sourcePluginDir) // source, not the empty cache dir
+    const r = await composeLoopClaudeConfig("loop-shape-1", "alice")
+    expect(r.enabledPlugins).toEqual(["a@mp"])
+    expect(r.extraMarketplaces.sort()).toEqual(["mp", "remote"])
+    expect(r.sources).toContain("team")
+    expect(r.sources).toContain("personal:alice")
   })
 })
 
-// ── loadSandboxClaudeJson (mcpServers + extraKnownMarketplaces merge) ──────
+// ─── 9. mise.toml + mise.lock merge ────────────────────────────────────
 
-describe("loadSandboxClaudeJson", () => {
-  test("no sandbox name → empty", async () => {
-    const r = await loadSandboxClaudeJson(undefined)
-    expect(r).toEqual({})
-  })
-
-  test("single sandbox mcpServers passthrough", async () => {
-    await makeSandbox("solo-mcp", {
-      mcpServers: { foo: { type: "http", url: "https://foo" } },
-    })
-    const r = await loadSandboxClaudeJson("solo-mcp")
-    expect(r.mcpServers).toEqual({ foo: { type: "http", url: "https://foo" } })
-  })
-
-  test("extends: child adds new mcp server, parent's preserved", async () => {
-    await makeSandbox("base-mcp", { mcpServers: { p1: { type: "http", url: "https://p1" } } })
-    await makeSandbox("ext-mcp", {
-      extendsName: "base-mcp",
-      mcpServers: { c1: { type: "http", url: "https://c1" } },
-    })
-    const r = await loadSandboxClaudeJson("ext-mcp")
-    expect(Object.keys(r.mcpServers!).sort()).toEqual(["c1", "p1"])
-  })
-
-  test("extends: child overrides parent same-name server (child URL wins)", async () => {
-    await makeSandbox("ovr-base", { mcpServers: { foo: { type: "http", url: "https://parent" } } })
-    await makeSandbox("ovr-child", {
-      extendsName: "ovr-base",
-      mcpServers: { foo: { type: "http", url: "https://child" } },
-    })
-    const r = await loadSandboxClaudeJson("ovr-child")
-    expect((r.mcpServers!.foo as any).url).toBe("https://child")
-  })
-
-  test("extraKnownMarketplaces merge by key", async () => {
-    await makeSandbox("base-mp", { extraKnownMarketplaces: { mp1: { source: { source: "git", url: "u1" } } } })
-    await makeSandbox("ext-mp", {
-      extendsName: "base-mp",
-      extraKnownMarketplaces: { mp2: { source: { source: "github", repo: "x/y" } } },
-    })
-    const r = await loadSandboxClaudeJson("ext-mp")
-    expect(Object.keys(r.extraKnownMarketplaces!).sort()).toEqual(["mp1", "mp2"])
-  })
-
-  test("3-level: all ancestors contribute", async () => {
-    await makeSandbox("gp-mcp", { mcpServers: { gp: { type: "http", url: "u-gp" } } })
-    await makeSandbox("p-mcp", { extendsName: "gp-mcp", mcpServers: { p: { type: "http", url: "u-p" } } })
-    await makeSandbox("c-mcp", { extendsName: "p-mcp", mcpServers: { c: { type: "http", url: "u-c" } } })
-    const r = await loadSandboxClaudeJson("c-mcp")
-    expect(Object.keys(r.mcpServers!).sort()).toEqual(["c", "gp", "p"])
-  })
-})
-
-// ── composeSandboxDoctrine (via composeLoopClaudeConfig) ───────────────────
-
-describe("composeSandboxDoctrine", () => {
-  /** Set up a fake loop dir + run compose; return loop's .claude/CLAUDE.md path. */
-  async function composeFor(sandboxName: string | undefined): Promise<string> {
-    const loopId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    await mkdir(loopClaudeDir(loopId), { recursive: true })
-    await composeLoopClaudeConfig(loopId, "testuser", sandboxName)
-    return join(loopClaudeDir(loopId), "CLAUDE.md")
+describe("mise.toml merge (toolchain layer)", () => {
+  async function writeToml(path: string, content: string) {
+    await mkdir(join(path, ".."), { recursive: true })
+    await writeFile(path, content)
   }
 
-  test("single sandbox CLAUDE.md → written verbatim", async () => {
-    await makeSandbox("doc-solo", { claudeMd: "# Doc\nSolo content." })
-    const dst = await composeFor("doc-solo")
-    expect(existsSync(dst)).toBe(true)
-    const content = await readFile(dst, "utf8")
-    expect(content.trim()).toBe("# Doc\nSolo content.")
+  test("union of [tools] across sources, last wins per-key", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.toml"), `
+[tools]
+node = "20"
+python = "3.12"
+`)
+    await makeProfile("ml", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("ml"), "mise.toml"), `
+[tools]
+python = "3.13"
+cuda = "12.4"
+`)
+    await makePersonal("alice", { defaultProfiles: ["ml"] })
+    await writeToml(join(personalClaudeDir("alice"), "mise.toml"), `
+[tools]
+node = "22"
+`)
+
+    const result = await composeLoopClaudeConfig("loop-mise-1", "alice")
+    expect(result.miseTomlPath).toBeTruthy()
+    const merged = await readFile(result.miseTomlPath!, "utf8")
+    expect(merged).toContain('node = "22"')      // personal wins over team
+    expect(merged).toContain('python = "3.13"')  // profile wins over team
+    expect(merged).toContain('cuda = "12.4"')    // profile-only
   })
 
-  test("parent → child concat with separator", async () => {
-    await makeSandbox("doc-p", { claudeMd: "Parent rules." })
-    await makeSandbox("doc-c", { extendsName: "doc-p", claudeMd: "Child rules." })
-    const dst = await composeFor("doc-c")
-    const content = await readFile(dst, "utf8")
-    expect(content).toContain("Parent rules.")
-    expect(content).toContain("Child rules.")
-    // Parent comes first.
-    expect(content.indexOf("Parent")).toBeLessThan(content.indexOf("Child"))
-    // Separator present.
-    expect(content).toContain("\n\n---\n\n")
+  test("union of [env] across sources, last wins per-key", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.toml"), `
+[env]
+NODE_ENV = "development"
+TEAM_FLAG = "true"
+`)
+    await makeProfile("p1", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("p1"), "mise.toml"), `
+[env]
+NODE_ENV = "production"
+PROFILE_FLAG = "yes"
+`)
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-2", "alice")
+    const merged = await readFile(result.miseTomlPath!, "utf8")
+    expect(merged).toContain('NODE_ENV = "production"')  // profile wins
+    expect(merged).toContain('TEAM_FLAG = "true"')
+    expect(merged).toContain('PROFILE_FLAG = "yes"')
   })
 
-  test("only parent has CLAUDE.md → parent only", async () => {
-    await makeSandbox("only-p", { claudeMd: "Parent only." })
-    await makeSandbox("no-c", { extendsName: "only-p" })
-    const dst = await composeFor("no-c")
-    expect((await readFile(dst, "utf8")).trim()).toBe("Parent only.")
+  test("nested table merge (e.g. [tools.node] = {version, checksum})", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.lock"), `
+[tools.node]
+version = "20.18.0"
+checksum = "abc"
+
+[tools.python]
+version = "3.12.7"
+checksum = "def"
+`)
+    await makeProfile("p1", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("p1"), "mise.lock"), `
+[tools.python]
+version = "3.13.0"
+checksum = "jkl"
+
+[tools.cuda]
+version = "12.4.1"
+checksum = "ghi"
+`)
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-3", "alice")
+    expect(result.miseLockPath).toBeTruthy()
+    const merged = await readFile(result.miseLockPath!, "utf8")
+    // python overridden by profile
+    expect(merged).toMatch(/python[\s\S]*version = "3.13.0"/)
+    // node preserved from team
+    expect(merged).toMatch(/node[\s\S]*version = "20.18.0"/)
+    // cuda added by profile
+    expect(merged).toMatch(/cuda[\s\S]*version = "12.4.1"/)
   })
 
-  test("only child has CLAUDE.md → child only", async () => {
-    await makeSandbox("no-p")
-    await makeSandbox("only-c", { extendsName: "no-p", claudeMd: "Child only." })
-    const dst = await composeFor("only-c")
-    expect((await readFile(dst, "utf8")).trim()).toBe("Child only.")
+  test("no source has mise.toml → miseTomlPath null", async () => {
+    await makePersonal("alice", { defaultProfiles: [] })
+    const result = await composeLoopClaudeConfig("loop-mise-4", "alice")
+    expect(result.miseTomlPath).toBeNull()
+    expect(result.miseLockPath).toBeNull()
   })
 
-  test("neither has CLAUDE.md → no file written", async () => {
-    await makeSandbox("no-doc")
-    const dst = await composeFor("no-doc")
-    expect(existsSync(dst)).toBe(false)
+  test("only team has mise.toml → merged is team's", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.toml"), `
+[tools]
+node = "20"
+`)
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-5", "alice")
+    expect(result.miseTomlPath).toBeTruthy()
+    const merged = await readFile(result.miseTomlPath!, "utf8")
+    expect(merged).toContain('node = "20"')
   })
 
-  test("no sandbox → no file written + stale file removed", async () => {
-    // First compose with a sandbox to write the file
-    await makeSandbox("had-doc", { claudeMd: "old" })
-    const loopId = `cleanup-${Date.now()}`
-    await mkdir(loopClaudeDir(loopId), { recursive: true })
-    await composeLoopClaudeConfig(loopId, "testuser", "had-doc")
-    const dst = join(loopClaudeDir(loopId), "CLAUDE.md")
-    expect(existsSync(dst)).toBe(true)
-    // Re-compose without sandbox → file should be removed (idempotent cleanup)
-    await composeLoopClaudeConfig(loopId, "testuser", undefined)
-    expect(existsSync(dst)).toBe(false)
+  test("malformed TOML in one source doesn't crash; warns and skips", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.toml"), 'not valid toml [[[')
+    await makeProfile("p1", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("p1"), "mise.toml"), `
+[tools]
+python = "3.12"
+`)
+    await makePersonal("alice", { defaultProfiles: ["p1"] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-6", "alice")
+    expect(result.miseTomlPath).toBeTruthy()
+    const merged = await readFile(result.miseTomlPath!, "utf8")
+    expect(merged).toContain('python = "3.12"')  // good source survives
   })
 
-  test("3-level concat: order is gp → p → c", async () => {
-    await makeSandbox("gp-doc", { claudeMd: "GP." })
-    await makeSandbox("p-doc", { extendsName: "gp-doc", claudeMd: "P." })
-    await makeSandbox("c-doc", { extendsName: "p-doc", claudeMd: "C." })
-    const dst = await composeFor("c-doc")
-    const content = await readFile(dst, "utf8")
-    const gpIdx = content.indexOf("GP.")
-    const pIdx = content.indexOf("P.")
-    const cIdx = content.indexOf("C.")
-    expect(gpIdx).toBeLessThan(pIdx)
-    expect(pIdx).toBeLessThan(cIdx)
+  test("mise.toml independence — different layer adds DIFFERENT tools", async () => {
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.toml"), `[tools]\nnode = "20"`)
+    await makeProfile("backend", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("backend"), "mise.toml"), `[tools]\ngo = "1.22"`)
+    await makeProfile("ml", { settings: {} })
+    await writeToml(join(workspaceProfileClaudeDir("ml"), "mise.toml"), `[tools]\npython = "3.13"`)
+    await makePersonal("alice", { defaultProfiles: ["backend", "ml"] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-7", "alice")
+    const merged = await readFile(result.miseTomlPath!, "utf8")
+    expect(merged).toContain('node = "20"')
+    expect(merged).toContain('go = "1.22"')
+    expect(merged).toContain('python = "3.13"')
+  })
+
+  test("orphan mise.lock (no mise.toml in any source) still writes lock", async () => {
+    // Edge case: lock present but no toml. Rare but valid.
+    await makeTeam({ settings: {} })
+    await writeToml(join(workspaceTeamClaudeDir(), "mise.lock"), `
+[tools.node]
+version = "20.18.0"
+checksum = "abc"
+`)
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-mise-8", "alice")
+    expect(result.miseTomlPath).toBeNull()
+    expect(result.miseLockPath).toBeTruthy()
   })
 })
 
-// ── createLoop integration: full materialized loop dir ────────────────────
+// ─── 10. listProfiles ───────────────────────────────────────────────────
 
-describe("createLoop integration", () => {
-  test("loop with sandbox: composed CLAUDE.md + plugins + mise.toml snapshot", async () => {
-    await makeSandbox("integ-base", {
-      claudeMd: "Common doctrine.",
-      miseToml: "[tools]\nnode = '20'\n",
-      mcpServers: { coop: { type: "http", url: "https://coop" } },
-      plugins: { "p1@m1": "1.0.0" },
-    })
-    await makeSandbox("integ-child", {
-      extendsName: "integ-base",
-      claudeMd: "Child rules.",
-      plugins: { "p2@m1": "1.0.0" },
-    })
-    const loop = await createLoop({
-      title: "integ test",
-      createdBy: "testuser",
-      sandbox: "integ-child",
-    })
-    // CLAUDE.md was composed
-    const doctrine = await readFile(join(loopClaudeDir(loop.id), "CLAUDE.md"), "utf8")
-    expect(doctrine).toContain("Common doctrine.")
-    expect(doctrine).toContain("Child rules.")
-    // mise.toml: child has its own, but in this test only base has one → falls back to base
-    expect(await readFile(loopSandboxPath(loop.id), "utf8")).toContain("node = '20'")
-    // workdir created
-    expect(existsSync(loopWorkdir(loop.id))).toBe(true)
-    // meta records sandbox
-    expect(loop.config?.sandbox).toBe("integ-child")
-    // resolved plugins reflect the chain
-    const plugins = await resolveLoopPlugins(loop.config?.sandbox)
-    const names = plugins.map((p) => p.name).sort()
-    expect(names).toEqual(["loopat@builtin", "p1@m1", "p2@m1"])
-    // mcp servers reflect chain
-    const claudeJson = await loadSandboxClaudeJson(loop.config?.sandbox)
-    expect(Object.keys(claudeJson.mcpServers!)).toContain("coop")
+describe("listProfiles", () => {
+  test("returns dirs that have .claude/ subdir", async () => {
+    await makeProfile("role-a", {})
+    await makeProfile("role-b", {})
+    await mkdir(join(TEST_HOME, "context/knowledge/.loopat/profiles/not-a-profile"), { recursive: true })
+
+    const names = await listProfiles()
+    expect(names.sort()).toEqual(["role-a", "role-b"])
   })
 
-  test("loop without sandbox: only builtin plugin, no doctrine", async () => {
-    const loop = await createLoop({ title: "no-sandbox", createdBy: "testuser" })
-    expect(loop.config?.sandbox).toBeUndefined()
-    expect(existsSync(join(loopClaudeDir(loop.id), "CLAUDE.md"))).toBe(false)
-    const plugins = await resolveLoopPlugins(loop.config?.sandbox)
-    expect(plugins.map((p) => p.name)).toEqual(["loopat@builtin"])
-  })
-
-  test("mise.toml falls back to parent when child lacks it", async () => {
-    await makeSandbox("mise-base", { miseToml: "[tools]\npython = '3.12'\n" })
-    await makeSandbox("mise-child", { extendsName: "mise-base" }) // no own mise.toml
-    const loop = await createLoop({
-      title: "mise-fallback",
-      createdBy: "testuser",
-      sandbox: "mise-child",
-    })
-    const content = await readFile(loopSandboxPath(loop.id), "utf8")
-    expect(content).toContain("python = '3.12'")
+  test("empty when no profiles", async () => {
+    const names = await listProfiles()
+    expect(names).toEqual([])
   })
 })

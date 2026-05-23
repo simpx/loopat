@@ -1,188 +1,373 @@
 /**
- * Compose multi-tier Claude Code config (skills + agents) into each loop's
- * private .claude/ dir.
+ * Compose loop's `.claude/` by merging multiple CC-native `.claude/` source
+ * dirs (team + active profiles + personal) — post-2026-05 CC-native refactor.
  *
- * Tiers (low → high precedence; later writes shadow earlier):
- *   - workspace (admin-pushed into knowledge/.loopat/)
- *   - personal  (per-user under personal/<user>/.loopat/)
+ * Sources (low precedence → high; later wins):
+ *   1. team:     knowledge/.loopat/.claude/
+ *   2. profile:  knowledge/.loopat/profiles/<name>/.claude/   (per active profile, in order)
+ *   3. personal: personal/<user>/CLAUDE.md (file) + personal/.loopat/claude/* (skills/agents)
  *
- * Plugins are NOT composed here. The Agent SDK loads plugins via its
- * `plugins` option (one `--plugin-dir <path>` per entry); the resolver
- * lives in plugin-installer.ts and points at server-side cache paths.
- * Skills here are CC's loose user-tier skills (flat directory), not the
- * namespaced plugin-internal skills.
+ * Merge semantics per file:
+ *   - settings.json: deep merge; `enabledPlugins` and `extraKnownMarketplaces`
+ *     are dict unions across sources; other fields take last-wins
+ *   - CLAUDE.md: ordered concat with source markers
+ *   - skills/ + agents/: symlink union (entries from later sources shadow same-name)
  *
- * Symlinks point at **sandbox virtual paths**, not host paths. Inside the
- * sandbox, virtual paths resolve to the bound directories; host-side `ls`
- * shows broken symlinks but that's irrelevant — only CC inside the sandbox
- * follows them.
+ * The merged dir at loop/.claude/ is the SDK's CLAUDE_CONFIG_DIR — CC reads
+ * CLAUDE.md, skills, agents from there. Plugins are passed to SDK via the
+ * `plugins` option (see plugin-installer.ts); cache lookups bypass.
  *
- * Each compose is idempotent: nuke + remake. Called on every spawn so skills
- * added to knowledge/personal mid-session show up at next session start.
+ * Re-run every spawn; idempotent (nuke + remake).
  */
 import { existsSync } from "node:fs"
 import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path"
+import { parse as tomlParse, stringify as tomlStringify } from "smol-toml"
 import {
   loopClaudeDir,
-  loopComposedAgentsDir,
-  loopComposedSkillsDir,
-  personalLoopatAgentsDir,
-  personalLoopatSkillsDir,
-  workspaceLoopatAgentsDir,
-  workspaceLoopatSandboxDir,
-  workspaceLoopatSkillsDir,
+  personalAgentsDir,
+  personalClaudeDir,
+  personalClaudeMdPath,
+  personalSettingsPath,
+  personalSkillsDir,
 } from "./paths"
-import { resolveSandboxChain } from "./sandboxes"
+import { resolveLoopPlan, type LoopPlan } from "./profiles"
 
-type Tier = {
-  /** Host-side directory that contains entries (one per skill/plugin/agent). */
-  rootHostPath: string
-  /** Sandbox-internal path the symlinks should point at. */
-  virtualPath: string
+/** Read JSON, return null if missing/malformed. */
+async function readJson<T = unknown>(path: string): Promise<T | null> {
+  if (!existsSync(path)) return null
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as T
+  } catch {
+    return null
+  }
 }
 
-type ComposeOpts = {
-  /** Symlink kind passed to fs.symlink. Skills/plugins are directories; agents
-   *  are single .md files. Pick the wrong kind and the symlink may still work
-   *  on Linux but is wrong on Windows / for tooling that reads the type. */
-  kind: "dir" | "file"
-  /** Optional predicate — only entries returning true are linked. Used for
-   *  agents (`.md` only) to skip stray junk. */
-  filter?: (name: string) => boolean
+/** Read TOML, return null if missing/malformed. */
+async function readToml<T = Record<string, any>>(path: string): Promise<T | null> {
+  if (!existsSync(path)) return null
+  try {
+    return tomlParse(await readFile(path, "utf8")) as T
+  } catch (e: any) {
+    console.warn(`[compose] toml malformed at ${path}: ${e?.message ?? e}`)
+    return null
+  }
 }
 
 /**
- * Compose multiple tier dirs into `dst`. Lower-priority tiers symlink first;
- * higher-priority tiers overwrite same-named entries. Final layout: `dst/<name>`
- * symlinks to `<tier.virtualPath>/<name>` for every entry across all tiers.
- *
- * Missing tier dirs are silently skipped.
+ * Deep-merge TOML-shaped objects (mise.toml / mise.lock semantics):
+ *   - tables (objects): union by key, recursing one level so [tools.node] merges sensibly
+ *   - primitives / arrays: last wins
+ * Mise's typical tables — [tools], [env], [settings], [hooks], [tasks] — all
+ * benefit from key-wise union.
  */
-async function composeTier(dst: string, tiers: Tier[], opts: ComposeOpts = { kind: "dir" }): Promise<string[]> {
+function mergeToml(
+  dst: Record<string, any>,
+  src: Record<string, any>,
+): Record<string, any> {
+  const out: Record<string, any> = { ...dst }
+  for (const [k, v] of Object.entries(src)) {
+    if (v === undefined) continue
+    if (
+      typeof v === "object" && v !== null && !Array.isArray(v) &&
+      typeof out[k] === "object" && out[k] !== null && !Array.isArray(out[k])
+    ) {
+      // For nested tables (e.g. [tools.node] = { version, checksum }), recurse one level
+      const merged: Record<string, any> = { ...out[k] }
+      for (const [k2, v2] of Object.entries(v)) {
+        if (
+          typeof v2 === "object" && v2 !== null && !Array.isArray(v2) &&
+          typeof merged[k2] === "object" && merged[k2] !== null && !Array.isArray(merged[k2])
+        ) {
+          merged[k2] = { ...merged[k2], ...v2 }
+        } else {
+          merged[k2] = v2
+        }
+      }
+      out[k] = merged
+    } else {
+      out[k] = v
+    }
+  }
+  return out
+}
+
+/**
+ * Normalize a single extraKnownMarketplaces entry: if its source is
+ * `{source: "directory", path: <relative>}`, resolve the path against the
+ * settings file's dir so merged loop settings end up with absolute paths.
+ * (Loop's merged settings.json is read later by plugin-installer.ts, which
+ * doesn't know the original source location.)
+ */
+function normalizeMarketplaceEntry(entry: any, settingsFilePath: string): any {
+  if (!entry || typeof entry !== "object") return entry
+  const src = entry.source
+  if (typeof src === "object" && src.source === "directory" && typeof src.path === "string") {
+    if (!isAbsolute(src.path)) {
+      const abs = resolvePath(dirname(settingsFilePath), src.path)
+      return { ...entry, source: { ...src, path: abs } }
+    }
+  }
+  return entry
+}
+
+/**
+ * Deep-merge a source settings.json into the accumulator. `enabledPlugins` +
+ * `extraKnownMarketplaces` union by key; other dict fields shallow-union;
+ * primitives = last wins. extraKnownMarketplaces paths normalize to absolute.
+ *
+ * `srcPath` is the source settings file's host path — needed to resolve
+ * relative paths in `extraKnownMarketplaces[*].source.path`.
+ */
+function mergeSettings(
+  dst: Record<string, any>,
+  src: Record<string, any>,
+  srcPath: string,
+): Record<string, any> {
+  const out: Record<string, any> = { ...dst }
+  for (const [k, v] of Object.entries(src)) {
+    if (k === "_comment") continue
+    if (v === undefined) continue
+    if (k === "extraKnownMarketplaces" && typeof v === "object" && v !== null && !Array.isArray(v)) {
+      const normalized: Record<string, any> = {}
+      for (const [name, entry] of Object.entries(v)) {
+        normalized[name] = normalizeMarketplaceEntry(entry, srcPath)
+      }
+      out[k] = { ...(out[k] ?? {}), ...normalized }
+    } else if (
+      k === "enabledPlugins" &&
+      typeof v === "object" && v !== null && !Array.isArray(v)
+    ) {
+      out[k] = { ...(out[k] ?? {}), ...v }
+    } else if (
+      typeof v === "object" && v !== null && !Array.isArray(v) &&
+      typeof out[k] === "object" && out[k] !== null && !Array.isArray(out[k])
+    ) {
+      out[k] = { ...out[k], ...v } // shallow union for other dicts
+    } else {
+      out[k] = v // primitives / arrays / different types — last wins
+    }
+  }
+  return out
+}
+
+/**
+ * For each source's `.claude/<subdir>/` (skills or agents), symlink its entries
+ * into dst. Later sources shadow earlier (same-name → relink). Missing source
+ * dirs silently skipped. Filter restricts to certain file types (e.g. .md for
+ * agents). Symlink kind is "dir" for skills (each is a dir), "file" for agents.
+ */
+async function composeSubdir(
+  dst: string,
+  sources: Array<{ source: string; rootDir: string }>,
+  opts: { kind: "dir" | "file"; filter?: (name: string) => boolean },
+): Promise<void> {
   await rm(dst, { recursive: true, force: true })
   await mkdir(dst, { recursive: true })
-  const names: string[] = []
-  for (const { rootHostPath, virtualPath } of tiers) {
-    if (!existsSync(rootHostPath)) continue
+  for (const src of sources) {
+    if (!existsSync(src.rootDir)) continue
     let entries: string[]
     try {
-      entries = await readdir(rootHostPath)
+      entries = await readdir(src.rootDir)
     } catch {
       continue
     }
     for (const name of entries) {
-      // Skip dotfiles — `.gitkeep` etc. shouldn't appear as a skill/plugin/agent.
       if (name.startsWith(".")) continue
       if (opts.filter && !opts.filter(name)) continue
       const linkPath = join(dst, name)
-      // Higher tier wins: rm any existing symlink before relinking.
       await rm(linkPath, { force: true }).catch(() => {})
-      await symlink(`${virtualPath}/${name}`, linkPath, opts.kind)
-      if (!names.includes(name)) names.push(name)
+      await symlink(join(src.rootDir, name), linkPath, opts.kind)
     }
   }
-  return names
 }
 
 /**
- * Compose skills + agents + sandbox doctrine into a given loop's .claude/.
- * Run on every spawn. Plugins are handled separately by plugin-installer.ts
- * (resolved at spawn and passed to the SDK via its `plugins` option).
+ * Resolve where each LoopPlan source has its .claude/-like dirs.
+ * For team + profiles, `dir` is the `.claude/` dir itself.
+ * For personal (`personal:<u>`), it's the user's home; subdirs live under
+ * `.loopat/claude/`. CLAUDE.md is at the user's root (not inside .loopat/).
+ */
+type ResolvedSource = {
+  source: string
+  settings?: string
+  claudeMd?: string
+  skillsDir?: string
+  agentsDir?: string
+  miseToml?: string
+  miseLock?: string
+}
+
+function resolveSource(s: { source: string; dir: string }, user: string): ResolvedSource {
+  if (s.source.startsWith("personal:")) {
+    // Personal layer uses the CC-native `.claude/` shape — same as team / profile.
+    return {
+      source: s.source,
+      settings: personalSettingsPath(user),
+      claudeMd: personalClaudeMdPath(user),
+      skillsDir: personalSkillsDir(user),
+      agentsDir: personalAgentsDir(user),
+      miseToml: join(personalClaudeDir(user), "mise.toml"),
+      miseLock: join(personalClaudeDir(user), "mise.lock"),
+    }
+  }
+  // team / profile / repo — dir IS the .claude/ dir
+  return {
+    source: s.source,
+    settings: join(s.dir, "settings.json"),
+    claudeMd: join(s.dir, "CLAUDE.md"),
+    skillsDir: join(s.dir, "skills"),
+    agentsDir: join(s.dir, "agents"),
+    miseToml: join(s.dir, "mise.toml"),
+    miseLock: join(s.dir, "mise.lock"),
+  }
+}
+
+export type ComposeResult = {
+  claudeMdPath: string
+  settingsPath: string
+  sources: string[]
+  enabledPlugins: string[] // for callers (plugin-installer) to drive install
+  extraMarketplaces: string[]
+  /** Path to merged mise.toml in loop's .claude/, or null if no source declared toolchain. */
+  miseTomlPath: string | null
+  /** Path to merged mise.lock in loop's .claude/, or null if no source declared lock. */
+  miseLockPath: string | null
+}
+
+/**
+ * Compose loop .claude/ from the loop's plan. Returns paths for downstream
+ * use (plugin-installer reads merged settings; spawn reads CLAUDE_CONFIG_DIR).
  */
 export async function composeLoopClaudeConfig(
   loopId: string,
   user: string,
-  sandboxName?: string,
-): Promise<void> {
-  // Ensure the loop's .claude/ exists (caller may have already done this).
-  await mkdir(loopClaudeDir(loopId), { recursive: true })
-
-  // Sandbox doctrine — concat CLAUDE.md from the sandbox's extends chain
-  // (oldest ancestor first → leaf), write to .claude/CLAUDE.md so CC loads
-  // it as user-tier (settingSources: ["user", "project"]). Per-loop file
-  // means sandbox doctrine updates take effect on next spawn.
-  await composeSandboxDoctrine(loopId, sandboxName)
-
-  // Skills tier — flat namespace, user-tier slot in CC.
-  // Virtual paths must match where bwrap binds knowledge / personal.
-  await composeTier(loopComposedSkillsDir(loopId), [
-    {
-      rootHostPath: workspaceLoopatSkillsDir(),
-      virtualPath: "/loopat/context/knowledge/.loopat/claude/skills",
-    },
-    {
-      rootHostPath: personalLoopatSkillsDir(user),
-      virtualPath: "/loopat/context/personal/.loopat/claude/skills",
-    },
-  ])
-
-  // Agents tier — single .md files per agent (CC subagent convention).
-  // CC scans $CLAUDE_CONFIG_DIR/agents/ and registers each as a delegatable
-  // subagent. Same workspace + personal tiering as skills.
-  await composeTier(
-    loopComposedAgentsDir(loopId),
-    [
-      {
-        rootHostPath: workspaceLoopatAgentsDir(),
-        virtualPath: "/loopat/context/knowledge/.loopat/claude/agents",
-      },
-      {
-        rootHostPath: personalLoopatAgentsDir(user),
-        virtualPath: "/loopat/context/personal/.loopat/claude/agents",
-      },
-    ],
-    { kind: "file", filter: (name) => name.endsWith(".md") },
-  )
+  profiles?: string[],
+  workdir?: string,
+): Promise<ComposeResult> {
+  const plan: LoopPlan = await resolveLoopPlan({
+    user,
+    overrideProfiles: profiles,
+    workdir,
+  })
+  return composeFromPlan(loopId, plan)
 }
 
-/**
- * Walk the sandbox's extends chain (oldest → leaf), concat each level's
- * CLAUDE.md with `\n\n---\n\n` separators, write to loop's
- * .claude/CLAUDE.md. Idempotent: deletes the file when no CLAUDE.md exists
- * in the chain (avoids stale doctrine after sandbox removed a file).
- */
-async function composeSandboxDoctrine(loopId: string, sandboxName: string | undefined): Promise<void> {
-  const dst = join(loopClaudeDir(loopId), "CLAUDE.md")
-  if (!sandboxName) {
-    await rm(dst, { force: true })
-    return
+export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<ComposeResult> {
+  const dst = loopClaudeDir(loopId)
+  await mkdir(dst, { recursive: true })
+
+  const resolved = plan.claudeSources.map((s) => resolveSource(s, plan.user))
+
+  // 1. Merge settings.json
+  let mergedSettings: Record<string, any> = {}
+  for (const r of resolved) {
+    if (!r.settings) continue
+    const obj = await readJson<Record<string, any>>(r.settings)
+    if (obj) mergedSettings = mergeSettings(mergedSettings, obj, r.settings)
   }
-  const chain = await resolveSandboxChain(sandboxName)
+  const settingsPath = join(dst, "settings.json")
+  // Inject loopat-managed fields that downstream code expects.
+  mergedSettings.autoMemoryEnabled = mergedSettings.autoMemoryEnabled ?? true
+  mergedSettings.autoMemoryDirectory =
+    mergedSettings.autoMemoryDirectory ?? "/loopat/context/personal/memory"
+  await writeFile(settingsPath, JSON.stringify(mergedSettings, null, 2))
+
+  // 2. Concat CLAUDE.md
+  const claudeMdPath = join(dst, "CLAUDE.md")
   const parts: string[] = []
-  for (const name of chain) {
-    const src = join(workspaceLoopatSandboxDir(name), "CLAUDE.md")
-    if (!existsSync(src)) continue
+  for (const r of resolved) {
+    if (!r.claudeMd || !existsSync(r.claudeMd)) continue
     try {
-      parts.push((await readFile(src, "utf8")).trim())
+      const content = (await readFile(r.claudeMd, "utf8")).trim()
+      parts.push(
+        `<!-- ========== ${r.source} ========== -->\n<!-- from: ${r.claudeMd} -->\n${content}`,
+      )
     } catch (e: any) {
-      console.warn(`[compose] sandbox "${name}" CLAUDE.md unreadable: ${e?.message ?? e}`)
+      console.warn(`[compose] ${r.source} CLAUDE.md unreadable: ${e?.message ?? e}`)
     }
   }
   if (parts.length === 0) {
-    await rm(dst, { force: true })
-    return
+    await rm(claudeMdPath, { force: true })
+  } else {
+    await writeFile(claudeMdPath, parts.join("\n\n") + "\n")
   }
-  await writeFile(dst, parts.join("\n\n---\n\n") + "\n")
+
+  // 3. Symlink-merge skills/ (each entry is a dir with SKILL.md)
+  await composeSubdir(
+    join(dst, "skills"),
+    resolved.filter((r) => r.skillsDir).map((r) => ({ source: r.source, rootDir: r.skillsDir! })),
+    { kind: "dir" },
+  )
+
+  // 4. Symlink-merge agents/ (each entry is a single .md file)
+  await composeSubdir(
+    join(dst, "agents"),
+    resolved.filter((r) => r.agentsDir).map((r) => ({ source: r.source, rootDir: r.agentsDir! })),
+    { kind: "file", filter: (n) => n.endsWith(".md") },
+  )
+
+  // 5. Merge mise.toml + mise.lock (toolchain layer, loopat-native extension to .claude/)
+  let mergedMiseToml: Record<string, any> = {}
+  let anyMiseToml = false
+  for (const r of resolved) {
+    if (!r.miseToml) continue
+    const obj = await readToml<Record<string, any>>(r.miseToml)
+    if (obj) {
+      mergedMiseToml = mergeToml(mergedMiseToml, obj)
+      anyMiseToml = true
+    }
+  }
+  let miseTomlPath: string | null = null
+  if (anyMiseToml) {
+    miseTomlPath = join(dst, "mise.toml")
+    await writeFile(miseTomlPath, tomlStringify(mergedMiseToml))
+  } else {
+    await rm(join(dst, "mise.toml"), { force: true })
+  }
+
+  let mergedMiseLock: Record<string, any> = {}
+  let anyMiseLock = false
+  for (const r of resolved) {
+    if (!r.miseLock) continue
+    const obj = await readToml<Record<string, any>>(r.miseLock)
+    if (obj) {
+      mergedMiseLock = mergeToml(mergedMiseLock, obj)
+      anyMiseLock = true
+    }
+  }
+  let miseLockPath: string | null = null
+  if (anyMiseLock) {
+    miseLockPath = join(dst, "mise.lock")
+    await writeFile(miseLockPath, tomlStringify(mergedMiseLock))
+  } else {
+    await rm(join(dst, "mise.lock"), { force: true })
+  }
+
+  const enabledPlugins = Object.keys(
+    (mergedSettings.enabledPlugins ?? {}) as Record<string, boolean>,
+  ).filter((k) => mergedSettings.enabledPlugins[k])
+
+  const extraMarketplaces = Object.keys(
+    (mergedSettings.extraKnownMarketplaces ?? {}) as Record<string, unknown>,
+  )
+
+  return {
+    claudeMdPath,
+    settingsPath,
+    sources: resolved.map((r) => r.source),
+    enabledPlugins,
+    extraMarketplaces,
+    miseTomlPath,
+    miseLockPath,
+  }
 }
 
 /**
- * Write settings.json under the loop's .claude/. Merges with existing fields
- * (auto-memory + anything CC itself may have written) so we don't clobber.
+ * Write settings.json under the loop's .claude/. DEPRECATED in the CC-native
+ * model — settings are written by composeFromPlan. Kept as a no-op for
+ * backward-compat callers (loops.ts). Use composeLoopClaudeConfig instead.
  */
-export async function writeLoopSettings(loopId: string): Promise<void> {
-  const path = join(loopClaudeDir(loopId), "settings.json")
-  let existing: Record<string, unknown> = {}
-  if (existsSync(path)) {
-    try {
-      const { readFile } = await import("node:fs/promises")
-      existing = JSON.parse(await readFile(path, "utf8"))
-    } catch {}
-  }
-  const merged = {
-    autoMemoryEnabled: true,
-    autoMemoryDirectory: "/loopat/context/personal/memory",
-    ...existing,
-  }
-  await writeFile(path, JSON.stringify(merged, null, 2))
+export async function writeLoopSettings(_loopId: string): Promise<void> {
+  // no-op
 }

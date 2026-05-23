@@ -5,8 +5,6 @@ import { join } from "node:path"
 import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported } from "./bwrap"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
-import { readSandboxMeta, readSandboxMetaFromPath } from "./sandboxes"
-import { loopSandboxMetaPath } from "./paths"
 
 type Term = {
   proc: IPty
@@ -43,15 +41,10 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     // Shell resolution (highest precedence first):
     //   1. personal config `shell` — user's per-user override
-    //   2. sandbox.json `shell` — sandbox author's choice (prefer loop snapshot
-    //      copy, fall back to catalog if no snapshot)
-    //   3. /bin/bash — POSIX-guaranteed fallback (always present via /bin bind)
+    //   2. /bin/bash — POSIX-guaranteed fallback (always present via /bin bind)
+    //   (sandbox-tier shell selection is gone in the profile model — loops
+    //   no longer have mise sandbox metadata.)
     let innerShell = personalCfg.shell
-    if (!innerShell && meta.config?.sandbox) {
-      const snapshotMeta = await readSandboxMetaFromPath(loopSandboxMetaPath(loopId))
-      const sandboxMeta = snapshotMeta ?? await readSandboxMeta(meta.config.sandbox)
-      if (sandboxMeta?.shell) innerShell = sandboxMeta.shell
-    }
     if (!innerShell) innerShell = "/bin/bash"
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
 
@@ -76,7 +69,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,
-    }, meta.config?.sandbox, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
+    }, undefined, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
     // Overlay path: unshare -Umr + overlayfs $HOME + bwrap nested-userns uid
     // drop. Tmpfs path: bwrap directly (older bwrap / restricted envs).
     let binary: string
@@ -89,7 +82,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       binary = "bwrap"
       fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
     }
-    console.error(`[term:${tag}] spawn ${binary} argc=${fullArgs.length} sandbox=${meta.config?.sandbox ?? "<none>"} overlay=${useOverlay}`)
+    console.error(`[term:${tag}] spawn ${binary} argc=${fullArgs.length} profiles=${meta.config?.profiles?.join(",") ?? "<none>"} overlay=${useOverlay}`)
     const proc = spawn(binary, fullArgs, {
       name: "xterm-256color",
       cols: 80,

@@ -1,0 +1,12 @@
+{
+  "_comment": "Alice 的 loopat 个人配置。default_profiles 决定每次 `loopat run` 自动加载哪些 profile；CLI 可用 +xxx / -xxx 增减。",
+  "default_profiles": [
+    "role-eng-backend",
+    "role-security"
+  ],
+  "default_vault": "dev",
+  "prefs": {
+    "shell": "zsh",
+    "editor": "vim"
+  }
+}

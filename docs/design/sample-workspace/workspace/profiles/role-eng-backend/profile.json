@@ -1,0 +1,7 @@
+{
+  "name": "role-eng-backend",
+  "description": "后端工程师身份 profile",
+  "plugins": [
+    "internal-mcp@acme-internal"
+  ]
+}
