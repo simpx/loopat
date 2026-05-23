@@ -675,13 +675,15 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                       >
                         ★
                       </button>
-                      <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
+                      <label className="flex items-center shrink-0 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={m.enabled !== false}
                           onChange={() => toggleModel(name, m.id)}
-                          className="h-3 w-3 rounded shrink-0"
+                          className="h-3 w-3 rounded"
                         />
+                      </label>
+                      <div className="flex-1 min-w-0 flex items-center gap-1">
                         {isEditing ? (
                           <input
                             autoFocus
@@ -708,7 +710,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                         {m.enabled === false && (
                           <span className="text-[9px] text-gray-300 font-medium shrink-0">off</span>
                         )}
-                      </label>
+                      </div>
                       <input
                         type="number"
                         value={m.maxContextTokens ?? ""}
