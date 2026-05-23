@@ -17,7 +17,7 @@
  * The SDK loads from absolute paths (bypasses CC's cache lookup), so
  * per-loop selection works regardless of what's globally enabled on the host.
  */
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { execFile } from "node:child_process"
 import { homedir } from "node:os"
@@ -102,17 +102,20 @@ export function sourcesMatch(declared: any, existing: any): boolean {
 /**
  * Ensure a marketplace is registered with CC. Idempotent + URL-drift aware.
  *
- * If the marketplace name is already registered but the source differs from
- * what the team declared (admin changed the URL, repo moved, etc.), remove
- * the stale registration and re-add. Without this, host CC would keep using
- * the old URL forever (CC doesn't auto-reconcile name-vs-source).
+ * Reads CC's known_marketplaces.json directly (no `claude plugin marketplace
+ * list` subprocess — saves ~1s per spawn). Only shells out when add / remove
+ * is actually needed.
  */
-async function ensureMarketplace(name: string, addPath: string, declaredSource: any): Promise<void> {
-  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
+async function ensureMarketplace(
+  name: string,
+  addPath: string,
+  declaredSource: any,
+  km: KnownMarketplacesFile | null,
+): Promise<void> {
   const existing = (km?.[name] as any)?.source
   if (existing) {
     if (sourcesMatch(declaredSource, existing)) {
-      return // already registered with correct source
+      return // already registered with correct source — fast path, no subprocess
     }
     console.warn(
       `[plugins] marketplace "${name}" source drift; re-registering ` +
@@ -134,6 +137,7 @@ async function ensureMarketplace(name: string, addPath: string, declaredSource: 
 async function ensureExtraMarketplaces(
   extras: Record<string, { source?: any }> | undefined,
   loopId: string,
+  km: KnownMarketplacesFile | null,
 ): Promise<void> {
   if (!extras) return
   for (const [name, entry] of Object.entries(extras)) {
@@ -159,21 +163,23 @@ async function ensureExtraMarketplaces(
       console.warn(`[plugins] extraKnownMarketplaces["${name}"]: unsupported source shape, skip`)
       continue
     }
-    await ensureMarketplace(name, addPath, normalized)
+    await ensureMarketplace(name, addPath, normalized, km)
   }
 }
 
 /**
- * Install each spec via `claude plugin install --scope=user`. Already-installed
- * specs are detected via `plugin list` and skipped.
+ * Install each spec via `claude plugin install --scope=user`. Reads
+ * installed_plugins.json directly to short-circuit (no `claude plugin list`
+ * subprocess — saves ~1s per spawn).
  */
-async function ensurePluginsInstalled(specs: string[]): Promise<void> {
+async function ensurePluginsInstalled(
+  specs: string[],
+  ip: InstalledPluginsFile | null,
+): Promise<void> {
   if (specs.length === 0) return
-  const list = await runClaude(["plugin", "list"])
-  const listed = list.ok ? list.out : ""
+  const installedKeys = new Set(Object.keys(ip?.plugins ?? {}))
   for (const spec of specs) {
-    const baseName = spec.split("@")[0]
-    if (listed.includes(baseName)) continue
+    if (installedKeys.has(spec)) continue
     const r = await runClaude(["plugin", "install", spec, "--scope=user"])
     if (!r.ok) {
       console.warn(`[plugins] install failed for "${spec}": ${r.err.trim().split("\n").slice(-2).join(" | ")}`)
@@ -215,19 +221,32 @@ async function resolveSpecPath(
 }
 
 /**
+ * In-memory cache keyed by loopId, invalidated when the loop's settings.json
+ * mtime changes. Compose rewrites settings.json on every spawn, so re-spawns
+ * naturally bust the cache. Multiple callers within one spawn cycle
+ * (session.ts spawn + slash-command seed, /api/mcp-servers, etc.) share the
+ * cached result — cuts attach time from ~6s to ~50ms when nothing changed.
+ */
+type ResolveCacheEntry = { mtime: number; plugins: ResolvedLoopPlugin[] }
+const resolveCache = new Map<string, ResolveCacheEntry>()
+
+/**
  * Main entry — called at loop spawn after compose has written the loop's
  * merged settings.json. Reads enabledPlugins + extraKnownMarketplaces from
  * that file, orchestrates marketplace registration + plugin install, then
  * returns absolute paths for the SDK's `plugins` option.
  *
- * Note: takes `loopId` not `profiles` — by this point profiles have been
- * merged into a single settings.json. This makes it easy to call from any
- * surface that has materialized a loop dir.
+ * Result cached by settings.json mtime; bypasses CC CLI subprocess calls
+ * (reads ~/.claude/plugins/{installed,known_marketplaces}.json directly).
  */
 export async function resolveLoopPlugins(loopId: string): Promise<ResolvedLoopPlugin[]> {
-  const builtins = resolveBuiltinPlugins()
-
   const settingsPath = join(loopClaudeDir(loopId), "settings.json")
+  const mtime = existsSync(settingsPath) ? statSync(settingsPath).mtimeMs : 0
+
+  const cached = resolveCache.get(loopId)
+  if (cached && cached.mtime === mtime) return cached.plugins
+
+  const builtins = resolveBuiltinPlugins()
   const settings = await readJsonOpt<{
     enabledPlugins?: Record<string, boolean>
     extraKnownMarketplaces?: Record<string, { source?: any }>
@@ -236,26 +255,34 @@ export async function resolveLoopPlugins(loopId: string): Promise<ResolvedLoopPl
   const enabled = Object.entries(settings?.enabledPlugins ?? {})
     .filter(([_, v]) => v)
     .map(([k]) => k)
-  if (enabled.length === 0) return builtins
 
-  // Register marketplaces declared in merged settings. Teams can host their
-  // own private marketplace anywhere (typically `knowledge/marketplace/`) —
-  // loopat doesn't probe fixed paths; it just registers what's declared.
-  await ensureExtraMarketplaces(settings?.extraKnownMarketplaces, loopId)
+  if (enabled.length === 0) {
+    resolveCache.set(loopId, { mtime, plugins: builtins })
+    return builtins
+  }
 
-  await ensurePluginsInstalled(enabled)
-
-  const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+  // Read CC state files once; pass to helpers (avoids redundant disk reads).
   const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
+  const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+
+  await ensureExtraMarketplaces(settings?.extraKnownMarketplaces, loopId, km)
+  await ensurePluginsInstalled(enabled, ip)
+
+  // Re-read installed_plugins.json after any installs (km too, in case
+  // ensureExtraMarketplaces touched it).
+  const ip2 = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+  const km2 = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
 
   const out: ResolvedLoopPlugin[] = [...builtins]
   for (const spec of enabled) {
-    const path = await resolveSpecPath(spec, ip, km)
+    const path = await resolveSpecPath(spec, ip2, km2)
     if (path) {
       out.push({ name: spec, path })
     } else {
       console.warn(`[plugins] could not resolve path for "${spec}" (install may have failed)`)
     }
   }
+
+  resolveCache.set(loopId, { mtime, plugins: out })
   return out
 }
