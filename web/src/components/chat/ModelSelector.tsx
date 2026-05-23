@@ -31,7 +31,7 @@ export default function ModelSelector() {
     if (!providers) return [];
     const result: FlatModel[] = [];
     for (const [provName, info] of Object.entries(providers.providers)) {
-      if (info.enabled === false) continue;
+      if (info.enabled === false || !info.hasKey) continue;
       for (const m of info.models ?? []) {
         if (m.enabled === false) continue;
         const q = search.toLowerCase().trim();

@@ -170,10 +170,11 @@ app.get("/api/serve/alias-check", requireAuth, async (c) => {
 // (they carry per-user apiKeys via secrets/). Source field indicates origin.
 app.get("/api/providers", requireAuth, async (c) => {
   const wCfg = await loadConfig()
-  const providers: Record<string, { models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean }> = {}
+  const providers: Record<string, { models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean; hasKey: boolean }> = {}
   if (wCfg.providers) {
     for (const [name, p] of Object.entries(wCfg.providers)) {
-      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "workspace", enabled: p.enabled }
+      const hasKey = typeof p.apiKey === "string" && p.apiKey.length > 0
+      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "workspace", enabled: hasKey ? p.enabled : false, hasKey }
     }
   }
   // Overlay personal providers (they take precedence)
@@ -182,11 +183,63 @@ app.get("/api/providers", requireAuth, async (c) => {
   try {
     const pCfg = await loadPersonalConfig(userId)
     for (const [name, p] of Object.entries(pCfg.providers)) {
-      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: p.enabled }
+      const hasKey = typeof p.apiKey === "string" && p.apiKey.length > 0
+      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: hasKey ? p.enabled : false, hasKey }
     }
     active = pCfg.default || active
   } catch {}
   return c.json({ providers, default: active })
+})
+
+// Test a provider + model connection by making a minimal Messages API call.
+// Accepts either a plain apiKey, or a provider name + source to resolve the
+// key server-side (so tests work for stored/encrypted keys without re-typing).
+app.post("/api/providers/test", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const { baseUrl, apiKey: rawApiKey, model, provider, source } = body
+  if (typeof baseUrl !== "string" || !baseUrl) return c.json({ ok: false, error: "baseUrl required" }, 400)
+  if (typeof model !== "string" || !model) return c.json({ ok: false, error: "model required" }, 400)
+
+  let apiKey = typeof rawApiKey === "string" ? rawApiKey.trim() : ""
+  // Resolve key server-side when a stored (encrypted) key is being tested
+  if (!apiKey && typeof provider === "string" && provider) {
+    if (source === "personal") {
+      const userId = c.get("userId") as string
+      try {
+        const pCfg = await loadPersonalConfig(userId)
+        apiKey = pCfg.providers[provider]?.apiKey ?? ""
+      } catch {}
+    } else if (source === "workspace") {
+      try {
+        const wCfg = await loadConfig()
+        apiKey = (wCfg.providers?.[provider] as any)?.apiKey ?? ""
+      } catch {}
+    }
+  }
+  if (!apiKey) return c.json({ ok: false, error: "no API key — enter one or store it first" }, 400)
+
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 1,
+        messages: [{ role: "user", content: "." }],
+      }),
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => "")
+      return c.json({ ok: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` })
+    }
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? "connection failed" })
+  }
 })
 
 // ── auth (public) ──

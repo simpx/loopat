@@ -891,12 +891,36 @@ export async function listTopics(): Promise<TopicAggregate[]> {
 }
 
 export type ModelEntry = { id: string; enabled?: boolean; maxContextTokens?: number }
-export type ProviderInfo = { model?: string; models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean }
+export type ProviderInfo = { model?: string; models: ModelEntry[]; baseUrl: string; source: "personal" | "workspace"; enabled: boolean; hasKey: boolean }
 export type ProvidersResponse = { providers: Record<string, ProviderInfo>; default: string }
 export async function getProviders(): Promise<ProvidersResponse> {
   const r = await apiFetch("/api/providers")
   if (!r.ok) return { providers: {}, default: "" }
   return (await r.json()) as ProvidersResponse
+}
+
+export async function testProviderConnection(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
+  provider?: string,
+  source?: "personal" | "workspace",
+): Promise<{ ok: boolean; error?: string }> {
+  const body: Record<string, string> = { baseUrl, model }
+  if (apiKey) {
+    body.apiKey = apiKey
+  } else if (provider && source) {
+    body.provider = provider
+    body.source = source
+  }
+  const r = await apiFetch("/api/providers/test", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `test failed (${r.status})` }
+  return j as { ok: boolean; error?: string }
 }
 
 export type VersionInfo = { branch: string; commit: string }

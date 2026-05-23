@@ -17,6 +17,7 @@ import {
   savePersonalDisk,
   writePersonalValue,
   listPersonalEntries,
+  testProviderConnection,
   type ConfigValue,
   type PersonalConfigDisk,
   type ProviderDisk,
@@ -349,6 +350,12 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const [adding, setAdding] = useState(false)
   const [newModelName, setNewModelName] = useState<Record<string, string>>({})
   const [addingModel, setAddingModel] = useState<Record<string, boolean>>({})
+  const [editingProvName, setEditingProvName] = useState<string | null>(null)
+  const [provRenameValue, setProvRenameValue] = useState("")
+  const [editingModelKey, setEditingModelKey] = useState<string | null>(null)
+  const [newModelIdValue, setNewModelIdValue] = useState("")
+  const [testingModel, setTestingModel] = useState<Record<string, string>>({})
+  const [testError, setTestError] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!disk) { setDraft(null); return }
@@ -389,7 +396,8 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     setDraft((d) => {
       if (!d) return d
       const { [name]: _, ...rest } = d.providers
-      return { ...d, providers: rest, default: d.default === name ? "" : d.default }
+      const clearDefault = d.default === name || d.default.startsWith(`${name}/`)
+      return { ...d, providers: rest, default: clearDefault ? "" : d.default }
     })
   }
 
@@ -417,7 +425,8 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     setDraft((d) => {
       if (!d || !d.providers[provName]) return d
       const models = d.providers[provName].models.filter(m => m.id !== modelId)
-      return { ...d, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+      const clearDefault = d.default === `${provName}/${modelId}`
+      return { ...d, default: clearDefault ? "" : d.default, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
     })
   }
 
@@ -440,6 +449,40 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     })
     setNewModelName((p) => ({ ...p, [provName]: "" }))
     setAddingModel((p) => ({ ...p, [provName]: false }))
+  }
+
+  const renameModel = (provName: string, oldId: string) => {
+    const newId = newModelIdValue.trim()
+    if (!newId || newId === oldId) { setEditingModelKey(null); return }
+    setDraft((d) => {
+      if (!d || !d.providers[provName]) return d
+      if (d.providers[provName].models.some(m => m.id === newId)) return d
+      const models = d.providers[provName].models.map(m =>
+        m.id === oldId ? { ...m, id: newId } : m,
+      )
+      const prevDefault = d.default === `${provName}/${oldId}` ? `${provName}/${newId}` : d.default
+      return { ...d, default: prevDefault, providers: { ...d.providers, [provName]: { ...d.providers[provName], models } } }
+    })
+    setEditingModelKey(null)
+  }
+
+  const renameProvider = (oldName: string) => {
+    const newName = provRenameValue.trim()
+    if (!newName || newName === oldName || newName === "default") { setEditingProvName(null); return }
+    setDraft((d) => {
+      if (!d || !d.providers[oldName]) return d
+      if (d.providers[newName]) return d
+      const { [oldName]: prov, ...rest } = d.providers
+      // Update default: if default starts with "oldName/" or equals oldName, rewrite to newName
+      let newDefault = d.default
+      if (d.default === oldName) {
+        newDefault = newName
+      } else if (d.default.startsWith(`${oldName}/`)) {
+        newDefault = newName + d.default.slice(oldName.length)
+      }
+      return { ...d, default: newDefault, providers: { ...rest, [newName]: prov } }
+    })
+    setEditingProvName(null)
   }
 
   const addProvider = () => {
@@ -499,42 +542,52 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       {names.map((name) => {
         const p = draft.providers[name]
         const isAddingModel = addingModel[name] ?? false
+        const hasKey = p.apiKeyStored || p.apiKeyNewValue.trim() !== ""
         return (
           <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             {/* Provider header */}
             <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50/50 border-b border-gray-100">
-              <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer select-none">
+              <label
+                className={`flex items-center gap-2 flex-1 min-w-0 select-none ${hasKey ? "cursor-pointer" : ""}`}
+                title={hasKey ? undefined : "set an API key to enable this provider"}
+              >
                 <input
                   type="checkbox"
                   checked={p.enabled}
-                  onChange={(e) => updateProv(name, { enabled: e.target.checked })}
+                  onChange={(e) => hasKey ? updateProv(name, { enabled: e.target.checked }) : undefined}
+                  disabled={!hasKey}
                   className="h-3.5 w-3.5 rounded"
                 />
-                <span className={`text-[13px] font-semibold truncate ${p.enabled ? "text-gray-900" : "text-gray-400"}`}>
-                  {name}
-                </span>
-                {!p.enabled && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium">disabled</span>
+                {editingProvName === name ? (
+                  <input
+                    autoFocus
+                    value={provRenameValue}
+                    onChange={(e) => setProvRenameValue(e.target.value)}
+                    onBlur={() => renameProvider(name)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") renameProvider(name)
+                      if (e.key === "Escape") setEditingProvName(null)
+                    }}
+                    className="ip text-[13px] font-semibold flex-1 min-w-0"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { setEditingProvName(name); setProvRenameValue(name) }}
+                    className={`text-[13px] font-semibold truncate text-left hover:underline ${p.enabled ? "text-gray-900" : "text-gray-400"}`}
+                    title="click to rename"
+                  >
+                    {name}
+                  </button>
                 )}
-              </label>
-              <label className={`text-[10px] px-1.5 py-0.5 rounded cursor-pointer select-none font-medium transition-colors ${
-                draft.default === name
-                  ? "bg-blue-500 text-white"
-                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-              }`}>
-                <input
-                  type="radio"
-                  name="default-provider"
-                  checked={draft.default === name}
-                  onChange={() => setDraft((d) => d ? { ...d, default: name } : d)}
-                  className="hidden"
-                />
-                {draft.default === name ? "default" : "set default"}
+                {!p.enabled && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium shrink-0">disabled</span>
+                )}
               </label>
               <button
                 type="button"
                 onClick={() => remove(name)}
-                className="text-[11px] text-gray-400 hover:text-red-500 transition-colors"
+                className="text-[11px] text-gray-400 hover:text-red-500 transition-colors shrink-0"
               >
                 remove
               </button>
@@ -605,18 +658,53 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                   <div className="text-[11px] text-gray-400 italic py-2">no models — add one above</div>
                 )}
                 <div className="-mx-1">
-                  {p.models.map((m) => (
-                    <div key={m.id} className="flex items-center gap-2 px-1 py-1.5 rounded group hover:bg-gray-50 transition-colors">
-                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                  {p.models.map((m) => {
+                    const isDefaultModel = draft.default === `${name}/${m.id}`
+                    const editKey = `${name}::${m.id}`
+                    const isEditing = editingModelKey === editKey
+                    const tmState = testingModel[`${name}::${m.id}`]
+                    const tmErr = testError[`${name}::${m.id}`]
+                    return (
+                    <div key={m.id} className="flex items-center gap-1.5 px-1 py-1.5 rounded group hover:bg-gray-50 transition-colors">
+                      {/* Default model star */}
+                      <button
+                        type="button"
+                        onClick={() => setDraft((d) => d ? { ...d, default: isDefaultModel ? "" : `${name}/${m.id}` } : d)}
+                        className={`shrink-0 text-[13px] leading-none transition-colors ${isDefaultModel ? "text-amber-500" : "text-gray-200 hover:text-amber-400"}`}
+                        title={isDefaultModel ? "current default model" : "set as default model"}
+                      >
+                        ★
+                      </button>
+                      <label className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={m.enabled !== false}
                           onChange={() => toggleModel(name, m.id)}
                           className="h-3 w-3 rounded shrink-0"
                         />
-                        <code className={`text-[12px] truncate ${m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"}`}>
-                          {m.id}
-                        </code>
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={newModelIdValue}
+                            onChange={(e) => setNewModelIdValue(e.target.value)}
+                            onBlur={() => renameModel(name, m.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") renameModel(name, m.id)
+                              if (e.key === "Escape") setEditingModelKey(null)
+                            }}
+                            className="ip text-[11px] flex-1 min-w-0"
+                          />
+                        ) : (
+                          <code
+                            className={`text-[12px] truncate cursor-pointer hover:bg-gray-100 px-0.5 rounded ${
+                              m.enabled !== false ? "text-gray-700" : "text-gray-300 line-through"
+                            }`}
+                            onClick={() => { setEditingModelKey(editKey); setNewModelIdValue(m.id) }}
+                            title="click to edit model ID"
+                          >
+                            {m.id}
+                          </code>
+                        )}
                         {m.enabled === false && (
                           <span className="text-[9px] text-gray-300 font-medium shrink-0">off</span>
                         )}
@@ -626,9 +714,53 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                         value={m.maxContextTokens ?? ""}
                         onChange={(e) => updateModel(name, m.id, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
                         placeholder="auto"
-                        className={`w-28 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
+                        className={`w-24 px-1.5 py-0.5 border border-gray-200 rounded text-[10px] outline-none focus:border-gray-400 shrink-0 ${m.maxContextTokens ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`}
                         title="max context tokens (empty = auto)"
                       />
+                      {/* Test button */}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const newKey = p.apiKeyNewValue.trim()
+                          const tk = `${name}::${m.id}`
+                          if (!newKey && !p.apiKeyStored) {
+                            setTestingModel((t) => ({ ...t, [tk]: "error" }))
+                            setTestError((t) => ({ ...t, [tk]: "enter an API key first" }))
+                            setTimeout(() => {
+                              setTestingModel((t) => { const { [tk]: _, ...rest } = t; return rest })
+                              setTestError((t) => { const { [tk]: _, ...rest } = t; return rest })
+                            }, 3000)
+                            return
+                          }
+                          setTestingModel((t) => ({ ...t, [tk]: "testing" }))
+                          setTestError((t) => ({ ...t, [tk]: "" }))
+                          try {
+                            const result = newKey
+                              ? await testProviderConnection(p.baseUrl, newKey, m.id)
+                              : await testProviderConnection(p.baseUrl, "", m.id, name, "personal")
+                            setTestingModel((t) => ({ ...t, [tk]: result.ok ? "ok" : "error" }))
+                            if (!result.ok) setTestError((t) => ({ ...t, [tk]: result.error ?? "unknown error" }))
+                          } catch (e: any) {
+                            setTestingModel((t) => ({ ...t, [tk]: "error" }))
+                            setTestError((t) => ({ ...t, [tk]: e?.message ?? "connection failed" }))
+                          }
+                          setTimeout(() => {
+                            setTestingModel((t) => { const { [tk]: _, ...rest } = t; return rest })
+                            setTestError((t) => { const { [tk]: _, ...rest } = t; return rest })
+                          }, 4000)
+                        }}
+                        disabled={tmState === "testing" || (!p.apiKeyStored && !p.apiKeyNewValue.trim())}
+                        className={`shrink-0 text-[9px] px-1 py-0 rounded transition-colors ${
+                          !p.apiKeyStored && !p.apiKeyNewValue.trim() ? "opacity-0 group-hover:opacity-100 text-gray-300" :
+                          tmState === "ok" ? "bg-emerald-100 text-emerald-700" :
+                          tmState === "error" ? "bg-red-100 text-red-700" :
+                          tmState === "testing" ? "bg-gray-100 text-gray-400 animate-pulse" :
+                          "text-gray-400 hover:text-gray-700 opacity-0 group-hover:opacity-100"
+                        }`}
+                        title={tmErr || (p.apiKeyNewValue.trim() ? "test connection" : p.apiKeyStored ? "test connection" : "enter an API key first")}
+                      >
+                        {tmState === "ok" ? "OK" : tmState === "error" ? "FAIL" : tmState === "testing" ? "..." : "test"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => removeModel(name, m.id)}
@@ -638,7 +770,8 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                         <Trash2 size={11} />
                       </button>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             </div>

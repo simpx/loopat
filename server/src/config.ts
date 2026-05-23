@@ -218,6 +218,22 @@ export type PersonalConfig = {
   onboarding?: OnboardingState
 }
 
+/**
+ * Parse a default selector string. Supports two formats:
+ *   - "providerName/modelId" (new) → { providerName, modelId }
+ *   - "providerName" (legacy)    → { providerName }
+ * Backward-compatible: if no "/" is present, the whole string is the provider name.
+ */
+export function parseDefault(raw: string): { providerName: string; modelId?: string } {
+  if (!raw) return { providerName: "" }
+  const slashIdx = raw.indexOf("/")
+  if (slashIdx <= 0) return { providerName: raw }
+  return {
+    providerName: raw.slice(0, slashIdx),
+    modelId: raw.slice(slashIdx + 1) || undefined,
+  }
+}
+
 /** Preset providers with Anthropic-compatible endpoints. loopat uses the
  *  Claude Agent SDK which speaks the Anthropic Messages API — only providers
  *  that expose an Anthropic-compatible endpoint work directly.
@@ -257,7 +273,7 @@ const WORKSPACE_TEMPLATE: WorkspaceConfig = {
 }
 
 const PERSONAL_TEMPLATE: PersonalConfig = {
-  default: PRESET_PROVIDERS[0]?.name ?? "",
+  default: PRESET_PROVIDERS[0] ? `${PRESET_PROVIDERS[0].name}/${PRESET_PROVIDERS[0].models[0]}` : "",
   providers: buildPresetProviders(),
 }
 
@@ -266,7 +282,7 @@ const PERSONAL_TEMPLATE: PersonalConfig = {
 const PERSONAL_DISK_TEMPLATE: PersonalConfigDisk = {
   providers: (() => {
     const providers: Record<string, ProviderConfigDisk | string> = {
-      default: PRESET_PROVIDERS[0]?.name ?? "",
+      default: PRESET_PROVIDERS[0] ? `${PRESET_PROVIDERS[0].name}/${PRESET_PROVIDERS[0].models[0]}` : "",
     }
     for (const p of PRESET_PROVIDERS) {
       providers[p.name] = {
@@ -423,14 +439,15 @@ export async function loadPersonalConfig(
 
   // Split the heterogeneous providers map: pull out the special "default"
   // string key, leave the rest as provider entries.
-  const defaultName = typeof disk.providers.default === "string" ? disk.providers.default : ""
+  const rawDefault = typeof disk.providers.default === "string" ? disk.providers.default : ""
+  const { providerName: defaultProviderName } = parseDefault(rawDefault)
   const providerEntries: Array<[string, ProviderConfigDisk]> = []
   for (const [name, val] of Object.entries(disk.providers)) {
     if (name === "default") continue
     if (val && typeof val === "object") providerEntries.push([name, val as ProviderConfigDisk])
   }
-  if (defaultName && !providerEntries.some(([n]) => n === defaultName)) {
-    console.warn(`[loopat] personal config: default "${defaultName}" not in providers (ignored)`)
+  if (defaultProviderName && !providerEntries.some(([n]) => n === defaultProviderName)) {
+    console.warn(`[loopat] personal config: default "${rawDefault}" provider "${defaultProviderName}" not in providers (ignored)`)
   }
 
   const refMtimes: Record<string, number> = {}
@@ -469,7 +486,7 @@ export async function loadPersonalConfig(
   }
 
   const cfg: PersonalConfig = {
-    default: defaultName && providers[defaultName] ? defaultName : "",
+    default: defaultProviderName && providers[defaultProviderName] ? rawDefault : "",
     providers,
     ...(envs ? { envs } : {}),
     ...(disk.mounts ? { mounts: disk.mounts } : {}),
@@ -481,9 +498,11 @@ export async function loadPersonalConfig(
 }
 
 export function getActiveProvider(cfg: PersonalConfig): { name: string; provider: ProviderConfig } | null {
-  const name = cfg.default
-  if (!name || !cfg.providers[name]) return null
-  return { name, provider: cfg.providers[name] }
+  const raw = cfg.default
+  if (!raw) return null
+  const { providerName } = parseDefault(raw)
+  if (!providerName || !cfg.providers[providerName]) return null
+  return { name: providerName, provider: cfg.providers[providerName] }
 }
 
 /**
@@ -622,8 +641,22 @@ export async function savePersonalDisk(
     // Default must point to a real provider (if set).
     const defName = patch.providers.default
     if (typeof defName === "string" && defName) {
-      const exists = Object.entries(patch.providers).some(([n, v]) => n !== "default" && n === defName && typeof v === "object")
-      if (!exists) return { ok: false, error: `default "${defName}" not in providers` }
+      const { providerName } = parseDefault(defName)
+      const exists = Object.entries(patch.providers).some(([n, v]) => n !== "default" && n === providerName && typeof v === "object")
+      if (!exists) return { ok: false, error: `default "${defName}" provider "${providerName}" not in providers` }
+    }
+    // Force enabled: false for providers without an API key.
+    for (const [name, val] of Object.entries(patch.providers)) {
+      if (name === "default" || !val || typeof val !== "object") continue
+      const p = val as ProviderConfigDisk
+      if (p.enabled !== false) {
+        const hasNewKey = p.apiKey !== undefined && isValidConfigValueShape(p.apiKey)
+        const existingEntry = disk.providers[name]
+        const existingRef = (existingEntry && typeof existingEntry === "object") ? (existingEntry as ProviderConfigDisk).apiKey : undefined
+        if (!hasNewKey && !existingRef) {
+          p.enabled = false
+        }
+      }
     }
     disk.providers = patch.providers
   }

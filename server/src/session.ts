@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { resolveLoopPlugins } from "./plugin-installer"
@@ -227,8 +227,8 @@ class LoopSession {
     const wCfg = await loadConfig()
     const names = [
       ...candidateNames,
-      pCfg.default,
-      wCfg.default,
+      pCfg.default ? parseDefault(pCfg.default).providerName : undefined,
+      wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
       ...Object.keys(pCfg.providers),
       ...Object.keys(wCfg.providers ?? {}),
     ].filter(Boolean) as string[]
@@ -388,7 +388,20 @@ class LoopSession {
     // models. Both env vars are required (cli checks DISABLE_COMPACT first
     // to enable the override path, then reads CLAUDE_CODE_MAX_CONTEXT_TOKENS).
     // Per-model override takes precedence over provider-level.
-    const activeModel = provider.models.find(m => m.enabled !== false) ?? provider.models[0]
+    //
+    // Resolve the active model: loop meta override first, then personal
+    // config default model, then first enabled, then models[0].
+    let modelId: string | undefined = meta.config?.default_model_id
+    if (!modelId) {
+      const pCfg = await loadPersonalConfig(driver, meta.config?.vault)
+      const defaultParsed = parseDefault(pCfg.default)
+      if (defaultParsed.modelId && defaultParsed.providerName === providerName) {
+        modelId = defaultParsed.modelId
+      }
+    }
+    const activeModel = (modelId ? provider.models.find(m => m.id === modelId) : undefined)
+      ?? provider.models.find(m => m.enabled !== false)
+      ?? provider.models[0]
     const contextTokenOverride = activeModel?.maxContextTokens ?? provider.maxContextTokens
     if (contextTokenOverride && contextTokenOverride > 0) {
       extraEnv.DISABLE_COMPACT = "1"
@@ -871,13 +884,27 @@ class LoopSession {
           meta.config?.default_model,
         ], false)
         if (resolved) {
-          const activeModel = resolved.provider.models.find(m => m.enabled !== false)?.id ?? resolved.provider.models[0]?.id ?? ""
+          let attachModelId: string | undefined = meta.config?.default_model_id
+          if (!attachModelId) {
+            try {
+              const driver = effectiveDriver(meta)
+              const pCfg = await loadPersonalConfig(driver, meta.config?.vault)
+              const defaultParsed = parseDefault(pCfg.default)
+              if (defaultParsed.modelId && defaultParsed.providerName === resolved.name) {
+                attachModelId = defaultParsed.modelId
+              }
+            } catch {}
+          }
+          const activeModel = (attachModelId ? resolved.provider.models.find(m => m.id === attachModelId) : undefined)
+            ?? resolved.provider.models.find(m => m.enabled !== false)
+            ?? resolved.provider.models[0]
+          const activeModelId = activeModel?.id ?? ""
           ws.send(JSON.stringify({
             type: "provider",
             name: resolved.name,
-            model: activeModel,
+            model: activeModelId,
             models: resolved.provider.models,
-            contextWindow: resolveContextWindow(resolved.provider, activeModel),
+            contextWindow: resolveContextWindow(resolved.provider, activeModelId),
           }))
         } else {
           console.warn(`[loop:${this.id.slice(0, 8)}] no provider found in personal or workspace config`)
