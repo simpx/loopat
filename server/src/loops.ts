@@ -1369,29 +1369,41 @@ export async function listLoops(): Promise<LoopMeta[]> {
  * loop's sandbox dir. Returns the catalog's git commit id at copy time (the
  * loop's "sandbox version"), or null if unavailable. Used by createLoop and
  * refreshLoopSandbox.
+ *
+ * Sandbox extends: each file is looked up by walking the chain from child
+ * to oldest ancestor — first match wins (toolchain is atomic, no merging).
+ * Child sandbox with no mise.toml inherits parent's.
  */
 async function snapshotSandboxIntoLoop(id: string, sandboxName: string): Promise<string | null> {
-  const { getSandboxVersion } = await import("./sandboxes")
-  const srcToml = workspaceLoopatSandboxPath(sandboxName)
-  const srcLock = workspaceLoopatSandboxLockPath(sandboxName)
-  const srcMeta = workspaceLoopatSandboxMetaPath(sandboxName)
-  if (!existsSyncBase(srcToml)) {
-    throw new Error(`sandbox "${sandboxName}" not found in catalog`)
+  const { getSandboxVersion, resolveSandboxChain } = await import("./sandboxes")
+  const chain = await resolveSandboxChain(sandboxName)
+  // Walk leaf → root to find first existing file (child wins).
+  const findInChain = (locator: (n: string) => string): string | null => {
+    for (const n of [...chain].reverse()) {
+      const p = locator(n)
+      if (existsSyncBase(p)) return p
+    }
+    return null
+  }
+  const srcToml = findInChain(workspaceLoopatSandboxPath)
+  const srcLock = findInChain(workspaceLoopatSandboxLockPath)
+  const srcMeta = findInChain(workspaceLoopatSandboxMetaPath)
+  if (!srcToml) {
+    throw new Error(`sandbox "${sandboxName}" (and its extends chain) has no mise.toml`)
   }
   await mkdir(loopSandboxDir(id), { recursive: true })
   await copyFile(srcToml, loopSandboxPath(id))
-  // Lockfile + sandbox.json are optional in catalog. If missing, also remove
-  // the loop's stale copies (which would lie about state).
-  if (existsSyncBase(srcLock)) {
+  if (srcLock) {
     await copyFile(srcLock, loopSandboxLockPath(id))
   } else {
     await rm(loopSandboxLockPath(id), { force: true })
   }
-  if (existsSyncBase(srcMeta)) {
+  if (srcMeta) {
     await copyFile(srcMeta, loopSandboxMetaPath(id))
   } else {
     await rm(loopSandboxMetaPath(id), { force: true })
   }
+  // Version is the leaf sandbox's own commit (refresh tracks the leaf).
   return await getSandboxVersion(sandboxName)
 }
 
@@ -1460,10 +1472,11 @@ export async function createLoop(opts: {
   }
   await mkdir(loopDir(id), { recursive: true })
   await mkdir(loopClaudeDir(id), { recursive: true })
-  // Compose skills/agents into .claude/ and write settings.json (autoMemory).
-  // Plugin resolution happens at spawn time (see session.ts) — SDK loads
-  // plugins via its `plugins` option, no loop-local install state needed.
-  await composeLoopClaudeConfig(id, opts.createdBy)
+  // Compose skills/agents + sandbox-chain doctrine into .claude/, write
+  // settings.json (autoMemory). Plugin resolution happens at spawn time
+  // (see session.ts) — SDK loads plugins via its `plugins` option, no
+  // loop-local install state needed.
+  await composeLoopClaudeConfig(id, opts.createdBy, opts.sandbox)
   await writeLoopSettings(id)
 
   // workdir = git worktree add (if repo selected) OR plain mkdir

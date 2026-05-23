@@ -8,7 +8,6 @@ import {
   personalTokenUsagePath,
   personalVaultDir,
   workspaceDir,
-  workspaceClaudeJsonPath,
   personalClaudeJsonPath,
 } from "./paths"
 import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
@@ -505,20 +504,37 @@ export function getActiveProvider(cfg: PersonalConfig): { name: string; provider
   return { name: providerName, provider: cfg.providers[providerName] }
 }
 
-/**
- * Read workspace-shared Claude Code config from knowledge/.loopat/claude/claude.json.
- * Currently used only for mcpServers (passed through to SDK query options).
- * Missing / malformed → {} (so loops still start without workspace MCP servers).
- */
-export async function loadWorkspaceClaudeJson(): Promise<WorkspaceClaudeJson> {
-  const p = workspaceClaudeJsonPath()
+/** Read ONE sandbox's .claude/.claude.json (no chain walking). */
+async function readSandboxOwnClaudeJson(sandboxName: string): Promise<WorkspaceClaudeJson> {
+  const { workspaceLoopatSandboxDir } = await import("./paths")
+  const p = `${workspaceLoopatSandboxDir(sandboxName)}/.claude/.claude.json`
   if (!existsSync(p)) return {}
   try {
     return JSON.parse(await readFile(p, "utf8")) as WorkspaceClaudeJson
   } catch (e: any) {
-    console.warn(`[loopat] workspace claude.json malformed at ${p}: ${e?.message ?? e}`)
+    console.warn(`[loopat] sandbox "${sandboxName}" .claude.json malformed at ${p}: ${e?.message ?? e}`)
     return {}
   }
+}
+
+/**
+ * Read a sandbox's Claude Code state file (`.claude/.claude.json` — CC's
+ * native location for mcpServers, written by `claude plugin install`).
+ * Walks the sandbox's extends chain (oldest ancestor first) and merges
+ * mcpServers + extraKnownMarketplaces by key — child shadows parent.
+ * Missing / malformed at any level → empty for that level (warned, not fatal).
+ */
+export async function loadSandboxClaudeJson(sandboxName: string | undefined): Promise<WorkspaceClaudeJson> {
+  if (!sandboxName) return {}
+  const { resolveSandboxChain } = await import("./sandboxes")
+  const chain = await resolveSandboxChain(sandboxName)
+  const merged: WorkspaceClaudeJson = { mcpServers: {}, extraKnownMarketplaces: {} }
+  for (const name of chain) {
+    const own = await readSandboxOwnClaudeJson(name)
+    Object.assign(merged.mcpServers!, own.mcpServers ?? {})
+    Object.assign(merged.extraKnownMarketplaces!, own.extraKnownMarketplaces ?? {})
+  }
+  return merged
 }
 
 /**

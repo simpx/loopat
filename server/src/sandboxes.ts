@@ -45,11 +45,50 @@ export type SandboxEntry = {
  *
  * - `shell`: term spawn shell — bare name (PATH lookup against mise installs)
  *   or absolute path. Falls back to /bin/bash when undefined.
+ * - `extends`: optional sibling sandbox name to inherit from. Child's
+ *   plugins / mcpServers / extraKnownMarketplaces union with parent (child
+ *   wins on same key). CLAUDE.md concatenates (parent → child). mise.toml
+ *   falls back to parent if child has none.
  *
  * Future: autostart services, hook scripts, etc.
  */
 export type SandboxMeta = {
   shell?: string
+  extends?: string
+}
+
+/** Hard cap on extends chain length — defensive, not enforced as "must be ≤". */
+const MAX_EXTENDS_DEPTH = 5
+
+/**
+ * Walk the extends chain for `name`, returning sandbox names from oldest
+ * ancestor (chain[0]) to the child itself (chain[chain.length-1]). Order
+ * matters: callers iterate in this order so child writes shadow parent
+ * writes naturally (later wins). Cycles + over-depth chains are warned and
+ * truncated, never thrown.
+ */
+export async function resolveSandboxChain(name: string): Promise<string[]> {
+  const stack: string[] = []
+  const seen = new Set<string>()
+  let cur: string | undefined = name
+  while (cur && stack.length < MAX_EXTENDS_DEPTH) {
+    if (!isValidSandboxName(cur)) {
+      console.warn(`[sandbox] invalid extends target "${cur}" in chain for "${name}"; stopping`)
+      break
+    }
+    if (seen.has(cur)) {
+      console.warn(`[sandbox] extends cycle at "${cur}" in chain for "${name}"; stopping`)
+      break
+    }
+    seen.add(cur)
+    stack.push(cur)
+    const meta = await readSandboxMeta(cur)
+    cur = meta?.extends
+  }
+  if (cur && stack.length >= MAX_EXTENDS_DEPTH) {
+    console.warn(`[sandbox] extends chain for "${name}" exceeded depth ${MAX_EXTENDS_DEPTH}; truncated at "${stack[stack.length - 1]}"`)
+  }
+  return stack.reverse() // child last → oldest-first
 }
 
 /** Read sandbox.json for the named sandbox. Returns null if missing or malformed. */

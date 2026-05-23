@@ -47,10 +47,8 @@ import {
   workspaceReposDir,
   loopContextKnowledge,
   loopContextNotes,
-  workspaceClaudePath,
   personalDir,
   LOOPAT_INSTALL_DIR,
-  serverPluginCacheRoot,
   loopHomeUpper,
   loopHomeWork,
   loopHomeMerged,
@@ -239,18 +237,16 @@ export async function buildBwrapArgs(
     knowledgeRw ? "--bind" : "--ro-bind", loopContextKnowledge(loopId), V_CONTEXT_KNOWLEDGE,
     "--bind", loopContextNotes(loopId), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
-    // loopat install dir (claude binary lives here)
+    // loopat install dir (claude binary lives here). Also covers builtin
+    // plugins shipped under server/templates/plugins/<name>/, which the SDK
+    // plugins option passes as host paths.
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
-  // Server-side plugin cache (workspace + personal marketplace clones +
-  // plugin checkouts). Bound same-to-same so loop-internal symlinks (whose
-  // targets are host paths under this dir) resolve inside the sandbox. Only
-  // bind when the dir exists — empty workspaces don't need it.
-  const pluginCache = serverPluginCacheRoot()
-  if (existsSync(pluginCache)) {
-    args.push("--ro-bind", pluginCache, pluginCache)
-  }
+  // Note: sandbox plugin caches live under
+  // knowledge/.loopat/sandboxes/<name>/.claude/, which is already covered by
+  // the knowledge bind above. Plugin installPaths (absolute, host-format)
+  // resolve naturally inside the sandbox via that bind.
 
   // ── vault symlink ──
   // Personal is bound wholesale above, so all named vaults under
@@ -280,13 +276,11 @@ export async function buildBwrapArgs(
   // nothing is written into the loop's .claude/plugins/.
   // The whole .claude/ dir is already rw-bound above (V_LOOP_CLAUDE).
 
-  // workspace CLAUDE.md supplement: bind to CLAUDE_CONFIG_DIR/CLAUDE.md so Claude
-  // Code natively loads it as user-tier (settingSources includes "user").
-  // The platform doctrine (L2) is still injected via systemPrompt.append.
-  const workspaceClaudeMd = workspaceClaudePath()
-  if (existsSync(workspaceClaudeMd)) {
-    args.push("--ro-bind", workspaceClaudeMd, join(V_LOOP_CLAUDE(loopId), "CLAUDE.md"))
-  }
+  // Sandbox doctrine (sandbox-chain CLAUDE.md) is composed into
+  // loops/<id>/.claude/CLAUDE.md by composeLoopClaudeConfig BEFORE this
+  // argv is built. CLAUDE_CONFIG_DIR points at .claude/ via the rw-bind
+  // above; CC natively loads CLAUDE.md from there as user-tier doctrine.
+  // No ro-bind needed.
 
   // We used to ro-bind `~/.claude/.credentials.json` here, intending to share
   // MCP OAuth tokens — but that file only ever contains `claudeAiOauth` (the

@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, workspaceLoopatSkillsDir, personalLoopatSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadWorkspaceClaudeJson, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadSandboxClaudeJson, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { resolveLoopPlugins } from "./plugin-installer"
@@ -320,14 +320,15 @@ class LoopSession {
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
 
-    // Compose multi-tier claude config (skills + agents) into the loop's
+    // Compose skills + agents + sandbox-chain doctrine into the loop's
     // private .claude/. Re-run every spawn so newly-added workspace/personal
-    // entries show up at next session start.
-    await composeLoopClaudeConfig(loopId, driver)
+    // skills + sandbox CLAUDE.md edits show up.
+    await composeLoopClaudeConfig(loopId, driver, meta.config?.sandbox)
     await writeLoopSettings(loopId)
-    // Resolve plugins from builtin + workspace + personal claude.json. Cheap
-    // when server-side cache is warm; passed to SDK below as `plugins`.
-    const resolvedPlugins = await resolveLoopPlugins(driver)
+    // Resolve plugins from the loop's chosen sandbox + builtins. Sandbox's
+    // .claude/plugins/installed_plugins.json (CC-managed) is the source of
+    // truth — no loopat-side install or marketplace logic.
+    const resolvedPlugins = await resolveLoopPlugins(meta.config?.sandbox)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
     //
@@ -351,16 +352,15 @@ class LoopSession {
       } catch {}
     }
 
-    // Workspace Claude config (mcpServers et al) lives in knowledge/.loopat/claude/claude.json.
-    // Passed through to SDK as-is — secret substitution removed; static-auth
-    // servers should keep their token in `env`/`headers` directly (only ever
-    // commit OAuth-flow servers like `coop` to the workspace repo).
-    const workspace = await loadWorkspaceClaudeJson()
+    // Sandbox-level mcpServers live in the sandbox's .claude/.claude.json
+    // (CC writes this when admin sets up the sandbox). Personal mcpServers
+    // overlay per-user. Passed through to SDK as-is — static-auth servers
+    // should keep their token in `env`/`headers` directly.
+    const sandboxClaudeJson = await loadSandboxClaudeJson(meta.config?.sandbox)
     const personalClaude = await loadPersonalClaudeJson(driver)
-    // Merge admin-tier + user-tier mcpServers (user wins on name collision —
-    // consistent with the skill/plugin compose model).
+    // Merge sandbox + personal mcpServers (personal wins on name collision).
     const mergedServers: Record<string, any> = {
-      ...(workspace.mcpServers ?? {}),
+      ...(sandboxClaudeJson.mcpServers ?? {}),
       ...(personalClaude.mcpServers ?? {}),
     }
     // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
@@ -849,21 +849,23 @@ class LoopSession {
     for (const name of await this.listDirNames(personalLoopatSkillsDir(user))) {
       map.set(name, await readSkillDescription(personalLoopatSkillsDir(user), name))
     }
-    // Plugin sub-commands: scan each resolved plugin's skills/ dir and surface
-    // as `<plugin-name>:<skill-name>`. resolveLoopPlugins returns the same
+    // Plugin sub-commands: scan each resolved plugin's skills/ dir and
+    // surface as `<plugin>:<skill>`. resolveLoopPlugins returns the same
     // paths the SDK will pass via `--plugin-dir` at spawn, so the seed
-    // exactly matches what CC will report on init.
+    // matches what CC will report on init. Names from the resolver are
+    // `plugin@marketplace`; strip the marketplace suffix for the slash form.
     try {
-      const resolvedPlugins = await resolveLoopPlugins(user)
+      const meta = await getLoop(this.id)
+      const resolvedPlugins = await resolveLoopPlugins(meta?.config?.sandbox)
       for (const plugin of resolvedPlugins) {
+        const pluginName = plugin.name.split("@")[0]
         const skillsDir = join(plugin.path, "skills")
         for (const skill of await this.listDirNames(skillsDir)) {
-          map.set(`${plugin.name}:${skill}`, await readSkillDescription(skillsDir, skill))
+          map.set(`${pluginName}:${skill}`, await readSkillDescription(skillsDir, skill))
         }
       }
     } catch (e: any) {
-      // Plugin resolution can fail (e.g. marketplace unreachable). Seed list
-      // is best-effort; CC's init payload will fill in the truth.
+      // Seed is best-effort; CC's init payload fills in the truth at spawn.
       console.warn(`[session ${this.id.slice(0,8)}] seed plugin scan failed: ${e?.message ?? e}`)
     }
     return [...map.entries()]

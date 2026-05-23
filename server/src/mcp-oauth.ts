@@ -34,7 +34,7 @@
  */
 import { createHash, randomBytes } from "node:crypto"
 
-import { loadWorkspaceClaudeJson, type McpServerConfig } from "./config"
+import { loadSandboxClaudeJson, type McpServerConfig } from "./config"
 import { putMcpToken, type McpServerToken } from "./mcp-tokens"
 
 const STATE_TTL_MS = 10 * 60 * 1000 // 10 minutes — generous; OAuth flows are slow
@@ -237,9 +237,12 @@ export async function startMcpAuth(opts: {
 }): Promise<StartResult> {
   const { user, vault, serverName, publicBaseUrl } = opts
 
-  const workspace = await loadWorkspaceClaudeJson()
-  const srv: McpServerConfig | undefined = workspace.mcpServers?.[serverName]
-  if (!srv) return { ok: false, error: `server "${serverName}" not configured in workspace claude.json` }
+  // MCP servers now live per-sandbox (in .claude/.claude.json). Pre-sandbox-
+  // routing UI, default to "default" sandbox — TODO: thread sandbox name
+  // from the OAuth flow caller once MCP page learns about sandboxes.
+  const sandbox = await loadSandboxClaudeJson("default")
+  const srv: McpServerConfig | undefined = sandbox.mcpServers?.[serverName]
+  if (!srv) return { ok: false, error: `server "${serverName}" not configured in default sandbox` }
   if (srv.type !== "http" && srv.type !== "sse") {
     return { ok: false, error: `server "${serverName}" is type "${srv.type}"; only http/sse support OAuth` }
   }

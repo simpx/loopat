@@ -49,10 +49,9 @@ import {
   workspaceRepoDir,
   workspaceReposDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadWorkspaceClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadSandboxClaudeJson, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
-import { prewarmWorkspaceMarketplaces } from "./plugin-installer"
 import {
   createUser,
   findUser,
@@ -644,7 +643,9 @@ function publicBaseUrl(c: any): string {
 // Personal-tier shadows workspace-tier on name collision (matches spawn merge).
 app.get("/api/mcp-servers", requireAuth, async (c) => {
   const userId = c.get("userId") as string
-  const ws = await loadWorkspaceClaudeJson()
+  // MCP servers now live per-sandbox. Until the MCP page supports per-sandbox
+  // routing, surface the default sandbox's servers as the "workspace" tier.
+  const ws = await loadSandboxClaudeJson("default")
   const ps = await loadPersonalClaudeJson(userId)
 
   const shape = (srv: any) => ({
@@ -2772,10 +2773,8 @@ import { isHomeOverlaySupported } from "./bwrap"
 const overlayOk = await isHomeOverlaySupported()
 console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled (tmpfs fallback)"}`)
 
-// Prewarm workspace marketplaces so first loop create after boot doesn't pay
-// clone latency. Failures here are warned, not fatal — admin can fix the URL
-// and the next loop create will retry (ensureMarketplaceCached is idempotent).
-await prewarmWorkspaceMarketplaces()
+// Plugin caching is delegated to CC itself — admin uses `claude plugin
+// install` inside each sandbox's .claude/ dir. No loopat-side prewarm.
 
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
 console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)

@@ -1,199 +1,102 @@
 /**
- * Resolve which plugins a loop should run with, returning local paths suitable
- * for the Agent SDK's `plugins: [{type: 'local', path: ...}]` option.
+ * Resolve which plugins a loop should run with — read straight from the
+ * loop's chosen sandbox dir, then add platform-shipped builtins. Output
+ * goes into the Agent SDK's `plugins: [{type:'local', path:...}]` option
+ * (one --plugin-dir per entry on the spawned CC).
  *
- * Background — why this isn't an "installer":
+ * Architecture:
  *
- *   The Agent SDK only loads plugins through its `plugins` option, which
- *   becomes one `--plugin-dir <path>` per entry on the spawned CC process
- *   (see SDK sdk.mjs). It does NOT read settings.json's `enabledPlugins`,
- *   does NOT read `installed_plugins.json`, does NOT participate in
- *   `/plugin install` lifecycle (that command itself is "isn't available in
- *   this environment" in headless mode). So writing CC-native install state
- *   to disk in the loop's .claude/ is pointless — SDK ignores it.
+ *   Per sandbox under knowledge/.loopat/sandboxes/<name>/:
+ *     .claude/                            ← admin uses `claude plugin install`
+ *       settings.json                      to populate; CC writes all this
+ *       .claude.json                       natively. .gitignore drops the
+ *       plugins/
+ *         installed_plugins.json           cache/ + marketplaces/ (per-server
+ *         known_marketplaces.json           state, not committable).
+ *         cache/<m>/<p>/<v>/               ← actual plugin files
+ *         marketplaces/<m>/                ← marketplace clones
+ *     mise.toml / mise.lock / sandbox.json / CLAUDE.md  ← team-shared
  *
- *   Instead loopat plays the role of the installer at the OUTER layer: it
- *   resolves "which plugins" (from builtin + workspace + personal claude.json
- *   declarations), materializes them in a server-side cache (one copy shared
- *   across loops), and at spawn hands the SDK the list of local paths. The
- *   loop's .claude/plugins/ stays untouched and CC-owned (though CC won't
- *   actually use it in SDK mode).
+ *   Loopat reads `installed_plugins.json` and forwards each entry's
+ *   `installPath` to the SDK. No marketplace logic, no install logic —
+ *   CC does all that, loopat just enumerates the result.
  *
- * Server-side cache layout — `${LOOPAT_HOME}/plugin-cache/`:
- *   <market>/_marketplace/                          ← marketplace clone (managed by marketplace-cache.ts)
- *   <market>/_marketplace/plugins/<plugin>/          ← plugin source for "./..." relative entries
- *
- * Bound into the sandbox same-to-same via bwrap, so paths in this file
- * (host paths) are valid inside the sandbox too — SDK passes them through
- * to the sandboxed CC and `--plugin-dir <host-path>` resolves.
+ *   The builtin `loopat` plugin (server/templates/plugins/loopat/) is
+ *   platform-shipped and always included regardless of sandbox.
  */
 import { existsSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
-import {
-  builtinMarketplaceDir,
-  builtinMarketplaceManifestPath,
-} from "./paths"
-import { loadPersonalClaudeJson, loadWorkspaceClaudeJson, type MarketplaceSource } from "./config"
-import {
-  ensureMarketplaceCached,
-  marketplaceHeadSha,
-  readMarketplaceCatalog,
-  refreshMarketplaceCache,
-  resolvePluginFromCatalog,
-} from "./marketplace-cache"
+import { TEMPLATES_DIR, workspaceLoopatSandboxDir } from "./paths"
+import { resolveSandboxChain } from "./sandboxes"
 
-/** Entry in a marketplace.json plugins[] array (subset we read). */
-type CatalogPluginEntry = {
-  name: string
-  description?: string
-  version?: string
-  /** Either a relative path string ("./plugins/foo") or a source object. */
-  source: string | { source: string; [k: string]: any }
-}
-
-/** Resolved plugin — a path the SDK can hand to CC via --plugin-dir. */
 export type ResolvedLoopPlugin = {
-  /** Display name (manifest's `name`, used for logging / dedup). */
+  /** Display name (`plugin@marketplace` or just `plugin` for builtins). */
   name: string
-  /** Marketplace this plugin came from (used for dedup + diagnostics). */
-  marketplace: string
-  /** Host path to the plugin's root dir (contains .claude-plugin/plugin.json).
-   *  Must be sandbox-visible via the corresponding ro-bind (LOOPAT_INSTALL_DIR
-   *  for builtin, serverPluginCacheRoot for workspace/personal). */
+  /** Host path to plugin root (contains .claude-plugin/plugin.json). Must be
+   *  sandbox-visible via existing bwrap binds (LOOPAT_INSTALL_DIR for
+   *  builtins; knowledge bind for sandbox-installed plugins). */
   path: string
 }
 
-async function readJson<T>(path: string): Promise<T | null> {
-  if (!existsSync(path)) return null
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as T
-  } catch {
-    return null
-  }
+/** Platform-shipped plugins. Always loaded into every loop. */
+function resolveBuiltinPlugins(): ResolvedLoopPlugin[] {
+  return [
+    { name: "loopat@builtin", path: join(TEMPLATES_DIR, "plugins", "loopat") },
+  ]
 }
 
-/** Resolve all builtin plugins (loopat-builtin marketplace, local source). */
-async function resolveBuiltinPlugins(): Promise<ResolvedLoopPlugin[]> {
-  const catalog = await readJson<{ name: string; plugins: CatalogPluginEntry[] }>(builtinMarketplaceManifestPath())
-  if (!catalog) {
-    console.warn(`[plugins] builtin marketplace catalog missing: ${builtinMarketplaceManifestPath()}`)
+type InstalledPluginsFile = {
+  version: number
+  plugins: Record<string, Array<{ installPath: string; version: string }>>
+}
+
+/** Read ONE sandbox's installed_plugins.json (no chain walking). */
+async function readSandboxOwnPlugins(sandboxName: string): Promise<ResolvedLoopPlugin[]> {
+  const path = join(workspaceLoopatSandboxDir(sandboxName), ".claude", "plugins", "installed_plugins.json")
+  if (!existsSync(path)) return []
+  let data: InstalledPluginsFile
+  try {
+    data = JSON.parse(await readFile(path, "utf8"))
+  } catch (e: any) {
+    console.warn(`[plugins] sandbox "${sandboxName}" installed_plugins.json unreadable: ${e?.message ?? e}`)
     return []
   }
   const out: ResolvedLoopPlugin[] = []
-  for (const entry of catalog.plugins) {
-    const src = typeof entry.source === "string" ? entry.source : null
-    if (!src || !src.startsWith("./")) {
-      console.warn(`[plugins] builtin ${entry.name}: unsupported source ${JSON.stringify(entry.source)}`)
+  for (const [key, entries] of Object.entries(data.plugins ?? {})) {
+    const entry = entries?.[0]
+    if (!entry?.installPath) continue
+    if (!existsSync(entry.installPath)) {
+      console.warn(`[plugins] sandbox "${sandboxName}" plugin "${key}": installPath missing (${entry.installPath})`)
       continue
     }
-    const path = join(builtinMarketplaceDir(), src)
-    if (!existsSync(path)) {
-      console.warn(`[plugins] builtin ${entry.name}: path missing ${path}`)
-      continue
-    }
-    out.push({ name: entry.name, marketplace: catalog.name, path })
+    out.push({ name: key, path: entry.installPath })
   }
   return out
 }
 
 /**
- * Walk workspace + personal claude.json's extraKnownMarketplaces + enabledPlugins
- * and resolve each enabled plugin to a path. Personal entries override workspace
- * by key (same precedence as MCP merge). Missing or unresolvable entries are
- * warned + skipped, not thrown — one bad plugin doesn't kill the spawn.
+ * Walk the sandbox's extends chain (oldest ancestor first) and merge plugins
+ * by `name@market` key — child entries shadow parent entries naturally.
  */
-async function resolveCatalogPlugins(user: string): Promise<ResolvedLoopPlugin[]> {
-  const workspace = await loadWorkspaceClaudeJson()
-  const personal = await loadPersonalClaudeJson(user)
-  const marketSources: Record<string, MarketplaceSource> = {}
-  for (const [name, entry] of Object.entries(workspace.extraKnownMarketplaces ?? {})) {
-    marketSources[name] = entry.source
-  }
-  for (const [name, entry] of Object.entries(personal.extraKnownMarketplaces ?? {})) {
-    marketSources[name] = entry.source
-  }
-  const enabled: Record<string, boolean> = {}
-  for (const [k, v] of Object.entries(workspace.enabledPlugins ?? {})) enabled[k] = v
-  for (const [k, v] of Object.entries(personal.enabledPlugins ?? {})) enabled[k] = v
-
-  const out: ResolvedLoopPlugin[] = []
-  for (const [key, on] of Object.entries(enabled)) {
-    if (!on) continue
-    const at = key.lastIndexOf("@")
-    if (at < 0) {
-      console.warn(`[plugins] enabledPlugins key "${key}" missing @marketplace suffix; skipped`)
-      continue
-    }
-    const pluginName = key.slice(0, at)
-    const marketName = key.slice(at + 1)
-    const source = marketSources[marketName]
-    if (!source) {
-      console.warn(`[plugins] ${key}: marketplace "${marketName}" not declared in extraKnownMarketplaces`)
-      continue
-    }
-    try {
-      const marketRoot = await ensureMarketplaceCached(marketName, source)
-      const catalog = await readMarketplaceCatalog(marketRoot)
-      if (!catalog) {
-        console.warn(`[plugins] ${marketName}: catalog unreadable at ${marketRoot}`)
-        continue
-      }
-      const entry = catalog.plugins.find((p) => p.name === pluginName)
-      if (!entry) {
-        console.warn(`[plugins] ${marketName}: plugin "${pluginName}" not in catalog`)
-        continue
-      }
-      const headSha = await marketplaceHeadSha(marketRoot)
-      const resolved = await resolvePluginFromCatalog(marketRoot, entry, headSha)
-      if (!resolved) continue
-      out.push({ name: pluginName, marketplace: marketName, path: resolved.hostPath })
-    } catch (e: any) {
-      console.warn(`[plugins] resolve ${key} failed: ${e?.message ?? e}`)
+async function resolveSandboxPlugins(sandboxName: string): Promise<ResolvedLoopPlugin[]> {
+  const chain = await resolveSandboxChain(sandboxName)
+  const merged = new Map<string, ResolvedLoopPlugin>()
+  for (const name of chain) {
+    for (const p of await readSandboxOwnPlugins(name)) {
+      merged.set(p.name, p) // later in chain (closer to leaf) wins
     }
   }
-  return out
+  return [...merged.values()]
 }
 
 /**
- * Boot-time prewarm: ensure every marketplace declared in workspace
- * claude.json is cloned + fresh, so loop creates after boot hit warm cache
- * and don't pay clone latency. Failures are warned, not thrown — bad URL
- * doesn't block server boot.
- *
- * Personal claude.json is NOT prewarmed at boot (per-user state, lazy at
- * spawn — most users won't have personal marketplaces anyway).
+ * Main entry — called at loop spawn. Always returns builtins; adds the
+ * sandbox's plugins on top if a sandbox is selected.
  */
-export async function prewarmWorkspaceMarketplaces(): Promise<void> {
-  const workspace = await loadWorkspaceClaudeJson()
-  const markets = workspace.extraKnownMarketplaces ?? {}
-  const names = Object.keys(markets)
-  if (names.length === 0) return
-  console.log(`[plugins] prewarming ${names.length} marketplace(s): ${names.join(", ")}`)
-  for (const [name, entry] of Object.entries(markets)) {
-    try {
-      const root = await refreshMarketplaceCache(name, entry.source)
-      const catalog = await readMarketplaceCatalog(root)
-      const have = catalog?.plugins?.length ?? 0
-      console.log(`[plugins]   ${name}: ${have} plugin(s) available`)
-    } catch (e: any) {
-      console.warn(`[plugins]   ${name}: ${e?.message ?? e}`)
-    }
-  }
-}
-
-/**
- * Main entry — called by session.ts at spawn time. Returns the list of
- * plugins to hand to the SDK's `plugins` option.
- *
- * Resolution happens at spawn (not create) so admin changes to workspace
- * claude.json take effect on next spawn without explicit "loop resync".
- * Resolution is cheap when the server cache is warm (just readJson +
- * existsSync per plugin).
- */
-export async function resolveLoopPlugins(user: string): Promise<ResolvedLoopPlugin[]> {
+export async function resolveLoopPlugins(sandboxName: string | undefined): Promise<ResolvedLoopPlugin[]> {
   return [
-    ...(await resolveBuiltinPlugins()),
-    ...(await resolveCatalogPlugins(user)),
+    ...resolveBuiltinPlugins(),
+    ...(sandboxName ? await resolveSandboxPlugins(sandboxName) : []),
   ]
 }

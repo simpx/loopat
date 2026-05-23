@@ -21,7 +21,7 @@
  * added to knowledge/personal mid-session show up at next session start.
  */
 import { existsSync } from "node:fs"
-import { mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
   loopClaudeDir,
@@ -30,8 +30,10 @@ import {
   personalLoopatAgentsDir,
   personalLoopatSkillsDir,
   workspaceLoopatAgentsDir,
+  workspaceLoopatSandboxDir,
   workspaceLoopatSkillsDir,
 } from "./paths"
+import { resolveSandboxChain } from "./sandboxes"
 
 type Tier = {
   /** Host-side directory that contains entries (one per skill/plugin/agent). */
@@ -84,16 +86,23 @@ async function composeTier(dst: string, tiers: Tier[], opts: ComposeOpts = { kin
 }
 
 /**
- * Compose skills + agents into a given loop's .claude/. Run on every spawn.
- * Plugins are handled separately by plugin-installer.ts (resolved at spawn
- * and passed to the SDK via its `plugins` option).
+ * Compose skills + agents + sandbox doctrine into a given loop's .claude/.
+ * Run on every spawn. Plugins are handled separately by plugin-installer.ts
+ * (resolved at spawn and passed to the SDK via its `plugins` option).
  */
 export async function composeLoopClaudeConfig(
   loopId: string,
   user: string,
+  sandboxName?: string,
 ): Promise<void> {
   // Ensure the loop's .claude/ exists (caller may have already done this).
   await mkdir(loopClaudeDir(loopId), { recursive: true })
+
+  // Sandbox doctrine — concat CLAUDE.md from the sandbox's extends chain
+  // (oldest ancestor first → leaf), write to .claude/CLAUDE.md so CC loads
+  // it as user-tier (settingSources: ["user", "project"]). Per-loop file
+  // means sandbox doctrine updates take effect on next spawn.
+  await composeSandboxDoctrine(loopId, sandboxName)
 
   // Skills tier — flat namespace, user-tier slot in CC.
   // Virtual paths must match where bwrap binds knowledge / personal.
@@ -125,6 +134,36 @@ export async function composeLoopClaudeConfig(
     ],
     { kind: "file", filter: (name) => name.endsWith(".md") },
   )
+}
+
+/**
+ * Walk the sandbox's extends chain (oldest → leaf), concat each level's
+ * CLAUDE.md with `\n\n---\n\n` separators, write to loop's
+ * .claude/CLAUDE.md. Idempotent: deletes the file when no CLAUDE.md exists
+ * in the chain (avoids stale doctrine after sandbox removed a file).
+ */
+async function composeSandboxDoctrine(loopId: string, sandboxName: string | undefined): Promise<void> {
+  const dst = join(loopClaudeDir(loopId), "CLAUDE.md")
+  if (!sandboxName) {
+    await rm(dst, { force: true })
+    return
+  }
+  const chain = await resolveSandboxChain(sandboxName)
+  const parts: string[] = []
+  for (const name of chain) {
+    const src = join(workspaceLoopatSandboxDir(name), "CLAUDE.md")
+    if (!existsSync(src)) continue
+    try {
+      parts.push((await readFile(src, "utf8")).trim())
+    } catch (e: any) {
+      console.warn(`[compose] sandbox "${name}" CLAUDE.md unreadable: ${e?.message ?? e}`)
+    }
+  }
+  if (parts.length === 0) {
+    await rm(dst, { force: true })
+    return
+  }
+  await writeFile(dst, parts.join("\n\n---\n\n") + "\n")
 }
 
 /**
