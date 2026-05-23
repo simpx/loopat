@@ -634,7 +634,72 @@ checksum = "abc"
   })
 })
 
-// ─── 10. listProfiles ───────────────────────────────────────────────────
+// ─── 10. Marketplace source-drift detection ────────────────────────────
+
+describe("sourcesMatch — marketplace URL drift detection", () => {
+  let sourcesMatch: any
+
+  beforeAll(async () => {
+    sourcesMatch = (await import("../src/plugin-installer")).sourcesMatch
+  })
+
+  test("git: identical URL → match", () => {
+    expect(sourcesMatch(
+      { source: "git", url: "git@x.com/foo.git" },
+      { source: "git", url: "git@x.com/foo.git" },
+    )).toBe(true)
+  })
+
+  test("git: different URL (drift) → mismatch", () => {
+    expect(sourcesMatch(
+      { source: "git", url: "git@x.com/new.git" },
+      { source: "git", url: "git@x.com/old.git" },
+    )).toBe(false)
+  })
+
+  test("github: repo same → match", () => {
+    expect(sourcesMatch(
+      { source: "github", repo: "owner/x" },
+      { source: "github", repo: "owner/x" },
+    )).toBe(true)
+  })
+
+  test("github: legacy `repository` field == new `repo` field", () => {
+    expect(sourcesMatch(
+      { source: "github", repo: "owner/x" },
+      { source: "github", repository: "owner/x" },
+    )).toBe(true)
+  })
+
+  test("directory: same path → match", () => {
+    expect(sourcesMatch(
+      { source: "directory", path: "/a/b" },
+      { source: "directory", path: "/a/b" },
+    )).toBe(true)
+  })
+
+  test("directory: different path → mismatch", () => {
+    expect(sourcesMatch(
+      { source: "directory", path: "/new/path" },
+      { source: "directory", path: "/old/path" },
+    )).toBe(false)
+  })
+
+  test("different source types → mismatch", () => {
+    expect(sourcesMatch(
+      { source: "github", repo: "x/y" },
+      { source: "git", url: "git@x.com/y.git" },
+    )).toBe(false)
+  })
+
+  test("nullish guards", () => {
+    expect(sourcesMatch(null, null)).toBe(true)
+    expect(sourcesMatch(null, { source: "git" })).toBe(false)
+    expect(sourcesMatch({ source: "git" }, undefined)).toBe(false)
+  })
+})
+
+// ─── 11. listProfiles ───────────────────────────────────────────────────
 
 describe("listProfiles", () => {
   test("returns dirs that have .claude/ subdir", async () => {

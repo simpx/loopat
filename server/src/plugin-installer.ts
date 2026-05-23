@@ -75,13 +75,51 @@ async function runClaude(args: string[]): Promise<{ ok: boolean; out: string; er
 }
 
 /**
- * Ensure a marketplace is registered with CC. Idempotent.
- * `name` is the marketplace name as it appears in CC config. `addPath` is
- * what we'd pass to `claude plugin marketplace add` if it's not present.
+ * Compare two marketplace sources (from settings.json and from CC's
+ * known_marketplaces.json). Used to detect URL/path drift — if a team admin
+ * changes the marketplace URL, members' host CC needs to re-register.
  */
-async function ensureMarketplace(name: string, addPath: string): Promise<void> {
-  const list = await runClaude(["plugin", "marketplace", "list"])
-  if (list.ok && list.out.includes(name)) return
+export function sourcesMatch(declared: any, existing: any): boolean {
+  if (declared === existing) return true
+  if (!declared || !existing) return false
+  if (typeof declared !== "object" || typeof existing !== "object") return false
+  if (declared.source !== existing.source) return false
+  switch (declared.source) {
+    case "git":
+    case "url":
+      return declared.url === existing.url
+    case "github":
+      // Both shapes seen: `repo: "owner/name"` and `repository: "owner/name"`
+      return (declared.repo ?? declared.repository) === (existing.repo ?? existing.repository)
+    case "directory":
+      return declared.path === existing.path
+    default:
+      // Unknown shape — fall back to JSON equality
+      return JSON.stringify(declared) === JSON.stringify(existing)
+  }
+}
+
+/**
+ * Ensure a marketplace is registered with CC. Idempotent + URL-drift aware.
+ *
+ * If the marketplace name is already registered but the source differs from
+ * what the team declared (admin changed the URL, repo moved, etc.), remove
+ * the stale registration and re-add. Without this, host CC would keep using
+ * the old URL forever (CC doesn't auto-reconcile name-vs-source).
+ */
+async function ensureMarketplace(name: string, addPath: string, declaredSource: any): Promise<void> {
+  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
+  const existing = (km?.[name] as any)?.source
+  if (existing) {
+    if (sourcesMatch(declaredSource, existing)) {
+      return // already registered with correct source
+    }
+    console.warn(
+      `[plugins] marketplace "${name}" source drift; re-registering ` +
+      `(was ${JSON.stringify(existing)}, want ${JSON.stringify(declaredSource)})`,
+    )
+    await runClaude(["plugin", "marketplace", "remove", name])
+  }
   const add = await runClaude(["plugin", "marketplace", "add", addPath])
   if (!add.ok) {
     console.warn(`[plugins] failed to register marketplace "${name}": ${add.err}`)
@@ -90,7 +128,8 @@ async function ensureMarketplace(name: string, addPath: string): Promise<void> {
 
 /**
  * Register each extraKnownMarketplaces entry from merged settings.
- * Skips entries CC already knows (claude-plugins-official etc.).
+ * Skips entries CC already knows AND whose declared source matches.
+ * Detects drift (e.g., team admin changed the URL) and re-registers.
  */
 async function ensureExtraMarketplaces(
   extras: Record<string, { source?: any }> | undefined,
@@ -100,21 +139,27 @@ async function ensureExtraMarketplaces(
   for (const [name, entry] of Object.entries(extras)) {
     const src = entry?.source as any
     let addPath: string | undefined
+    // Normalize the declared source into a canonical shape for drift comparison
+    // AND pick the addPath to pass to `claude plugin marketplace add`.
+    let normalized: any = src
     if (typeof src === "string") {
-      addPath = src // shorthand: "owner/repo" or URL
+      addPath = src
+      normalized = { source: "github", repo: src } // best-effort shorthand
     } else if (src?.source === "directory" && typeof src.path === "string") {
-      // resolve relative to loop's .claude dir's parent (where settings.json lives)
       addPath = resolvePath(loopClaudeDir(loopId), src.path)
+      normalized = { source: "directory", path: addPath }
     } else if (src?.source === "github" && typeof src.repo === "string") {
       addPath = src.repo
+      normalized = { source: "github", repo: src.repo }
     } else if ((src?.source === "git" || src?.source === "url") && typeof src.url === "string") {
       addPath = src.url
+      normalized = { source: src.source, url: src.url }
     }
     if (!addPath) {
       console.warn(`[plugins] extraKnownMarketplaces["${name}"]: unsupported source shape, skip`)
       continue
     }
-    await ensureMarketplace(name, addPath)
+    await ensureMarketplace(name, addPath, normalized)
   }
 }
 
