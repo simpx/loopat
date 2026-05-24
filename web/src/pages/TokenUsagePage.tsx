@@ -143,24 +143,27 @@ function AreaChart({ data, w = 600, h = 180 }: {
 function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRange: TimeRange }) {
   const [sortField, setSortField] = useState<string | null>("total")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
+  const [showAll, setShowAll] = useState(false)
+  const LIMIT = 10
 
   const rawEntries = useMemo(() => {
     const cutoff = timeRange === "today" ? daysAgo(0)
       : timeRange === "7d" ? daysAgo(7)
       : timeRange === "30d" ? daysAgo(30)
       : ""
-    const modelMap: Record<string, { inputTokens: number; outputTokens: number }> = {}
+    const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number }> = {}
     for (const [model, dates] of Object.entries(dailyUsage)) {
       for (const [date, u] of Object.entries(dates)) {
         if (cutoff && date < cutoff) continue
-        const entry = modelMap[model] ?? { inputTokens: 0, outputTokens: 0 }
+        const entry = modelMap[model] ?? { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
         entry.inputTokens += u.inputTokens
         entry.outputTokens += u.outputTokens
+        entry.cacheReadInputTokens += u.cacheReadInputTokens ?? 0
         modelMap[model] = entry
       }
     }
     return Object.entries(modelMap)
-      .map(([model, u]) => ({ model, ...u, total: u.inputTokens + u.outputTokens }))
+      .map(([model, u]) => ({ model, ...u, total: u.inputTokens + u.outputTokens, cacheRate: (u.inputTokens + u.cacheReadInputTokens) > 0 ? Math.round(u.cacheReadInputTokens / (u.inputTokens + u.cacheReadInputTokens) * 100) : 0 }))
   }, [dailyUsage, timeRange])
 
   const entries = useMemo(() => {
@@ -188,13 +191,14 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
   }
 
   const grandTotal = entries.reduce((s, e) => s + e.total, 0)
-  const maxTotal = entries[0]?.total ?? 1
-  const chartData = entries.map(e => ({ label: e.model, input: e.inputTokens, output: e.outputTokens }))
+  const maxTotal = Math.max(...entries.map(e => e.total), 1)
+  const displayEntries = showAll ? entries : entries.slice(0, LIMIT)
+  const chartData = displayEntries.map(e => ({ label: e.model, input: e.inputTokens, output: e.outputTokens }))
 
   return (
     <div>
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-4 gap-3 mb-6">
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="text-[11px] text-gray-500 mb-1">Total Tokens</div>
           <div className="text-xl font-semibold text-gray-900">{formatTokens(grandTotal)}</div>
@@ -207,10 +211,19 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
           <div className="text-[11px] text-gray-500 mb-1">Completion</div>
           <div className="text-xl font-semibold text-green-600">{formatTokens(entries.reduce((s, e) => s + e.outputTokens, 0))}</div>
         </div>
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-[11px] text-gray-500 mb-1">Cached Tokens</div>
+          <div className="text-xl font-semibold text-purple-600">{formatTokens(entries.reduce((s, e) => s + (e as any).cacheReadInputTokens, 0))}</div>
+          <div className="text-[11px] text-purple-400 mt-0.5">{(() => {
+            const totalCache = entries.reduce((s, e) => s + (e as any).cacheReadInputTokens, 0)
+            const totalInput = entries.reduce((s, e) => s + e.inputTokens, 0)
+            return (totalInput + totalCache) > 0 ? `${Math.round(totalCache / (totalInput + totalCache) * 100)}% of potential input` : "—"
+          })()}</div>
+        </div>
       </div>
 
       {/* Bar chart + legend */}
-      {entries.length > 0 && (
+      {displayEntries.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-4 mb-4">
           <div className="flex items-center gap-4 mb-3">
             <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Token Distribution</span>
@@ -218,7 +231,7 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
             <span className="flex items-center gap-1 text-[10px] text-gray-500"><span className="w-2.5 h-2.5 rounded-sm bg-green-500 opacity-70" /> Output</span>
           </div>
           <div className="overflow-x-auto">
-            <HBarChart data={chartData.slice(0, 12)} maxVal={maxTotal} />
+            <HBarChart data={chartData} maxVal={maxTotal} />
           </div>
         </div>
       )}
@@ -232,11 +245,12 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
               <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Cached" field="cacheRate" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">%</th>
             </tr>
           </thead>
           <tbody>
-            {entries.map((e) => (
+            {displayEntries.map((e) => (
               <tr key={e.model} className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors">
                 <td className="px-4 py-2.5">
                   <code className="text-[12px] text-gray-800">{e.model}</code>
@@ -244,18 +258,29 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
                 <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(e.inputTokens)}</td>
                 <td className="px-4 py-2.5 text-right text-[12px] text-green-600 tabular-nums">{formatTokens(e.outputTokens)}</td>
                 <td className="px-4 py-2.5 text-right text-[12px] text-gray-900 font-medium tabular-nums">{formatTokens(e.total)}</td>
+                <td className="px-4 py-2.5 text-right text-[12px] text-purple-600 tabular-nums">{formatTokens((e as any).cacheReadInputTokens)} <span className="text-[10px] text-purple-400">({(e as any).cacheRate}%)</span></td>
                 <td className="px-4 py-2.5 text-right text-[11px] text-gray-400 tabular-nums">
                   {grandTotal > 0 ? ((e.total / grandTotal) * 100).toFixed(1) : 0}%
                 </td>
               </tr>
             ))}
-            {entries.length === 0 && (
+            {displayEntries.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-[12px] text-gray-400 italic">No token usage data</td>
+                <td colSpan={6} className="px-4 py-8 text-center text-[12px] text-gray-400 italic">No token usage data</td>
               </tr>
             )}
           </tbody>
         </table>
+        {entries.length > LIMIT && (
+          <div className="px-4 py-2 border-t border-gray-100 bg-gray-50/50">
+            <button
+              onClick={() => setShowAll(!showAll)}
+              className="text-[11px] text-gray-500 hover:text-gray-900 transition-colors"
+            >
+              {showAll ? "Show less" : `Show all ${entries.length} models`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -419,12 +444,14 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
               <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Cached</th>
               <SortableTh label="Last active" field="lastActivity" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right hidden sm:table-cell" />
             </tr>
           </thead>
           <tbody>
             {filtered.map((l) => {
               const total = l.inputTokens + l.outputTokens
+              const cacheRate = (l.inputTokens + l.cacheReadInputTokens) > 0 ? Math.round(l.cacheReadInputTokens / (l.inputTokens + l.cacheReadInputTokens) * 100) : 0
               return (
                 <tr
                   key={l.loopId}
@@ -440,6 +467,7 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
                   <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(l.inputTokens)}</td>
                   <td className="px-4 py-2.5 text-right text-[12px] text-green-600 tabular-nums">{formatTokens(l.outputTokens)}</td>
                   <td className="px-4 py-2.5 text-right text-[12px] text-gray-900 font-medium tabular-nums">{formatTokens(total)}</td>
+                  <td className="px-4 py-2.5 text-right text-[12px] text-purple-600 tabular-nums">{formatTokens(l.cacheReadInputTokens)} <span className="text-[10px] text-purple-400">({cacheRate}%)</span></td>
                   <td className="hidden sm:table-cell px-4 py-2.5 text-right text-[11px] text-gray-400">{fmtDateFull(l.lastActivity)}</td>
                 </tr>
               )

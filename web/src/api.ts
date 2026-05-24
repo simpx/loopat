@@ -1164,7 +1164,7 @@ export async function updateWorkspaceSettings(patch: {
   return r.ok
 }
 
-export type DailyUsage = Record<string, Record<string, { inputTokens: number; outputTokens: number }>>
+export type DailyUsage = Record<string, Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }>>
 
 export async function getDailyTokenUsage(): Promise<DailyUsage> {
   const r = await apiFetch("/api/settings/token-usage/daily")
@@ -1178,6 +1178,8 @@ export type LoopTokenUsage = {
   model: string
   inputTokens: number
   outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
   lastActivity: string
 }
 
