@@ -2,7 +2,8 @@
  * Loop tab — AI chat with Claude Code-like experience.
  * Chat area uses assistant-ui runtime with custom claudecodeui-styled components.
  */
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, Fragment } from "react"
+import { createPortal } from "react-dom"
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
 import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand, FlaskConical } from "lucide-react"
@@ -285,20 +286,12 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const isMobile = useIsMobile()
   const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
   const [openPanels, setOpenPanels] = useState<RightMode[]>([])
+  const [fullscreenPanel, setFullscreenPanel] = useState<RightMode | null>(null)
   const [pickedFile, setPickedFile] = useState<string | null>(null)
   const [mounts, setMounts] = useState<ContextMount[]>([])
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
-  const [chatSize, setChatSize] = useState(() => {
-    const saved = localStorage.getItem("loopat:chatSize")
-    return saved ? parseInt(saved, 10) : 60
-  })
-  const [sideSplit, setSideSplit] = useState(() => {
-    const saved = localStorage.getItem("loopat:sideSplit")
-    return saved ? parseInt(saved, 10) : 50
-  })
-
   useEffect(() => {
     getContext(meta.id).then(setMounts)
     markLoopViewed(meta.id)
@@ -332,18 +325,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
 
   const closePanel = (m: RightMode) => {
     setOpenPanels((prev) => prev.filter((p) => p !== m))
-  }
-
-  const onChatResize = (layout: Record<string, number>) => {
-    const cSize = layout["chat"] ?? chatSize
-    setChatSize(cSize)
-    localStorage.setItem("loopat:chatSize", String(cSize))
-  }
-
-  const onSideSplitResize = (layout: Record<string, number>) => {
-    const sSize = layout["editorCol"] ?? sideSplit
-    setSideSplit(sSize)
-    localStorage.setItem("loopat:sideSplit", String(sSize))
+    setFullscreenPanel((prev) => prev === m ? null : prev)
   }
 
   const hasPanels = openPanels.length > 0
@@ -352,10 +334,45 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const hasEditorCol = editorPanels.length > 0
   const hasOtherCol = otherPanels.length > 0
 
+  // defaultSize values — used by the library for proportional distribution
+  // when panels first mount. Persisted from onLayoutChange after user drags.
+  const [chatSize, setChatSize] = useState(() => {
+    const n = parseInt(localStorage.getItem("loopat:chatPct") || "", 10)
+    return (!isNaN(n) && n >= 10 && n <= 90) ? n : 55
+  })
+  const [otherSize, setOtherSize] = useState(() => {
+    const n = parseInt(localStorage.getItem("loopat:otherPct") || "", 10)
+    return (!isNaN(n) && n >= 5 && n <= 50) ? n : 18
+  })
+  // Read persisted sizes back when panel closes so state stays in sync.
+  useEffect(() => {
+    if (!hasOtherCol) {
+      const n = parseInt(localStorage.getItem("loopat:otherPct") || "", 10)
+      if (!isNaN(n) && n >= 5 && n <= 50) setOtherSize(n)
+    }
+    if (!hasEditorCol && !hasOtherCol) {
+      const n = parseInt(localStorage.getItem("loopat:chatPct") || "", 10)
+      if (!isNaN(n) && n >= 10 && n <= 90) setChatSize(n)
+    }
+  }, [hasEditorCol, hasOtherCol])
+
+  const persistLayout = (layout: Record<string, number>) => {
+    // Write to localStorage only — no setState during drag to avoid re-render
+    // breaking the gesture. State is synced back via useEffect on panel close.
+    if (!isNaN(layout.chat) && layout.chat > 0) {
+      localStorage.setItem("loopat:chatPct", String(Math.round(layout.chat)))
+    }
+    if (!isNaN(layout.otherCol) && layout.otherCol > 0) {
+      localStorage.setItem("loopat:otherPct", String(Math.round(layout.otherCol)))
+    }
+  }
+  console.log("[layout] render", { hasEditorCol, hasOtherCol, chatSize, otherSize })
+
   const renderPanel = (mode: RightMode) => {
     if (mode === "git") {
       return <GitDiffSidebar key={mode} loopId={meta.id} onClose={() => closePanel("git")} onPickFile={openFile} />
     }
+    const isFullscreen = fullscreenPanel === mode
     return (
       <RightPanel
         key={mode}
@@ -366,29 +383,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         pickedFile={pickedFile}
         onPickFile={openFile}
         currentUserId={ws.currentUser?.id ?? ""}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={() => setFullscreenPanel(isFullscreen ? null : mode)}
       />
-    )
-  }
-
-  const renderVerticalGroup = (panels: RightMode[]) => {
-    if (panels.length === 0) return null
-    if (panels.length === 1) return <>{renderPanel(panels[0])}</>
-    return (
-      <Group orientation="vertical" className="flex-1 min-w-0 min-h-0">
-        {panels.map((mode) => (
-          <Panel key={mode} id={mode} minSize={10} className="flex flex-col min-h-0 min-w-0">
-            {renderPanel(mode)}
-          </Panel>
-        ))}
-        {panels.slice(0, -1).map((_, i) => (
-          <Separator
-            key={`sep-${panels[i]}`}
-            className="relative h-1.5 cursor-row-resize group flex items-center justify-center after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400"
-          >
-            <div className="absolute left-1/2 -translate-x-1/2 w-8 h-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-          </Separator>
-        ))}
-      </Group>
     )
   }
 
@@ -427,15 +424,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           </LoopRuntimeProvider>
         </div>
       ) : hasPanels ? (
-        <Group
-          orientation="horizontal"
-          className="flex-1 min-w-0 min-h-0"
-          onLayoutChange={onChatResize}
+        <Group orientation="horizontal" className="flex-1 min-w-0 min-h-0"
+          onLayoutChange={persistLayout}
         >
-          <Panel
-            id="chat"
-            minSize={20}
-            defaultSize={chatSize}
+          <Panel id="chat" minSize={20} size={chatSize} defaultSize={chatSize}
             className="flex flex-col min-h-0 min-w-0"
           >
             <LoopRuntimeProvider extra={extra}>
@@ -455,38 +447,58 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
           </Panel>
-          <Separator className="relative w-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+
+          {(hasEditorCol || hasOtherCol) && <Separator className="relative w-4 -mx-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
             <div className="absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-          </Separator>
-          <Panel
-            id="side"
-            minSize={15}
-            defaultSize={100 - chatSize}
-            className="flex flex-col min-h-0 min-w-0"
-          >
-            {hasEditorCol && hasOtherCol ? (
-              <Group
-                orientation="horizontal"
-                className="flex-1 min-w-0 min-h-0"
-                onLayoutChange={onSideSplitResize}
-              >
-                <Panel id="editorCol" minSize={15} defaultSize={sideSplit} className="flex flex-col min-h-0 min-w-0">
-                  {renderVerticalGroup(editorPanels)}
-                </Panel>
-                <Separator className="relative w-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
-                  <div className="absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
-                </Separator>
-                <Panel id="otherCol" minSize={15} defaultSize={100 - sideSplit} className="flex flex-col min-h-0 min-w-0">
-                  {renderVerticalGroup(otherPanels)}
-                </Panel>
-              </Group>
-            ) : (
-              <>
-                {hasEditorCol && renderVerticalGroup(editorPanels)}
-                {hasOtherCol && renderVerticalGroup(otherPanels)}
-              </>
-            )}
-          </Panel>
+          </Separator>}
+
+          {hasEditorCol && (
+            <Panel id="editorCol" minSize={15} defaultSize={30} className="flex flex-col min-h-0 min-w-0">
+              {editorPanels.length > 1 ? (
+                <Group orientation="vertical" className="flex-1 min-h-0">
+                  {editorPanels.map((mode, i) => (
+                    <Fragment key={mode}>
+                      {i > 0 && <Separator className="relative h-4 -my-1.5 cursor-row-resize group flex items-center justify-center after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+                        <div className="absolute left-1/2 -translate-x-1/2 w-8 h-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                      </Separator>}
+                      <Panel id={mode} minSize={10} defaultSize={100 / editorPanels.length} className="flex flex-col min-h-0 min-w-0">
+                        {renderPanel(mode)}
+                      </Panel>
+                    </Fragment>
+                  ))}
+                </Group>
+              ) : (
+                renderPanel(editorPanels[0])
+              )}
+            </Panel>
+          )}
+
+          {(hasEditorCol && hasOtherCol) && <Separator className="relative w-4 -mx-1.5 cursor-col-resize group flex items-center justify-center after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+            <div className="absolute top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+          </Separator>}
+
+          {hasOtherCol && (
+            <Panel id="otherCol" minSize={15} defaultSize={otherSize}
+              className="flex flex-col min-h-0 min-w-0"
+            >
+              {otherPanels.length > 1 ? (
+                <Group orientation="vertical" className="flex-1 min-h-0">
+                  {otherPanels.map((mode, i) => (
+                    <Fragment key={mode}>
+                      {i > 0 && <Separator className="relative h-4 -my-1.5 cursor-row-resize group flex items-center justify-center after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:-translate-y-1/2 after:bg-gray-200 after:transition-colors hover:after:bg-blue-400">
+                        <div className="absolute left-1/2 -translate-x-1/2 w-8 h-1.5 rounded-full bg-gray-300 group-hover:bg-blue-400 transition-colors" />
+                      </Separator>}
+                      <Panel id={mode} minSize={10} defaultSize={100 / otherPanels.length} className="flex flex-col min-h-0 min-w-0">
+                        {renderPanel(mode)}
+                      </Panel>
+                    </Fragment>
+                  ))}
+                </Group>
+              ) : (
+                renderPanel(otherPanels[0])
+              )}
+            </Panel>
+          )}
         </Group>
       ) : (
         <div className="flex-1 min-h-0">
@@ -890,6 +902,8 @@ function RightPanel({
   pickedFile,
   onPickFile,
   currentUserId,
+  isFullscreen,
+  onToggleFullscreen,
 }: {
   loopId: string
   meta: LoopMeta
@@ -898,25 +912,40 @@ function RightPanel({
   pickedFile: string | null
   onPickFile: (path: string) => void
   currentUserId: string
+  isFullscreen?: boolean
+  onToggleFullscreen?: () => void
 }) {
   const isMobile = useIsMobile()
 
+  const header = (
+    <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
+      <span className="capitalize">{mode}</span>
+      {mode === "editor" && (
+        <span className="ml-2 truncate text-gray-700">{pickedFile || "(no file)"}</span>
+      )}
+      <div className="flex-1" />
+      {(mode === "editor" || mode === "terminal") && (
+        <button
+          className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
+          onClick={onToggleFullscreen}
+          title={isFullscreen ? "restore" : "maximize"}
+        >
+          {isFullscreen ? "⤓" : "⤢"}
+        </button>
+      )}
+      <button
+        className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
+        onClick={onClose}
+        title="close panel"
+      >
+        ✕
+      </button>
+    </header>
+  )
+
   const panel = (
     <aside className="flex-1 min-w-0 bg-white flex flex-col">
-      <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
-        <span className="capitalize">{mode}</span>
-        {mode === "editor" && (
-          <span className="ml-2 truncate text-gray-700">{pickedFile || "(no file)"}</span>
-        )}
-        <div className="flex-1" />
-        <button
-          className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
-          onClick={onClose}
-          title="close panel"
-        >
-          ✕
-        </button>
-      </header>
+      {header}
 
       {mode === "info" && <InfoPanel meta={meta} />}
 
@@ -932,7 +961,7 @@ function RightPanel({
       <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading...</div>}>
         {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
         {mode === "terminal" && (
-          <div className="flex-1 min-h-0 bg-[#1a1c20]">
+          <div className="flex-1 min-h-0 bg-[#1a1c20] overflow-auto">
             <Terminal loopId={loopId} currentUserId={currentUserId} />
           </div>
         )}
@@ -945,6 +974,15 @@ function RightPanel({
       <div className="fixed inset-0 z-40">
         {panel}
       </div>
+    )
+  }
+
+  if (isFullscreen) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex flex-col">
+        {panel}
+      </div>,
+      document.body,
     )
   }
 
