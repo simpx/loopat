@@ -672,10 +672,35 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
     }
   }
 
-  const personalTier = await Promise.all(
-    Object.entries(ps.mcpServers ?? {}).map(async ([name, srv]) =>
+  // Team tier: shared workspace mcpServers from knowledge/.loopat/.claude/settings.json.
+  // Read directly (rather than via composer) because we want to show the
+  // tier even when no loop is active.
+  const { workspaceTeamSettingsPath } = await import("./paths")
+  const { readFile: rf0 } = await import("node:fs/promises")
+  const { existsSync: esync0 } = await import("node:fs")
+  let teamMcpServers: Record<string, any> = {}
+  const teamSettingsPath = workspaceTeamSettingsPath()
+  if (esync0(teamSettingsPath)) {
+    try {
+      const parsed = JSON.parse(await rf0(teamSettingsPath, "utf8"))
+      teamMcpServers = (parsed?.mcpServers ?? {}) as Record<string, any>
+    } catch (e: any) {
+      console.warn(`[mcp] team settings.json unreadable: ${e?.message ?? e}`)
+    }
+  }
+  const teamTier = await Promise.all(
+    Object.entries(teamMcpServers).map(async ([name, srv]) =>
       withOAuthSupport({ name, ...shape(srv) }),
     ),
+  )
+
+  const personalTier = await Promise.all(
+    Object.entries(ps.mcpServers ?? {}).map(async ([name, srv]) => {
+      // Flag personal entries that shadow a same-named team entry so the UI
+      // can warn (CC composition is last-wins; personal silently overrides).
+      const shadowsWorkspace = name in teamMcpServers
+      return { ...(await withOAuthSupport({ name, ...shape(srv) })), shadowsWorkspace }
+    }),
   )
 
   // Plugin tier: scan each enabled plugin's .mcp.json. CC auto-registers
@@ -723,6 +748,12 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
 
   return c.json({
     tiers: [
+      {
+        id: "team",
+        label: "Workspace MCPs (team-shared)",
+        path: "context/knowledge/.loopat/.claude/settings.json",
+        servers: teamTier,
+      },
       {
         id: "plugin",
         label: "Plugin MCPs (auto-loaded from profile-declared plugins)",

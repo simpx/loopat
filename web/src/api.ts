@@ -1410,9 +1410,23 @@ export async function markOnboardingDone(): Promise<boolean> {
 
 // ── MCP auth ──
 
-export type McpAuthStatus = Record<string, { connected: boolean; expiresAt?: number; scope?: string }>
+/**
+ * MCP auth status — the backend returns a map keyed by **env var name**
+ * (e.g. "MCP_COOP_TOKEN") rather than server name, because env vars are the
+ * physical storage and server name → env var mapping isn't 1-to-1 reversible
+ * (servers with spaces / dots both collapse to underscores). UI consumers
+ * derive the lookup key with `mcpServerEnvVarName(serverName)`.
+ */
+export type McpAuthStatus = Record<string, { connected: boolean; varName: string }>
 
-/** List the user's MCP auth state for a given vault. */
+/** Mirror of server `mcpServerEnvVarName` — derive the vault env file name
+ *  for a given MCP server. Keep in sync with server/src/mcp-oauth.ts. */
+export function mcpServerEnvVarName(serverName: string): string {
+  const sanitized = serverName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+  return `MCP_${sanitized || "SERVER"}_TOKEN`
+}
+
+/** List the user's MCP auth state for a given vault. Keyed by env var name. */
 export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStatus> {
   const r = await apiFetch(`/api/mcp-auth?vault=${encodeURIComponent(vault)}`)
   if (!r.ok) return {}
@@ -1459,7 +1473,7 @@ export type McpServerEntry = {
 }
 
 export type McpServerTier = {
-  id: "workspace" | "plugin" | "personal"
+  id: "team" | "plugin" | "personal"
   label: string
   /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. Empty for plugin tier. */
   path: string
