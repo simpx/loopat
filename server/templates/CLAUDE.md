@@ -52,24 +52,23 @@ If `git push` is rejected with `non-fast-forward`, the trunk moved while you wer
 
 **Runtime never auto-publishes.** If you don't push, your edits stay in the worktree and persist as long as the loop does.
 
-## claude config tiers
+## .claude config tiers
 
-Three CLAUDE.md files may be in scope (each layers on top of the previous):
+Loopat composes five `.claude/` tiers into the loop's runtime CLAUDE_CONFIG_DIR.
+By precedence weakest → strongest:
 
-1. **Platform doctrine** — this file. Bundled, always loaded.
-2. **Team supplement** — `/loopat/context/knowledge/.loopat/claude/CLAUDE.md`. Workspace-wide conventions. Optional.
-3. **Project** — `/loopat/loop/<id>/workdir/CLAUDE.md`. Per-repo conventions, lives in the workdir.
+1. **Platform doctrine** — this file. Bundled, always loaded (concatenated as part of the system prompt).
+2. **Workspace (team)** — `/loopat/context/knowledge/.loopat/.claude/`. Always on for everyone.
+3. **Profiles (0..N)** — `/loopat/context/knowledge/.loopat/profiles/<name>/.claude/`. Opt-in per loop.
+4. **Personal (user)** — `/loopat/context/personal/.loopat/.claude/`. Per-user overrides.
+5. **Project (workdir)** — `/loopat/loop/<id>/workdir/.claude/`. Per-repo, lives in the workdir.
 
-When the user says "the CLAUDE.md" without qualifying, ask which tier — they often conflate them. The team file lives under **knowledge**, not under notes.
+Each `.claude/` dir may contain: `CLAUDE.md` · `settings.json` · `skills/<name>/SKILL.md` · `agents/<name>.md` · `mise.toml` · `mise.lock`.
+The first four tiers are merged by loopat into `loops/<id>/.claude/` and become CC's user tier; the fifth is read by the SDK directly as project tier.
 
-`/loopat/context/knowledge/.loopat/` is a reserved namespace for team Claude config:
+When the user says "the CLAUDE.md" without qualifying, ask which tier — they often conflate them. Team / profile files live under **knowledge**, not under notes.
 
-- `.loopat/claude/CLAUDE.md` — team supplement above.
-- `.loopat/claude/skills/` — team skills (auto-discovered as user-tier).
-- `.loopat/claude/agents/` — team subagents (`.md` per agent, YAML frontmatter + system prompt).
-- `.loopat/claude/claude.json` — team MCP config (mirrors `.claude.json` shape).
-
-All under knowledge → **read-only** from your view. To edit the team CLAUDE.md, propose the Context tab's "edit by loop" flow — same as any knowledge file.
+All four loopat-managed tiers (workspace, profiles, personal, plus this file) → **read-only** from your view inside the loop. To edit team or profile config, propose the Context tab "edit by loop" flow — same as any knowledge file.
 
 ## memory (two-tier)
 

@@ -735,7 +735,7 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
       {
         id: "personal",
         label: "Personal MCPs (per-user, your overrides)",
-        path: `personal/${userId}/.loopat/claude/claude.json`,
+        path: `personal/${userId}/.loopat/.claude/settings.json`,
         servers: personalTier,
       },
     ],

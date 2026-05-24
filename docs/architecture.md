@@ -26,21 +26,23 @@ it — see [composition.md](composition.md).
 
 ---
 
-## Loop = Sandbox × Vault (in words)
+## Loop = Profiles × Vault (in words)
 
 The one abstraction to internalize:
 
 | Axis | What it picks | Who owns it | Storage |
 |---|---|---|---|
-| **Sandbox** | the **tools** the loop can use (mise toolchain + shell + MCP servers) | admin / team | `knowledge/.loopat/sandboxes/<name>/` |
+| **Profiles** | the **`.claude/` tiers** to compose (toolchain + plugins + MCP + skills + agents + CLAUDE.md) | admin / team | `knowledge/.loopat/profiles/<name>/.claude/` (opt-in, 0..N per loop) |
 | **Vault** | the **credentials** the loop runs as (apiKey, ssh, tokens) | individual / member | `personal/<user>/.loopat/vaults/<name>/` |
+
+See [composition.md](composition.md) for the full five-tier merge story (workspace · profiles · personal · project · local).
 
 Examples that fall out:
 
-- alice spawns `frontend × dev` — uses team frontend tools, her dev credentials
-- alice spawns `frontend × test` — same tools, different identity
-- bob spawns `frontend × test` — same tools as alice, **his own** test creds (alice can't see)
-- carol spawns `sre × prod` — different tools, her prod credentials
+- alice spawns `[frontend] × dev` — frontend profile tools, her dev credentials
+- alice spawns `[frontend] × test` — same profile, different identity
+- bob spawns `[frontend, oncall] × test` — two profiles unioned, his own test creds (alice can't see)
+- carol spawns `[sre] × prod` — different profile, her prod credentials
 
 Same engine, four cells of the matrix.
 
@@ -53,11 +55,11 @@ Per turn, the agent's effective "context" is assembled from layered sources:
 | Layer | Source on host | Loaded by | Scope |
 |---|---|---|---|
 | **L1 doctrine** | `server/templates/CLAUDE.md` | system-prompt builder, always | sandbox basics, path conventions |
-| **L2 team** | `knowledge/.loopat/claude/CLAUDE.md` | ro-bind to `.claude/CLAUDE.md`, SDK loads as user-tier | workspace conventions |
+| **L2 team** | `knowledge/.loopat/.claude/CLAUDE.md` | ro-bind to `.claude/CLAUDE.md`, SDK loads as user-tier | workspace conventions |
 | **L3 project** | `workdir/CLAUDE.md` | SDK loads from cwd | repo-specific conventions |
 | **L4 runtime** | server-computed (loop id, title, branch, driver, vault, sandbox) | concatenated into system prompt | per-turn variables |
-| **skills** | `knowledge/.loopat/claude/skills/` | ro-bind to `.claude/skills/`, SDK auto-discovers | callable procedures |
-| **mcp** | `knowledge/.loopat/claude/claude.json` | passed to SDK at spawn | external tools (jira / github / …) |
+| **skills** | `knowledge/.loopat/.claude/skills/` | ro-bind to `.claude/skills/`, SDK auto-discovers | callable procedures |
+| **mcp** | `knowledge/.loopat/.claude/settings.json` | passed to SDK at spawn | external tools (jira / github / …) |
 | **personal memory** | `personal/memory/*.md` | SDK auto-recall via `.claude/settings.json` | your habits, user-specific facts |
 | **team memory** | `notes/memory/MEMORY.md` + files | doctrine tells the agent to read on complex turns | gotchas, conventions |
 | **chat thread** | `chat/<tid>/history.jsonl` | ro-bound at `/context/chat/<id>/` (only when spawned from chat) | seed conversation |
@@ -151,7 +153,8 @@ The first three are vault-specific; the last three are baseline.
 | memory recall config | `server/src/loops.ts` (`.claude/settings.json` per loop) |
 | auto-commit on writes | `server/src/workspace.ts` (`vaultWrite`) |
 | chat → loop spawn | `server/src/chat.ts` |
-| sandbox toolchain spec | `server/src/sandboxes.ts`, `knowledge/.loopat/sandboxes/<name>/` |
+| `.claude/` tier composition | `server/src/compose.ts`, `server/src/profiles.ts` |
+| profile catalog | `knowledge/.loopat/profiles/<name>/.claude/` |
 
 See `docs/sandbox.md` for deeper bwrap mechanics and the three-tier mount authority detail.
 
@@ -165,7 +168,7 @@ process running inside a loopat sandbox.
 ### Where team Claude config lives
 
 All team-shared Claude Code config lives under the reserved namespace
-`knowledge/.loopat/claude/`:
+`knowledge/.loopat/.claude/`:
 
 ```
 LOOPAT_HOME/
@@ -211,10 +214,10 @@ Five distinct pieces, three injection mechanisms.
 | Piece | Source | How it reaches sandbox claude | Loaded by |
 |---|---|---|---|
 | **Platform doctrine** (always) | `server/templates/CLAUDE.md` | `systemPrompt.append` via SDK | loopat |
-| **Team CLAUDE.md** (optional) | `knowledge/.loopat/claude/CLAUDE.md` | ro-bind → `$CLAUDE_CONFIG_DIR/CLAUDE.md` | Claude Code (user-tier) |
+| **Team CLAUDE.md** (optional) | `knowledge/.loopat/.claude/CLAUDE.md` | ro-bind → `$CLAUDE_CONFIG_DIR/CLAUDE.md` | Claude Code (user-tier) |
 | **Project CLAUDE.md** (optional) | `<workdir>/CLAUDE.md` | nothing — exists in workdir | Claude Code (project-tier) |
-| **Skills** (optional) | `knowledge/.loopat/claude/skills/` | ro-bind → `$CLAUDE_CONFIG_DIR/skills/` | Claude Code (user-tier) |
-| **MCP servers** (optional) | `knowledge/.loopat/claude/claude.json` | server reads → SDK `mcpServers` option (as-is) | loopat |
+| **Skills** (optional) | `knowledge/.loopat/.claude/skills/` | ro-bind → `$CLAUDE_CONFIG_DIR/skills/` | Claude Code (user-tier) |
+| **MCP servers** (optional) | `knowledge/.loopat/.claude/settings.json` | server reads → SDK `mcpServers` option (as-is) | loopat |
 | **MCP OAuth tokens** (optional) | host `~/.claude/.credentials.json` | ro-bind → `$CLAUDE_CONFIG_DIR/.credentials.json` | Claude Code |
 | **Runtime block** (always) | computed | `systemPrompt.append` via SDK | loopat |
 
@@ -235,7 +238,7 @@ Mechanism summary:
 
 ### MCP server config schema
 
-`knowledge/.loopat/claude/claude.json` shape (mirrors `.claude.json`):
+`knowledge/.loopat/.claude/settings.json` shape (mirrors `.claude.json`):
 
 ```json
 {

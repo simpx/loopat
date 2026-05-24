@@ -29,9 +29,10 @@ Both are read-only from your standpoint — they're the substrate you're distill
 3. **Propose sedimentation forms, plural.** Not everything wants to be a knowledge md. Be specific about *which file* and *what shape*:
 
    - `knowledge/<topic>.md` — a doc page when the insight is reference material a human will read
-   - `knowledge/.loopat/claude/skills/<name>/SKILL.md` — when the insight is a repeatable workflow Claude should invoke (e.g. "deploy-to-staging", "investigate-latency-spike"). See existing skills in that dir for shape.
-   - `knowledge/.loopat/claude/claude.json` (mcpServers section) — when the insight is "we should be talking to service X via MCP"
-   - `knowledge/.loopat/CLAUDE.md` (the team supplement) — when the insight is a convention every loop should know
+   - `knowledge/.loopat/.claude/skills/<name>/SKILL.md` — when the insight is a repeatable workflow Claude should invoke (e.g. "deploy-to-staging", "investigate-latency-spike"). See existing skills in that dir for shape.
+   - `knowledge/.loopat/.claude/settings.json` (`mcpServers` key) — when the insight is "we should be talking to service X via MCP"
+   - `knowledge/.loopat/.claude/CLAUDE.md` (the team supplement) — when the insight is a convention every loop should know
+   - `knowledge/.loopat/profiles/<role>/.claude/...` — same shapes as above but scoped to a profile (role / mode) rather than the whole team
    - sometimes the answer is "nothing yet — this doesn't generalize" — say so, don't manufacture an entry
 
 4. **Draft, then check in.** Propose specific files + specific content. Show the user the proposed text. Let them tweak. *Then* commit + push via the worktree publish workflow.
