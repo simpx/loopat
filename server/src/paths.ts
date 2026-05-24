@@ -85,10 +85,13 @@ export const personalVaultsDir = (user: string) => join(personalLoopatDir(user),
  *  by git-crypt — content is per-active-vault, never seen across vaults. */
 export const personalMcpTokensPath = (user: string, vault: string) =>
   join(personalVaultsDir(user), vault, "mcp-tokens.json")
-// Personal `.claude/` — CC-native shape, mirrors `~/.claude/`. The 4th layer
-// in loopat's tiered .claude merge (workspace + profiles + personal + repo).
+// Personal `.claude/` — CC-native shape. The 4th layer in loopat's tiered
+// .claude merge (workspace + profiles + personal + repo). Lives under
+// `.loopat/` to mirror the team convention (`knowledge/.loopat/.claude/`):
+// loopat-controlled config goes under `.loopat/` so the personal repo's
+// other content (memory, scratch files) stays cleanly separate.
 // Contains: settings.json, CLAUDE.md, skills/, agents/.
-export const personalClaudeDir = (user: string) => join(personalDir(user), ".claude")
+export const personalClaudeDir = (user: string) => join(personalLoopatDir(user), ".claude")
 export const personalClaudeMdPath = (user: string) => join(personalClaudeDir(user), "CLAUDE.md")
 export const personalSettingsPath = (user: string) => join(personalClaudeDir(user), "settings.json")
 export const personalSkillsDir = (user: string) => join(personalClaudeDir(user), "skills")

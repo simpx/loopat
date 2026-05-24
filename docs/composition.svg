@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 700" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+<svg viewBox="0 0 1280 820" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
   <title id="t">loopat .claude composition</title>
-  <desc id="d">Five source .claude tiers on the left are merged by loopat into a single composed .claude under the loop dir. Inside the sandbox, the SDK reads two source-of-truths: the composed user tier (CLAUDE_CONFIG_DIR) and the workdir's own .claude (project/local tier). External plugin paths are ro-bound separately.</desc>
+  <desc id="d">Five .claude tiers stacked with strongest (last-wins) at top. Workspace, profiles and personal are merged by loopat into the loop's user tier. Workdir (project + local) is read by the SDK directly. Inside the sandbox the SDK sees two .claude sources of truth plus the wholesale-bound plugin cache.</desc>
 
   <defs>
-    <marker id="arr-K" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/></marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/></marker>
     <marker id="arr-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9333ea"/></marker>
-    <marker id="arr-N" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d4a017"/></marker>
     <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
     <marker id="arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
     <marker id="arr-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7e8794"/></marker>
+    <marker id="arr-up" viewBox="0 0 10 10" refX="5" refY="1" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,10 L10,10 L5,0 z" fill="#5b6776"/></marker>
 
     <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
@@ -19,196 +19,238 @@
     </filter>
   </defs>
 
-  <!-- ── TITLE ────────────────────────────────────────────────── -->
+  <!-- ── TITLE ─────────────────────────────────────────────────────── -->
   <text x="640" y="44" text-anchor="middle" font-size="32" font-weight="700" letter-spacing="-0.5" fill="#1c2733">.claude composition</text>
   <text x="640" y="74" text-anchor="middle" font-size="14" fill="#5b6776">five host-side tiers · merged into one loop · read by the SDK as user + project + local</text>
 
-  <!-- ══════════════════════════════════════════════════════════════
-       LEFT CARD — SOURCES  (x=60..420, y=110..640)
-  ══════════════════════════════════════════════════════════════ -->
+  <!-- ══════════════════════════════════════════════════════════════════
+       LEFT CARD — SOURCES, top = strongest (last-wins)
+  ══════════════════════════════════════════════════════════════════ -->
   <g filter="url(#soft)">
-    <rect x="60" y="110" width="360" height="530" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+    <rect x="60" y="110" width="370" height="660" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
   </g>
-  <rect x="60" y="110" width="360" height="40" rx="14" fill="#eef2f7"/>
-  <rect x="60" y="136" width="360" height="14" fill="#eef2f7"/>
+  <rect x="60" y="110" width="370" height="40" rx="14" fill="#eef2f7"/>
+  <rect x="60" y="136" width="370" height="14" fill="#eef2f7"/>
   <text x="80" y="136" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">SOURCES</text>
-  <text x="400" y="136" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">HOST · PER-WORKSPACE</text>
+  <text x="410" y="136" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">TOP = LAST-WINS</text>
 
-  <!-- TEAM workspace .claude -->
+  <!-- vertical override arrow on right edge of card — points UP -->
+  <line x1="395" y1="700" x2="395" y2="175" stroke="#5b6776" stroke-width="1.5" marker-end="url(#arr-up)"/>
+  <text x="408" y="437" font-size="10" fill="#5b6776" font-style="italic" letter-spacing="0.5">
+    <tspan x="408" dy="-90">o</tspan>
+    <tspan x="408" dy="12">v</tspan>
+    <tspan x="408" dy="12">e</tspan>
+    <tspan x="408" dy="12">r</tspan>
+    <tspan x="408" dy="12">r</tspan>
+    <tspan x="408" dy="12">i</tspan>
+    <tspan x="408" dy="12">d</tspan>
+    <tspan x="408" dy="12">e</tspan>
+    <tspan x="408" dy="12">s</tspan>
+  </text>
+
+  <!-- ──── GROUP B (top) — read directly by SDK ──── -->
+  <text x="80" y="180" font-size="10" font-weight="700" fill="#16a34a" letter-spacing="1">READ DIRECTLY BY SDK</text>
+
+  <!-- LOCAL tier — strongest -->
   <g>
-    <circle cx="92" cy="180" r="14" fill="#3b5bdb"/>
-    <text x="92" y="185" text-anchor="middle" font-size="11" font-weight="700" fill="white">T</text>
-    <text x="115" y="178" font-size="15" font-weight="600" fill="#1c2733">team workspace</text>
-    <text x="115" y="194" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">knowledge/.loopat/.claude/</text>
-    <text x="115" y="208" font-size="10" fill="#7e8794" font-style="italic">always on · shared by every member</text>
+    <circle cx="92" cy="208" r="14" fill="#16a34a" opacity="0.55"/>
+    <text x="92" y="213" text-anchor="middle" font-size="11" font-weight="700" fill="white">L</text>
+    <text x="115" y="206" font-size="14" font-weight="600" fill="#1c2733">local</text>
+    <text x="115" y="221" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/*.local.*</text>
+    <text x="115" y="234" font-size="10" fill="#7e8794" font-style="italic">per-checkout · not committed</text>
   </g>
-  <line x1="76" y1="225" x2="404" y2="225" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- PROJECT (workdir) tier -->
+  <g>
+    <circle cx="92" cy="262" r="14" fill="#16a34a"/>
+    <text x="92" y="267" text-anchor="middle" font-size="11" font-weight="700" fill="white">W</text>
+    <text x="115" y="260" font-size="14" font-weight="600" fill="#1c2733">project (workdir)</text>
+    <text x="115" y="275" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/</text>
+    <text x="115" y="288" font-size="10" fill="#7e8794" font-style="italic">repo-native · per repo</text>
+  </g>
+
+  <!-- divider between SDK-direct and loopat-merged -->
+  <line x1="80" y1="312" x2="380" y2="312" stroke="#e0e4ea" stroke-width="1" stroke-dasharray="4 3"/>
+
+  <!-- ──── GROUP A (bottom) — merged by loopat into user tier ──── -->
+  <text x="80" y="335" font-size="10" font-weight="700" fill="#9333ea" letter-spacing="1">MERGED BY LOOPAT → USER TIER</text>
+
+  <!-- PERSONAL — strongest of the merged group -->
+  <g>
+    <circle cx="92" cy="363" r="14" fill="#9333ea"/>
+    <text x="92" y="368" text-anchor="middle" font-size="11" font-weight="700" fill="white">P</text>
+    <text x="115" y="361" font-size="14" font-weight="600" fill="#1c2733">personal</text>
+    <text x="115" y="376" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">personal/&lt;user&gt;/.loopat/.claude/</text>
+    <text x="115" y="389" font-size="10" fill="#7e8794" font-style="italic">per-user · last word on user tier</text>
+  </g>
+
+  <!-- PROFILE N -->
+  <g>
+    <circle cx="92" cy="417" r="14" fill="#9333ea"/>
+    <text x="92" y="422" text-anchor="middle" font-size="10" font-weight="700" fill="white">P<tspan font-size="8" baseline-shift="sub">N</tspan></text>
+    <text x="115" y="415" font-size="14" font-weight="600" fill="#1c2733">profile N</text>
+    <text x="115" y="430" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">knowledge/.loopat/profiles/…/.claude/</text>
+    <text x="115" y="443" font-size="10" fill="#7e8794" font-style="italic">opt-in bundles (role / mode)</text>
+  </g>
+
+  <!-- profile ellipsis -->
+  <text x="92" y="470" text-anchor="middle" font-size="20" fill="#9333ea" font-weight="700">⋮</text>
+  <text x="115" y="467" font-size="11" fill="#7e8794" font-style="italic">0..N profiles selected at loop creation</text>
 
   <!-- PROFILE 1 -->
   <g>
-    <circle cx="92" cy="252" r="14" fill="#9333ea"/>
-    <text x="92" y="257" text-anchor="middle" font-size="11" font-weight="700" fill="white">P₁</text>
-    <text x="115" y="250" font-size="15" font-weight="600" fill="#1c2733">profile 1</text>
-    <text x="115" y="266" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">…/profiles/role-eng/.claude/</text>
-    <text x="115" y="280" font-size="10" fill="#7e8794" font-style="italic">opt-in bundle (role / mode)</text>
+    <circle cx="92" cy="498" r="14" fill="#9333ea"/>
+    <text x="92" y="503" text-anchor="middle" font-size="10" font-weight="700" fill="white">P<tspan font-size="8" baseline-shift="sub">1</tspan></text>
+    <text x="115" y="496" font-size="14" font-weight="600" fill="#1c2733">profile 1</text>
+    <text x="115" y="511" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">knowledge/.loopat/profiles/…/.claude/</text>
   </g>
 
-  <!-- PROFILE N (ellipsis) -->
+  <!-- WORKSPACE — weakest -->
   <g>
-    <text x="92" y="304" text-anchor="middle" font-size="22" fill="#9333ea" font-weight="700">⋮</text>
-    <text x="115" y="298" font-size="13" font-weight="500" fill="#7e8794">profile N</text>
-    <text x="115" y="314" font-size="10" font-family="ui-monospace, monospace" fill="#7e8794">…/profiles/&lt;name&gt;/.claude/</text>
-    <text x="115" y="328" font-size="10" fill="#7e8794" font-style="italic">user selects 0..N at loop creation</text>
-  </g>
-  <line x1="76" y1="345" x2="404" y2="345" stroke="#eaecf1" stroke-width="1"/>
-
-  <!-- PERSONAL -->
-  <g>
-    <circle cx="92" cy="372" r="14" fill="#9333ea"/>
-    <text x="92" y="377" text-anchor="middle" font-size="11" font-weight="700" fill="white">P</text>
-    <text x="115" y="370" font-size="15" font-weight="600" fill="#1c2733">personal</text>
-    <text x="115" y="386" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">personal/&lt;user&gt;/.claude/</text>
-    <text x="115" y="400" font-size="10" fill="#7e8794" font-style="italic">per-user · last word on user tier</text>
-  </g>
-  <line x1="76" y1="417" x2="404" y2="417" stroke="#eaecf1" stroke-width="1"/>
-
-  <!-- WORKDIR (repo) .claude — note: not merged into user tier, kept aside -->
-  <g>
-    <circle cx="92" cy="444" r="14" fill="#16a34a"/>
-    <text x="92" y="449" text-anchor="middle" font-size="11" font-weight="700" fill="white">W</text>
-    <text x="115" y="442" font-size="15" font-weight="600" fill="#1c2733">workdir (repo)</text>
-    <text x="115" y="458" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/</text>
-    <text x="115" y="472" font-size="10" fill="#7e8794" font-style="italic">native to the repo · SDK reads as project tier</text>
-  </g>
-  <line x1="76" y1="488" x2="404" y2="488" stroke="#eaecf1" stroke-width="1"/>
-
-  <!-- LOCAL tier (settings.local) -->
-  <g>
-    <circle cx="92" cy="515" r="14" fill="#16a34a" opacity="0.55"/>
-    <text x="92" y="520" text-anchor="middle" font-size="10" font-weight="700" fill="white">L</text>
-    <text x="115" y="513" font-size="15" font-weight="600" fill="#1c2733">local override</text>
-    <text x="115" y="529" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/*.local.*</text>
-    <text x="115" y="543" font-size="10" fill="#7e8794" font-style="italic">checkout-private · not committed</text>
+    <circle cx="92" cy="551" r="14" fill="#3b5bdb"/>
+    <text x="92" y="556" text-anchor="middle" font-size="11" font-weight="700" fill="white">T</text>
+    <text x="115" y="549" font-size="14" font-weight="600" fill="#1c2733">workspace</text>
+    <text x="115" y="564" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">knowledge/.loopat/.claude/</text>
+    <text x="115" y="577" font-size="10" fill="#7e8794" font-style="italic">always on · whole team</text>
   </g>
 
-  <!-- contents legend -->
-  <rect x="80" y="568" width="320" height="60" rx="6" fill="#fafbfd" stroke="#e8ecf2"/>
-  <text x="92" y="585" font-size="11" font-weight="700" fill="#5b6776" letter-spacing="1">EACH .claude/ MAY CONTAIN</text>
-  <text x="92" y="603" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">settings.json · CLAUDE.md · skills/ · agents/</text>
-  <text x="92" y="619" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">mise.toml · mise.lock · hooks · …</text>
+  <!-- legend at bottom -->
+  <rect x="80" y="608" width="300" height="148" rx="6" fill="#fafbfd" stroke="#e8ecf2"/>
+  <text x="92" y="626" font-size="10" font-weight="700" fill="#5b6776" letter-spacing="1">EACH .claude/ MAY CONTAIN</text>
+  <text x="92" y="644" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">settings.json</text>
+  <text x="220" y="644" font-size="10" fill="#7e8794">— enabledPlugins · mcpServers · hooks</text>
+  <text x="92" y="660" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">CLAUDE.md</text>
+  <text x="220" y="660" font-size="10" fill="#7e8794">— always-on doctrine</text>
+  <text x="92" y="676" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">skills/</text>
+  <text x="220" y="676" font-size="10" fill="#7e8794">— /command procedures</text>
+  <text x="92" y="692" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">agents/</text>
+  <text x="220" y="692" font-size="10" fill="#7e8794">— subagent prompts</text>
+  <text x="92" y="708" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">mise.toml</text>
+  <text x="220" y="708" font-size="10" fill="#7e8794">— toolchain pins (loopat ext.)</text>
+  <text x="92" y="724" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">…</text>
+  <text x="220" y="724" font-size="10" fill="#7e8794">— any future CC .claude/ field</text>
+  <text x="92" y="746" font-size="10" fill="#9ba3ad" font-style="italic">All keys deep-merge per-key, last-wins.</text>
 
-  <!-- ══════════════════════════════════════════════════════════════
-       CENTER — MERGE step  (x=440..720)
-  ══════════════════════════════════════════════════════════════ -->
+  <!-- ══════════════════════════════════════════════════════════════════
+       CENTER — COMPOSE step (with merge rules INSIDE the card)
+  ══════════════════════════════════════════════════════════════════ -->
 
-  <!-- arrows from T/P₁/Pn/P → merge -->
-  <g fill="none" stroke="#3b5bdb" stroke-width="1.8">
-    <path d="M 420 180 C 460 180, 480 320, 540 340" marker-end="url(#arr-K)"/>
+  <!-- arrows from merged-tier group → compose -->
+  <g fill="none" stroke="#9333ea" stroke-width="1.6">
+    <path d="M 380 363 C 425 363, 440 440, 478 460" marker-end="url(#arr-purple)"/>
+    <path d="M 380 417 C 425 417, 440 450, 478 463" marker-end="url(#arr-purple)"/>
+    <path d="M 380 498 C 425 498, 440 472, 478 467" marker-end="url(#arr-purple)"/>
   </g>
-  <g fill="none" stroke="#9333ea" stroke-width="1.8">
-    <path d="M 420 252 C 460 252, 490 320, 540 346" marker-end="url(#arr-purple)"/>
-    <path d="M 420 304 C 460 312, 500 332, 540 352" marker-end="url(#arr-purple)"/>
-    <path d="M 420 372 C 470 372, 500 360, 540 358" marker-end="url(#arr-purple)"/>
+  <g fill="none" stroke="#3b5bdb" stroke-width="1.6">
+    <path d="M 380 551 C 425 551, 445 480, 478 471" marker-end="url(#arr-blue)"/>
   </g>
 
-  <!-- merge step -->
+  <!-- compose card with merge rules inside -->
   <g filter="url(#soft)">
-    <rect x="540" y="324" width="180" height="74" rx="10" fill="#fff8ec" stroke="#d97706" stroke-width="1.5"/>
+    <rect x="478" y="425" width="252" height="220" rx="10" fill="#fff8ec" stroke="#d97706" stroke-width="1.5"/>
   </g>
-  <text x="630" y="350" text-anchor="middle" font-size="14" font-weight="700" fill="#d97706">compose</text>
-  <text x="630" y="368" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace" fill="#a16207">server/src/compose.ts</text>
-  <text x="630" y="386" text-anchor="middle" font-size="10" fill="#a16207" font-style="italic">deep-merge by key · last-write-wins</text>
+  <text x="604" y="453" text-anchor="middle" font-size="15" font-weight="700" fill="#d97706">compose</text>
+  <text x="604" y="471" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace" fill="#a16207">server/src/compose.ts</text>
 
-  <!-- merge rules below -->
-  <g font-size="10" fill="#7e8794">
-    <text x="540" y="416">• settings.json — shallow union; enabledPlugins/mcpServers per-key last-wins</text>
-    <text x="540" y="432">• CLAUDE.md       — concatenated in tier order with ## headers</text>
-    <text x="540" y="448">• skills/, agents/ — symlink union (later sources shadow same-name)</text>
-    <text x="540" y="464">• mise.toml/lock   — TOML table union; layered toolchain pins</text>
+  <line x1="490" y1="485" x2="718" y2="485" stroke="#f7d997" stroke-width="1"/>
+  <text x="490" y="503" font-size="11" font-weight="700" fill="#a16207" letter-spacing="0.5">MERGE RULES</text>
+
+  <g font-size="10" fill="#5b6776">
+    <text x="490" y="521"><tspan font-family="ui-monospace, monospace" fill="#1c2733">settings.json</tspan></text>
+    <text x="490" y="534" fill="#7e8794">  shallow key union; sub-keys last-wins</text>
+    <text x="490" y="552"><tspan font-family="ui-monospace, monospace" fill="#1c2733">CLAUDE.md</tspan></text>
+    <text x="490" y="565" fill="#7e8794">  concat in tier order, ## headers</text>
+    <text x="490" y="583"><tspan font-family="ui-monospace, monospace" fill="#1c2733">skills/, agents/</tspan></text>
+    <text x="490" y="596" fill="#7e8794">  symlink union, last-wins per name</text>
+    <text x="490" y="614"><tspan font-family="ui-monospace, monospace" fill="#1c2733">mise.toml</tspan></text>
+    <text x="490" y="627" fill="#7e8794">  TOML [tools]/[env] table union</text>
   </g>
 
-  <!-- arrow from merge → composed dir -->
+  <!-- arrow compose → user tier box -->
   <g fill="none" stroke="#d97706" stroke-width="2">
-    <path d="M 720 360 L 798 360" marker-end="url(#arr-orange)"/>
+    <path d="M 730 535 L 778 535" marker-end="url(#arr-orange)"/>
   </g>
 
-  <!-- ══════════════════════════════════════════════════════════════
-       RIGHT — COMPOSED LOOP + SANDBOX VIEW  (x=800..1230)
-  ══════════════════════════════════════════════════════════════ -->
+  <!-- ══════════════════════════════════════════════════════════════════
+       RIGHT — SANDBOX VIEW
+  ══════════════════════════════════════════════════════════════════ -->
   <g filter="url(#soft)">
-    <rect x="800" y="110" width="430" height="530" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+    <rect x="780" y="110" width="450" height="660" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
   </g>
-  <rect x="800" y="110" width="430" height="40" rx="14" fill="#eef2f7"/>
-  <rect x="800" y="136" width="430" height="14" fill="#eef2f7"/>
-  <text x="820" y="136" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">SANDBOX VIEW</text>
+  <rect x="780" y="110" width="450" height="40" rx="14" fill="#eef2f7"/>
+  <rect x="780" y="136" width="450" height="14" fill="#eef2f7"/>
+  <text x="800" y="136" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">SANDBOX VIEW</text>
   <text x="1210" y="136" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">PER-LOOP · ISOLATED</text>
 
-  <!-- Composed loop .claude — the user tier SoT -->
+  <!-- SDK badge (top-right) -->
   <g>
-    <rect x="820" y="170" width="280" height="180" rx="8" fill="#fafbfd" stroke="#3b5bdb" stroke-width="1.5"/>
-    <text x="836" y="192" font-size="13" font-weight="700" fill="#3b5bdb">user tier (loopat-composed)</text>
-    <text x="836" y="208" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">loops/&lt;id&gt;/.claude/</text>
-    <text x="836" y="224" font-size="10" fill="#7e8794" font-style="italic" letter-spacing="0.1">SDK env: CLAUDE_CONFIG_DIR</text>
+    <rect x="1138" y="180" width="80" height="56" rx="6" fill="#eaf3ff" stroke="#3b5bdb"/>
+    <text x="1178" y="200" text-anchor="middle" font-size="11" font-weight="700" fill="#3b5bdb">SDK</text>
+    <text x="1178" y="216" text-anchor="middle" font-size="8" fill="#5b6776">settingSources</text>
+    <text x="1178" y="228" text-anchor="middle" font-size="8" font-family="ui-monospace, monospace" fill="#5b6776">[u,p,l]</text>
+  </g>
+
+  <!-- USER TIER — composed by loopat -->
+  <g>
+    <rect x="800" y="180" width="320" height="200" rx="8" fill="#fafbfd" stroke="#3b5bdb" stroke-width="1.5"/>
+    <text x="816" y="202" font-size="13" font-weight="700" fill="#3b5bdb">user tier (loopat-composed)</text>
+    <text x="816" y="218" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">loops/&lt;id&gt;/.claude/</text>
+    <text x="816" y="232" font-size="10" fill="#7e8794" font-style="italic">SDK env: CLAUDE_CONFIG_DIR</text>
     <g font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">
-      <text x="836" y="252">├── settings.json</text>
-      <text x="836" y="268">├── CLAUDE.md</text>
-      <text x="836" y="284">├── skills/        → symlinks</text>
-      <text x="836" y="300">├── agents/        → symlinks</text>
-      <text x="836" y="316">├── mise.toml</text>
-      <text x="836" y="332">└── mise.lock</text>
+      <text x="816" y="260">├── settings.json</text>
+      <text x="816" y="276">├── CLAUDE.md</text>
+      <text x="816" y="292">├── skills/        → symlinks</text>
+      <text x="816" y="308">├── agents/        → symlinks</text>
+      <text x="816" y="324">├── mise.toml</text>
+      <text x="816" y="340">└── mise.lock</text>
     </g>
   </g>
 
-  <!-- SDK badge -->
+  <!-- PROJECT + LOCAL tier — read directly by SDK -->
   <g>
-    <rect x="1115" y="178" width="100" height="46" rx="6" fill="#eaf3ff" stroke="#3b5bdb"/>
-    <text x="1165" y="196" text-anchor="middle" font-size="11" font-weight="700" fill="#3b5bdb">claude-agent-sdk</text>
-    <text x="1165" y="212" text-anchor="middle" font-size="9" fill="#5b6776">settingSources:</text>
-    <text x="1165" y="222" text-anchor="middle" font-size="9" font-family="ui-monospace, monospace" fill="#5b6776">[user, project, local]</text>
-  </g>
-
-  <!-- arrow loop → SDK -->
-  <g fill="none" stroke="#3b5bdb" stroke-width="1.6">
-    <path d="M 1100 200 L 1112 200" marker-end="url(#arr-K)"/>
-  </g>
-
-  <!-- Workdir .claude — project tier SoT (NOT merged) -->
-  <g>
-    <rect x="820" y="370" width="280" height="130" rx="8" fill="#fafbfd" stroke="#16a34a" stroke-width="1.5"/>
-    <text x="836" y="392" font-size="13" font-weight="700" fill="#16a34a">project + local tier</text>
-    <text x="836" y="408" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/   (cwd)</text>
-    <text x="836" y="422" font-size="10" fill="#7e8794" font-style="italic" letter-spacing="0.1">read directly by SDK — NOT merged by loopat</text>
+    <rect x="800" y="408" width="320" height="156" rx="8" fill="#fafbfd" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="816" y="430" font-size="13" font-weight="700" fill="#16a34a">project + local tier</text>
+    <text x="816" y="446" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/   (= cwd)</text>
+    <text x="816" y="460" font-size="10" fill="#7e8794" font-style="italic">read directly by SDK, not merged</text>
     <g font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">
-      <text x="836" y="450">├── settings.json</text>
-      <text x="836" y="466">├── settings.local.json   (local tier)</text>
-      <text x="836" y="482">├── CLAUDE.md   ·   agents/   ·   …</text>
+      <text x="816" y="488">├── settings.json</text>
+      <text x="816" y="504">├── settings.local.json   (local tier)</text>
+      <text x="816" y="520">├── CLAUDE.md</text>
+      <text x="816" y="536">└── skills/   ·   agents/   ·   …</text>
     </g>
   </g>
 
-  <!-- arrow workdir → SDK -->
-  <g fill="none" stroke="#16a34a" stroke-width="1.6">
-    <path d="M 1100 415 C 1140 415, 1140 250, 1140 232" marker-end="url(#arr-green)"/>
-  </g>
-
-  <!-- Plugin paths (wholesale bind) -->
+  <!-- PLUGIN CACHE — wholesale bind -->
   <g>
-    <rect x="820" y="520" width="280" height="100" rx="8" fill="#fafbfd" stroke="#9ba3ad" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="836" y="542" font-size="13" font-weight="700" fill="#5b6776">plugin cache</text>
-    <text x="836" y="558" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">~/.claude/plugins/   (wholesale ro-bind)</text>
-    <text x="836" y="572" font-size="10" fill="#7e8794" font-style="italic">SDK natively resolves settings.json enabledPlugins</text>
-    <text x="836" y="586" font-size="10" fill="#7e8794" font-style="italic">via installed_plugins.json. loopat builtin is the only</text>
-    <text x="836" y="600" font-size="10" fill="#7e8794" font-style="italic">plugin still passed via `plugins:` option.</text>
-    <text x="836" y="614" font-size="10" fill="#7e8794">Plugin skills/agents surface as <tspan font-family="ui-monospace, monospace">plugin:skill</tspan>.</text>
-  </g>
-  <g fill="none" stroke="#7e8794" stroke-width="1.5" stroke-dasharray="3 3">
-    <path d="M 1100 555 C 1150 555, 1160 280, 1140 232" marker-end="url(#arr-gray)"/>
+    <rect x="800" y="592" width="320" height="118" rx="8" fill="#fafbfd" stroke="#9ba3ad" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="816" y="614" font-size="13" font-weight="700" fill="#5b6776">plugin cache (ro-bound wholesale)</text>
+    <text x="816" y="630" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">~/.claude/plugins/</text>
+    <text x="816" y="650" font-size="10" fill="#7e8794" font-style="italic">SDK resolves enabledPlugins natively from</text>
+    <text x="816" y="664" font-size="10" fill="#7e8794" font-style="italic">settings.json + installed_plugins.json.</text>
+    <text x="816" y="684" font-size="10" fill="#7e8794">loopat builtin is the only plugin passed</text>
+    <text x="816" y="698" font-size="10" fill="#7e8794">via the <tspan font-family="ui-monospace, monospace">plugins:</tspan> SDK option.</text>
   </g>
 
-  <!-- footnote -->
-  <text x="1015" y="638" text-anchor="middle" font-size="10" fill="#9ba3ad" font-style="italic">no ~/.claude inside sandbox — $HOME overlay has an empty lower layer</text>
+  <!-- arrows: user tier → SDK -->
+  <g fill="none" stroke="#3b5bdb" stroke-width="1.5">
+    <path d="M 1120 250 L 1136 230" marker-end="url(#arr-blue)"/>
+  </g>
+  <!-- project/local tier → SDK -->
+  <g fill="none" stroke="#16a34a" stroke-width="1.5">
+    <path d="M 1120 460 C 1155 460, 1155 250, 1162 240" marker-end="url(#arr-green)"/>
+  </g>
+  <!-- plugin cache → SDK -->
+  <g fill="none" stroke="#7e8794" stroke-width="1.4" stroke-dasharray="3 3">
+    <path d="M 1120 640 C 1180 640, 1188 270, 1188 240" marker-end="url(#arr-gray)"/>
+  </g>
 
-  <!-- ── BOTTOM CAPTION ───────────────────────────────────────── -->
-  <text x="240" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">team + N profiles + personal merged by tier order</text>
-  <text x="630" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">deep-merge writes the composed user tier</text>
-  <text x="1015" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">SDK reads two tiers · plugins as orthogonal channel</text>
+  <!-- bottom annotation about no ~/.claude -->
+  <text x="1005" y="744" text-anchor="middle" font-size="11" fill="#9ba3ad" font-style="italic">
+    no host <tspan font-family="ui-monospace, monospace">~/.claude/</tspan> visible — sandbox <tspan font-family="ui-monospace, monospace">$HOME</tspan> is an overlay with an empty lower layer
+  </text>
+
+  <!-- ── BOTTOM CAPTION ─────────────────────────────────────────────── -->
+  <text x="245" y="800" text-anchor="middle" font-size="11" fill="#7e8794" font-style="italic">five tiers · top = strongest · grouped by who reads them</text>
+  <text x="604" y="800" text-anchor="middle" font-size="11" fill="#7e8794" font-style="italic">workspace + profiles + personal deep-merge by tier order</text>
+  <text x="1005" y="800" text-anchor="middle" font-size="11" fill="#7e8794" font-style="italic">SDK reads composed user tier + workdir; auth injected at spawn</text>
 </svg>
