@@ -56,11 +56,32 @@ status: as-implemented · 2026-05
 
 **loopat 不是把内容"喂给" SDK——loopat 只是把 SDK 自己会读的那个目录预先布置好。**
 
-少数例外（SDK option 直接传，bypass settings.json）：
-- `plugins:` — 直接传解析好的 plugin 绝对路径数组（绕过 enabledPlugins）
-- `mcpServers:` — 直接传 vault-注入后的 MCP server 配置（绕过 settings.json.mcpServers）
+### 例外：plugin / MCP 走 SDK option，bypass settings.json
 
-这两个走 option 是因为它们需要 per-loop 的 runtime 信息（vault 凭据、host plugin 路径），settings.json 里塞不下。
+`.claude/` 里的内容分两类，决定了 loopat 处理它们的方式：
+
+| 类别 | 例子 | 内容存在哪 | settings.json 起的作用 |
+|---|---|---|---|
+| **A. 自包含** | skills/ · agents/ · CLAUDE.md · hook 脚本 | 就在 `.claude/` 里（或 settings.json 直接引用的本地路径） | SDK 读 settings 就够了 |
+| **B. 间接引用** | plugins · MCP servers | 内容在 `.claude/` **外面** | settings.json 只是个**指针**，还需要 sandbox 里能找到真正的内容 |
+
+**类别 A 在 loopat 里完美工作：** compose 合并的 `.claude/` 写进 loop 目录，SDK 通过 `CLAUDE_CONFIG_DIR` 读到 = 一切自动生效。
+
+**类别 B 在 loopat sandbox 里直接走 settings.json 会失败：**
+
+- **Plugin**：`enabledPlugins: {"foo@bar": true}` 是个指针，**真正的 plugin 文件**在 `~/.claude/plugins/cache/...`（host CC 的缓存）。SDK 要解析这个指针得读 `~/.claude/plugins/installed_plugins.json` 拿 installPath。但 sandbox 的 `$HOME` 是空 overlay——`~/.claude/` **不存在**，SDK 没法解析；就算解析了，installPath 是 host 路径，sandbox 也看不到。
+- **MCP server**：settings.json 能写，但 loopat 要把 vault 凭据（`apiKey` 等）**runtime 注入** MCP server 的 env——静态 settings.json 表达不了。
+
+所以这两个走 SDK option：
+
+| Option | loopat 怎么用 | 解决了 settings.json 路线的什么问题 |
+|---|---|---|
+| `plugins: [{type:"local", path:"..."}]` | host 侧 `resolveLoopPlugins` 解析出绝对路径 + bwrap ro-bind 每个 plugin 路径进 sandbox | 绕开 sandbox 里 `~/.claude/plugins/installed_plugins.json` 不可达的死结 |
+| `mcpServers: {...}` | host 侧把 vault 凭据 merge 进 mcpServer 配置后整体传 | settings.json 写不下 runtime-resolved 凭据 |
+
+**注意：compose 仍然会合并 enabledPlugins / mcpServers 字段**——但合并结果是给 `resolveLoopPlugins` / `mergeMcpTokens` 用的"声明清单"，最终生效靠 SDK option，不是靠 SDK 自己读 settings.json 的那条路。
+
+总结：**SDK 识别 .claude/ 的全部字段，但 sandbox 的隔离性让"指针型"字段的解析链断了；这两个字段我们绕过去走 option，本质是在补 sandbox 的能力，不是 SDK 不行**。
 
 ---
 
