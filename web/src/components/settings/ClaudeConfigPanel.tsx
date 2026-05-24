@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { useWorkspace } from "@/ctx"
 import { getTiers, saveTierSettings, type TierInfo, type TiersResponse } from "@/api"
 import { McpServerEditor, mcpServersFromJson } from "./McpServerEditor"
 import { PluginToggleList } from "./PluginToggleList"
-import { ChevronDown, ChevronRight, Lock, RefreshCw, Check, Layers, AlertCircle, Globe, User, Blocks, FolderGit2, FileCode2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Lock, RefreshCw, Check, Layers, AlertCircle, Globe, User, Blocks, FolderGit2, FileCode2, ExternalLink, Plus, Store, Trash2 } from "lucide-react"
 
 // ── tier metadata ──
 
@@ -26,6 +27,17 @@ function getTierMeta(id: string): TierMeta {
     return { icon: Blocks, borderClass: "border-l-blue-400", badgeClass: "bg-blue-100 text-blue-700", desc: "Opt-in role-based config" }
   }
   return TIER_META[id] ?? TIER_META.team
+}
+
+/** Map tier id to a Context page URL for editing the raw settings.json file. */
+function tierContextUrl(tier: TierInfo): { vault: string; file: string } | null {
+  if (tier.id === "team") return { vault: "knowledge", file: ".loopat/.claude/settings.json" }
+  if (tier.id.startsWith("profile:")) {
+    const name = tier.id.slice("profile:".length)
+    return { vault: "knowledge", file: `.loopat/profiles/${name}/.claude/settings.json` }
+  }
+  if (tier.id === "personal") return { vault: "personal", file: ".loopat/.claude/settings.json" }
+  return null
 }
 
 function tierOrder(id: string): number {
@@ -175,6 +187,9 @@ function TierDetail({
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const navigate = useNavigate()
+
+  const ctxUrl = tierContextUrl(tier)
 
   useEffect(() => {
     setDraft(tier.settings ? { ...tier.settings } : {})
@@ -228,6 +243,16 @@ function TierDetail({
             </span>
           )}
         </div>
+        {/* Edit raw in Context */}
+        {ctxUrl && (
+          <button
+            onClick={() => navigate(`/context/${ctxUrl.vault}?file=${encodeURIComponent(ctxUrl.file)}&edit=1`)}
+            className="shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+            title={`Edit raw settings.json in Context → ${ctxUrl.vault}`}
+          >
+            <ExternalLink size={13} />
+          </button>
+        )}
       </div>
 
       {/* Body */}
@@ -238,10 +263,26 @@ function TierDetail({
           </div>
         ) : (
           <>
-            {/* Path hint */}
-            {tier.path && !tier.path.startsWith("<") && (
-              <div className="text-[11px] text-gray-400 font-mono truncate bg-gray-50/50 px-2 py-1 rounded">
-                {tier.path}
+            {/* File links */}
+            {ctxUrl && (
+              <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                <button
+                  onClick={() => navigate(`/context/${ctxUrl.vault}?file=${encodeURIComponent(ctxUrl.file)}&edit=1`)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+                >
+                  <FileCode2 size={11} />
+                  edit settings.json
+                </button>
+                {tier.claudeMd !== null && (
+                  <button
+                    onClick={() => navigate(`/context/${ctxUrl.vault}?file=${encodeURIComponent(ctxUrl.file.replace("settings.json", "CLAUDE.md"))}`)}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors"
+                  >
+                    view CLAUDE.md
+                  </button>
+                )}
+                <span className="text-gray-300">·</span>
+                <span className="text-gray-400 truncate font-mono text-[10px]">{ctxUrl.vault}/{ctxUrl.file}</span>
               </div>
             )}
 
@@ -288,21 +329,24 @@ function TierDetail({
               />
             </SubSection>
 
-            {/* Hooks + Marketplaces (summary) */}
-            {(tier.hookCount > 0 || tier.marketplaceCount > 0) && (
-              <SubSection title="Other" count={tier.hookCount + tier.marketplaceCount} defaultOpen={false}>
-                <div className="text-[12px] text-gray-500 space-y-1">
-                  {tier.hookCount > 0 && (
-                    <div>Hooks: {Object.keys((draft?.hooks as Record<string, any>) ?? {}).length} groups</div>
-                  )}
-                  {tier.marketplaceCount > 0 && (
-                    <div>
-                      Marketplaces:{" "}
-                      <span className="font-mono text-[11px]">
-                        {Object.keys((draft?.extraKnownMarketplaces as Record<string, any>) ?? {}).join(", ")}
-                      </span>
-                    </div>
-                  )}
+            {/* Marketplaces */}
+            <SubSection
+              title="Marketplaces"
+              count={tier.marketplaceCount}
+              defaultOpen={tier.marketplaceCount > 0 || canEdit}
+            >
+              <MarketplaceEditor
+                marketplaces={(draft?.extraKnownMarketplaces as Record<string, any>) ?? {}}
+                readonly={!canEdit || disabled}
+                onChange={(mps) => setDraft((d) => d ? { ...d, extraKnownMarketplaces: mps } : { extraKnownMarketplaces: mps })}
+              />
+            </SubSection>
+
+            {/* Hooks (summary only) */}
+            {tier.hookCount > 0 && (
+              <SubSection title="Hooks" count={tier.hookCount} defaultOpen={false}>
+                <div className="text-[12px] text-gray-500">
+                  {Object.keys((draft?.hooks as Record<string, any>) ?? {}).length} hook groups configured.
                 </div>
               </SubSection>
             )}
@@ -373,6 +417,138 @@ function SubSection({
         <span className="text-[10px] text-gray-400 tabular-nums">{count}</span>
       </button>
       {open && <div className="ml-3 pl-3 border-l-2 border-gray-100">{children}</div>}
+    </div>
+  )
+}
+
+// ── marketplace editor ──
+
+function MarketplaceEditor({
+  marketplaces,
+  readonly,
+  onChange,
+}: {
+  marketplaces: Record<string, any>
+  readonly?: boolean
+  onChange: (mps: Record<string, any>) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState("")
+  const [newSource, setNewSource] = useState<"git" | "github" | "directory">("git")
+  const [newValue, setNewValue] = useState("")
+  const [newBranch, setNewBranch] = useState("main")
+
+  const entries = Object.entries(marketplaces)
+
+  const add = () => {
+    const name = newName.trim()
+    if (!name || !newValue.trim()) return
+    let source: any
+    switch (newSource) {
+      case "git": source = { source: "git", url: newValue.trim() }; break
+      case "github": source = { source: "github", repo: newValue.trim() }; break
+      case "directory": source = { source: "directory", path: newValue.trim() }; break
+    }
+    if (newSource !== "directory" && newBranch.trim() && newBranch.trim() !== "main") {
+      source.branch = newBranch.trim()
+    }
+    onChange({ ...marketplaces, [name]: { source } })
+    setNewName("")
+    setNewValue("")
+    setNewBranch("main")
+    setAdding(false)
+  }
+
+  const remove = (name: string) => {
+    const { [name]: _, ...rest } = marketplaces
+    onChange(rest)
+  }
+
+  return (
+    <div className="space-y-1">
+      {entries.length === 0 && !adding && (
+        <div className="text-[12px] text-gray-400 italic py-2">
+          No additional marketplaces. The built-in marketplace is always available.
+        </div>
+      )}
+      {entries.map(([name, entry]) => {
+        const src = entry?.source ?? {}
+        const branch = src?.branch
+    const srcLabel = src.source === "git" ? `git ${src.url ?? ""}${branch ? ` @${branch}` : ""}`
+          : src.source === "github" ? `github:${src.repo ?? ""}${branch ? ` @${branch}` : ""}`
+          : src.source === "directory" ? `dir: ${src.path ?? ""}`
+          : JSON.stringify(src)
+        return (
+          <div key={name} className="group flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+            <Store size={13} className="text-gray-400 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[12px] font-medium text-gray-800 truncate">{name}</div>
+              <div className="text-[11px] text-gray-400 font-mono truncate">{srcLabel}</div>
+            </div>
+            {!readonly && (
+              <button
+                onClick={() => remove(name)}
+                className="shrink-0 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                title="remove"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        )
+      })}
+
+      {adding && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { setAdding(false); setNewName("") } }}
+              placeholder="marketplace name"
+              className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
+            />
+            <select
+              value={newSource}
+              onChange={(e) => setNewSource(e.target.value as any)}
+              className="w-24 shrink-0 border border-gray-300 rounded px-2 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
+            >
+              <option value="git">git URL</option>
+              <option value="github">github repo</option>
+              <option value="directory">directory</option>
+            </select>
+          </div>
+          <input
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            placeholder={newSource === "git" ? "https://..." : newSource === "github" ? "owner/repo" : "/path/to/marketplace"}
+            className="ip text-[12px] w-full font-mono"
+          />
+          {newSource !== "directory" && (
+            <input
+              value={newBranch}
+              onChange={(e) => setNewBranch(e.target.value)}
+              placeholder="branch (default: main)"
+              className="ip text-[12px] w-full font-mono"
+            />
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={add} className="px-3 h-7 rounded-lg bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
+            <button onClick={() => { setAdding(false); setNewName(""); setNewValue("") }} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!readonly && (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex items-center gap-1.5 px-3 py-2 text-[12px] text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg w-full transition-colors"
+        >
+          <Plus size={13} />
+          Add marketplace source
+        </button>
+      )}
     </div>
   )
 }

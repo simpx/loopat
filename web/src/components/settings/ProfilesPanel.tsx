@@ -93,7 +93,7 @@ export function ProfilesPanel() {
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") { setCreating(false); setNewName("") } }}
               placeholder="profile name (letters, numbers, dash, underscore)"
-              className="ip text-[13px] flex-1"
+              className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[13px] outline-none focus:border-gray-900 bg-white"
             />
             <button onClick={handleCreate} className="px-4 h-8 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 shrink-0">Create</button>
             <button onClick={() => { setCreating(false); setNewName("") }} className="px-3 h-8 text-xs text-gray-500 hover:text-gray-700 shrink-0">Cancel</button>

@@ -915,6 +915,24 @@ app.get("/api/plugins/available", requireAuth, async (c) => {
   return c.json({ plugins: await listAvailablePlugins() })
 })
 
+app.get("/api/plugins/browse", requireAuth, async (c) => {
+  const { browseMarketplacePlugins } = await import("./tiers")
+  return c.json({ plugins: await browseMarketplacePlugins() })
+})
+
+app.get("/api/marketplaces", requireAuth, async (c) => {
+  const { listMarketplaces } = await import("./tiers")
+  return c.json({ marketplaces: await listMarketplaces() })
+})
+
+app.post("/api/plugins/refresh", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const { refreshMarketplaces } = await import("./tiers")
+  const r = await refreshMarketplaces(userId)
+  if (!r.ok) return c.json({ error: r.error }, 500)
+  return c.json({ ok: true, added: r.added })
+})
+
 app.get("/api/settings/workspace", requireAuth, requireAdmin, async (c) => {
   const cfg = await loadConfig()
   const providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean }> = {}

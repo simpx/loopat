@@ -141,12 +141,12 @@ export function McpServerEditor({
               onChange={(e) => setNewRow((r) => ({ ...r, name: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") commitAdd(); if (e.key === "Escape") { setAdding(false); setNewRow(emptyRow()) } }}
               placeholder="server name"
-              className="ip text-[12px] font-medium flex-1"
+              className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] font-medium outline-none focus:border-gray-900 bg-white"
             />
             <select
               value={newRow.type}
               onChange={(e) => setNewRow((r) => ({ ...r, type: e.target.value as McpServerRow["type"] }))}
-              className="ip text-[12px] w-20 shrink-0"
+              className="w-20 shrink-0 border border-gray-300 rounded px-2 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
             >
               <option value="stdio">stdio</option>
               <option value="http">http</option>
@@ -225,11 +225,11 @@ function ServerRow({
       >
         <span className={`w-2 h-2 rounded-full shrink-0 ${row.type === "stdio" ? "bg-purple-400" : "bg-blue-400"}`} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-medium text-gray-800 truncate">{row.name}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[13px] font-medium text-gray-800 truncate">{row.name || <span className="text-gray-400 italic">unnamed</span>}</span>
             <span className="text-[10px] text-gray-400 uppercase shrink-0">{row.type}</span>
           </div>
-          <div className="text-[11px] text-gray-400 font-mono truncate mt-0.5">
+          <div className="text-[11px] text-gray-400 truncate mt-0.5 font-mono">
             {row.type === "http" || row.type === "sse" ? row.url || "—" : row.command || "—"}
           </div>
         </div>
@@ -248,17 +248,17 @@ function ServerRow({
 
   return (
     <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <input
           value={row.name}
           onChange={(e) => onCommit({ name: e.target.value })}
           placeholder="server name"
-          className="ip text-[12px] font-medium flex-1"
+          className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] font-medium outline-none focus:border-gray-900 bg-white"
         />
         <select
           value={row.type}
           onChange={(e) => onCommit({ type: e.target.value as McpServerRow["type"] })}
-          className="ip text-[12px] w-20 shrink-0"
+          className="w-20 shrink-0 border border-gray-300 rounded px-2 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
         >
           <option value="stdio">stdio</option>
           <option value="http">http</option>
