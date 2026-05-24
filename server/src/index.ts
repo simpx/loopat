@@ -349,6 +349,48 @@ app.delete("/api/admin/users/:id", requireAdmin, async (c) => {
   }
 })
 
+// ── profile CRUD (admin) ──
+
+app.get("/api/admin/profiles", requireAdmin, async (c) => {
+  const { listProfilesRich } = await import("./tiers")
+  return c.json({ profiles: await listProfilesRich() })
+})
+
+app.post("/api/admin/profiles", requireAdmin, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const name = typeof body.name === "string" ? body.name.trim() : ""
+  if (!name) return c.json({ error: "name required" }, 400)
+  const { createProfile } = await import("./tiers")
+  const r = await createProfile(name)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
+app.get("/api/admin/profiles/:name", requireAdmin, async (c) => {
+  const name = c.req.param("name") ?? ""
+  const { getProfile } = await import("./tiers")
+  const p = await getProfile(name)
+  if (!p) return c.json({ error: "not found" }, 404)
+  return c.json(p)
+})
+
+app.put("/api/admin/profiles/:name", requireAdmin, async (c) => {
+  const name = c.req.param("name") ?? ""
+  const body = await c.req.json().catch(() => ({}))
+  const { updateProfile } = await import("./tiers")
+  const r = await updateProfile(name, { settings: body.settings, claudeMd: body.claudeMd })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
+app.delete("/api/admin/profiles/:name", requireAdmin, async (c) => {
+  const name = c.req.param("name") ?? ""
+  const { deleteProfile } = await import("./tiers")
+  const r = await deleteProfile(name)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
 // ── admin platform (system info + git pull) ──
 
 /**
@@ -835,6 +877,44 @@ app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
+// ── tier settings API (composition model) ──
+
+app.get("/api/tiers", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const me = await findUser(userId)
+  const isAdmin = me?.role === "admin"
+  const { getTiers } = await import("./tiers")
+  return c.json(await getTiers(userId, isAdmin))
+})
+
+app.get("/api/tiers/:tier/settings", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const tierId = c.req.param("tier") ?? ""
+  const { getTierSettings } = await import("./tiers")
+  return c.json(await getTierSettings(tierId, userId))
+})
+
+app.put("/api/tiers/:tier/settings", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const tierId = c.req.param("tier") ?? ""
+  const me = await findUser(userId)
+  const isAdmin = me?.role === "admin"
+  // Only admin can write team/profile tiers
+  if ((tierId === "team" || tierId.startsWith("profile:")) && !isAdmin) {
+    return c.json({ error: "admin required for team/profile tiers" }, 403)
+  }
+  const body = await c.req.json().catch(() => ({}))
+  const { saveTierSettings } = await import("./tiers")
+  const r = await saveTierSettings(tierId, body, userId)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
+app.get("/api/plugins/available", requireAuth, async (c) => {
+  const { listAvailablePlugins } = await import("./tiers")
+  return c.json({ plugins: await listAvailablePlugins() })
+})
+
 app.get("/api/settings/workspace", requireAuth, requireAdmin, async (c) => {
   const cfg = await loadConfig()
   const providers: Record<string, { models: ModelEntry[]; baseUrl: string; hasKey: boolean; enabled: boolean }> = {}
@@ -1308,6 +1388,29 @@ app.get("/api/personal/default-profiles", requireAuth, async (c) => {
     return c.json({ default_profiles: arr })
   } catch {
     return c.json({ default_profiles: [] })
+  }
+})
+
+app.put("/api/personal/default-profiles", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const { existsSync } = await import("node:fs")
+  const { readFile, writeFile, mkdir: mk } = await import("node:fs/promises")
+  const { dirname } = await import("node:path")
+  const { personalLoopatConfigPath } = await import("./paths")
+  const body = await c.req.json().catch(() => ({}))
+  if (!Array.isArray(body.default_profiles)) return c.json({ error: "default_profiles must be an array" }, 400)
+  const path = personalLoopatConfigPath(userId)
+  let cfg: Record<string, any> = {}
+  if (existsSync(path)) {
+    try { cfg = JSON.parse(await readFile(path, "utf8")) } catch { cfg = {} }
+  }
+  cfg.default_profiles = body.default_profiles.filter((x: unknown): x is string => typeof x === "string")
+  try {
+    await mk(dirname(path), { recursive: true })
+    await writeFile(path, JSON.stringify(cfg, null, 2) + "\n")
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "save failed" }, 500)
   }
 })
 

@@ -1503,3 +1503,141 @@ export async function restartLoopSession(loopId: string): Promise<{ restarted: b
   if (!r.ok) return { restarted: false, error: j.error ?? `restart failed (${r.status})` }
   return { restarted: !!j.restarted }
 }
+
+// ── composition model: tiers ──
+
+export type TierId = "team" | "personal" | "project" | "local" | (string & {})
+
+export type TierInfo = {
+  id: TierId
+  label: string
+  path: string
+  exists: boolean
+  editable: boolean
+  managedBy: "admin" | "user" | "sdk"
+  settings: Record<string, any> | null
+  claudeMd: string | null
+  pluginCount: number
+  mcpServerCount: number
+  marketplaceCount: number
+  hookCount: number
+  skillCount: number
+  agentCount: number
+  overrides: Record<string, { overrides: string; value: any }>
+}
+
+export type TiersResponse = {
+  tiers: TierInfo[]
+  mergedSettings: Record<string, any>
+  isAdmin: boolean
+}
+
+export async function getTiers(): Promise<TiersResponse | null> {
+  const r = await apiFetch("/api/tiers")
+  if (!r.ok) return null
+  return (await r.json()) as TiersResponse
+}
+
+export async function getTierSettings(tierId: string): Promise<Record<string, any> | null> {
+  const r = await apiFetch(`/api/tiers/${encodeURIComponent(tierId)}/settings`)
+  if (!r.ok) return null
+  return (await r.json()) as Record<string, any>
+}
+
+export async function saveTierSettings(tierId: string, settings: Record<string, any>): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/tiers/${encodeURIComponent(tierId)}/settings`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `save failed (${r.status})` }
+  return { ok: true }
+}
+
+// ── plugin inventory ──
+
+export type PluginEntry = {
+  name: string
+  marketplace: string
+  displayName: string
+  description?: string
+}
+
+export async function listAvailablePlugins(): Promise<PluginEntry[]> {
+  const r = await apiFetch("/api/plugins/available")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.plugins as PluginEntry[]) ?? []
+}
+
+// ── profile CRUD (admin) ──
+
+export type ProfileDetail = {
+  name: string
+  path: string
+  description: string | null
+  settings: Record<string, any> | null
+  claudeMd: string | null
+  pluginCount: number
+  mcpServerCount: number
+  marketplaceCount: number
+  hookCount: number
+  skillCount: number
+  agentCount: number
+}
+
+export async function listProfilesRich(): Promise<ProfileDetail[]> {
+  const r = await apiFetch("/api/admin/profiles")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.profiles as ProfileDetail[]) ?? []
+}
+
+export async function createProfile(name: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/admin/profiles", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `create failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function getProfileDetail(name: string): Promise<ProfileDetail | null> {
+  const r = await apiFetch(`/api/admin/profiles/${encodeURIComponent(name)}`)
+  if (!r.ok) return null
+  return (await r.json()) as ProfileDetail
+}
+
+export async function updateProfile(name: string, data: { settings?: Record<string, any>; claudeMd?: string }): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/admin/profiles/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `update failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function deleteProfile(name: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/admin/profiles/${encodeURIComponent(name)}`, { method: "DELETE" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `delete failed (${r.status})` }
+  return { ok: true }
+}
+
+// ── personal default profiles ──
+
+export async function saveDefaultProfiles(profiles: string[]): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/personal/default-profiles", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ default_profiles: profiles }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `save failed (${r.status})` }
+  return { ok: true }
+}
