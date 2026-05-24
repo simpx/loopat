@@ -124,6 +124,33 @@ describe("buildBwrapArgs — plugin visibility via wholesale ~/.claude/plugins/ 
     const pluginsDir = join(homedir(), ".claude", "plugins")
     expect(binds.get(pluginsDir)).toContain(pluginsDir)
   })
+
+  test("when loop has a snapshot installed_plugins.json, it's bound OVER host's", async () => {
+    // Per-loop plugin version lock (principle 1 — loops are frozen at
+    // creation). compose writes loops/<id>/.claude/plugins/installed_plugins.json;
+    // bwrap file-level-binds it over the wholesale dir bind so the inner SDK
+    // resolves pinned versions, not whatever the host happens to have now.
+    const loopIp = join(loopClaudeDir(LOOP_ID), "plugins", "installed_plugins.json")
+    await mkdir(join(loopClaudeDir(LOOP_ID), "plugins"), { recursive: true })
+    await writeFile(loopIp, JSON.stringify({ version: 1, plugins: {} }))
+
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
+    const binds = collectBinds(argv)
+    const hostIp = join(homedir(), ".claude", "plugins", "installed_plugins.json")
+    expect(binds.get(loopIp)).toContain(hostIp)
+  })
+
+  test("when loop has NO snapshot, no file-level bind is added (host file used as-is)", async () => {
+    // Backward-compat path: a loop created before the snapshot model lands
+    // doesn't have plugins/installed_plugins.json yet. bwrap should not try
+    // to bind a non-existent file (bwrap with bare --ro-bind would fail).
+    const loopIp = join(loopClaudeDir(LOOP_ID), "plugins", "installed_plugins.json")
+    await rm(loopIp, { force: true })
+
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
+    const binds = collectBinds(argv)
+    expect(binds.get(loopIp)).toBeUndefined()
+  })
 })
 
 describe("buildBwrapArgs — CLAUDE_CONFIG_DIR contract", () => {
