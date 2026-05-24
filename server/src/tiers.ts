@@ -544,9 +544,9 @@ export async function refreshMarketplaces(user: string): Promise<{ ok: boolean; 
         await runClaude(["plugin", "marketplace", "remove", existing])
       }
 
-      // Build add command: claude plugin marketplace add <name> <path> [--branch <b>]
-      // CC auto-detects source type from path; no --source flag needed.
-      const args = ["plugin", "marketplace", "add", name, addPath]
+      // Build add command: claude plugin marketplace add <path> [--branch <b>]
+      // CC auto-detects source type (and derives name) from the path.
+      const args = ["plugin", "marketplace", "add", addPath]
       if (typeof src.branch === "string" && src.branch) {
         args.push("--branch", src.branch)
       }
