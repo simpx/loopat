@@ -122,7 +122,7 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
         <div className="text-sm font-semibold text-gray-900">Back up your git-crypt key</div>
         <div className="text-xs text-gray-600 leading-relaxed">
           Loopat just initialized your repo with git-crypt. The symmetric key below
-          decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/secrets/</code>.
+          decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/vaults/</code>.
           It's already stored on this host, but <b>you should save your own copy</b> —
           if this host dies and you don't have it, all secrets are unrecoverable.
         </div>
@@ -611,7 +611,7 @@ function ExportKeyFlow({ onDone }: { onDone: () => void }) {
         </div>
         <div className="text-[11px] text-gray-500 leading-relaxed">
           Treat it like a password — anyone with this key can decrypt everything
-          under <code className="bg-gray-100 px-1 rounded">.loopat/secrets/</code>.
+          under <code className="bg-gray-100 px-1 rounded">.loopat/vaults/</code>.
         </div>
         <button
           type="button"

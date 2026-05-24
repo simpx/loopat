@@ -185,8 +185,9 @@ async function composeSubdir(
 /**
  * Resolve where each LoopPlan source has its .claude/-like dirs.
  * For team + profiles, `dir` is the `.claude/` dir itself.
- * For personal (`personal:<u>`), it's the user's home; subdirs live under
- * `.loopat/claude/`. CLAUDE.md is at the user's root (not inside .loopat/).
+ * For personal (`personal:<u>`), everything lives under `.loopat/.claude/`
+ * (mirrors CC's own `~/.claude/` convention but namespaced under `.loopat/`):
+ * `CLAUDE.md`, `settings.json`, `skills/`, `agents/`, `mise.toml`, etc.
  */
 type ResolvedSource = {
   source: string

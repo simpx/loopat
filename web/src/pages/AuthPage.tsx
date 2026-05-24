@@ -330,7 +330,7 @@ function BackupKeyPanel({
       <div className="text-sm font-semibold text-gray-900">Back up your git-crypt key</div>
       <div className="text-xs text-gray-600 leading-relaxed">
         Loopat just initialized your repo with git-crypt. The symmetric key below
-        decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/secrets/</code>.
+        decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/vaults/</code>.
         It's saved on this host, but if this host dies and you don't have your
         own copy, all secrets are unrecoverable.
       </div>

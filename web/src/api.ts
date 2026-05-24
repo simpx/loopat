@@ -1080,36 +1080,29 @@ export async function updatePersonalSettings(patch: {
 
 // ── disk-shape settings (rich Settings page) ──
 
-/** `ConfigValue` mirror — used by both apiKey and envs values. */
-export type ConfigValue = string | { vault: string } | { file: string }
-
-/** `PathRef` mirror — used by mount.src. */
-export type PathRef = string | { vault: string }
-
 export type ProviderDisk = {
   model?: string
   models?: ModelEntry[]
   baseUrl: string
-  apiKey?: ConfigValue
+  /** Plain string; may contain `${VAR}` references resolved against vault envs/ at load. */
+  apiKey?: string
   maxContextTokens?: number
   enabled?: boolean
-}
-
-export type MountDisk = {
-  src: PathRef
-  dst: string
-  rw?: boolean
 }
 
 export type PersonalConfigDisk = {
   /** Mixed map: "default" key carries a string; other keys carry ProviderDisk. */
   providers: Record<string, ProviderDisk | string>
-  envs?: Record<string, ConfigValue>
-  mounts?: MountDisk[]
   shell?: string
 }
 
-export type RefExistsMap = Record<string, { kind: string; exists: boolean }>
+/**
+ * For each `providers.<name>.apiKey` ref the backend reports:
+ *   - kind: "literal" | "var" | "mixed" | "empty"
+ *   - exists: whether the vault env file referenced by `${VAR}` exists
+ *   - varName: the `${VAR}` name (only when kind === "var")
+ */
+export type RefExistsMap = Record<string, { kind: string; exists: boolean; varName?: string }>
 
 export async function getPersonalDisk(): Promise<{ disk: PersonalConfigDisk; refExists: RefExistsMap } | null> {
   const r = await apiFetch("/api/settings/personal/disk")
@@ -1128,19 +1121,16 @@ export async function savePersonalDisk(patch: Partial<PersonalConfigDisk>): Prom
   return { ok: true }
 }
 
-export type PersonalEntry = { path: string; type: "file" | "dir" }
-export async function listPersonalEntries(root: "personal" | "vault"): Promise<PersonalEntry[]> {
-  const r = await apiFetch(`/api/settings/personal/entries?root=${root}`)
-  if (!r.ok) return []
-  const j = await r.json()
-  return (j.entries as PersonalEntry[]) ?? []
-}
-
-export async function writePersonalValue(ref: ConfigValue, value: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Write a value to a vault env file. `name` is the env var name (e.g.
+ * "ANTHROPIC_API_KEY"); `vault` defaults to "default". The next personal
+ * config load picks up the new value via `${VAR}` substitution in apiKey.
+ */
+export async function writeVaultEnv(name: string, value: string, vault: string = "default"): Promise<{ ok: boolean; error?: string }> {
   const r = await apiFetch("/api/settings/personal/value", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ref, value }),
+    body: JSON.stringify({ name, value, vault }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { ok: false, error: j.error ?? `write failed (${r.status})` }

@@ -174,10 +174,10 @@ All team-shared Claude Code config lives under the reserved namespace
 LOOPAT_HOME/
 ├── config.json                                       # workspace runtime config (knowledge/notes/repos)
 ├── personal/<user>/.loopat/
-│   ├── config.json                                   # per-user config (providers, default, mounts, shell)
+│   ├── config.json                                   # per-user config (providers, default, shell)
 │   └── vaults/<name>/                                # one or more named credential bundles (default, dev, prod, ...)
-│       ├── provider-keys/<provider-name>             # loopat reads → provider.apiKey (active vault only)
-│       └── <service>/<VAR>                           # user-owned tokens (filename = env-var name)
+│       ├── envs/<NAME>                               # auto-injected env var; also feeds ${VAR} in apiKey
+│       └── mounts/home/<rel>/...                     # auto-bound at sandbox $HOME/<rel>/...
 └── context/knowledge/
     └── .loopat/claude/                               # team-shared Claude config
         ├── CLAUDE.md     (optional)                  # team prompt supplement
@@ -194,18 +194,20 @@ Rules:
 - Everything else under `knowledge/` is plain team docs; everything else under
   `personal/<user>/` is user-owned freeform space.
 - Workspace `config.json` is **team-shared** (knowledge/notes/repos URLs only).
-  Per-user fields (providers, default, mounts, shell) live in
-  `personal/<user>/.loopat/config.json`. Member `mounts` have `src` relative
-  to `personal/<user>/` (RO); `dst` must be sandbox-rooted (`$HOME/...`,
-  `~/...`, or `/...`). Encrypted dotfiles live under `.loopat/vaults/<name>/...`
-  and get bind-mounted via mounts pointing at that path. Operator `mounts`
-  live in workspace `config.json` and can name any host path.
-- `personal/<user>/.loopat/vaults/<name>/<service>/<VAR>` follows the ccx convention:
-  filename = env-var name, file body = value. Each loop picks one active vault
-  (`meta.config.vault`, default `"default"`); the sandbox surfaces it as a
-  symlink at `/loopat/context/vault → personal/.loopat/vaults/<active>/`.
-- Legacy `personal/<user>/.loopat/secrets/` (pre-vault layout) is auto-promoted
-  to an implicit "default" vault when no `vaults/` subdir exists.
+  Per-user fields (providers, default, shell) live in
+  `personal/<user>/.loopat/config.json`. There is no `mounts` or `envs` field —
+  those are conventional, derived from vault filesystem layout (see next bullet).
+  Operator `mounts` live in workspace `config.json` and can name any host path
+  (cross-user shared caches like `/etc/pki/ca-trust`).
+- `personal/<user>/.loopat/vaults/<name>/` has two convention directories that
+  drive automatic sandbox delivery at spawn time:
+  - `envs/<NAME>` — file content is injected as env var `$NAME` (also feeds
+    `${VAR}` substitution in provider `apiKey`).
+  - `mounts/home/<rel>/...` — each top-level entry is `--bind`'d into the
+    sandbox at `$HOME/<rel>/...`.
+  Each loop picks one active vault (`meta.config.vault`, default `"default"`).
+  No symlink, no `/loopat/context/vault` entrypoint — AI sees a configured
+  machine, not a "vault" concept.
 
 ### Five injection paths
 

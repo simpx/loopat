@@ -1,16 +1,16 @@
 import { existsSync, statSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { dirname, join, normalize, relative } from "node:path"
+import { dirname, join } from "node:path"
 import {
-  personalDir,
   personalLoopatConfigPath,
   personalLoopatDir,
   personalTokenUsagePath,
-  personalVaultDir,
+  personalVaultEnvPath,
+  personalVaultEnvsDir,
   workspaceDir,
   personalSettingsPath,
 } from "./paths"
-import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
+import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
 
 /**
  * MCP server config — shape matches Claude Agent SDK `McpServerConfig`.
@@ -36,20 +36,6 @@ export type WorkspaceClaudeJson = {
   enabledPlugins?: Record<string, boolean>
 }
 
-/**
- * Reference for a config value that gets resolved at load time:
- *   - string             → literal value
- *   - { vault: "x/y" }   → read `<active-vault-root>/x/y` (rebinds per loop)
- *   - { file:  "a/b" }   → read `personal/<user>/a/b` (vault-agnostic)
- *
- * Trailing whitespace (including the conventional file-final newline) is
- * stripped; leading/interior whitespace is preserved.
- */
-export type ConfigValue =
-  | string
-  | { vault: string }
-  | { file: string }
-
 /** A model entry within a provider's model list. */
 export type ModelEntry = {
   id: string
@@ -58,12 +44,16 @@ export type ModelEntry = {
   maxContextTokens?: number
 }
 
-/** On-disk shape of a provider — apiKey is a ConfigValue (or absent). */
+/**
+ * On-disk shape of a provider. `apiKey` is a plain string that may contain
+ * `${VAR}` references resolved against vault envs at load time. Empty / unset
+ * means no key (provider effectively disabled).
+ */
 export type ProviderConfigDisk = {
   model?: string          // legacy single-model; migrated to models[] on read
   models?: ModelEntry[]   // canonical multi-model format
   baseUrl: string
-  apiKey?: ConfigValue
+  apiKey?: string
   maxContextTokens?: number
   enabled?: boolean       // provider-level toggle, default true
 }
@@ -73,8 +63,9 @@ export type ProviderConfig = {
   /** Canonical model list (at least one entry after migration). */
   models: ModelEntry[]
   baseUrl: string
-  /** Resolved at load time from `apiKey: ConfigValue` on disk. Empty string
-   *  if the reference is missing or the target file doesn't exist. */
+  /** Resolved at load time: `${VAR}` references in the disk apiKey are
+   *  expanded against the active vault's envs/. Empty string if the
+   *  referenced env doesn't exist (provider effectively disabled). */
   apiKey: string
   /**
    * Override cli's context-window detection for this model. cli has a
@@ -99,37 +90,10 @@ export type RepoSpec = {
   git: string
 }
 
-/**
- * Reference to a host path. Sister to `ConfigValue` but for paths:
- *   - string             → personal-relative (existing behavior)
- *   - { vault: "x/y" }   → active-vault-relative (rebinds per loop)
- *
- * Asymmetric with ConfigValue on purpose: a path's bare-string form has
- * always meant "personal-relative", so there's no `{file}` variant.
- */
-export type PathRef = string | { vault: string }
-
-/**
- * Sandbox bind. `dst` is the sandbox-side path; must be rooted
- * (`$HOME/...`, `~/...`, or absolute `/...`). `src` semantics depend on
- * which config holds it:
- *
- * - **Operator** (`~/.loopat/config.json` `mounts`): `src` is any host
- *   path (`~/...`, `$HOME/...`, or absolute `/...`). Operator owns the
- *   host, so we don't restrict scope. (Always a string — no PathRef.)
- * - **Member** (`personal/<user>/.loopat/config.json` `mounts`): `src` is
- *   a `PathRef`. Bare string → relative under `personal/<user>/`.
- *   `{ vault: "..." }` → relative under the loop's active vault root.
- *
- * `rw` defaults to false (RO bind). Missing source is silently skipped.
- */
-export type Mount = {
-  src: PathRef
-  dst: string
-  rw?: boolean
-}
-
-/** Operator-side mount (workspace config). src is always a literal host path. */
+/** Operator-side mount (workspace config). src is always a literal host path.
+ *  Operator owns the host, so any path under `~/...`, `$HOME/...`, or `/...`
+ *  is allowed (modulo `..` traversal). Used for cross-user shared caches
+ *  (e.g. /etc/pki/ca-trust). */
 export type OperatorMount = {
   src: string
   dst: string
@@ -174,10 +138,13 @@ export type WorkspaceConfig = {
  *     for keeping every provider-related field under one section, which
  *     matches how the Settings UI groups them. No provider is allowed to
  *     be literally named "default".
- *   - `apiKey` / `envs` values are `ConfigValue` references; resolved on
- *     load and exposed as plain strings via the runtime `PersonalConfig`.
- *   - `mounts[].src` is `PathRef` (string = personal-relative,
- *     `{vault}` = active-vault-relative).
+ *   - `apiKey` is a plain string that may contain `${VAR}` references. At
+ *     load time, each `${VAR}` is resolved against the active vault's
+ *     `envs/<VAR>` file. Unset → empty string (provider effectively off).
+ *   - Sandbox env vars and CLI config mounts are conventional, not declared:
+ *     anything in `vault/envs/*` is auto-injected, anything in
+ *     `vault/mounts/home/<rel>/...` is auto-bound at $HOME/<rel>/...
+ *     There is no `envs` or `mounts` field — filesystem layout IS the spec.
  */
 /**
  * Onboarding state per user. Used by the Welcome card on Loops list to
@@ -196,10 +163,6 @@ export type OnboardingState = {
 export type PersonalConfigDisk = {
   /** Mixed: "default" key is a string, all other keys are providers. */
   providers: Record<string, ProviderConfigDisk | string>
-  /** Environment variables to inject into the sandbox / process env. */
-  envs?: Record<string, ConfigValue>
-  /** Member-level mounts — src is `PathRef`. See Mount JSDoc. */
-  mounts?: Mount[]
   /** PTY shell override (highest precedence). */
   shell?: string
   /** Optional. Missing = "fresh" (user hasn't started or dismissed yet). */
@@ -210,9 +173,12 @@ export type PersonalConfig = {
   /** Active provider name. On disk this lives at `providers.default`. */
   default: string
   providers: Record<string, ProviderConfig>
-  /** Resolved envs (ConfigValue → string). Missing files drop the entry. */
-  envs?: Record<string, string>
-  mounts?: Mount[]
+  /**
+   * Resolved env vars from the active vault's `envs/` dir. Filename → value.
+   * Used to (a) inject into spawn env so spawned binary's `${VAR}` substitution
+   * in mcpServers works, and (b) substitute `${VAR}` in provider.apiKey.
+   */
+  vaultEnvs: Record<string, string>
   shell?: string
   onboarding?: OnboardingState
 }
@@ -274,6 +240,7 @@ const WORKSPACE_TEMPLATE: WorkspaceConfig = {
 const PERSONAL_TEMPLATE: PersonalConfig = {
   default: PRESET_PROVIDERS[0] ? `${PRESET_PROVIDERS[0].name}/${PRESET_PROVIDERS[0].models[0]}` : "",
   providers: buildPresetProviders(),
+  vaultEnvs: {},
 }
 
 /** On-disk shape used when a config.json is missing or malformed. Seeded
@@ -335,8 +302,10 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
 const personalCache = new Map<string, {
   cfg: PersonalConfig
   configMtimeMs: number
-  /** mtime of every file referenced (resolved) by apiKey/envs. */
-  refMtimes: Record<string, number>
+  /** Snapshot of the vault envs dir mtime; if the dir changes (file added /
+   *  removed / value edited) we re-resolve. We don't track per-file mtimes
+   *  because vault envs are small enough to re-walk cheaply on miss. */
+  envsDirMtimeMs: number
 }>()
 
 function clearPersonalCache(user: string): void {
@@ -345,55 +314,13 @@ function clearPersonalCache(user: string): void {
   }
 }
 
-/** Reject `..` / absolute / drive paths under `root`. Returns the absolute
- *  resolved path on success, null if the relpath escapes. */
-function safeUnder(root: string, rel: string): string | null {
-  if (typeof rel !== "string" || rel.length === 0) return null
-  const candidate = normalize(join(root, rel))
-  const insideRel = relative(root, candidate)
-  if (insideRel === "" || insideRel.startsWith("..") || insideRel.startsWith("/")) return null
-  return candidate
-}
+const VAR_REF_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
 
-/** Read a file as utf8 and strip trailing newlines only (file-final \n is
- *  the convention; trailing spaces/tabs are taken as intentional content).
- *  Leading/interior whitespace is preserved. Missing/unreadable → empty. */
-async function readTrimmedEnd(path: string): Promise<{ value: string; mtimeMs: number }> {
-  if (!existsSync(path)) return { value: "", mtimeMs: 0 }
-  try {
-    const raw = await readFile(path, "utf8")
-    return { value: raw.replace(/[\r\n]+$/, ""), mtimeMs: statSync(path).mtimeMs }
-  } catch {
-    return { value: "", mtimeMs: 0 }
-  }
-}
-
-/**
- * Resolve one ConfigValue against the active vault / user root. Returns the
- * literal value plus the path read (for cache mtime tracking). The path is
- * empty when the value is a string literal (nothing to watch).
- */
-async function resolveConfigValue(
-  v: ConfigValue,
-  user: string,
-  vault: string,
-): Promise<{ value: string; path: string; mtimeMs: number }> {
-  if (typeof v === "string") return { value: v, path: "", mtimeMs: 0 }
-  if (v && typeof v === "object" && "vault" in v && typeof v.vault === "string") {
-    const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
-    const abs = safeUnder(root, v.vault)
-    if (!abs) return { value: "", path: "", mtimeMs: 0 }
-    const r = await readTrimmedEnd(abs)
-    return { value: r.value, path: abs, mtimeMs: r.mtimeMs }
-  }
-  if (v && typeof v === "object" && "file" in v && typeof v.file === "string") {
-    const root = personalDir(user)
-    const abs = safeUnder(root, v.file)
-    if (!abs) return { value: "", path: "", mtimeMs: 0 }
-    const r = await readTrimmedEnd(abs)
-    return { value: r.value, path: abs, mtimeMs: r.mtimeMs }
-  }
-  return { value: "", path: "", mtimeMs: 0 }
+/** Substitute every `${VAR}` in a template against the env map. Unknown
+ *  vars resolve to empty string. Literal strings (no $) pass through. */
+export function expandVars(template: string, envs: Record<string, string>): string {
+  if (!template || !template.includes("${")) return template
+  return template.replace(VAR_REF_RE, (_, name) => envs[name] ?? "")
 }
 
 /**
@@ -412,15 +339,16 @@ export async function loadPersonalConfig(
     return JSON.parse(JSON.stringify(PERSONAL_TEMPLATE)) as PersonalConfig
   }
   const configMtimeMs = statSync(path).mtimeMs
+  const envsDir = personalVaultEnvsDir(user, vault)
+  const envsDirMtimeMs = existsSync(envsDir) ? statSync(envsDir).mtimeMs : 0
   const cacheKey = `${user}|${vault}`
   const cached = personalCache.get(cacheKey)
-  if (cached && cached.configMtimeMs === configMtimeMs) {
-    let stale = false
-    for (const [p, m] of Object.entries(cached.refMtimes)) {
-      const cur = existsSync(p) ? statSync(p).mtimeMs : 0
-      if (cur !== m) { stale = true; break }
-    }
-    if (!stale) return cached.cfg
+  if (
+    cached &&
+    cached.configMtimeMs === configMtimeMs &&
+    cached.envsDirMtimeMs === envsDirMtimeMs
+  ) {
+    return cached.cfg
   }
 
   const raw = await readFile(path, "utf8")
@@ -436,6 +364,9 @@ export async function loadPersonalConfig(
     disk = JSON.parse(JSON.stringify(PERSONAL_DISK_TEMPLATE)) as PersonalConfigDisk
   }
 
+  // Vault envs feed both the spawn env and ${VAR} substitution in apiKey.
+  const vaultEnvs = await loadVaultEnvs(user, vault)
+
   // Split the heterogeneous providers map: pull out the special "default"
   // string key, leave the rest as provider entries.
   const rawDefault = typeof disk.providers.default === "string" ? disk.providers.default : ""
@@ -449,15 +380,9 @@ export async function loadPersonalConfig(
     console.warn(`[loopat] personal config: default "${rawDefault}" provider "${defaultProviderName}" not in providers (ignored)`)
   }
 
-  const refMtimes: Record<string, number> = {}
   const providers: Record<string, ProviderConfig> = {}
   for (const [name, p] of providerEntries) {
-    let apiKey = ""
-    if (p.apiKey !== undefined) {
-      const r = await resolveConfigValue(p.apiKey, user, vault)
-      apiKey = r.value
-      if (r.path) refMtimes[r.path] = r.mtimeMs
-    }
+    const apiKey = typeof p.apiKey === "string" ? expandVars(p.apiKey, vaultEnvs) : ""
     // Normalize legacy single-model to canonical models[] format.
     const models: ModelEntry[] = p.models && p.models.length > 0
       ? p.models.map(m => ({ id: m.id, enabled: m.enabled !== false }))
@@ -471,28 +396,14 @@ export async function loadPersonalConfig(
     }
   }
 
-  let envs: Record<string, string> | undefined
-  if (disk.envs && typeof disk.envs === "object") {
-    envs = {}
-    for (const [k, v] of Object.entries(disk.envs)) {
-      const r = await resolveConfigValue(v, user, vault)
-      if (r.path) refMtimes[r.path] = r.mtimeMs
-      // Drop empty resolutions for non-literal refs (missing file). Literal
-      // empty strings, conversely, are kept — that's user intent.
-      const isLiteral = typeof v === "string"
-      if (isLiteral || r.value !== "") envs[k] = r.value
-    }
-  }
-
   const cfg: PersonalConfig = {
     default: defaultProviderName && providers[defaultProviderName] ? rawDefault : "",
     providers,
-    ...(envs ? { envs } : {}),
-    ...(disk.mounts ? { mounts: disk.mounts } : {}),
+    vaultEnvs,
     ...(disk.shell ? { shell: disk.shell } : {}),
     ...(disk.onboarding ? { onboarding: disk.onboarding } : {}),
   }
-  personalCache.set(cacheKey, { cfg, configMtimeMs, refMtimes })
+  personalCache.set(cacheKey, { cfg, configMtimeMs, envsDirMtimeMs })
   return cfg
 }
 
@@ -560,38 +471,36 @@ export async function readPersonalDiskRaw(user: string): Promise<PersonalConfigD
 }
 
 /**
- * For a ConfigValue ref, return the absolute path it points to (or null for
- * literals) plus whether that path exists on disk. Used by the Settings API
- * to surface "ref ✓ exists / ✗ missing" indicators WITHOUT leaking the
- * resolved value to the client.
+ * For an apiKey string that may contain `${VAR}` references, describe the
+ * shape so the Settings UI can render "✓ exists / ✗ missing" indicators
+ * without leaking the value.
+ *
+ *   - "literal" : no `${VAR}` ref; value is the literal text (or empty)
+ *   - "var"     : exactly one `${VAR}` ref; reports whether the vault env
+ *                 file `envs/<VAR>` exists
+ *   - "mixed"   : multiple refs or template+text; existence not surfaced
  */
-export function describeConfigValue(v: ConfigValue, user: string, vault: string = DEFAULT_VAULT): { kind: "literal" | "vault" | "file" | "invalid"; path: string | null; exists: boolean } {
-  if (typeof v === "string") return { kind: "literal", path: null, exists: true }
-  if (v && typeof v === "object" && "vault" in v && typeof v.vault === "string") {
-    const root = resolveVaultRoot(user, vault) ?? personalVaultDir(user, vault)
-    const abs = safeUnder(root, v.vault)
-    if (!abs) return { kind: "invalid", path: null, exists: false }
-    return { kind: "vault", path: abs, exists: existsSync(abs) }
+export function describeApiKeyRef(
+  apiKey: string | undefined,
+  user: string,
+  vault: string = DEFAULT_VAULT,
+): { kind: "literal" | "var" | "mixed" | "empty"; varName?: string; path?: string; exists: boolean } {
+  if (!apiKey) return { kind: "empty", exists: false }
+  const matches = [...apiKey.matchAll(VAR_REF_RE)]
+  if (matches.length === 0) return { kind: "literal", exists: true }
+  if (matches.length === 1 && matches[0][0] === apiKey) {
+    const name = matches[0][1]
+    const path = personalVaultEnvPath(user, vault, name)
+    return { kind: "var", varName: name, path, exists: existsSync(path) }
   }
-  if (v && typeof v === "object" && "file" in v && typeof v.file === "string") {
-    const abs = safeUnder(personalDir(user), v.file)
-    if (!abs) return { kind: "invalid", path: null, exists: false }
-    return { kind: "file", path: abs, exists: existsSync(abs) }
-  }
-  return { kind: "invalid", path: null, exists: false }
+  return { kind: "mixed", exists: false }
 }
 
 /**
  * Apply a structural patch to personal/<user>/.loopat/config.json. Accepts
  * partial fields from `PersonalConfigDisk`; only fields present on the
- * patch are touched. Does NOT write any secret values — apiKey/env file
- * contents are managed through separate value-write endpoints.
- *
- * Validation:
- *   - No provider entry may be named "default" (reserved selector key).
- *   - If `providers.default` is set, it must point to an existing provider.
- *   - Each mount's `dst` and `src` (PathRef) must validate.
- *   - Each env value must be a valid ConfigValue shape.
+ * patch are touched. Does NOT write any secret values — apiKey values
+ * referenced as `${VAR}` are managed via `writeVaultEnv()`.
  */
 export async function savePersonalDisk(
   user: string,
@@ -599,7 +508,6 @@ export async function savePersonalDisk(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const disk = await readPersonalDisk(user)
   if (patch.providers !== undefined) {
-    // Validate providers map shape: "default" → string, others → object with model/baseUrl.
     for (const [name, val] of Object.entries(patch.providers)) {
       if (name === "default") {
         if (typeof val !== "string") return { ok: false, error: `providers.default must be a string` }
@@ -617,49 +525,30 @@ export async function savePersonalDisk(
       if (typeof p.baseUrl !== "string") {
         return { ok: false, error: `provider "${name}" missing baseUrl` }
       }
-      if (p.apiKey !== undefined && !isValidConfigValueShape(p.apiKey)) {
-        return { ok: false, error: `provider "${name}" apiKey has invalid shape` }
+      if (p.apiKey !== undefined && typeof p.apiKey !== "string") {
+        return { ok: false, error: `provider "${name}" apiKey must be a string` }
       }
     }
-    // Default must point to a real provider (if set).
     const defName = patch.providers.default
     if (typeof defName === "string" && defName) {
       const { providerName } = parseDefault(defName)
       const exists = Object.entries(patch.providers).some(([n, v]) => n !== "default" && n === providerName && typeof v === "object")
       if (!exists) return { ok: false, error: `default "${defName}" provider "${providerName}" not in providers` }
     }
-    // Force enabled: false for providers without an API key.
+    // Force enabled: false for providers without an apiKey reference.
     for (const [name, val] of Object.entries(patch.providers)) {
       if (name === "default" || !val || typeof val !== "object") continue
       const p = val as ProviderConfigDisk
       if (p.enabled !== false) {
-        const hasNewKey = p.apiKey !== undefined && isValidConfigValueShape(p.apiKey)
+        const hasNewKey = typeof p.apiKey === "string" && p.apiKey.length > 0
         const existingEntry = disk.providers[name]
-        const existingRef = (existingEntry && typeof existingEntry === "object") ? (existingEntry as ProviderConfigDisk).apiKey : undefined
-        if (!hasNewKey && !existingRef) {
+        const existingKey = (existingEntry && typeof existingEntry === "object") ? (existingEntry as ProviderConfigDisk).apiKey : undefined
+        if (!hasNewKey && !existingKey) {
           p.enabled = false
         }
       }
     }
     disk.providers = patch.providers
-  }
-  if (patch.envs !== undefined) {
-    if (patch.envs && typeof patch.envs === "object") {
-      for (const [k, v] of Object.entries(patch.envs)) {
-        if (!isValidEnvKey(k)) return { ok: false, error: `invalid env key "${k}"` }
-        if (!isValidConfigValueShape(v)) return { ok: false, error: `env "${k}" has invalid value shape` }
-      }
-    }
-    disk.envs = patch.envs
-  }
-  if (patch.mounts !== undefined) {
-    if (!Array.isArray(patch.mounts)) return { ok: false, error: `mounts must be an array` }
-    for (const m of patch.mounts) {
-      if (!m || typeof m !== "object") return { ok: false, error: `mounts entry must be an object` }
-      if (typeof m.dst !== "string" || !isValidMountDstShape(m.dst)) return { ok: false, error: `invalid mount dst: ${JSON.stringify(m.dst)}` }
-      if (!isValidPathRefShape(m.src)) return { ok: false, error: `invalid mount src: ${JSON.stringify(m.src)}` }
-    }
-    disk.mounts = patch.mounts
   }
   if (patch.shell !== undefined) {
     if (typeof patch.shell !== "string") return { ok: false, error: `shell must be a string` }
@@ -672,50 +561,38 @@ export async function savePersonalDisk(
   return { ok: true }
 }
 
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 /**
- * Write a literal value to the target a ConfigValue ref points to. Useful
- * for "user typed a new apiKey/env value, route it to wherever the ref
- * says". Literal-string refs aren't writable (the value IS the ref); the
- * caller is expected to update config.json directly via savePersonalDisk.
+ * Write a value to the vault's `envs/<NAME>` file. Used when the Settings UI
+ * stores a fresh apiKey / token value. Caller chooses the variable name; we
+ * just validate and write. Re-reading the personal config picks up the value
+ * automatically via `${VAR}` substitution.
  */
-export async function writeConfigValueTarget(
-  ref: ConfigValue,
+export async function writeVaultEnv(
   user: string,
+  vault: string,
+  name: string,
   value: string,
 ): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
-  if (typeof ref === "string") return { ok: false, error: "literal ref has no writable target" }
-  const writeAt = resolveWritablePath(ref, user)
-  if (!writeAt) return { ok: false, error: "invalid ref path" }
+  if (!ENV_NAME_RE.test(name)) return { ok: false, error: `invalid env name "${name}"` }
+  const writeAt = personalVaultEnvPath(user, vault, name)
   await mkdir(dirname(writeAt), { recursive: true })
-  // Match the file-final newline convention so the trim-only-trailing-newline
-  // read path produces the value verbatim.
   await writeFile(writeAt, value.replace(/\r?\n+$/, "") + "\n")
   clearPersonalCache(user)
   return { ok: true, path: writeAt }
 }
 
-function isValidConfigValueShape(v: unknown): v is ConfigValue {
-  if (typeof v === "string") return true
-  if (!v || typeof v !== "object") return false
-  if ("vault" in v && typeof (v as any).vault === "string") return true
-  if ("file"  in v && typeof (v as any).file  === "string") return true
-  return false
+/** Delete a vault env file. No-op if missing. */
+export async function deleteVaultEnv(user: string, vault: string, name: string): Promise<void> {
+  if (!ENV_NAME_RE.test(name)) return
+  const p = personalVaultEnvPath(user, vault, name)
+  if (existsSync(p)) {
+    const { rm } = await import("node:fs/promises")
+    await rm(p, { force: true })
+  }
+  clearPersonalCache(user)
 }
-
-function isValidPathRefShape(v: unknown): v is PathRef {
-  if (typeof v === "string") return v.length > 0 && !v.startsWith("/")
-  if (!v || typeof v !== "object") return false
-  if ("vault" in v && typeof (v as any).vault === "string") return (v as any).vault.length > 0
-  return false
-}
-
-function isValidMountDstShape(s: string): boolean {
-  if (!s) return false
-  return s === "~" || s === "$HOME" || s.startsWith("~/") || s.startsWith("$HOME/") || s.startsWith("/")
-}
-
-const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
-function isValidEnvKey(k: string): boolean { return typeof k === "string" && ENV_KEY_RE.test(k) }
 
 async function readPersonalDisk(user: string): Promise<PersonalConfigDisk> {
   const path = personalLoopatConfigPath(user)
@@ -732,72 +609,52 @@ async function readPersonalDisk(user: string): Promise<PersonalConfigDisk> {
 }
 
 /**
- * Resolve where to physically write a new value for a ConfigValue reference.
- * `vault` uses the default vault (settings UI is per-user, not per-vault).
- * Returns null for string-literal refs (no file to write to).
- */
-function resolveWritablePath(ref: ConfigValue, user: string): string | null {
-  if (typeof ref === "string") return null
-  if ("vault" in ref && typeof ref.vault === "string") {
-    return safeUnder(personalVaultDir(user, DEFAULT_VAULT), ref.vault)
-  }
-  if ("file" in ref && typeof ref.file === "string") {
-    return safeUnder(personalDir(user), ref.file)
-  }
-  return null
-}
-
-/**
- * Save personal config to disk. Provider apiKey values are written into
- * whatever path each provider's `apiKey` reference points to (with default
- * `{ vault: "provider-keys/<name>" }` if no ref exists yet). String-literal
- * refs are updated in-place in config.json. `default` is now stored at
- * `providers.default` inside the providers map.
+ * Save personal config to disk. Provider apiKey values are stored in vault
+ * envs/<NAME>_API_KEY (NAME = uppercase provider name); config.json carries
+ * a `${VAR}` reference. `default` lives at `providers.default` inside the
+ * providers map.
  */
 export async function savePersonalConfig(user: string, cfg: {
   default?: string
   providers?: Record<string, { model?: string; models?: ModelEntry[]; baseUrl: string; apiKey?: string; maxContextTokens?: number; enabled?: boolean }>
 }): Promise<void> {
   const disk = await readPersonalDisk(user)
-
-  // Read existing default (string at providers.default) and existing provider
-  // entries (everything else under providers) — they round-trip when only one
-  // of {default, providers} is being updated.
   const existingDefault = typeof disk.providers.default === "string" ? disk.providers.default : ""
 
   if (cfg.providers !== undefined) {
     const rebuilt: Record<string, ProviderConfigDisk | string> = {}
     const nextDefault = cfg.default !== undefined ? cfg.default : existingDefault
-    if (nextDefault) rebuilt.default = nextDefault   // emit FIRST for readability
+    if (nextDefault) rebuilt.default = nextDefault
     for (const [name, p] of Object.entries(cfg.providers)) {
       if (name === "default") {
-        // Defensive: a literal provider named "default" collides with the
-        // selector key. Refuse and warn — UI should already prevent this.
         console.warn(`[loopat] savePersonalConfig: ignored provider named "default" (reserved key)`)
         continue
       }
       const existingEntry = disk.providers[name]
-      const existingRef = (existingEntry && typeof existingEntry === "object") ? existingEntry.apiKey : undefined
-      let ref: ConfigValue = existingRef ?? { vault: `provider-keys/${name}` }
+      const existingKey = (existingEntry && typeof existingEntry === "object") ? existingEntry.apiKey : undefined
+      // Decide the apiKey field for disk:
+      //   - If the user passed a new value, derive the env var name and stash
+      //     the literal value into vault envs/<VAR>, then write a `${VAR}` ref.
+      //   - Else keep whatever was there.
+      const defaultVar = providerEnvVarName(name)
+      let apiKeyField: string | undefined = existingKey
       const hasNewKey = p.apiKey !== undefined && p.apiKey.trim() !== ""
       if (hasNewKey) {
-        if (typeof ref === "string") {
-          ref = p.apiKey!.trim()
-        } else {
-          const writeAt = resolveWritablePath(ref, user)
-          if (writeAt) {
-            await mkdir(dirname(writeAt), { recursive: true })
-            await writeFile(writeAt, p.apiKey!.trim() + "\n")
-          }
-        }
+        // If existing ref is a `${VAR}` template, reuse its var name; otherwise
+        // pick a deterministic default like ANTHROPIC_API_KEY for "Anthropic".
+        const targetVar = (existingKey && extractSingleVarName(existingKey)) ?? defaultVar
+        await writeVaultEnv(user, DEFAULT_VAULT, targetVar, p.apiKey!.trim())
+        apiKeyField = `\${${targetVar}}`
+      } else if (!apiKeyField) {
+        // No new key, no existing key → leave field unset (provider disabled).
+        apiKeyField = undefined
       }
-      // Normalize to canonical models[] format.
       const models: ModelEntry[] = p.models && p.models.length > 0
         ? p.models.map(m => ({ id: m.id, ...(m.enabled === false ? { enabled: false } : {}) }))
         : (p.model ? [{ id: p.model, enabled: true }] : [])
       rebuilt[name] = {
         baseUrl: p.baseUrl,
-        apiKey: ref,
+        ...(apiKeyField !== undefined ? { apiKey: apiKeyField } : {}),
         ...(models.length > 0 ? { models } : {}),
         ...(p.maxContextTokens ? { maxContextTokens: p.maxContextTokens } : {}),
         ...(p.enabled === false ? { enabled: false } : {}),
@@ -805,8 +662,6 @@ export async function savePersonalConfig(user: string, cfg: {
     }
     disk.providers = rebuilt
   } else if (cfg.default !== undefined) {
-    // Only updating the default selector — leave provider entries untouched
-    // but rebuild the map so "default" stays first for readability.
     const rebuilt: Record<string, ProviderConfigDisk | string> = {}
     if (cfg.default) rebuilt.default = cfg.default
     for (const [name, val] of Object.entries(disk.providers)) {
@@ -819,6 +674,19 @@ export async function savePersonalConfig(user: string, cfg: {
   await mkdir(personalLoopatDir(user), { recursive: true })
   await writeFile(personalLoopatConfigPath(user), JSON.stringify(disk, null, 2) + "\n")
   clearPersonalCache(user)
+}
+
+/** Derive a default vault env var name from a provider name.
+ *  "Anthropic" → "ANTHROPIC_API_KEY"; "DeepSeek" → "DEEPSEEK_API_KEY". */
+export function providerEnvVarName(providerName: string): string {
+  const sanitized = providerName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+  return `${sanitized || "PROVIDER"}_API_KEY`
+}
+
+/** If `template` is exactly `${X}` (one ref, nothing else), return X. Else null. */
+function extractSingleVarName(template: string): string | null {
+  const m = template.match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/)
+  return m ? m[1] : null
 }
 
 /** Save workspace config to disk. Only provided fields are overwritten.

@@ -1,8 +1,9 @@
 /**
  * Full-screen Settings page — the UX-friendly editor for
- * `personal/<user>/.loopat/config.json`. Sections: Providers, Environment,
- * Mounts, Shell, Personal Repo. Output is byte-identical to hand-editing
- * the JSON.
+ * `personal/<user>/.loopat/config.json`. Sections: Providers, Shell, MCP,
+ * Personal Repo. Env vars and home mounts are no longer declared here —
+ * they're conventional, derived from `vaults/<v>/envs/*` and
+ * `vaults/<v>/mounts/home/*` filesystem layout.
  *
  * Gating: everything except Personal Repo is grayed out until the user
  * has both `personalRepo` set AND `imported: true` (per /api/personal/status).
@@ -15,15 +16,11 @@ import {
   getPersonalStatus,
   getPersonalDisk,
   savePersonalDisk,
-  writePersonalValue,
-  listPersonalEntries,
+  writeVaultEnv,
   testProviderConnection,
-  type ConfigValue,
   type PersonalConfigDisk,
   type ProviderDisk,
-  type MountDisk,
   type RefExistsMap,
-  type PersonalEntry,
   type ModelEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
@@ -35,13 +32,18 @@ import { useWorkspace } from "@/ctx"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
+/** Mirror of server `providerEnvVarName` — keep the two in sync.
+ *  "Anthropic" → "ANTHROPIC_API_KEY"; "DeepSeek" → "DEEPSEEK_API_KEY". */
+function providerEnvVarName(providerName: string): string {
+  const sanitized = providerName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+  return `${sanitized || "PROVIDER"}_API_KEY`
+}
+
+type TabId = "personal-repo" | "providers" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
   { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default." },
-  { id: "envs",          label: "Environment Variables", gated: true,  description: "Env vars injected into every loop sandbox." },
-  { id: "mounts",        label: "Sandbox Mounts",         gated: true,  description: "Expose personal files / dirs into loop sandboxes." },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
   { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier." },
@@ -277,12 +279,6 @@ export function SettingsPage() {
                   {active === "providers" && (
                     <ProvidersSection disk={disk} refExists={refExists} onChanged={refresh} disabled={isGatedAndLocked} />
                   )}
-                  {active === "envs" && (
-                    <EnvsSection disk={disk} refExists={refExists} onChanged={refresh} disabled={isGatedAndLocked} />
-                  )}
-                  {active === "mounts" && (
-                    <MountsSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
-                  )}
                   {active === "shell" && (
                     <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
                   )}
@@ -515,9 +511,13 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     if (!draft) return
     setSaving(true)
     setErr(null)
+    // Each provider derives a deterministic env var name: ANTHROPIC → ANTHROPIC_API_KEY etc.
+    // If the user typed a new value, write it to vault envs/<VAR>; the apiKey
+    // field becomes "${VAR}" so config.json never carries the literal value.
     for (const [name, p] of Object.entries(draft.providers)) {
       if (!p.apiKeyNewValue.trim()) continue
-      const r = await writePersonalValue({ vault: `provider-keys/${name}` }, p.apiKeyNewValue.trim())
+      const varName = providerEnvVarName(name)
+      const r = await writeVaultEnv(varName, p.apiKeyNewValue.trim())
       if (!r.ok) { setErr(`apiKey write failed for "${name}": ${r.error}`); setSaving(false); return }
     }
     const providersOut: Record<string, ProviderDisk | string> = {}
@@ -532,7 +532,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         }))
       providersOut[name] = {
         baseUrl: p.baseUrl,
-        apiKey: { vault: `provider-keys/${name}` },
+        apiKey: `\${${providerEnvVarName(name)}}`,
         ...(models.length > 0 ? { models } : {}),
         ...(p.maxContextTokens ? { maxContextTokens: Number(p.maxContextTokens) } : {}),
         ...(p.enabled ? {} : { enabled: false }),
@@ -869,321 +869,6 @@ function Labeled({ label, children, className }: { label: string; children: Reac
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Envs
-// ────────────────────────────────────────────────────────────────────────────
-
-type EnvDraft = {
-  key: string
-  encrypted: boolean
-  /** Plain value (used when !encrypted). */
-  literal: string
-  /** New encrypted value typed by the user — empty = keep existing. */
-  newValue: string
-  /** Was the encrypted value already stored on disk? Display only. */
-  stored: boolean
-}
-
-function EnvsSection({ disk, refExists, onChanged, disabled }: {
-  disk: PersonalConfigDisk | null
-  refExists: RefExistsMap
-  onChanged: () => void
-  disabled?: boolean
-}) {
-  const [rows, setRows] = useState<EnvDraft[]>([])
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!disk) { setRows([]); return }
-    const out: EnvDraft[] = []
-    for (const [k, v] of Object.entries(disk.envs ?? {})) {
-      const refInfo = refExists[`envs.${k}`]
-      if (typeof v === "string") {
-        out.push({ key: k, encrypted: false, literal: v, newValue: "", stored: false })
-      } else {
-        out.push({ key: k, encrypted: true, literal: "", newValue: "", stored: !!refInfo?.exists })
-      }
-    }
-    setRows(out)
-  }, [disk, refExists])
-
-  const update = (i: number, patch: Partial<EnvDraft>) => {
-    setRows((rs) => rs.map((r, idx) => idx === i ? { ...r, ...patch } : r))
-  }
-  const remove = (i: number) => setRows((rs) => rs.filter((_, idx) => idx !== i))
-  const add = () => setRows((rs) => [...rs, { key: "", encrypted: true, literal: "", newValue: "", stored: false }])
-
-  const save = async () => {
-    setSaving(true)
-    setErr(null)
-    // Validate keys
-    const seen = new Set<string>()
-    for (const r of rows) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(r.key)) { setErr(`invalid env name "${r.key}"`); setSaving(false); return }
-      if (seen.has(r.key)) { setErr(`duplicate env name "${r.key}"`); setSaving(false); return }
-      seen.add(r.key)
-    }
-    // Best practice: encrypted envs always live at
-    //   <active vault>/envs/<envName>
-    // The user toggles encrypted on/off; we own the storage layout.
-    for (const r of rows) {
-      if (!r.encrypted) continue
-      if (!r.newValue.trim()) continue
-      const wr = await writePersonalValue({ vault: `envs/${r.key}` }, r.newValue.trim())
-      if (!wr.ok) { setErr(`value write failed for ${r.key}: ${wr.error}`); setSaving(false); return }
-    }
-    const envs: Record<string, ConfigValue> = {}
-    for (const r of rows) {
-      envs[r.key] = r.encrypted ? { vault: `envs/${r.key}` } : r.literal
-    }
-    const res = await savePersonalDisk({ envs })
-    setSaving(false)
-    if (!res.ok) { setErr(res.error ?? "save failed"); return }
-    onChanged()
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {rows.length === 0 && (
-        <div className="text-[12px] text-gray-400 italic">no environment variables</div>
-      )}
-      {rows.map((r, i) => (
-        <div key={i} className="border border-gray-200 rounded-md p-3 grid grid-cols-1 sm:grid-cols-[200px_1fr_auto_auto] gap-2.5 items-start">
-          <Labeled label="Name">
-            <input
-              value={r.key}
-              onChange={(e) => update(i, { key: e.target.value })}
-              placeholder="ENV_NAME"
-              className="ip font-mono"
-            />
-          </Labeled>
-          <Labeled label={r.encrypted ? (r.stored ? "Value (set — type to overwrite)" : "Value") : "Value (plain text)"}>
-            {r.encrypted ? (
-              <input
-                type="password"
-                value={r.newValue}
-                onChange={(e) => update(i, { newValue: e.target.value })}
-                placeholder={r.stored ? "•••••• stored encrypted in vault" : "type secret value"}
-                className="ip"
-              />
-            ) : (
-              <input
-                value={r.literal}
-                onChange={(e) => update(i, { literal: e.target.value })}
-                placeholder="value"
-                className="ip"
-              />
-            )}
-          </Labeled>
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium text-gray-500">{r.encrypted ? "🔒 Encrypted" : "Encryption"}</span>
-            <label className="flex items-center gap-1.5 h-[34px] text-[12px] text-gray-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={r.encrypted}
-                onChange={(e) => update(i, { encrypted: e.target.checked, newValue: "", stored: false })}
-              />
-              <span>{r.encrypted ? "stored encrypted" : "plain text"}</span>
-            </label>
-          </div>
-          <button
-            onClick={() => remove(i)}
-            className="self-start h-[34px] mt-[19px] w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
-            title="remove"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-      ))}
-      <button
-        onClick={add}
-        className="self-start text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
-      >
-        <Plus size={12} /> add env var
-      </button>
-      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-        {err && <span className="text-[11px] text-red-600">{err}</span>}
-        <button
-          onClick={save}
-          disabled={saving || disabled}
-          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
-        >
-          {saving ? "saving…" : "save env"}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Mounts
-// ────────────────────────────────────────────────────────────────────────────
-
-type MountRow = {
-  /** "vault" → src is `{vault: path}`; "personal" → src is `path`. */
-  source: "vault" | "personal"
-  path: string
-  dst: string
-  rw: boolean
-  /** User has manually edited dst → don't auto-derive anymore. */
-  dstTouched: boolean
-}
-
-function MountsSection({ disk, onChanged, disabled }: {
-  disk: PersonalConfigDisk | null
-  onChanged: () => void
-  disabled?: boolean
-}) {
-  const [rows, setRows] = useState<MountRow[]>([])
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [vaultEntries, setVaultEntries] = useState<PersonalEntry[]>([])
-  const [personalEntries, setPersonalEntries] = useState<PersonalEntry[]>([])
-
-  useEffect(() => {
-    Promise.all([listPersonalEntries("vault"), listPersonalEntries("personal")]).then(([v, p]) => {
-      setVaultEntries(v)
-      setPersonalEntries(p)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!disk) { setRows([]); return }
-    const next: MountRow[] = []
-    for (const m of disk.mounts ?? []) {
-      if (typeof m.src === "string") {
-        next.push({ source: "personal", path: m.src, dst: m.dst, rw: !!m.rw, dstTouched: true })
-      } else if (m.src && typeof m.src === "object" && "vault" in m.src) {
-        next.push({ source: "vault", path: (m.src as any).vault, dst: m.dst, rw: !!m.rw, dstTouched: true })
-      }
-    }
-    setRows(next)
-  }, [disk])
-
-  const deriveDst = (path: string): string => {
-    if (!path) return "$HOME/"
-    return `$HOME/${path}`
-  }
-
-  const update = (i: number, patch: Partial<MountRow>) => {
-    setRows((rs) => rs.map((r, idx) => {
-      if (idx !== i) return r
-      const next = { ...r, ...patch }
-      // Re-derive dst when path or source changes, unless the user has
-      // manually edited dst.
-      if (("path" in patch || "source" in patch) && !next.dstTouched) {
-        next.dst = deriveDst(next.path)
-      }
-      return next
-    }))
-  }
-  const remove = (i: number) => setRows((rs) => rs.filter((_, idx) => idx !== i))
-  const add = () => setRows((rs) => [...rs, { source: "vault", path: "", dst: "$HOME/", rw: false, dstTouched: false }])
-
-  const save = async () => {
-    setSaving(true)
-    setErr(null)
-    const out: MountDisk[] = []
-    for (const r of rows) {
-      if (!r.path) { setErr("pick a source path for every mount"); setSaving(false); return }
-      if (!r.dst || (!r.dst.startsWith("$HOME") && !r.dst.startsWith("~") && !r.dst.startsWith("/"))) {
-        setErr(`mount dst "${r.dst}" must start with $HOME/ ~/ or /`)
-        setSaving(false)
-        return
-      }
-      out.push({
-        src: r.source === "vault" ? { vault: r.path } : r.path,
-        dst: r.dst,
-        ...(r.rw ? { rw: true } : {}),
-      })
-    }
-    const res = await savePersonalDisk({ mounts: out })
-    setSaving(false)
-    if (!res.ok) { setErr(res.error ?? "save failed"); return }
-    onChanged()
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {rows.length === 0 && <div className="text-[12px] text-gray-400 italic">no mounts</div>}
-      {rows.map((r, i) => {
-        const entries = r.source === "vault" ? vaultEntries : personalEntries
-        const listId = `mount-paths-${i}`
-        return (
-          <div key={i} className="border border-gray-200 rounded-md p-3 grid grid-cols-1 sm:grid-cols-[160px_1fr_1fr_auto_auto] gap-2.5 items-start">
-            <Labeled label="Source">
-              <select
-                value={r.source}
-                onChange={(e) => update(i, { source: e.target.value as MountRow["source"], path: "" })}
-                className="ip"
-              >
-                <option value="vault">Vault (encrypted)</option>
-                <option value="personal">Personal (plain)</option>
-              </select>
-            </Labeled>
-            <Labeled label="Path">
-              <input
-                list={listId}
-                value={r.path}
-                onChange={(e) => update(i, { path: e.target.value })}
-                placeholder={r.source === "vault" ? "pick from vault…" : "pick from personal…"}
-                className="ip font-mono"
-              />
-              <datalist id={listId}>
-                {entries.map((e) => (
-                  <option key={e.path} value={e.path}>{e.type === "dir" ? "📁" : "📄"} {e.path}</option>
-                ))}
-              </datalist>
-            </Labeled>
-            <Labeled label="Mount inside sandbox at">
-              <input
-                value={r.dst}
-                onChange={(e) => update(i, { dst: e.target.value, dstTouched: true })}
-                placeholder="$HOME/.config/foo"
-                className="ip font-mono"
-              />
-            </Labeled>
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-gray-500">Access</span>
-              <label className="flex items-center gap-1.5 h-[34px] text-[12px] text-gray-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={r.rw}
-                  onChange={(e) => update(i, { rw: e.target.checked })}
-                />
-                <span>read-write</span>
-              </label>
-            </div>
-            <button
-              onClick={() => remove(i)}
-              className="self-start h-[34px] mt-[19px] w-7 flex items-center justify-center text-gray-400 hover:text-red-600 rounded"
-              title="remove"
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        )
-      })}
-      <button
-        onClick={add}
-        className="self-start text-xs text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"
-      >
-        <Plus size={12} /> add mount
-      </button>
-      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-        {err && <span className="text-[11px] text-red-600">{err}</span>}
-        <button
-          onClick={save}
-          disabled={saving || disabled}
-          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
-        >
-          {saving ? "saving…" : "save mounts"}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Shell

@@ -21,9 +21,9 @@
  *     git worktrees store absolute gitdir paths
  *   - Network is not unshared (host network shared); API calls work directly
  *
- * Three mount-authority tiers (see docs/sandbox.md "三层 mount 权责"):
- *   - operator: ~/.dashscope/config.json `mounts` (any host path)
- *   - member:   personal/<user>/.loopat/config.json `mounts` (personal-relative)
+ * Two mount-authority tiers (see docs/sandbox.md):
+ *   - operator: ~/.dashscope/config.json `mounts` (any host path; cross-user shared caches)
+ *   - member:   convention-based via `vaults/<v>/mounts/home/<rel>/...` → $HOME/<rel>/...
  *   - admin:    no mount capability (would let knowledge-pushers poison team)
  *
  * See memory: project_loop_dir_is_sandbox.md
@@ -53,8 +53,8 @@ import {
 } from "./paths"
 // mise toolchain integration now keys off the loop's merged .claude/mise.toml
 // (compose.ts writes it from team + profile + personal sources).
-import { loadConfig, loadPersonalConfig } from "./config"
-import { DEFAULT_VAULT, resolveVaultRoot } from "./vaults"
+import { loadConfig } from "./config"
+import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
 
 const execFileP = promisify(execFile)
 
@@ -122,14 +122,6 @@ function expandSandboxPath(p: string, home: string): string {
   return p
 }
 
-/** Validate a member-side relative path (used for both PathRef variants).
- *  No `..`, no absolute, no empty segments. */
-function isValidRelPath(s: unknown): s is string {
-  if (typeof s !== "string" || !s) return false
-  if (s.startsWith("/")) return false
-  return !s.split("/").some((seg) => seg === ".." || seg === "")
-}
-
 /**
  * Operator-config src: any host path expressible as `~/...`, `$HOME/...`,
  * or absolute `/...`. Operator owns the host, so we don't restrict scope —
@@ -164,7 +156,6 @@ export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
 export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
 export const V_CONTEXT_REPOS = "/loopat/context/repos"
 export const V_CONTEXT_CHAT = "/loopat/context/chat"
-export const V_CONTEXT_VAULT = "/loopat/context/vault"
 
 export type SandboxExtraEnv = Record<string, string>
 
@@ -268,26 +259,7 @@ export async function buildBwrapArgs(
     )
   }
 
-  // ── vault symlink ──
-  // Personal is bound wholesale above, so all named vaults under
-  // .loopat/vaults/ are visible inside the sandbox (no isolation between
-  // named vaults — they're per-user, not per-loop). Convenience symlink for
-  // the AI: it accesses the selected loop's credentials through
-  // /loopat/context/vault, not by digging into personal/.loopat/vaults/.
-  // Doctrine tells the AI to stick to this entrypoint and ignore the other
-  // vaults present in personal/.
-  //
-  // History: we previously per-file-bound each vault file into a sandbox-side
-  // `.loopat/vault/` dir, but bwrap creates an empty stub on the host at each
-  // bind target. Those stubs accumulated in personal repo and got committed.
-  // A symlink avoids any host-side file creation.
   const vault = vaultName?.trim() || DEFAULT_VAULT
-  const vaultRoot = resolveVaultRoot(createdBy, vault)
-  if (vaultRoot) {
-    args.push("--symlink", `${V_CONTEXT_PERSONAL}/.loopat/vaults/${vault}`, V_CONTEXT_VAULT)
-  } else {
-    console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
-  }
 
   // skills + agents + CLAUDE.md: composed into loops/<id>/.claude/{skills,
   // agents,CLAUDE.md} by `composeLoopClaudeConfig()` (see compose.ts) BEFORE
@@ -364,15 +336,15 @@ export async function buildBwrapArgs(
     "--setenv", "PWD", V_LOOP_WORKDIR(loopId),
   )
 
-  // ── three-layer mount authority ──
-  // operator: ~/.dashscope/config.json `mounts` — any host path is fair
-  //   game (operator owns the host); intended for cross-user shared host
-  //   caches (e.g. /etc/pki/ca-trust) or operator-only host conveniences.
-  // member: personal/<user>/.loopat/config.json `mounts` — src strictly
-  //   within personal/<user>/ subtree, so one member can't reach into
-  //   another's data or operator's host paths.
-  // admin: no mount field in any .claude/settings.json (would let a knowledge
-  //   pusher mount anything across the whole team).
+  // ── two-tier mount authority ──
+  // operator: ~/.dashscope/config.json `mounts` — any host path is fair game
+  //   (operator owns the host); intended for cross-user shared host caches
+  //   (e.g. /etc/pki/ca-trust) or operator-only host conveniences.
+  // member: convention-based via vault `mounts/home/<rel>/...` — each top-level
+  //   entry is bound at the corresponding $HOME-relative path. No declarations,
+  //   no per-mount RW/RO config (always bind-try RW; user owns their vault).
+  // admin: no mount field anywhere (would let a knowledge pusher mount across
+  //   the whole team).
   const workspaceCfg = await loadConfig()
   for (const m of workspaceCfg.mounts ?? []) {
     if (!isValidOperatorMountSrc(m.src) || !isValidMountDst(m.dst)) {
@@ -384,34 +356,11 @@ export async function buildBwrapArgs(
     args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
   }
 
-  const personalCfg = await loadPersonalConfig(createdBy, vault)
-  const personalRoot = personalDir(createdBy)
-  for (const m of personalCfg.mounts ?? []) {
-    if (!isValidMountDst(m.dst)) {
-      console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
-      continue
-    }
-    // PathRef: bare string → personal-relative; { vault } → active-vault-relative.
-    let src: string | null = null
-    if (typeof m.src === "string") {
-      if (!isValidRelPath(m.src)) {
-        console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
-        continue
-      }
-      src = join(personalRoot, m.src)
-    } else if (m.src && typeof m.src === "object" && "vault" in m.src && isValidRelPath((m.src as any).vault)) {
-      if (!vaultRoot) {
-        // No active vault → silently skip vault-relative mounts. Matches the
-        // "missing source is skipped" policy in the Mount JSDoc.
-        continue
-      }
-      src = join(vaultRoot, (m.src as { vault: string }).vault)
-    } else {
-      console.warn(`[loopat] skipping invalid personal mount ${JSON.stringify(m)}`)
-      continue
-    }
-    const dst = expandSandboxPath(m.dst, home)
-    args.push(m.rw ? "--bind-try" : "--ro-bind-try", src, dst)
+  // Vault mounts/home/: each top-level entry → $HOME/<entry>. Files and
+  // directories both work; bwrap bind-try auto-skips missing sources (vault
+  // dir may not exist at all on a fresh install).
+  for (const m of listVaultHomeMounts(createdBy, vault)) {
+    args.push("--bind-try", m.src, join(home, m.rel))
   }
 
   // mise data dir: tools mise installs live under $HOME/.local/share/mise

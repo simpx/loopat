@@ -6,8 +6,7 @@ import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
-import { loadMcpTokens, deleteMcpToken } from "./mcp-tokens"
-import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, type OAuthSupport } from "./mcp-oauth"
+import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, mcpServerEnvVarName, type OAuthSupport } from "./mcp-oauth"
 import {
   initChat,
   listChannels,
@@ -50,7 +49,7 @@ import {
   workspaceRepoDir,
   workspaceReposDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeConfigValue, writeConfigValueTarget, loadPersonalClaudeJson, type ProviderConfig, type ConfigValue, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadPersonalClaudeJson, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -530,28 +529,27 @@ app.put("/api/settings/personal", requireAuth, async (c) => {
 
 // ── disk-shape settings (for the rich Settings page) ──
 // `/api/settings/personal/disk` returns the raw personal/<user>/.loopat/
-// config.json shape with ConfigValue refs intact, plus "ref exists" flags
-// for each apiKey / env reference. The resolved (secret) values are NEVER
-// included — the UI sees structure and existence only.
+// config.json. Provider apiKey strings may contain `${VAR}` references; for
+// each provider we report whether the referenced vault env file exists.
+// The resolved (secret) values are NEVER included — the UI sees structure
+// and existence only.
 
 app.get("/api/settings/personal/disk", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const disk = await readPersonalDiskRaw(userId)
-  const refExists: Record<string, { kind: string; exists: boolean }> = {}
+  const refExists: Record<string, { kind: string; exists: boolean; varName?: string }> = {}
   if (disk.providers) {
     for (const [name, val] of Object.entries(disk.providers)) {
       if (name === "default" || !val || typeof val !== "object") continue
       const apiKey = (val as any).apiKey
       if (apiKey !== undefined) {
-        const d = describeConfigValue(apiKey, userId)
-        refExists[`providers.${name}.apiKey`] = { kind: d.kind, exists: d.exists }
+        const d = describeApiKeyRef(apiKey, userId)
+        refExists[`providers.${name}.apiKey`] = {
+          kind: d.kind,
+          exists: d.exists,
+          ...(d.varName ? { varName: d.varName } : {}),
+        }
       }
-    }
-  }
-  if (disk.envs) {
-    for (const [k, v] of Object.entries(disk.envs)) {
-      const d = describeConfigValue(v, userId)
-      refExists[`envs.${k}`] = { kind: d.kind, exists: d.exists }
     }
   }
   return c.json({ disk, refExists })
@@ -565,63 +563,19 @@ app.put("/api/settings/personal/disk", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
-// List entries (files + dirs) under either the user's personal root or
-// the active default vault root. Used by the Settings UI for the mount
-// "src" picker. Depth-limited, skips noise (.git, node_modules, etc.).
-app.get("/api/settings/personal/entries", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const root = c.req.query("root") ?? "personal"
-  if (root !== "personal" && root !== "vault") return c.json({ error: "root must be personal|vault" }, 400)
-  const { readdir, stat } = await import("node:fs/promises")
-  const { join, relative } = await import("node:path")
-  const { personalDir } = await import("./paths")
-  const { resolveVaultRoot, DEFAULT_VAULT } = await import("./vaults")
-  const rootPath = root === "personal" ? personalDir(userId) : resolveVaultRoot(userId, DEFAULT_VAULT)
-  if (!rootPath) return c.json({ entries: [] })
-  const SKIP = new Set([".git", "node_modules", ".DS_Store", "dist", "target", "build"])
-  const MAX_DEPTH = 3
-  type Entry = { path: string; type: "file" | "dir" }
-  const out: Entry[] = []
-  async function walk(abs: string, rel: string, depth: number) {
-    if (depth > MAX_DEPTH) return
-    let names: string[]
-    try {
-      names = await readdir(abs)
-    } catch { return }
-    for (const name of names) {
-      if (SKIP.has(name)) continue
-      // For personal root, hide `.loopat` (that's where config + vaults live —
-      // mount UI should expose dotfiles from personal, not the meta dir).
-      if (root === "personal" && rel === "" && name === ".loopat") continue
-      const childAbs = join(abs, name)
-      const childRel = rel ? `${rel}/${name}` : name
-      let s
-      try { s = await stat(childAbs) } catch { continue }
-      if (s.isDirectory()) {
-        out.push({ path: childRel, type: "dir" })
-        await walk(childAbs, childRel, depth + 1)
-      } else if (s.isFile()) {
-        out.push({ path: childRel, type: "file" })
-      }
-    }
-  }
-  await walk(rootPath, "", 1)
-  out.sort((a, b) => a.path.localeCompare(b.path))
-  return c.json({ entries: out })
-})
-
-// Write a literal value to a ConfigValue ref's target file. Used by the
-// Settings UI when the user types a new apiKey/env value behind a
-// `{ vault }` or `{ file }` ref. Body: `{ ref, value }`.
+// Write a value to a vault env file. Used by the Settings UI when the user
+// types a new apiKey / token. Body: `{ name, value, vault? }` — `name` is
+// the env var name (i.e. the contents of `${...}` in config.json apiKey ref);
+// `vault` defaults to "default".
 app.post("/api/settings/personal/value", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
-  const ref = body.ref as ConfigValue
+  const name = typeof body.name === "string" ? body.name : ""
   const value = typeof body.value === "string" ? body.value : ""
-  if (!ref || typeof ref !== "object" || (!("vault" in ref) && !("file" in ref))) {
-    return c.json({ error: "ref must be { vault } or { file }" }, 400)
-  }
-  const r = await writeConfigValueTarget(ref, userId, value)
+  const vault = typeof body.vault === "string" && body.vault ? body.vault : "default"
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
+  if (!name) return c.json({ error: "name required" }, 400)
+  const r = await writeVaultEnv(userId, vault, name, value)
   if (!r.ok) return c.json({ error: r.error }, 400)
   return c.json({ ok: true })
 })
@@ -660,10 +614,11 @@ app.post("/api/onboarding/done", requireAuth, async (c) => {
 
 // ── MCP OAuth (auth required) ──
 // loopat owns the OAuth dance entirely: discovery + DCR + auth code + PKCE
-// + token exchange happen server-side. Sandboxed CC sees pre-authenticated
-// transports via header injection at spawn (see session.ts / mcp-tokens.ts).
-// Tokens are persisted per-(user, vault) inside the vault tree, so they're
-// auto-encrypted by git-crypt and isolated across vaults.
+// + token exchange happen server-side. The resulting access token is stashed
+// at `vaults/<v>/envs/MCP_<NAME>_TOKEN`; workspace `.mcp.json` references it
+// via `${MCP_<NAME>_TOKEN}` substitution (the spawned claude binary expands
+// against its own env, which inherits the vault envs we inject at spawn).
+// Per-vault by storage location → auto-encrypted by git-crypt and isolated.
 
 const VAULT_RE = /^[a-zA-Z0-9_-]+$/
 
@@ -788,15 +743,21 @@ app.get("/api/mcp-auth", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const vault = c.req.query("vault") || "default"
   if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault name" }, 400)
-  const tokens = await loadMcpTokens(userId, vault)
-  // Mask values; report status only.
-  const summary: Record<string, { connected: boolean; expiresAt?: number; scope?: string }> = {}
-  for (const [name, t] of Object.entries(tokens)) {
-    summary[name] = {
-      connected: !!t.accessToken,
-      ...(t.expiresAt ? { expiresAt: t.expiresAt } : {}),
-      ...(t.scope ? { scope: t.scope } : {}),
-    }
+  // Connected = the vault env file `MCP_<NAME>_TOKEN` exists and is non-empty.
+  // Server names are walked from merged settings.json + plugin .mcp.json
+  // dynamically at /api/mcp-servers — but here we don't know that set, so we
+  // just enumerate all MCP_*_TOKEN env files and let the UI cross-reference.
+  const { loadVaultEnvs } = await import("./vaults")
+  const envs = await loadVaultEnvs(userId, vault)
+  const summary: Record<string, { connected: boolean; varName: string }> = {}
+  for (const [varName, value] of Object.entries(envs)) {
+    const m = varName.match(/^MCP_(.+)_TOKEN$/)
+    if (!m) continue
+    // The reverse mapping (env var → server name) isn't deterministic for
+    // server names with spaces / dashes (both collapse to underscores). UI
+    // uses varName for keying; if it needs the human server name, it should
+    // look it up via /api/mcp-servers and apply mcpServerEnvVarName().
+    summary[varName] = { connected: !!value, varName }
   }
   return c.json(summary)
 })
@@ -872,8 +833,9 @@ app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const server = c.req.param("server")
   const vault = c.req.query("vault") || "default"
-  if (!VAULT_RE.test(server) || !VAULT_RE.test(vault)) return c.json({ error: "invalid name" }, 400)
-  await deleteMcpToken(userId, vault, server)
+  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
+  if (!SERVER_NAME_RE.test(server)) return c.json({ error: "invalid server name" }, 400)
+  await deleteVaultEnv(userId, vault, mcpServerEnvVarName(server))
   return c.json({ ok: true })
 })
 
@@ -1104,6 +1066,8 @@ async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
     model: string
     inputTokens: number
     outputTokens: number
+    cacheReadInputTokens: number
+    cacheCreationInputTokens: number
     lastActivity: string
   }> = []
   try {

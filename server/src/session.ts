@@ -10,7 +10,6 @@ import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } fro
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
-import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
@@ -312,7 +311,7 @@ class LoopSession {
       meta.config?.default_model,
     ], true)
     if (!resolved) {
-      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${driver}/.loopat/vaults/${meta.config?.vault ?? "default"}/provider-keys/`)
+      throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${driver}/.loopat/vaults/${meta.config?.vault ?? "default"}/envs/`)
     }
     const providerName = resolved.name
     const provider = resolved.provider
@@ -340,65 +339,40 @@ class LoopSession {
     await ensureLoopPluginsInstalled(loopId)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
-    //
-    //   `.credentials.json`        — CC's ephemeral OAuth state (mcpOAuth.<name>|<hash>).
-    //                                When present CC prefers it over Authorization
-    //                                headers we inject; stale entries cause needs-auth.
-    //   `mcp-needs-auth-cache.json` — CC's "I already know this server needs auth"
-    //                                short-circuit cache. If a server was marked
-    //                                needs-auth in a previous spawn, CC skips the
-    //                                connection attempt entirely on subsequent
-    //                                spawns — even when our injection now provides
-    //                                a valid header.
-    //
-    // loopat owns MCP auth now (Settings → MCP → Connect), tokens live in
-    // the vault, and they're applied per-spawn through mergeMcpTokens(). CC
-    // has nothing to maintain in these files; clear them every spawn so
-    // header injection takes effect immediately.
+    //   `.credentials.json`         — CC's ephemeral OAuth state.
+    //   `mcp-needs-auth-cache.json` — CC's "this server needs auth" short-circuit.
+    // Tokens flow through vault envs/MCP_*_TOKEN now, substituted into the
+    // workspace `mcpServers[*].headers.Authorization` template by the spawned
+    // binary at startup. Stale CC cache files would shortcircuit that, so we
+    // clear them every spawn.
     for (const f of [".credentials.json", "mcp-needs-auth-cache.json"]) {
       try {
         await rm(join(loopClaudeDir(loopId), f), { force: true })
       } catch {}
     }
 
-    // mcpServers in the composition model:
-    //   - tier-merged settings.json (workspace + profiles + personal) — compose
-    //     wrote the union to loops/<id>/.claude/settings.json above
-    //   - plugin-bundled .mcp.json — auto-registered by CC when the plugin
-    //     loads; we don't merge those here
-    //
-    // We re-read the merged settings.json here (rather than just letting SDK
-    // pick it up via settingSources) because we need to runtime-inject the
-    // vault's credentials into each server's headers/env before the SDK
-    // starts. Passing the augmented map via the `mcpServers:` option lets
-    // those credentials reach MCP without ever touching disk.
+    // mcpServers come straight from the merged settings.json (workspace +
+    // profiles + personal — compose wrote it to loops/<id>/.claude/settings.json
+    // above). Any `${VAR}` references in headers / env are substituted by the
+    // spawned claude binary against its own process env — which inherits the
+    // vault envs we inject into extraEnv below.
     const mergedSettingsPath = join(loopClaudeDir(loopId), "settings.json")
-    let mergedServers: Record<string, any> = {}
+    let mcpServers: Record<string, any> = {}
     if (existsSync(mergedSettingsPath)) {
       try {
         const merged = JSON.parse(await readFile(mergedSettingsPath, "utf8"))
-        mergedServers = { ...(merged.mcpServers ?? {}) }
+        mcpServers = { ...(merged.mcpServers ?? {}) }
       } catch (e: any) {
         console.warn(`[session ${loopId.slice(0,8)}] could not read merged mcpServers: ${e?.message ?? e}`)
       }
     }
-    // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
-    // `Authorization: Bearer <token>` headers on matching servers. This is
-    // the SDK-recommended pattern for headless MCP auth — CC sees pre-
-    // authenticated transports and never triggers its own OAuth flow.
-    const activeVault = meta.config?.vault?.trim() || "default"
-    const userMcpTokens = await loadMcpTokens(driver, activeVault)
-    const mcpServers = mergeMcpTokens(mergedServers, userMcpTokens)
 
-    // Prebuild bwrap base argv (resolves personal-dep symlinks etc.) so the
-    // spawnClaudeCodeProcess callback can run synchronously.
-    //
-    // User-defined envs from personal config go in first so the platform-
-    // controlled vars below (provider creds, CLAUDE_CONFIG_DIR) can't be
-    // accidentally clobbered by a stray `ANTHROPIC_API_KEY` in envs.
+    // Build sandbox env. Order matters: vault envs first (so the spawned binary
+    // can substitute ${VAR} in mcpServers headers / .mcp.json), then platform-
+    // controlled vars (which can't be overridden by a stray vault env file).
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     const extraEnv: Record<string, string> = {
-      ...(personalCfg.envs ?? {}),
+      ...personalCfg.vaultEnvs,
       ANTHROPIC_API_KEY: provider.apiKey,
       ANTHROPIC_BASE_URL: provider.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
