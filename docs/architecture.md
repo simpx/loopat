@@ -20,6 +20,10 @@ This markdown file holds the **textual supplements** to that diagram:
 read/write path tables, code map, and the philosophy notes — things that grep
 better than they render.
 
+For the **`.claude/` composition model** specifically — how team / profile /
+personal / repo tiers merge into the loop's `.claude/` and how the SDK reads
+it — see [design/composition-model.md](./design/composition-model.md).
+
 ---
 
 ## Loop = Sandbox × Vault (in words)

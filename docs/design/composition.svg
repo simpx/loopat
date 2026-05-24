@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 700" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="t d">
+  <title id="t">loopat .claude composition</title>
+  <desc id="d">Five source .claude tiers on the left are merged by loopat into a single composed .claude under the loop dir. Inside the sandbox, the SDK reads two source-of-truths: the composed user tier (CLAUDE_CONFIG_DIR) and the workdir's own .claude (project/local tier). External plugin paths are ro-bound separately.</desc>
+
+  <defs>
+    <marker id="arr-K" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3b5bdb"/></marker>
+    <marker id="arr-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9333ea"/></marker>
+    <marker id="arr-N" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d4a017"/></marker>
+    <marker id="arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/></marker>
+    <marker id="arr-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+    <marker id="arr-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7e8794"/></marker>
+
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="off"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.18"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── TITLE ────────────────────────────────────────────────── -->
+  <text x="640" y="44" text-anchor="middle" font-size="32" font-weight="700" letter-spacing="-0.5" fill="#1c2733">.claude composition</text>
+  <text x="640" y="74" text-anchor="middle" font-size="14" fill="#5b6776">five host-side tiers · merged into one loop · read by the SDK as user + project + local</text>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LEFT CARD — SOURCES  (x=60..420, y=110..640)
+  ══════════════════════════════════════════════════════════════ -->
+  <g filter="url(#soft)">
+    <rect x="60" y="110" width="360" height="530" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+  </g>
+  <rect x="60" y="110" width="360" height="40" rx="14" fill="#eef2f7"/>
+  <rect x="60" y="136" width="360" height="14" fill="#eef2f7"/>
+  <text x="80" y="136" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">SOURCES</text>
+  <text x="400" y="136" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">HOST · PER-WORKSPACE</text>
+
+  <!-- TEAM workspace .claude -->
+  <g>
+    <circle cx="92" cy="180" r="14" fill="#3b5bdb"/>
+    <text x="92" y="185" text-anchor="middle" font-size="11" font-weight="700" fill="white">T</text>
+    <text x="115" y="178" font-size="15" font-weight="600" fill="#1c2733">team workspace</text>
+    <text x="115" y="194" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">knowledge/.loopat/.claude/</text>
+    <text x="115" y="208" font-size="10" fill="#7e8794" font-style="italic">always on · shared by every member</text>
+  </g>
+  <line x1="76" y1="225" x2="404" y2="225" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- PROFILE 1 -->
+  <g>
+    <circle cx="92" cy="252" r="14" fill="#9333ea"/>
+    <text x="92" y="257" text-anchor="middle" font-size="11" font-weight="700" fill="white">P₁</text>
+    <text x="115" y="250" font-size="15" font-weight="600" fill="#1c2733">profile 1</text>
+    <text x="115" y="266" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">…/profiles/role-eng/.claude/</text>
+    <text x="115" y="280" font-size="10" fill="#7e8794" font-style="italic">opt-in bundle (role / mode)</text>
+  </g>
+
+  <!-- PROFILE N (ellipsis) -->
+  <g>
+    <text x="92" y="304" text-anchor="middle" font-size="22" fill="#9333ea" font-weight="700">⋮</text>
+    <text x="115" y="298" font-size="13" font-weight="500" fill="#7e8794">profile N</text>
+    <text x="115" y="314" font-size="10" font-family="ui-monospace, monospace" fill="#7e8794">…/profiles/&lt;name&gt;/.claude/</text>
+    <text x="115" y="328" font-size="10" fill="#7e8794" font-style="italic">user selects 0..N at loop creation</text>
+  </g>
+  <line x1="76" y1="345" x2="404" y2="345" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- PERSONAL -->
+  <g>
+    <circle cx="92" cy="372" r="14" fill="#9333ea"/>
+    <text x="92" y="377" text-anchor="middle" font-size="11" font-weight="700" fill="white">P</text>
+    <text x="115" y="370" font-size="15" font-weight="600" fill="#1c2733">personal</text>
+    <text x="115" y="386" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">personal/&lt;user&gt;/.claude/</text>
+    <text x="115" y="400" font-size="10" fill="#7e8794" font-style="italic">per-user · last word on user tier</text>
+  </g>
+  <line x1="76" y1="417" x2="404" y2="417" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- WORKDIR (repo) .claude — note: not merged into user tier, kept aside -->
+  <g>
+    <circle cx="92" cy="444" r="14" fill="#16a34a"/>
+    <text x="92" y="449" text-anchor="middle" font-size="11" font-weight="700" fill="white">W</text>
+    <text x="115" y="442" font-size="15" font-weight="600" fill="#1c2733">workdir (repo)</text>
+    <text x="115" y="458" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/</text>
+    <text x="115" y="472" font-size="10" fill="#7e8794" font-style="italic">native to the repo · SDK reads as project tier</text>
+  </g>
+  <line x1="76" y1="488" x2="404" y2="488" stroke="#eaecf1" stroke-width="1"/>
+
+  <!-- LOCAL tier (settings.local) -->
+  <g>
+    <circle cx="92" cy="515" r="14" fill="#16a34a" opacity="0.55"/>
+    <text x="92" y="520" text-anchor="middle" font-size="10" font-weight="700" fill="white">L</text>
+    <text x="115" y="513" font-size="15" font-weight="600" fill="#1c2733">local override</text>
+    <text x="115" y="529" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/*.local.*</text>
+    <text x="115" y="543" font-size="10" fill="#7e8794" font-style="italic">checkout-private · not committed</text>
+  </g>
+
+  <!-- contents legend -->
+  <rect x="80" y="568" width="320" height="60" rx="6" fill="#fafbfd" stroke="#e8ecf2"/>
+  <text x="92" y="585" font-size="11" font-weight="700" fill="#5b6776" letter-spacing="1">EACH .claude/ MAY CONTAIN</text>
+  <text x="92" y="603" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">settings.json · CLAUDE.md · skills/ · agents/</text>
+  <text x="92" y="619" font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">mise.toml · mise.lock · hooks · …</text>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       CENTER — MERGE step  (x=440..720)
+  ══════════════════════════════════════════════════════════════ -->
+
+  <!-- arrows from T/P₁/Pn/P → merge -->
+  <g fill="none" stroke="#3b5bdb" stroke-width="1.8">
+    <path d="M 420 180 C 460 180, 480 320, 540 340" marker-end="url(#arr-K)"/>
+  </g>
+  <g fill="none" stroke="#9333ea" stroke-width="1.8">
+    <path d="M 420 252 C 460 252, 490 320, 540 346" marker-end="url(#arr-purple)"/>
+    <path d="M 420 304 C 460 312, 500 332, 540 352" marker-end="url(#arr-purple)"/>
+    <path d="M 420 372 C 470 372, 500 360, 540 358" marker-end="url(#arr-purple)"/>
+  </g>
+
+  <!-- merge step -->
+  <g filter="url(#soft)">
+    <rect x="540" y="324" width="180" height="74" rx="10" fill="#fff8ec" stroke="#d97706" stroke-width="1.5"/>
+  </g>
+  <text x="630" y="350" text-anchor="middle" font-size="14" font-weight="700" fill="#d97706">compose</text>
+  <text x="630" y="368" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace" fill="#a16207">server/src/compose.ts</text>
+  <text x="630" y="386" text-anchor="middle" font-size="10" fill="#a16207" font-style="italic">deep-merge by key · last-write-wins</text>
+
+  <!-- merge rules below -->
+  <g font-size="10" fill="#7e8794">
+    <text x="540" y="416">• settings.json — shallow union; enabledPlugins/mcpServers per-key last-wins</text>
+    <text x="540" y="432">• CLAUDE.md       — concatenated in tier order with ## headers</text>
+    <text x="540" y="448">• skills/, agents/ — symlink union (later sources shadow same-name)</text>
+    <text x="540" y="464">• mise.toml/lock   — TOML table union; layered toolchain pins</text>
+  </g>
+
+  <!-- arrow from merge → composed dir -->
+  <g fill="none" stroke="#d97706" stroke-width="2">
+    <path d="M 720 360 L 798 360" marker-end="url(#arr-orange)"/>
+  </g>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       RIGHT — COMPOSED LOOP + SANDBOX VIEW  (x=800..1230)
+  ══════════════════════════════════════════════════════════════ -->
+  <g filter="url(#soft)">
+    <rect x="800" y="110" width="430" height="530" rx="14" fill="#ffffff" stroke="#d8dde4" stroke-width="1"/>
+  </g>
+  <rect x="800" y="110" width="430" height="40" rx="14" fill="#eef2f7"/>
+  <rect x="800" y="136" width="430" height="14" fill="#eef2f7"/>
+  <text x="820" y="136" font-size="13" font-weight="700" fill="#5b6776" letter-spacing="2">SANDBOX VIEW</text>
+  <text x="1210" y="136" font-size="11" text-anchor="end" fill="#7e8794" letter-spacing="1">PER-LOOP · ISOLATED</text>
+
+  <!-- Composed loop .claude — the user tier SoT -->
+  <g>
+    <rect x="820" y="170" width="280" height="180" rx="8" fill="#fafbfd" stroke="#3b5bdb" stroke-width="1.5"/>
+    <text x="836" y="192" font-size="13" font-weight="700" fill="#3b5bdb">user tier (loopat-composed)</text>
+    <text x="836" y="208" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">loops/&lt;id&gt;/.claude/</text>
+    <text x="836" y="224" font-size="10" fill="#7e8794" font-style="italic" letter-spacing="0.1">SDK env: CLAUDE_CONFIG_DIR</text>
+    <g font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">
+      <text x="836" y="252">├── settings.json</text>
+      <text x="836" y="268">├── CLAUDE.md</text>
+      <text x="836" y="284">├── skills/        → symlinks</text>
+      <text x="836" y="300">├── agents/        → symlinks</text>
+      <text x="836" y="316">├── mise.toml</text>
+      <text x="836" y="332">└── mise.lock</text>
+    </g>
+  </g>
+
+  <!-- SDK badge -->
+  <g>
+    <rect x="1115" y="178" width="100" height="46" rx="6" fill="#eaf3ff" stroke="#3b5bdb"/>
+    <text x="1165" y="196" text-anchor="middle" font-size="11" font-weight="700" fill="#3b5bdb">claude-agent-sdk</text>
+    <text x="1165" y="212" text-anchor="middle" font-size="9" fill="#5b6776">settingSources:</text>
+    <text x="1165" y="222" text-anchor="middle" font-size="9" font-family="ui-monospace, monospace" fill="#5b6776">[user, project, local]</text>
+  </g>
+
+  <!-- arrow loop → SDK -->
+  <g fill="none" stroke="#3b5bdb" stroke-width="1.6">
+    <path d="M 1100 200 L 1112 200" marker-end="url(#arr-K)"/>
+  </g>
+
+  <!-- Workdir .claude — project tier SoT (NOT merged) -->
+  <g>
+    <rect x="820" y="370" width="280" height="130" rx="8" fill="#fafbfd" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="836" y="392" font-size="13" font-weight="700" fill="#16a34a">project + local tier</text>
+    <text x="836" y="408" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">workdir/.claude/   (cwd)</text>
+    <text x="836" y="422" font-size="10" fill="#7e8794" font-style="italic" letter-spacing="0.1">read directly by SDK — NOT merged by loopat</text>
+    <g font-size="11" font-family="ui-monospace, monospace" fill="#1c2733">
+      <text x="836" y="450">├── settings.json</text>
+      <text x="836" y="466">├── settings.local.json   (local tier)</text>
+      <text x="836" y="482">├── CLAUDE.md   ·   agents/   ·   …</text>
+    </g>
+  </g>
+
+  <!-- arrow workdir → SDK -->
+  <g fill="none" stroke="#16a34a" stroke-width="1.6">
+    <path d="M 1100 415 C 1140 415, 1140 250, 1140 232" marker-end="url(#arr-green)"/>
+  </g>
+
+  <!-- Plugin paths (orthogonal channel) -->
+  <g>
+    <rect x="820" y="520" width="280" height="100" rx="8" fill="#fafbfd" stroke="#9ba3ad" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="836" y="542" font-size="13" font-weight="700" fill="#5b6776">plugin paths</text>
+    <text x="836" y="558" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">~/.claude/plugins/marketplaces/…</text>
+    <text x="836" y="572" font-size="10" fill="#7e8794" font-style="italic">passed to SDK via `plugins:` option;</text>
+    <text x="836" y="586" font-size="10" fill="#7e8794" font-style="italic">each path ro-bound into sandbox at the same host path.</text>
+    <text x="836" y="608" font-size="10" fill="#7e8794">Skills/agents inside plugins surface namespaced (<tspan font-family="ui-monospace, monospace">plugin:skill</tspan>).</text>
+  </g>
+  <g fill="none" stroke="#7e8794" stroke-width="1.5" stroke-dasharray="3 3">
+    <path d="M 1100 555 C 1150 555, 1160 280, 1140 232" marker-end="url(#arr-gray)"/>
+  </g>
+
+  <!-- footnote -->
+  <text x="1015" y="638" text-anchor="middle" font-size="10" fill="#9ba3ad" font-style="italic">no ~/.claude inside sandbox — $HOME overlay has an empty lower layer</text>
+
+  <!-- ── BOTTOM CAPTION ───────────────────────────────────────── -->
+  <text x="240" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">team + N profiles + personal merged by tier order</text>
+  <text x="630" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">deep-merge writes the composed user tier</text>
+  <text x="1015" y="660" text-anchor="middle" font-size="10" fill="#7e8794" font-style="italic">SDK reads two tiers · plugins as orthogonal channel</text>
+</svg>

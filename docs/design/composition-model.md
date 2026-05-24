@@ -1,350 +1,205 @@
 ---
-title: loopat composition model
-tags: [loopat, design, plugins, profiles, composition]
-status: design doc · 2026-05 (post-experiment)
-supersedes: implicit single-sandbox model in architecture.md
+title: .claude composition model
+tags: [loopat, design, composition, claude-dir]
+status: as-implemented · 2026-05
 ---
 
-# loopat composition model
+# .claude composition model
 
-> **Loopat 是 CC 的组合层**：在 CC plugin 之上加一个 loopat-native 的 profile 概念，
-> 负责跨 marketplace 编排、always-on context、个人凭据注入。
+> 描述 loopat 如何为每个 loop 装配 `.claude/` 运行环境。
 >
-> 这份文档锚定 5 轮设计讨论 + 一次实测后的概念模型。
-> 所有后续 loopat 设计决策对回这里。
+> 关于术语：你之前说的 "agent loop" 不准——loopat 这个名字本身就是 "loop"。
+> 我们要描述的事是 **"loopat 怎么把多层 .claude 合成一个 loop 的运行环境"**。
+> 简称用 **".claude composition"** 或 **"tiered claude config"**。
 
 ---
 
-## 0. Why this doc
+## 0. 一句话心智模型
 
-加入 CC plugin / marketplace 生态 + 看了 Anthropic 的 vertical Claude（Claude for Legal）
-之后，loopat 的边界开始模糊：
-
-- 什么是 plugin、什么是 profile、什么是 knowledge
-- 团队成员的"可复用 AI 能力"到底放哪
-- loopat 是不是和 marketplace 在重复造轮子
-- 300 人组织怎么避免 plugin/knowledge 爆炸
-
-这份文档把答案写死。**实测过 CC plugin 行为**（2026-05，CC 2.1.148），后面有具体限制清单。
+> **Claude Code 自带 3 个 setting source（`user` · `project` · `local`）。
+> loopat 在上面加了 2 个 team-side tier（`workspace` · `profile`），合并成
+> CC 的 `user` tier 喂给 SDK。** 其他啥都不变。
 
 ---
 
-## 1. 四层架构
+## 1. 原则：CC-native，最低心智负担
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Layer 4:  Loopat profile（loopat 原生，活在 team repo）      │
-│            "我们选这些 plugin + 这段 CLAUDE.md + 这堆 knowledge" │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 3:  CC plugin（CC 原生，活在 marketplace）             │
-│            "一个能力包：skill / command / MCP / hook / agent" │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 2:  Claude Marketplace                                │
-│            "plugin 的全球 / 团队 / 私有 分发目录"               │
-├─────────────────────────────────────────────────────────────┤
-│  Layer 1:  Claude Code engine                                │
-└─────────────────────────────────────────────────────────────┘
-```
+**loopat 不发明 .claude 的目录结构、不重新定义文件格式、不引入 loopat 专属语义。** 你
+在 CC 文档里看到的 `.claude/` 行为，在 loopat 里就是同款行为；你在 CC 文档里看到
+的 `settings.json` 字段，在 loopat 里就是同样起作用。
 
-熟悉的类比关系：
+唯一的"额外动作"是：**team / profile 这两个新 tier 在 SDK 启动前先被 loopat 合并
+进 user tier**。合并后产物长成完全标准的 `.claude/` 形状，SDK 一看就懂——它根本
+不知道 loopat 存在。
 
-| Layer 4（组合） | Layer 3-2（包） | Layer 1（引擎） |
-|---|---|---|
-| **loopat profile** | **CC plugin / marketplace** | **CC engine** |
-| `docker-compose.yml` | docker image / Hub | Docker |
-| `package.json` | npm package / registry | Node.js |
-| Helm chart | container image / OCI | Kubernetes |
-
-**Profile 是 plugin 的客户**——它声明要哪些 plugin、附带哪些 CLAUDE.md/knowledge。Plugin 是 profile 的供应商——它提供 skill/MCP/agent。
-
-> **"Claude for Legal" = Anthropic 卖的、行业层的 vertical bundle**。
-> 自建 loopat = **团队层的 vertical bundle**。两者 shape 同，audience 异。
+由此推论一些 loopat 上手时的对齐预期：
+- `.claude/settings.json` 的所有 CC 字段都生效（包括我们没显式列出的）
+- 任何 CC 后续给 `.claude/` 加的新功能，loopat 都自动兼容
+- 学过 CC 的人不用学第二遍
 
 ---
 
-## 2. 为什么 profile 必须是 loopat-native，不能是 CC plugin
+## 2. SDK 与 .claude 的关系（纠正一个常见误解）
 
-实测 CC plugin 有三个**硬限制**（CC 2.1.148，2026-05）：
+**Claude Agent SDK 完全识别 `.claude/` 目录。** 它就是 CC 引擎的 wrapper——CC CLI
+认的 `.claude/`，SDK 也认。两个唯一区别：
 
-| 限制 | 实测行为 | 对 loopat 的影响 |
-|------|---------|-----------------|
-| `dependencies` 不跨 marketplace 自动安装 | 同 marketplace deps auto-install ✓；跨 mp 只做 load-time 检查，不安装 | loopat 必须自己 orchestrate `claude plugin install` |
-| Plugin root `CLAUDE.md` 不被加载 | `claude plugin validate` 显式 warn："use `skills/<name>/SKILL.md` instead" | always-on 团队姿态必须由 loopat 拼 |
-| 没有 version lock 字段 | `dependencies` 是 array of strings，无 semver | 想可复现要 loopat 自己做 lock |
+1. **CC CLI 默认从 `~/.claude/` 读 user tier；SDK 允许 `CLAUDE_CONFIG_DIR` env 改这个根**——loopat 就是利用这点把 user tier 指向 `loops/<id>/.claude/`。
+2. **SDK 有个 isolation 模式**：传 `settingSources: []` 完全不读文件系统。loopat **不用**这个模式，loopat 传 `["user", "project", "local"]` 让 SDK 全读。
 
-这三件事都需要在 CC plugin 之外解决。**Profile 这层就是来填这个 gap 的**。它不是更高级的 plugin，是不同性质的东西。
+所以分工是：
 
----
-
-## 3. Profile 的形态
-
-```
-workspace/profiles/mode-oncall/
-├── profile.json        ← 3 字段：name, description, plugins
-├── CLAUDE.md           ← always-on（loopat concat）
-└── knowledge/          ← optional（loopat mount）
-```
-
-`profile.json`：
-
-```json
-{
-  "name": "mode-oncall",
-  "description": "值班模式。假设你已加载某个 role-eng-* profile。",
-  "plugins": [
-    "acme-runbook-search@acme-internal",
-    "frontend-design@claude-plugins-official"
-  ]
-}
-```
-
-**3 个字段，不多不少**：
-
-| 字段 | 作用 |
-|------|------|
-| `name` | profile 标识，CLI 用 |
-| `description` | 人类可读 |
-| `plugins` | 要装的 CC plugin 列表（`name@marketplace` 形式） |
-
-**没有 `extends`**：profile 互相独立，组合责任在用户的 `default_profiles` 列表。
-Sub-role 通过列两个 profile 解决（`[role-eng-backend, role-eng-backend-infra]`），不引入隐式继承。
-
-**没有内嵌 CLAUDE.md 引用**：约定 sibling 文件 `CLAUDE.md`，存在就 concat，不存在就跳过。
-
----
-
-## 4. Personal config + CLI
-
-```json
-// personal/<user>/.loopat/config.json
-{
-  "default_profiles": ["role-eng-backend", "role-security"],
-  "default_vault": "dev"
-}
-```
-
-```bash
-loopat run                                # base + default_profiles + personal
-loopat run +mode-oncall                   # 临时加 oncall
-loopat run +mode-oncall -role-security    # 加 oncall，去掉 security
-loopat run --profiles=mode-incident       # 完全覆盖默认（应急）
-loopat run +mode-oncall --dry-run         # 只展示决策，不动 sandbox
-```
-
-最终 sandbox = `base + (default_profiles ∪ CLI 加 − CLI 减) + personal` 的 union。
-
----
-
-## 5. Loopat 管什么 / 不管什么
-
-| 维度 | 团队 | 个人 |
-|------|------|------|
-| **Capability**（能做什么） | CC plugins（`workspace/plugins/` 是 local marketplace） | 罕见，可有 personal plugin |
-| **Composition**（怎么组） | **loopat profile**（`workspace/profiles/`） | personal `config.json` |
-| **Knowledge**（参考） | `workspace/knowledge/` + profile-内 knowledge | personal knowledge |
-| **Memory**（记忆） | `workspace/notes/` | `personal/<u>/notes/` |
-| **Secret**（凭据） | —（团队不共享） | `personal/<u>/vaults/` |
-
-**Capability 行让位 CC plugin。Composition 行是 loopat 的核心增量**——profile 是 loopat 自己的 schema，对应 docker-compose.yml 在 docker 生态里的地位。
-
----
-
-## 6. Docker compose 心智模型
-
-| Docker | Loopat |
+| 谁 | 干什么 |
 |---|---|
-| docker image | CC plugin |
-| Docker Hub / private registry | Claude marketplace / `workspace/plugins/` |
-| **docker-compose.yml** | **loopat profile** |
-| docker compose 的 `services:` 段 | profile.json 的 `plugins:` 段 |
-| volume bind-mount | knowledge / notes / personal 挂进 sandbox |
-| `docker compose up` | `loopat run +<profile>` |
-| `.env` / local override | `personal/` 层 |
+| **loopat** | 把 team workspace / N profiles / personal 三层的 `.claude/` 合并写到 `loops/<id>/.claude/`；把 `CLAUDE_CONFIG_DIR` 指向那里 |
+| **SDK** | 启动时按 `settingSources` 自动扫 user / project / local 三层 `.claude/`，加载 settings.json / CLAUDE.md / skills/ / agents/，注册 hooks，连 MCP 等 |
 
-抓住两个映射：
+**loopat 不是把内容"喂给" SDK——loopat 只是把 SDK 自己会读的那个目录预先布置好。**
 
-- **profile = compose 文件**：声明组合的"配方"
-- **plugin = 镜像**：无状态、可分发的能力包
+少数例外（SDK option 直接传，bypass settings.json）：
+- `plugins:` — 直接传解析好的 plugin 绝对路径数组（绕过 enabledPlugins）
+- `mcpServers:` — 直接传 vault-注入后的 MCP server 配置（绕过 settings.json.mcpServers）
+
+这两个走 option 是因为它们需要 per-loop 的 runtime 信息（vault 凭据、host plugin 路径），settings.json 里塞不下。
 
 ---
 
-## 7. Knowledge vs Capability：激活语义
+## 3. 扩展性：`.claude/` 里啥都能 tier
 
-|| Knowledge | Capability（Skill / MCP / Command / Hook） |
-|---|---|---|
-| 形态 | 普通 markdown | 注册到 CC plugin loader |
-| 谁读 | AI 按需主动 read | CC 启动时注册、运行时自动激活 |
-| 触发 | 不触发，只被引用 | 按意图/事件/用户输入 |
-| 边界 | 无权限 | 有工具/MCP 权限范围 |
-| 失效条件 | 没人 read → 静静躺着 | 没注册进 plugin path → 不存在 |
+只要某个文件/目录是 "drop into .claude/ 就生效" 的形态，loopat 的 compose 就天然支持它的多层覆盖。
 
-**关键反模式**：把 `SKILL.md` 直接放在 `knowledge/` 里。CC loader 不扫这里，它就是死 markdown。
+**典型例子：mise.toml**
 
-同一段"部署流程"的三种形态：
+mise 是 loopat 引入的 toolchain 层（不是 CC 原生），但因为我们把 `mise.toml` 放在每层 `.claude/` 里，它自然继承了同款 5-tier merge——team 可以钉版本、profile 可以加工具、personal 可以本地覆盖。
 
-| 形态 | 触发 | 何时用 |
-|------|------|--------|
-| `knowledge/deploy.md` 散文 | AI 按需 read | 流程还在变 / 仅作参考 |
-| plugin 里的 `skills/deploy/SKILL.md` | CC auto-trigger | 流程稳定 + 想自动唤起 |
-| plugin 里的 `commands/deploy.md` | 用户 `/deploy` | 用户想显式调用 |
-| **profile 的 `CLAUDE.md`** | always-on（loopat concat） | 团队工作姿态 |
+往后 CC 给 `.claude/` 加新字段（比如假想的 `.claude/output-styles/`、`.claude/statusline.json`）——loopat 不用改一行代码，merge 逻辑会自动把它们 union 进去。
+
+**总规则：放在 `.claude/` 里的东西自动获得 multi-tier 能力**。要扩 loopat、要给团队加共享能力，第一选择就是用 CC native 的 `.claude/` 子项；只有 CC 完全没有的能力（比如把 host 路径绑进 sandbox）才需要在 loopat 自己的代码里加。
 
 ---
 
-## 8. Loop sandbox 物化流程
+## 4. Tier merge 逻辑
 
-```
-loopat run +mode-oncall
-   │
-   ├─ Step 1: 读 personal/<user>/.loopat/config.json
-   ├─ Step 2: 计算 active profiles = base ∪ default_profiles ∪ +CLI − -CLI
-   ├─ Step 3: union 每个 profile 的 `plugins` 列表（dedup）
-   ├─ Step 4: orchestrate `claude plugin install` 把所有 plugin 装齐
-   │           （跨 marketplace 在这步搞定，CC 自己不会跨装）
-   ├─ Step 5: concat 每个 profile 目录的 CLAUDE.md → sandbox 根 CLAUDE.md
-   ├─ Step 6: mount 每个 profile 的 knowledge/ + workspace/knowledge/ → sandbox knowledge/
-   ├─ Step 7: 读 personal/<u>/vaults/<v>/* 导成 env vars
-   └─ Step 8: 启动 CC
-```
+### 5 个 source tier（按合并顺序）
 
-**Loopat 在中间做胶水**，CC 看到的是一个已经配好的环境。
+| 顺序 | Tier | 路径 | 谁维护 |
+|---|---|---|---|
+| 1 | team workspace | `knowledge/.loopat/.claude/` | 团队管理员，全员共享 |
+| 2 | profile-1 | `knowledge/.loopat/profiles/<name>/.claude/` | role/mode 子团队 |
+| ⋮ | profile-N | 同上 | 用户在 NewLoop 时选 0..N 个 |
+| 3 | personal | `personal/<user>/.claude/` | 每个成员自己 |
+| 4 | workdir (repo) | `workdir/.claude/` | **不被 loopat merge**——SDK 直接读 |
+| 5 | local override | `workdir/.claude/*.local.*` | **不被 loopat merge**——SDK 直接读 |
 
----
+前 3 层（team + profiles + personal）会被 loopat compose 合并成一个目录写到 `loops/<id>/.claude/`，这就是 CC 的 `user` tier。后 2 层（workdir + local）由 SDK 自己读 cwd-relative 的 `.claude/`，loopat 不动它们。
 
-## 9. 300-person 规模
+### 合并规则（每种内容不同）
 
-```
-loopat-acme/                          ← 一个 monorepo
-├── profiles/
-│   ├── base/                         ← 全员必加
-│   ├── role-eng-backend/
-│   ├── role-eng-frontend/
-│   ├── role-eng-ml/
-│   ├── role-legal/
-│   ├── role-pm/
-│   ├── role-security/
-│   ├── mode-oncall/
-│   ├── mode-review/
-│   ├── mode-incident/
-│   └── mode-planning/
-├── plugins/                          ← CC local marketplace
-│   ├── .claude-plugin/marketplace.json
-│   ├── internal-mcp/
-│   ├── pagerduty-mcp/
-│   ├── deploy-cli/
-│   └── ...
-├── knowledge/                        ← workspace 全局
-├── notes/                            ← workspace 全局记忆
-└── CODEOWNERS
-```
+| 内容 | 规则 |
+|---|---|
+| `settings.json` | 按 key shallow union；`enabledPlugins` / `mcpServers` / `extraKnownMarketplaces` 按子 key last-wins |
+| `CLAUDE.md` | 按 tier 顺序拼接，每段加 `## <tier-name>` 头 |
+| `skills/<name>/` | symlink union，同名后写者赢 |
+| `agents/<name>.md` | symlink union，同名后写者赢 |
+| `mise.toml`, `mise.lock` | TOML table-level union（`[tools]` / `[env]` 各自 union） |
 
-### 维护权切分（典型）
+实现锚点：`server/src/compose.ts`（45 个单元测试覆盖在 `server/test/compose.test.ts`）。
 
-```
-/profiles/base/                @platform-team
-/profiles/role-eng-*/          @eng-leads
-/profiles/role-legal/          @legal-leads
-/profiles/mode-oncall/         @sre-team
-/plugins/<name>/               @<plugin-author>
-```
+### 图示
 
-10 个 profile owner 维护 ~80 条 profile→plugin 依赖边——稀疏图，标准包管理工作量。
-
-### 何时拆 repo（monorepo → multi-repo）
-
-| 触发 | 怎么拆 |
-|------|--------|
-| 某 profile/plugin **不能让其他 group 看到**（合规） | 拆独立 repo，loopat 用 git URL / OCI ref |
-| 某模块 **发布节奏完全错位**（legal 一年 vs eng 一天） | 拆独立 repo，独立 release cycle |
-| 单 repo > 1 GB / > 30 plugin / clone 慢 | 物理性能问题 |
-
-**默认 monorepo + CODEOWNERS**。300 人 monorepo 完全跑得动。
+![composition](./composition.svg)
 
 ---
 
-## 10. Skill 的 graduation path
+## 5. 最终 Sandbox 里有几个 SoT？
 
-```
-阶段 1: knowledge/howto-X.md           ← AI 按需 read
-        ↓（流程稳定 + 多人用）
-阶段 2: plugins/<name>/skills/X/       ← CC 注册为 skill，按意图自动触发
-        ↓（跨团队复用 / 体积大）
-阶段 3: 独立 plugin repo，profile 通过 deps 引用
-```
+**两个。** 这是 CC 设计上就有的——user tier + project tier 本就并存（local 算 project 的同层 override）。
 
-**规则**：**"≥2 人用 + 稳定 ≥2 周" → 升级成 plugin**。早期 skill 留在 knowledge/ 不丢人——这是 graduation gate，不是反模式。
+| Sandbox 里 | 对应路径 | 谁喂 | 内容 |
+|---|---|---|---|
+| user tier | `$CLAUDE_CONFIG_DIR/` → `loops/<id>/.claude/` | loopat compose 合成 | team+profile+personal 的并集 |
+| project tier | `$CWD/.claude/` → `workdir/.claude/` | repo 自己自带 | 跟着 repo 走，loopat 不碰 |
+| local tier | 同 cwd 下的 `*.local.*` 文件 | 同上 | repo checkout-private 私货 |
+| ~~user tier (host)~~ | ~~`~/.claude/`~~ | **没有** | sandbox $HOME 是个空 overlay |
 
----
+第三条尤其重要：**sandbox 里不存在 host 的 `~/.claude/`**——bwrap 把 $HOME 挂成 overlayfs，lower 层（`sandbox-home-skel/`）是空的，所以 host CC 本机配置（你自己 `claude plugin enable` 的、自己写的 CLAUDE.md 等）一概看不到。loopat 这么设计是有意的：要可复现，host 的 ad-hoc 状态不能漏进 loop。
 
-## 11. CC plugin 实测情况（2026-05 验证）
-
-| 特性 | 状态 | 备注 |
-|------|------|------|
-| `plugin.json` 的 `dependencies` | ✅ 工作 | **array of strings**（不是 object），无 version constraint |
-| Same-marketplace deps auto-install | ✅ | 装 meta-plugin 自动拉 deps |
-| Cross-marketplace deps auto-install | ❌ | 只 load-time 检查，**loopat 必须 orchestrate** |
-| Plugin root `CLAUDE.md` | ❌ | **不被加载**，validate 会 warn |
-| `type: "library"` 标记 | ❌ | 未实现（Issue #9444） |
-| Version pinning in deps | ❌ | 未支持 |
-| MCP servers 自动注册 | ✅ | 命名 `plugin:<name>:<marketplace>` |
-| `claude plugin prune` | ✅ | 自动清理无用 deps |
-| `claude plugin validate` | ✅ | 可用做 CI 校验 |
-| 跨 marketplace dep 语法 | ✅ | `name@marketplace` 形式 |
+所以一个 loop 看到的"运行环境"就是 **(loopat 合成的 user tier) ∪ (repo 自带的 project/local tier)**，仅此而已。
 
 ---
 
-## 12. 与现有 architecture.md 的关系
+## 6. `.claude/` 里可以被层叠的东西
 
-现有 `architecture.md` 描述的 **sandbox × vault** 二维矩阵：
+下面这些都是放到 `.claude/` 子项就会被 loopat 自动多层合并的：
 
-| Axis | What it picks | Owner |
-|---|---|---|
-| **Sandbox** | the tools the loop can use（**单一**命名 bundle） | team |
-| **Vault** | the credentials | personal |
+### CC native
 
-本文档对这层抽象的**破坏性演化**：
+- **`settings.json`** — 主配置文件。CC 所有顶层 setting 字段都在这（包括 `enabledPlugins` / `mcpServers` / `extraKnownMarketplaces` / `hooks` / `model` / `permissions` / 等）
+- **`CLAUDE.md`** — 团队 always-on doctrine
+- **`skills/<name>/SKILL.md`** — 用户主动调用的 procedure（`/skill-name`）
+- **`agents/<name>.md`** — 主 agent 派活给 subagent 的 prompt 定义
+- **`hooks/`** — 通过 settings.json 的 `hooks` 字段引用的脚本
+- **MCP servers** — 写在 `settings.json` 的 `mcpServers` 字段（也可以走 `extraKnownMarketplaces` 用 plugin 形式分发）
 
-- **sandbox 从"单一命名 bundle"扩展到"profile 的 union"**——破坏性替换 `extends` 单父链
-- 把 sandbox 的内容拆成 profile（loopat 原生）+ plugin（CC 原生）两层
-- vault 保持不变（personal credential 子集）
-- `compose.ts` 的 tier 机制保留思路，tier 从 2 扩到 N
+### CC native，loopat **绕过 settings.json** 用 SDK option 传的
 
-**没有否定 sandbox/vault 概念**——sandbox 还是 lifecycle envelope（per-loop 隔离），vault 还是 personal credential。变化只在"sandbox 里装什么"从"一个名字"变成"profile 集合的 union"。
+- **plugins**（`enabledPlugins` 字段）—— compose 会合并 enabledPlugins，但实际加载靠 `resolveLoopPlugins` 把绝对路径数组喂给 SDK option，原因见 §2
+- **mcpServers** —— 合并的 mcpServers 会被 vault 凭据注入后通过 SDK option 传，原因同上
 
----
+### loopat 引入的扩展
 
-## 13. Anti-patterns（明确禁止）
+- **`mise.toml` / `mise.lock`** — 工具链版本钉死，per-loop activate
 
-1. **不要发明 "loopat plugin format"**——直接用 CC plugin 格式
-2. **不要在 loopat 里造 "agent" 概念**——CC 已有 subagent，会撞名
-3. **不要把 SKILL.md / MCP 配置塞进 `knowledge/`**——category error，CC 不扫这里
-4. **不要在 profile 里加 `extends` 或继承**——让用户在 `default_profiles` 显式列；sub-role 列两个 profile
-5. **不要用 plugin root 的 `CLAUDE.md` 传播姿态**——CC 不加载，必须靠 profile CLAUDE.md
-6. **不要让 plugin 知道自己在哪些 profile 里**——耦合反转
-7. **不要预先建独立 team-marketplace repo**——`workspace/plugins/` 子目录起步
-8. **不要预先设计 loopat.yml schema 扩字段**——3 字段 + sibling 文件够用；要扩之前先验证刚需
+### 待加（CC 后续如果加新字段，自动跟）
+
+- 任何 CC 后续往 `.claude/` 加的子项——`.claude/output-styles/`、`.claude/statusline.json`、等等——只要写到 `compose.ts` 的合并规则里（通常 10 行内能搞定），就自动获得 5-tier 层叠能力
 
 ---
 
-## 14. Open questions（待定）
+## 7. 每个能力的细节对照表
 
-| 问题 | 当前倾向 | 决定时机 |
-|------|----------|----------|
-| Profile 引用不存在的 plugin 怎么办？ | 物化前 dry-validate；报错 | 实现 resolver 时 |
-| 要不要 `plugins.lock` 锁 plugin sha？ | 短期不做，跟 marketplace upstream；长期加 | 撞到可复现性问题时 |
-| Vault env 怎么注入到 CC 进程？ | 物化时把 `vaults/<v>/*` 读出来 export 进 CC env | 集成实现时 |
-| 多 loop 同时跑，CC marketplace 是全局态怎么办？ | 短期：accept；长期：每 loop 独立 `~/.claude` | 多 loop 并发出问题时 |
-| 用户列了同名但跨 mp plugin 冲突？ | 报错，让用户用 `name@mp` 显式 | resolver 里实现 |
-| MCP OAuth token 跨 loop 共享？ | symlink 进 sandbox，撞 atomic-write 问题再换 | MCP OAuth 落盘时 |
+下表横向：六个具体能力（skill / agent / MCP / plugin / hook / mise）。
+纵向：5 个维度——它是什么 · 在 .claude 放哪 · CC 怎么启用 · SDK 怎么启用 · loopat 怎么启用 · sandbox 里落在哪。
+
+| 维度 | **Skill** | **Agent (subagent)** | **MCP server** | **Plugin** | **Hook** | **Mise toolchain** |
+|---|---|---|---|---|---|---|
+| **是什么 / 何时用** | 一段用户可主动调用的 procedure（`/foo`）。流程稳定 + 想显式触发时用 | 一个可被主 agent 派活的子 agent（独立 system prompt + tool 限制 + 模型选择）。需要主 agent 把一段任务委托出去时用 | 暴露外部工具（jira / github / slack / 自研 MCP）给 CC 用的进程 | 一个能力包：把 skills + agents + MCP + hooks 打成一个可分发单元（带 marketplace 元数据） | 在特定事件触发的脚本：Setup / PreToolUse / PostToolUse / SubagentStop 等 | 工具链版本钉死（node/python/uv/…）；loopat 引入，CC native 不识别 |
+| **放在 .claude 哪里** | `.claude/skills/<name>/SKILL.md`（必带），可加附件 | `.claude/agents/<name>.md`（单文件，frontmatter + body） | `.claude/settings.json` 的 `mcpServers` 字段（不是文件） | 不直接放——通过 `.claude/settings.json` 的 `enabledPlugins` + `extraKnownMarketplaces` 引用；plugin 内容存在 `~/.claude/plugins/...` host 缓存 | `.claude/settings.json` 的 `hooks` 字段（指向脚本路径） | `.claude/mise.toml`（pin）+ `.claude/mise.lock`（lock） |
+| **CC 里怎么启用** | drop in `.claude/skills/<name>/` 就生效——无 enable 字段，目录在 = 可用 | drop in `.claude/agents/<name>.md` 就生效——同样无 enable 字段 | 在 `settings.json` 写 `mcpServers.<n>: {...}` 就生效 | 必须显式 `enabledPlugins["foo@market"]: true`——dropin 缓存不算（详见 [CC plugins 文档](https://docs.claude.com/en/docs/claude-code/plugins)） | 在 `settings.json` 写 `hooks.<event>: [...]` 就生效 | n/a（CC 不识别） |
+| **SDK 里 query() 时怎么启用** | `settingSources` 含 `'user'`（扫 user tier）+ `'project'`（扫 cwd）；可选 `skills: 'all' \| string[]` 过滤；目录里有就会被发现 | `settingSources` 含 `'user'`/`'project'`/`'local'` 自动扫文件系统；或者通过 `agents:` option 程序化定义 | 三选一：① settings.json mcpServers（settingSources='user' 起作用）② `mcpServers:` option 直接传（loopat 走这条）③ plugin 携带的 `.mcp.json` | settings.json 里的 enabledPlugins 通过 settingSources 生效；或 `plugins:` option 直接传 `[{type:"local", path:...}]`（loopat 走这条，bypass settings） | settings.json 的 hooks 通过 settingSources 生效；或 `hooks:` option 程序化定义 | n/a |
+| **loopat 里怎么启用** | 在某层 `.claude/skills/` 放进去——compose 把它符号链接进 user tier。在 NewLoopDialog 选对应 profile / 写到 team workspace / 放 personal 都行 | 同 skill：放到某层 `.claude/agents/` 就自动可用 | 在某层 `.claude/settings.json` 的 `mcpServers` 写——compose merge 后由 SDK option 注入（顺带把 vault 凭据并进去） | 在某层 `.claude/settings.json` 的 `enabledPlugins` 写 `true`——compose merge 后 `resolveLoopPlugins` 解析路径，bwrap ro-bind 进 sandbox，SDK option 喂 | 在某层 `.claude/settings.json` 的 `hooks` 写——通过 settingSources `'user'` 生效 | 在某层 `.claude/mise.toml` 写——bwrap 启动前 `mise install + env --json`，把 PATH/env 注入 sandbox |
+| **Sandbox 里落地路径** | `loops/<id>/.claude/skills/<name>/` (symlink → 源 host 路径) | `loops/<id>/.claude/agents/<name>.md` (symlink → 源 host 路径) | 不落文件——通过 SDK 进程内部传递 | 不在 `.claude/plugins/` 里——每个 plugin 通过 `--ro-bind <host-path> <host-path>` 单独可见，CC 在 `--plugin-dir` 拿到 | `loops/<id>/.claude/settings.json` 的 `hooks` 字段；脚本本身在源 tier 的 host 路径上（被知识 repo bind 或 personal bind 覆盖） | `loops/<id>/.claude/mise.toml` + bwrap `--setenv` 把 PATH 注入 |
 
 ---
 
-## 15. 一句话总结
+## 8. 实施位置（代码索引）
 
-> **CC plugin** 是能力单元（住 marketplace），**loopat profile** 是组合单元（住 team repo）。
->
-> Profile 用 `name@marketplace` 列依赖；loopat 物化 sandbox 时 orchestrate 跨 marketplace 安装、concat CLAUDE.md、mount knowledge、注入凭据。
->
-> Profile 平铺独立，无继承；用户在 `default_profiles` 列自己要的，CLI 用 `+/-` 临时增减。
->
-> 不发明新概念，只在 CC 原生格式撑不起的地方补一层薄 schema（profile.json 三字段）。
+| 关注点 | 文件 |
+|---|---|
+| Tier 解析（team + profile + personal + repo） | `server/src/profiles.ts` |
+| 多层 merge（写出 loops/<id>/.claude/） | `server/src/compose.ts` |
+| Plugin 解析 + 路径缓存 | `server/src/plugin-installer.ts` |
+| bwrap 绑定（含 plugin / personal 路径可见性） | `server/src/bwrap.ts` |
+| SDK options（settingSources / plugins / mcpServers） | `server/src/session.ts` |
+| compose 单元测试 | `server/test/compose.test.ts` |
+| bwrap 可见性回归测试 | `server/test/bwrap.test.ts` |
+
+---
+
+## 9. 跟早期设计稿的差异
+
+更早的 `composition-model.md`（design rationale 版本）里写过 `profile.json` 三字段 schema + sibling `CLAUDE.md`。后来实测发现：
+
+- 用 CC-native 的 `.claude/` 目录形态，可以让 profile **自己就是个 mini-workspace**——profile 自带 settings.json/skills/agents/CLAUDE.md/mise.toml，全部能层叠
+- 不需要 `profile.json` 这个 loopat 专属 schema
+- profile 的"声明 plugin 依赖"自然由 profile 自带的 `.claude/settings.json` 的 `enabledPlugins` 承担
+
+所以本文档描述的形态 = `.claude/` 一通到底，**profile 不是新 schema 而是新 tier**——这是相比早期设计稿最大的演化。当前的 `server/src/profiles.ts` 实现就是这版。
+
+---
+
+## 10. 一句话总结
+
+> **CC 自带 user/project/local 三 tier。loopat 加 workspace/profile 两 tier，
+> 全部按 CC 的 `.claude/` 形态摆放，由 compose.ts 合并成一个 loop 的 user tier
+> 喂给 SDK。SDK 完全识别这套——loopat 不发明任何新格式。**
