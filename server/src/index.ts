@@ -980,8 +980,21 @@ app.get("/api/settings/token-usage/loops", requireAuth, async (c) => {
 
 import { readFile, appendFile, mkdir } from "node:fs/promises"
 
-async function recomputeTokenUsage(userId: string): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
-  const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
+type TokenUsageEntry = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }
+
+function newEntry(): TokenUsageEntry {
+  return { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }
+}
+
+function addUsage(e: TokenUsageEntry, mu: any) {
+  e.inputTokens += mu.inputTokens ?? 0
+  e.outputTokens += mu.outputTokens ?? 0
+  e.cacheReadInputTokens += mu.cacheReadInputTokens ?? 0
+  e.cacheCreationInputTokens += mu.cacheCreationInputTokens ?? 0
+}
+
+async function recomputeTokenUsage(userId: string): Promise<Record<string, TokenUsageEntry>> {
+  const usage: Record<string, TokenUsageEntry> = {}
   try {
     const allLoops = await listLoops()
     const userLoops = allLoops.filter((l) => l.createdBy === userId)
@@ -997,9 +1010,8 @@ async function recomputeTokenUsage(userId: string): Promise<Record<string, { inp
           if (msg.type === "result" && msg.modelUsage) {
             for (const [model, u] of Object.entries(msg.modelUsage)) {
               const mu = u as any
-              const entry = usage[model] ?? { inputTokens: 0, outputTokens: 0 }
-              entry.inputTokens += mu.inputTokens ?? 0
-              entry.outputTokens += mu.outputTokens ?? 0
+              const entry = usage[model] ?? newEntry()
+              addUsage(entry, mu)
               usage[model] = entry
             }
           }
@@ -1010,8 +1022,8 @@ async function recomputeTokenUsage(userId: string): Promise<Record<string, { inp
   return usage
 }
 
-async function recomputeWorkspaceTokenUsage(): Promise<Record<string, { inputTokens: number; outputTokens: number }>> {
-  const usage: Record<string, { inputTokens: number; outputTokens: number }> = {}
+async function recomputeWorkspaceTokenUsage(): Promise<Record<string, TokenUsageEntry>> {
+  const usage: Record<string, TokenUsageEntry> = {}
   try {
     const allLoops = await listLoops()
     for (const loop of allLoops) {
@@ -1026,9 +1038,8 @@ async function recomputeWorkspaceTokenUsage(): Promise<Record<string, { inputTok
           if (msg.type === "result" && msg.modelUsage) {
             for (const [model, u] of Object.entries(msg.modelUsage)) {
               const mu = u as any
-              const entry = usage[model] ?? { inputTokens: 0, outputTokens: 0 }
-              entry.inputTokens += mu.inputTokens ?? 0
-              entry.outputTokens += mu.outputTokens ?? 0
+              const entry = usage[model] ?? newEntry()
+              addUsage(entry, mu)
               usage[model] = entry
             }
           }
@@ -1039,9 +1050,9 @@ async function recomputeWorkspaceTokenUsage(): Promise<Record<string, { inputTok
   return usage
 }
 
-async function recomputeDailyTokenUsage(userId: string): Promise<Record<string, Record<string, { inputTokens: number; outputTokens: number }>>> {
-  // daily[model][date] = { inputTokens, outputTokens }
-  const daily: Record<string, Record<string, { inputTokens: number; outputTokens: number }>> = {}
+async function recomputeDailyTokenUsage(userId: string): Promise<Record<string, Record<string, TokenUsageEntry>>> {
+  // daily[model][date] = { inputTokens, outputTokens, ... }
+  const daily: Record<string, Record<string, TokenUsageEntry>> = {}
   try {
     const allLoops = await listLoops()
     const userLoops = allLoops.filter((l) => l.createdBy === userId)
@@ -1067,9 +1078,8 @@ async function recomputeDailyTokenUsage(userId: string): Promise<Record<string, 
             for (const [model, u] of Object.entries(msg.modelUsage)) {
               const mu = u as any
               daily[model] ??= {}
-              const entry = daily[model][date] ?? { inputTokens: 0, outputTokens: 0 }
-              entry.inputTokens += mu.inputTokens ?? 0
-              entry.outputTokens += mu.outputTokens ?? 0
+              const entry = daily[model][date] ?? newEntry()
+              addUsage(entry, mu)
               daily[model][date] = entry
             }
           }
@@ -1086,6 +1096,8 @@ async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
   model: string
   inputTokens: number
   outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
   lastActivity: string
 }>> {
   const loops: Array<{
@@ -1106,6 +1118,8 @@ async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
       try { raw = await readFile(hp, "utf8") } catch { continue }
       let inputTokens = 0
       let outputTokens = 0
+      let cacheReadInputTokens = 0
+      let cacheCreationInputTokens = 0
       const models = new Set<string>()
       let lastActivity = loop.createdAt ?? ""
       for (const line of raw.split("\n")) {
@@ -1115,8 +1129,11 @@ async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
           if (msg._ts) lastActivity = msg._ts
           if (msg.type === "result" && msg.modelUsage) {
             for (const [, mu] of Object.entries(msg.modelUsage as Record<string, any>)) {
-              inputTokens += (mu as any).inputTokens ?? 0
-              outputTokens += (mu as any).outputTokens ?? 0
+              const m = mu as any
+              inputTokens += m.inputTokens ?? 0
+              outputTokens += m.outputTokens ?? 0
+              cacheReadInputTokens += m.cacheReadInputTokens ?? 0
+              cacheCreationInputTokens += m.cacheCreationInputTokens ?? 0
             }
             for (const model of Object.keys(msg.modelUsage)) {
               models.add(model)
@@ -1131,6 +1148,8 @@ async function recomputeLoopTokenUsage(userId: string): Promise<Array<{
           model: Array.from(models).join(", "),
           inputTokens,
           outputTokens,
+          cacheReadInputTokens,
+          cacheCreationInputTokens,
           lastActivity,
         })
       }

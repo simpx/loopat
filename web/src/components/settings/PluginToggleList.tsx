@@ -15,10 +15,12 @@ export function PluginToggleList({
   enabledPlugins,
   onChange,
   readonly,
+  focusMarketplaceRef,
 }: {
   enabledPlugins: Record<string, boolean>
   onChange: (enabled: Record<string, boolean>) => void
   readonly?: boolean
+  focusMarketplaceRef?: React.MutableRefObject<(() => void) | null>
 }) {
   const [installed, setInstalled] = useState<PluginEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,6 +146,7 @@ export function PluginToggleList({
         <MarketplaceBrowser
           enabledPlugins={enabledPlugins}
           onToggle={toggle}
+          focusMarketplaceRef={focusMarketplaceRef}
         />
       )}
     </div>
@@ -155,9 +158,11 @@ export function PluginToggleList({
 function MarketplaceBrowser({
   enabledPlugins,
   onToggle,
+  focusMarketplaceRef,
 }: {
   enabledPlugins: Record<string, boolean>
   onToggle: (key: string) => void
+  focusMarketplaceRef?: React.MutableRefObject<(() => void) | null>
 }) {
   const [open, setOpen] = useState(false)
   const [plugins, setPlugins] = useState<PluginWithStatus[]>([])
@@ -259,6 +264,15 @@ function MarketplaceBrowser({
               {marketplaces.length} source{marketplaces.length !== 1 ? "s" : ""}
             </span>
             <div className="flex-1" />
+            {focusMarketplaceRef && (
+              <button
+                onClick={() => focusMarketplaceRef.current?.()}
+                className="text-[11px] text-gray-400 hover:text-gray-700 px-1.5 py-0.5 rounded transition-colors"
+                title="Add a marketplace source"
+              >
+                + Add source
+              </button>
+            )}
             <button
               onClick={refresh}
               disabled={refreshing}
@@ -326,9 +340,21 @@ function MarketplaceBrowser({
                    "No plugins found in marketplaces"}
                 </div>
                 {marketplaces.length === 0 && (
-                  <div className="text-[11px] text-gray-400/70 px-4">
-                    Add <code className="bg-gray-100 px-1 rounded text-[10px]">extraKnownMarketplaces</code> entries
-                    to a tier's settings.json, then click refresh.
+                  <div className="text-[11px] text-gray-400/70 px-4 space-y-2">
+                    <div>
+                      No marketplace sources registered. Add one below or{" "}
+                      {focusMarketplaceRef ? (
+                        <button
+                          onClick={() => focusMarketplaceRef.current?.()}
+                          className="text-gray-700 underline hover:text-gray-900"
+                        >
+                          add a marketplace source
+                        </button>
+                      ) : (
+                        "add a marketplace source"
+                      )}{" "}
+                      in the Marketplaces section, then refresh.
+                    </div>
                   </div>
                 )}
               </div>
