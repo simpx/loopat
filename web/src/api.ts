@@ -560,26 +560,10 @@ export async function listRepos(): Promise<RepoEntry[]> {
   return (j.repos ?? []) as RepoEntry[]
 }
 
-export type SandboxEntry = { name: string }
-export async function listSandboxes(): Promise<SandboxEntry[]> {
-  const r = await apiFetch(`/api/sandboxes`)
-  if (!r.ok) return []
-  const j = await r.json()
-  return (j.sandboxes ?? []) as SandboxEntry[]
-}
-
-/** Files inside a sandbox dir that the editor can address. Mirrors server SandboxFile. */
-export type SandboxFile = "mise.toml" | "sandbox.json" | "CLAUDE.md"
-
-export async function readSandbox(name: string, file: SandboxFile = "mise.toml"): Promise<string | null> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`)
-  if (!r.ok) return null
-  const j = await r.json()
-  return typeof j.content === "string" ? j.content : null
-}
-
-// LoopSandboxInfo + getLoopSandbox + refreshLoopSandbox removed — profile model
-// re-composes on every spawn, no snapshot/refresh concept.
+// Sandbox API client removed — sandbox concept replaced by profiles
+// (composition model). Profile editing now happens via filesystem edits to
+// knowledge/.loopat/profiles/<n>/.claude/; the matching backend endpoints
+// were deleted in the profile refactor.
 
 export async function getChatHistory(loopId: string): Promise<string[]> {
   const r = await apiFetch(`/api/loops/${loopId}/chat-history`)
@@ -594,106 +578,6 @@ export async function appendChatHistory(loopId: string, text: string): Promise<v
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
   })
-}
-
-export async function deleteSandbox(name: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}`, { method: "DELETE" })
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}))
-    return { ok: false, error: j.error ?? `http ${r.status}` }
-  }
-  return { ok: true }
-}
-
-export type WriteSandboxResult = {
-  ok: boolean
-  error?: string
-  locked?: boolean
-  lockError?: string
-  committed?: boolean
-  commitSha?: string
-  commitError?: string
-}
-export async function writeSandbox(name: string, content: string, file: SandboxFile = "mise.toml"): Promise<WriteSandboxResult> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}?file=${encodeURIComponent(file)}`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content }),
-  })
-  if (!r.ok) {
-    const j = await r.json().catch(() => ({}))
-    return { ok: false, error: j.error ?? `http ${r.status}` }
-  }
-  const j = await r.json().catch(() => ({}))
-  return {
-    ok: true,
-    locked: j.locked,
-    lockError: j.lockError,
-    committed: j.committed,
-    commitSha: j.commitSha,
-    commitError: j.commitError,
-  }
-}
-
-export type SandboxInstalledPlugin = {
-  key: string
-  name: string
-  marketplace: string
-  version: string
-  gitCommitSha: string
-  installPath: string
-  cachePresent: boolean
-}
-export type SandboxMarketplaceCatalogEntry = {
-  name: string
-  description?: string
-  installed: boolean
-}
-export type SandboxMarketplace = {
-  name: string
-  source: any
-  installLocation?: string
-  lastUpdated?: string
-  catalogPlugins: SandboxMarketplaceCatalogEntry[]
-}
-export type SandboxPluginInventory = {
-  plugins: SandboxInstalledPlugin[]
-  marketplaces: SandboxMarketplace[]
-}
-export async function listSandboxPlugins(name: string): Promise<SandboxPluginInventory> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins`)
-  if (!r.ok) return { plugins: [], marketplaces: [] }
-  return (await r.json()) as SandboxPluginInventory
-}
-
-export type ClaudeCmdResult = { ok: boolean; output: string; error?: string }
-export async function installSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ plugin }),
-  })
-  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
-}
-export async function uninstallSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins/${encodeURIComponent(plugin)}`, {
-    method: "DELETE",
-  })
-  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
-}
-export async function updateSandboxPlugin(name: string, plugin: string): Promise<ClaudeCmdResult> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/plugins/${encodeURIComponent(plugin)}/update`, {
-    method: "POST",
-  })
-  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
-}
-export async function addSandboxMarketplace(name: string, source: string): Promise<ClaudeCmdResult> {
-  const r = await apiFetch(`/api/sandboxes/${encodeURIComponent(name)}/marketplaces`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source }),
-  })
-  return (await r.json().catch(() => ({ ok: false, output: "", error: `http ${r.status}` }))) as ClaudeCmdResult
 }
 
 export type RepoDetail = RepoEntry & {

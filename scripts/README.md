@@ -19,7 +19,7 @@ bun run scripts/mock-mcp-server.ts
 # listens on http://127.0.0.1:7799
 ```
 
-Add to your workspace `knowledge/.loopat/claude/claude.json`:
+Add to your workspace `knowledge/.loopat/.claude/settings.json`:
 
 ```json
 {

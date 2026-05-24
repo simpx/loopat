@@ -18,15 +18,15 @@ curl -fsSL https://mise.run | sh
 | **bubblewrap** | per-loop sandbox (Linux only) | required; on macOS/Windows use Docker |
 | **openssh-client** | deploy-key flow for `personal/` import | required if you bind external git repos into vaults |
 | **bun** | runtime + bundler | required |
-| **mise** | per-loop toolchain manager | required only for loops that select a sandbox |
+| **mise** | per-loop toolchain manager | required only for loops whose composed `.claude/mise.toml` is non-empty |
 
 ### About `mise`
 
-When a loop selects a sandbox (defined under
-`$LOOPAT_HOME/context/knowledge/.loopat/sandboxes/<name>/`), the server runs
-`mise install` on the host and binds the tool installs into the sandbox.
-Without `mise` on PATH, loops that select a sandbox fail at spawn; loops
-with no sandbox still work normally.
+When a loop's merged `.claude/mise.toml` (composed from team / profile /
+personal tiers — see [composition.md](composition.md)) declares tools, the
+server runs `mise install` on the host and binds the tool installs into the
+sandbox. Without `mise` on PATH, such loops fail at spawn; loops whose
+merged `mise.toml` is empty still work normally.
 
 mise data lives at `~/.local/share/mise/installs/`. loopat binds that path
 read-only into each loop's sandbox, so tool installs are shared across loops

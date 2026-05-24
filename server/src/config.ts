@@ -200,7 +200,7 @@ export type PersonalConfigDisk = {
   envs?: Record<string, ConfigValue>
   /** Member-level mounts — src is `PathRef`. See Mount JSDoc. */
   mounts?: Mount[]
-  /** PTY shell override (highest precedence; beats sandbox.json's shell). */
+  /** PTY shell override (highest precedence). */
   shell?: string
   /** Optional. Missing = "fresh" (user hasn't started or dismissed yet). */
   onboarding?: OnboardingState

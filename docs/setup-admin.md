@@ -19,8 +19,8 @@ prints its bootstrap banner.
 | 1 | Workspace config | `~/.loopat/config.json` | required if you want shared repos |
 | 2 | Knowledge repo | `context/knowledge/` (cloned from remote) | optional, recommended |
 | 3 | Notes repo | `context/notes/` (cloned from remote) | optional, recommended |
-| 4 | Team CLAUDE.md / skills / MCP | `knowledge/.loopat/claude/` | optional |
-| 5 | Sandboxes | `knowledge/.loopat/sandboxes/<name>/` | optional |
+| 4 | Team CLAUDE.md / skills / MCP | `knowledge/.loopat/.claude/` | optional |
+| 5 | Profiles (roles / modes) | `knowledge/.loopat/profiles/<name>/.claude/` | optional |
 | 6 | Operator mounts | `config.json` `mounts[]` | optional |
 | 7 | Activate users | UI → `/admin` | once members register |
 
@@ -76,14 +76,14 @@ Layout once provisioned:
 ```
 context/knowledge/
 ├── .loopat/                       ← reserved namespace (loopat-aware)
-│   ├── claude/
+│   ├── .claude/                   workspace tier (always on)
 │   │   ├── CLAUDE.md              (optional)  team prompt supplement
-│   │   ├── claude.json            (optional)  MCP servers
-│   │   └── skills/                (optional)  team Claude Code skills
-│   └── sandboxes/
-│       └── <name>/                (optional)  one dir per sandbox
-│           ├── mise.toml          toolchain spec
-│           └── sandbox.json       loopat metadata (e.g. shell override)
+│   │   ├── settings.json          (optional)  enabledPlugins, mcpServers, hooks
+│   │   ├── skills/                (optional)  team skills
+│   │   ├── agents/                (optional)  team subagents
+│   │   └── mise.toml              (optional)  team toolchain pins
+│   └── profiles/                  profile tier (opt-in per loop)
+│       └── <name>/.claude/        same shape as workspace .claude/ above
 └── ... your team's prose docs (anything else)
 ```
 
@@ -109,7 +109,7 @@ repo — auto-push will fail.
 
 ## 4. Team Claude config — CLAUDE.md / skills / MCP
 
-All three live under `knowledge/.loopat/claude/`. Loopat ro-binds the
+All three live under `knowledge/.loopat/.claude/`. Loopat ro-binds the
 whole tree into each loop's `$CLAUDE_CONFIG_DIR/`, so Claude Code
 discovers them natively as if they were `~/.claude/` on a normal host.
 
@@ -128,7 +128,7 @@ slash-skill inside loops. Use these for repeatable team procedures
 ### MCP servers
 
 ```json
-// knowledge/.loopat/claude/claude.json
+// knowledge/.loopat/.claude/settings.json
 {
   "mcpServers": {
     "github": {
@@ -148,41 +148,37 @@ Details on the full injection model: [claude-config.md](claude-config.md).
 
 ---
 
-## 5. Sandboxes
+## 5. Profiles (roles / modes)
 
-A sandbox = a named toolchain + shell that loops can opt into. Each
-sandbox is a directory:
+A profile = an opt-in bundle of `.claude/` config that loops can stack.
+Each profile is a complete `.claude/` tree:
 
 ```
-knowledge/.loopat/sandboxes/
-├── node/
-│   ├── mise.toml          [tools] node = "20", bun = "1.2"
-│   └── sandbox.json       { "shell": "/usr/bin/bash" }
-├── python/
-│   ├── mise.toml          [tools] python = "3.12", uv = "latest"
-│   └── sandbox.json
-└── go/
-    ├── mise.toml
-    └── sandbox.json
+knowledge/.loopat/profiles/
+├── role-eng/
+│   └── .claude/
+│       ├── CLAUDE.md          # role-specific doctrine
+│       ├── settings.json      # enabledPlugins, mcpServers, hooks
+│       ├── skills/<name>/SKILL.md
+│       ├── agents/<name>.md
+│       └── mise.toml          # toolchain pins for this role
+├── role-legal/
+│   └── .claude/…
+└── mode-oncall/
+    └── .claude/…
 ```
 
-When a user spawns a loop and selects sandbox `node`, the server runs
-`mise install` on the host (cached at `~/.local/share/mise/installs/`)
-and binds the result into the sandbox. Toolchain reuses across loops,
-identical across machines.
+When a user spawns a loop and selects `[role-eng, mode-oncall]`, loopat
+merges those profiles' `.claude/` directories on top of the team workspace
+tier and the user's personal tier. Per-key shallow union; later tier wins
+per key. See [composition.md](composition.md).
 
-A loop with **no** sandbox skips mise entirely — works for pure-prose
-loops that don't need a runtime.
+`mise.toml` inside any profile activates `mise install` for that loop;
+toolchain installs are shared across all loops (cached at
+`~/.local/share/mise/installs/`).
 
-`sandbox.json` carries loopat-side metadata that doesn't belong in
-`mise.toml`:
-
-```json
-{ "shell": "/usr/bin/bash" }
-```
-
-Only `shell` is read today; the file leaves room for future fields
-(MCP overrides, AGENTS.md, …).
+A loop selecting **zero** profiles still gets workspace + personal + the
+project's own `.claude/` — works fine for pure-prose loops.
 
 ---
 
@@ -236,7 +232,7 @@ After the dust settles, the banner should be all green:
   loopat bootstrap — loopat (user=admin)
 ────────────────────────────────────────────────────────────
   ✓  workspace: /home/admin/.loopat
-  ✓  workspace supplement: knowledge/.loopat/claude/CLAUDE.md (present)
+  ✓  workspace supplement: knowledge/.loopat/.claude/CLAUDE.md (present)
   ✓  knowledge: git@…/loopat-knowledge.git
   ✓  notes:     git@…/loopat-notes.git
   ✓  repos:     app, infra

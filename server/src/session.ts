@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
@@ -357,14 +357,27 @@ class LoopSession {
       } catch {}
     }
 
-    // mcpServers come from two sources in the profile model:
-    //   - plugin-bundled .mcp.json (auto-registered by CC when the plugin is
-    //     loaded; we don't merge those here — CC handles them)
-    //   - personal .claude.json (per-user overlay; same as before)
-    // The old sandbox-level mcpServers source is dropped — profile model uses
-    // plugin `.mcp.json` instead.
-    const personalClaude = await loadPersonalClaudeJson(driver)
-    const mergedServers: Record<string, any> = { ...(personalClaude.mcpServers ?? {}) }
+    // mcpServers in the composition model:
+    //   - tier-merged settings.json (workspace + profiles + personal) — compose
+    //     wrote the union to loops/<id>/.claude/settings.json above
+    //   - plugin-bundled .mcp.json — auto-registered by CC when the plugin
+    //     loads; we don't merge those here
+    //
+    // We re-read the merged settings.json here (rather than just letting SDK
+    // pick it up via settingSources) because we need to runtime-inject the
+    // vault's credentials into each server's headers/env before the SDK
+    // starts. Passing the augmented map via the `mcpServers:` option lets
+    // those credentials reach MCP without ever touching disk.
+    const mergedSettingsPath = join(loopClaudeDir(loopId), "settings.json")
+    let mergedServers: Record<string, any> = {}
+    if (existsSync(mergedSettingsPath)) {
+      try {
+        const merged = JSON.parse(await readFile(mergedSettingsPath, "utf8"))
+        mergedServers = { ...(merged.mcpServers ?? {}) }
+      } catch (e: any) {
+        console.warn(`[session ${loopId.slice(0,8)}] could not read merged mcpServers: ${e?.message ?? e}`)
+      }
+    }
     // Inject per-(user, vault) MCP OAuth tokens (Settings → MCP) as
     // `Authorization: Bearer <token>` headers on matching servers. This is
     // the SDK-recommended pattern for headless MCP auth — CC sees pre-

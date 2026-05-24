@@ -7,8 +7,8 @@
  * Data source: useLoopRuntime's availableSlashCommands. Plugin sub-commands
  * are the entries whose name contains ":" (per CC's plugin namespace
  * convention). The seed list (server/src/session.ts:buildInitialSlashCommands)
- * pre-populates these from resolveLoopPlugins, so the chip is correct on
- * first open — no need to wait for CC's init payload.
+ * pre-populates these from each enabled plugin's host install dir, so the
+ * chip is correct on first open — no need to wait for CC's init payload.
  */
 import { useMemo, useState, useEffect } from "react"
 import { Search, CornerDownLeft, ArrowUp, ArrowDown } from "lucide-react"

@@ -212,11 +212,10 @@ land in `config.json` directly (visible in plaintext).
 
 **Settings → Terminal Shell**.
 
-PTY shell binary for loop terminals. Highest precedence — overrides
-the sandbox's `sandbox.json` `shell`. Default is `/bin/bash`.
+PTY shell binary for loop terminals. Default is `/bin/bash`.
 
-Set to `/usr/bin/zsh` etc. if you've also exposed it via mounts /
-sandbox toolchain.
+Set to `/usr/bin/zsh` etc. if you've also exposed it via mounts or
+via a profile's `mise.toml`.
 
 ---
 

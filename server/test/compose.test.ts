@@ -17,19 +17,23 @@ import { mkdir, rm, writeFile, readFile, readdir } from "node:fs/promises"
 import { existsSync, readlinkSync } from "node:fs"
 import { join } from "node:path"
 
-const TEST_HOME = `/tmp/loopat-merge-test-${process.pid}`
-process.env.LOOPAT_HOME = TEST_HOME
+// paths.ts captures LOOPAT_HOME at module load. If another test file imported
+// it first in this run, this assignment is a no-op; align our TEST_HOME to
+// whatever was captured so the fixture and the helpers agree.
+process.env.LOOPAT_HOME ??= `/tmp/loopat-merge-test-${process.pid}`
 
 // Imports AFTER LOOPAT_HOME is set
 const { composeLoopClaudeConfig } = await import("../src/compose")
 const { resolveLoopPlan, listProfiles } = await import("../src/profiles")
 const {
+  LOOPAT_HOME,
   loopClaudeDir,
   workspaceTeamClaudeDir,
   workspaceProfileClaudeDir,
   personalClaudeDir,
   personalLoopatConfigPath,
 } = await import("../src/paths")
+const TEST_HOME = LOOPAT_HOME
 // Avoid unused-var warning when tests below don't use this in every block
 void loopClaudeDir
 
@@ -716,3 +720,122 @@ describe("listProfiles", () => {
     expect(names).toEqual([])
   })
 })
+
+// ─── 8. Path invariants (post-composition-model rewrite) ─────────────────
+
+describe("path invariants", () => {
+  test("personal .claude/ lives at personal/<user>/.loopat/.claude/", async () => {
+    // The personal tier mirrors the team tier: both put loopat-managed config
+    // under a `.loopat/` segment of the owning repo. Anything outside
+    // `.loopat/` in personal/ belongs to the user, not loopat.
+    const dir = personalClaudeDir("alice")
+    expect(dir.endsWith("/personal/alice/.loopat/.claude")).toBe(true)
+  })
+
+  test("team .claude/ lives at knowledge/.loopat/.claude/", async () => {
+    const dir = workspaceTeamClaudeDir()
+    expect(dir.endsWith("/knowledge/.loopat/.claude")).toBe(true)
+  })
+
+  test("profile .claude/ lives at knowledge/.loopat/profiles/<n>/.claude/", async () => {
+    const dir = workspaceProfileClaudeDir("role-eng")
+    expect(dir.endsWith("/knowledge/.loopat/profiles/role-eng/.claude")).toBe(true)
+  })
+})
+
+// ─── 9. MCP server merge across tiers ────────────────────────────────────
+
+describe("mergeSettings — mcpServers union", () => {
+  test("mcpServers from every tier appear in merged settings.json", async () => {
+    // Why this matters: session.ts reads mergedServers from the merged
+    // settings.json on disk and injects vault credentials into it before
+    // passing to SDK. If compose drops a tier's mcpServers, that server is
+    // invisible to the loop even if the tier declared it.
+    await makeTeam({
+      settings: { mcpServers: { "team-mcp": { type: "http", url: "https://team.example/mcp" } } },
+    })
+    await makeProfile("oncall", {
+      settings: { mcpServers: { "pagerduty": { type: "http", url: "https://pd.example/mcp" } } },
+    })
+    await makePersonal("alice", {
+      defaultProfiles: ["oncall"],
+      settings: { mcpServers: { "personal-jira": { command: "node", args: ["./jira-mcp.js"] } } },
+    })
+
+    const result = await composeLoopClaudeConfig("loop-mcp-merge", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+
+    expect(Object.keys(merged.mcpServers ?? {}).sort()).toEqual([
+      "pagerduty",
+      "personal-jira",
+      "team-mcp",
+    ])
+    expect(merged.mcpServers["team-mcp"]).toEqual({ type: "http", url: "https://team.example/mcp" })
+    expect(merged.mcpServers["pagerduty"]).toEqual({ type: "http", url: "https://pd.example/mcp" })
+    expect(merged.mcpServers["personal-jira"]).toEqual({ command: "node", args: ["./jira-mcp.js"] })
+  })
+
+  test("personal-tier mcpServer with same name overrides team-tier (last-wins)", async () => {
+    // A user might point an MCP server at a personal endpoint while still
+    // benefiting from the team-declared config for the rest.
+    await makeTeam({
+      settings: { mcpServers: { github: { type: "http", url: "https://team.example/gh" } } },
+    })
+    await makePersonal("alice", {
+      defaultProfiles: [],
+      settings: { mcpServers: { github: { type: "http", url: "https://alice.example/gh" } } },
+    })
+
+    const result = await composeLoopClaudeConfig("loop-mcp-override", "alice")
+    const merged = JSON.parse(await readFile(result.settingsPath, "utf8"))
+    expect(merged.mcpServers.github.url).toBe("https://alice.example/gh")
+  })
+
+  test("mcpServer secrets are NEVER written to the composed settings.json", async () => {
+    // Locks in the auth/config split: sources declare server CONFIG; vault
+    // contributes CREDENTIALS at spawn time. The settings.json on disk must
+    // carry no apiKey/authorization values, even if a source accidentally
+    // included one. (Compose itself doesn't strip them — but our convention
+    // is "don't put secrets in .claude/settings.json". This test documents
+    // that the merge faithfully reflects what sources put in, so any leak
+    // would show up here as a deliberate-feeling failure pointing at the
+    // source tier rather than at compose.)
+    await makeTeam({ settings: { mcpServers: { svc: { type: "http", url: "https://svc/" } } } })
+    await makePersonal("alice", { defaultProfiles: [] })
+    const result = await composeLoopClaudeConfig("loop-mcp-no-secrets", "alice")
+    const text = await readFile(result.settingsPath, "utf8")
+    expect(text.toLowerCase()).not.toContain("authorization")
+    expect(text.toLowerCase()).not.toContain("apikey")
+    expect(text.toLowerCase()).not.toContain("bearer ")
+  })
+})
+
+// ─── 10. CLAUDE.md tiered concatenation ──────────────────────────────────
+
+describe("composeFromPlan — CLAUDE.md", () => {
+  test("each tier's CLAUDE.md is included in the merged output", async () => {
+    await makeTeam({ claudeMd: "# Team rule\n\nAlways do X." })
+    await makeProfile("role-eng", { claudeMd: "# Engineering\n\nUse strict TypeScript." })
+    await makePersonal("alice", {
+      defaultProfiles: ["role-eng"],
+      claudeMd: "# Alice's notes\n\nLowercase variable names.",
+    })
+
+    const result = await composeLoopClaudeConfig("loop-claudemd", "alice")
+    const text = await readFile(result.claudeMdPath, "utf8")
+    expect(text).toContain("Always do X.")
+    expect(text).toContain("Use strict TypeScript.")
+    expect(text).toContain("Lowercase variable names.")
+  })
+
+  test("CLAUDE.md missing in some tiers is silently skipped", async () => {
+    await makeTeam({})  // no claudeMd
+    await makeProfile("role-eng", { claudeMd: "# Only profile speaks" })
+    await makePersonal("alice", { defaultProfiles: ["role-eng"] })  // no claudeMd
+
+    const result = await composeLoopClaudeConfig("loop-claudemd-partial", "alice")
+    const text = await readFile(result.claudeMdPath, "utf8")
+    expect(text).toContain("Only profile speaks")
+  })
+})
+

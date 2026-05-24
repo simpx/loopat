@@ -253,7 +253,5 @@ loopat each activate it, and where it lands inside the sandbox.
 - [`architecture.md`](architecture.md) — sandbox / vault model, read &
   write paths, full bwrap layout.
 - [`composition.svg`](composition.svg) — the diagram on its own.
-- [`design/sample-workspace/`](design/sample-workspace/) — a concrete
-  example workspace showing all five tiers populated.
 - Source of truth: [`server/src/compose.ts`](../server/src/compose.ts) and
   [`server/src/profiles.ts`](../server/src/profiles.ts).

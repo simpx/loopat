@@ -274,18 +274,17 @@ export async function buildBwrapArgs(
     console.warn(`[loopat] loop ${loopId}: vault "${vault}" not found for user ${createdBy} — running with no credentials`)
   }
 
-  // skills + agents: composed into loops/<id>/.claude/{skills,agents}/ by
-  // `composeLoopClaudeConfig()` (see compose.ts) BEFORE this argv is built.
-  // Plugins: SDK passes `--plugin-dir <path>` per resolved plugin from the
-  // server-side cache (see plugin-installer.ts + session.ts plugins option);
-  // nothing is written into the loop's .claude/plugins/.
-  // The whole .claude/ dir is already rw-bound above (V_LOOP_CLAUDE).
-
-  // Sandbox doctrine (sandbox-chain CLAUDE.md) is composed into
-  // loops/<id>/.claude/CLAUDE.md by composeLoopClaudeConfig BEFORE this
-  // argv is built. CLAUDE_CONFIG_DIR points at .claude/ via the rw-bind
-  // above; CC natively loads CLAUDE.md from there as user-tier doctrine.
-  // No ro-bind needed.
+  // skills + agents + CLAUDE.md: composed into loops/<id>/.claude/{skills,
+  // agents,CLAUDE.md} by `composeLoopClaudeConfig()` (see compose.ts) BEFORE
+  // this argv is built. The whole .claude/ dir is rw-bound above
+  // (V_LOOP_CLAUDE) → SDK CLAUDE_CONFIG_DIR; CC natively loads CLAUDE.md /
+  // skills/ / agents/ from there as user-tier doctrine.
+  //
+  // Plugins: ~/.claude/plugins/ is ro-bound wholesale above. SDK resolves
+  // marketplace plugins natively from the loop's merged enabledPlugins +
+  // host's installed_plugins.json; the loopat-shipped builtin plugin is
+  // passed via the SDK `plugins:` option (it lives under LOOPAT_INSTALL_DIR,
+  // not in CC's plugin cache).
 
   // We used to ro-bind `~/.claude/.credentials.json` here, intending to share
   // MCP OAuth tokens — but that file only ever contains `claudeAiOauth` (the
@@ -357,8 +356,8 @@ export async function buildBwrapArgs(
   // member: personal/<user>/.loopat/config.json `mounts` — src strictly
   //   within personal/<user>/ subtree, so one member can't reach into
   //   another's data or operator's host paths.
-  // admin: no mount field in sandbox.json (would let a knowledge pusher mount
-  //   anything across the whole team).
+  // admin: no mount field in any .claude/settings.json (would let a knowledge
+  //   pusher mount anything across the whole team).
   const workspaceCfg = await loadConfig()
   for (const m of workspaceCfg.mounts ?? []) {
     if (!isValidOperatorMountSrc(m.src) || !isValidMountDst(m.dst)) {
@@ -409,9 +408,8 @@ export async function buildBwrapArgs(
     args.push("--ro-bind-try", miseData, miseData)
   }
 
-  // miseEnv always null in the profile model (mise toolchain integration
-  // was tied to the old sandbox concept). Block kept as a structural
-  // reminder for future toolchain re-introduction.
+  // Inject mise-resolved env (PATH, [env] keys) so the sandboxed shell sees
+  // the toolchain pinned by the merged .claude/mise.toml. Composed above.
   if (miseEnv) {
     for (const [k, v] of Object.entries(miseEnv as Record<string, string>)) {
       args.push("--setenv", k, v)
