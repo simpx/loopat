@@ -29,8 +29,14 @@ import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from ".
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Cable, Layers, BarChart3, Users, Globe, Share2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
 import { useSearchParams } from "react-router-dom"
+
+const inputClass = "w-full px-2.5 py-1.5 border border-gray-300 rounded text-[13px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors disabled:bg-gray-50 disabled:text-gray-400"
+const inputClassSm = "w-full px-2 py-1 border border-gray-300 rounded text-[11px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors"
 
 /** Mirror of server `providerEnvVarName` — keep the two in sync.
  *  "Anthropic" → "ANTHROPIC_API_KEY"; "DeepSeek" → "DEEPSEEK_API_KEY". */
@@ -41,16 +47,16 @@ function providerEnvVarName(providerName: string): string {
 
 type TabId = "personal-repo" | "providers" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
 
-const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
-  { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
-  { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default." },
-  { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals." },
-  { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault." },
-  { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier." },
-  { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time." },
-  { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove." },
-  { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration." },
-  { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings." },
+const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
+  { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
+  { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default.",     icon: Cpu },
+  { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
+  { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault.",         icon: Cable },
+  { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
+  { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
+  { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
+  { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
+  { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -120,12 +126,6 @@ export function SettingsPage() {
 
   return (
     <div className="h-full overflow-hidden bg-gray-50 flex flex-col">
-      <style>{`
-        .ip { width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; background: white; }
-        .ip:focus { border-color: #111827; }
-        .ip:disabled { background: #f3f4f6; color: #9ca3af; }
-      `}</style>
-
       <header className="shrink-0 border-b border-gray-200 bg-white px-4 sm:px-6 h-12 flex items-center gap-3">
         <button
           type="button"
@@ -188,8 +188,9 @@ export function SettingsPage() {
                           (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
                         }
                       >
+                        <t.icon size={14} className={`shrink-0 ${isActive ? "text-gray-600" : "text-gray-400"}`} />
                         <span className="flex-1 truncate">{t.label}</span>
-                        {locked && <span title="locked"><Lock size={11} className="text-amber-600 shrink-0" /></span>}
+                        {locked && <span title="locked"><Lock size={11} className="text-gray-400 shrink-0" /></span>}
                       </button>
                     </li>
                   )
@@ -209,8 +210,9 @@ export function SettingsPage() {
                             (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
                           }
                         >
+                          <t.icon size={14} className={`shrink-0 ${isActive ? "text-gray-600" : "text-gray-400"}`} />
                           <span className="flex-1 truncate">{t.label}</span>
-                          {locked && <span title="locked"><Lock size={11} className="text-amber-600 shrink-0" /></span>}
+                          {locked && <span title="locked"><Lock size={11} className="text-gray-400 shrink-0" /></span>}
                         </button>
                       </li>
                     )
@@ -232,6 +234,7 @@ export function SettingsPage() {
                                 (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
                               }
                             >
+                              <t.icon size={14} className={`shrink-0 ${isActive ? "text-gray-600" : "text-gray-400"}`} />
                               <span className="flex-1 truncate">{t.label}</span>
                             </button>
                           </li>
@@ -250,14 +253,17 @@ export function SettingsPage() {
 
         {/* tab content */}
         <main className="flex-1 min-w-0 min-h-0 overflow-auto">
-          <div className="max-w-[760px] mx-auto px-4 sm:px-6 py-5">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-5">
             {loading && !disk ? (
               <div className="text-[13px] text-gray-400 italic py-12 text-center">loading…</div>
             ) : (
               <>
                 <div className="mb-4">
-                  <h2 className="text-[16px] font-semibold text-gray-900">{activeMeta.label}</h2>
-                  <p className="text-[12.5px] text-gray-500 mt-0.5">{activeMeta.description}</p>
+                  <h2 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                    <activeMeta.icon size={18} className="text-gray-400" />
+                    {activeMeta.label}
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-0.5">{activeMeta.description}</p>
                 </div>
 
                 {isGatedAndLocked && (
@@ -274,8 +280,17 @@ export function SettingsPage() {
                   </div>
                 )}
 
-                <div className={isGatedAndLocked ? "opacity-50 pointer-events-none" : ""}>
-                  {active === "personal-repo" && <PersonalRepoPanel onDone={refresh} />}
+                <div className="relative">
+                  {isGatedAndLocked && (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/60 backdrop-blur-[1px] rounded-lg">
+                      <Lock size={24} className="text-gray-300" />
+                      <span className="text-[13px] text-gray-500 font-medium">Set up your personal repo first</span>
+                    </div>
+                  )}
+                  <div className={isGatedAndLocked ? "opacity-30" : ""}>
+                  {active === "personal-repo" && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-5"><PersonalRepoPanel onDone={refresh} /></div>
+                  )}
                   {active === "providers" && (
                     <ProvidersSection disk={disk} refExists={refExists} onChanged={refresh} disabled={isGatedAndLocked} />
                   )}
@@ -283,7 +298,7 @@ export function SettingsPage() {
                     <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
                   )}
                   {active === "mcp" && (
-                    <McpSection disabled={isGatedAndLocked} />
+                    <div className="rounded-lg border border-gray-200 bg-white p-5"><McpSection disabled={isGatedAndLocked} /></div>
                   )}
                   {active === "claude-config" && (
                     <ClaudeConfigPanel disabled={isGatedAndLocked} />
@@ -292,14 +307,15 @@ export function SettingsPage() {
                     <TokenUsagePage />
                   )}
                   {active === "admin-users" && (
-                    <UsersPanel currentUserId={ws.currentUser?.id ?? ""} />
+                    <div className="rounded-lg border border-gray-200 bg-white p-5"><UsersPanel currentUserId={ws.currentUser?.id ?? ""} /></div>
                   )}
                   {active === "admin-workspace" && (
                     <AdminWorkspacePanel />
                   )}
                   {active === "admin-serve" && (
-                    <ServePanel />
+                    <div className="rounded-lg border border-gray-200 bg-white p-5"><ServePanel /></div>
                   )}
+                </div>
                 </div>
               </>
             )}
@@ -553,19 +569,15 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         const isAddingModel = addingModel[name] ?? false
         const hasKey = p.apiKeyStored || p.apiKeyNewValue.trim() !== ""
         return (
-          <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+          <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden transition-shadow hover:shadow-sm">
             {/* Provider header */}
             <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50/50 border-b border-gray-100">
-              <label
-                className={`flex items-center gap-2 flex-1 min-w-0 select-none ${hasKey ? "cursor-pointer" : ""}`}
-                title={hasKey ? undefined : "set an API key to enable this provider"}
-              >
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-2.5 flex-1 min-w-0 select-none">
+                <Switch
                   checked={p.enabled}
-                  onChange={(e) => hasKey ? updateProv(name, { enabled: e.target.checked }) : undefined}
+                  onCheckedChange={(v) => hasKey ? updateProv(name, { enabled: v }) : undefined}
                   disabled={!hasKey}
-                  className="h-3.5 w-3.5 rounded"
+                  size="sm"
                 />
                 {editingProvName === name ? (
                   <input
@@ -577,7 +589,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                       if (e.key === "Enter") renameProvider(name)
                       if (e.key === "Escape") setEditingProvName(null)
                     }}
-                    className="ip text-[13px] font-semibold flex-1 min-w-0"
+                    className={cn(inputClass, "text-[13px] font-semibold flex-1 min-w-0")}
                   />
                 ) : (
                   <button
@@ -590,7 +602,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                   </button>
                 )}
                 {!p.enabled && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium shrink-0">disabled</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400 font-medium shrink-0">disabled</span>
                 )}
               </label>
               <button
@@ -610,7 +622,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                     value={p.baseUrl}
                     onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
                     placeholder="https://api.example.com"
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
                 <Labeled label="Max context tokens">
@@ -619,7 +631,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                     value={p.maxContextTokens}
                     onChange={(e) => updateProv(name, { maxContextTokens: e.target.value })}
                     placeholder="auto"
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
                 <Labeled label={p.apiKeyStored ? "API key (set — type to overwrite)" : "API key"} className="sm:col-span-2">
@@ -628,7 +640,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                     value={p.apiKeyNewValue}
                     onChange={(e) => updateProv(name, { apiKeyNewValue: e.target.value })}
                     placeholder={p.apiKeyStored ? "•••••• stored encrypted in vault" : "paste API key"}
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
               </div>
@@ -656,10 +668,10 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                       onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
                       placeholder="model ID (e.g. claude-sonnet-4-20250514)"
-                      className="ip flex-1 text-[11px]"
+                      className={cn(inputClass, "flex-1 text-[11px]")}
                     />
-                    <button onClick={() => addModel(name)} className="px-2.5 h-6 rounded bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-700">add</button>
-                    <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                    <Button size="xs" onClick={() => addModel(name)}>add</Button>
+                    <Button variant="ghost" size="xs" onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))}>cancel</Button>
                   </div>
                 )}
 
@@ -689,7 +701,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                           type="checkbox"
                           checked={m.enabled !== false}
                           onChange={() => toggleModel(name, m.id)}
-                          className="h-3 w-3 rounded"
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-gray-900 accent-gray-900"
                         />
                       </label>
                       <div className="flex-1 min-w-0 flex items-center gap-1">
@@ -703,7 +715,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                               if (e.key === "Enter") renameModel(name, m.id)
                               if (e.key === "Escape") setEditingModelKey(null)
                             }}
-                            className="ip text-[11px] flex-1 min-w-0"
+                            className={cn(inputClass, "text-[11px] flex-1 min-w-0")}
                           />
                         ) : (
                           <code
@@ -717,7 +729,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                           </code>
                         )}
                         {m.enabled === false && (
-                          <span className="text-[9px] text-gray-300 font-medium shrink-0">off</span>
+                          <span className="text-[10px] text-gray-300 font-medium shrink-0">off</span>
                         )}
                       </div>
                       <input
@@ -761,7 +773,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                           }, 4000)
                         }}
                         disabled={tmState === "testing" || (!p.apiKeyStored && !p.apiKeyNewValue.trim())}
-                        className={`shrink-0 text-[9px] px-1 py-0 rounded transition-colors ${
+                        className={`shrink-0 text-[10px] px-1 py-0 rounded transition-colors ${
                           !p.apiKeyStored && !p.apiKeyNewValue.trim() ? "opacity-0 group-hover:opacity-100 text-gray-300" :
                           tmState === "ok" ? "bg-emerald-100 text-emerald-700" :
                           tmState === "error" ? "bg-red-100 text-red-700" :
@@ -831,10 +843,10 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addProvider(); if (e.key === "Escape") setAdding(false) }}
             placeholder="provider name"
-            className="ip flex-1"
+            className={cn(inputClass, "flex-1")}
           />
-          <button onClick={addProvider} className="px-2.5 h-7 rounded bg-gray-900 text-white text-xs hover:bg-gray-700">add</button>
-          <button onClick={() => { setAdding(false); setNewName("") }} className="text-xs text-gray-400 hover:text-gray-700">cancel</button>
+          <Button size="sm" onClick={addProvider}>add</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setAdding(false); setNewName("") }}>cancel</Button>
         </div>
       ) : (
         <button
@@ -845,15 +857,11 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         </button>
       )}
 
-      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-        {err && <span className="text-[11px] text-red-600">{err}</span>}
-        <button
-          onClick={save}
-          disabled={saving || disabled}
-          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
-        >
+      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
+        {err && <span className="text-xs text-red-600">{err}</span>}
+        <Button size="sm" onClick={save} disabled={saving || disabled}>
           {saving ? "saving…" : "save providers"}
-        </button>
+        </Button>
       </div>
 
     </div>
@@ -909,7 +917,7 @@ function ShellSection({ disk, onChanged, disabled }: {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="rounded-lg border border-gray-200 bg-white overflow-hidden p-4 flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         {SHELL_PRESETS.map((p) => (
           <label
@@ -953,22 +961,18 @@ function ShellSection({ disk, onChanged, disabled }: {
                 value={val}
                 onChange={(e) => { setVal(e.target.value); setSaved(false) }}
                 placeholder="/usr/bin/nushell"
-                className="ip font-mono"
+                className={cn(inputClass, "font-mono")}
               />
             )}
           </div>
         </label>
       </div>
-      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-        {err && <span className="text-[11px] text-red-600">{err}</span>}
-        {saved && !err && <span className="text-[11px] text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
-        <button
-          onClick={save}
-          disabled={saving || disabled}
-          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
-        >
+      <div className="flex items-center justify-end gap-2 p-3 border-t border-gray-100">
+        {err && <span className="text-xs text-red-600">{err}</span>}
+        {saved && !err && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
+        <Button size="sm" onClick={save} disabled={saving || disabled}>
           {saving ? "saving…" : "save shell"}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -1001,7 +1005,14 @@ function McpSection({ disabled }: { disabled: boolean }) {
   }, [])
 
   return (
-    <div className={disabled ? "pointer-events-none opacity-50" : ""}>
+    <div className="relative">
+      {disabled && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/60 backdrop-blur-[1px] rounded-lg">
+          <Lock size={24} className="text-gray-300" />
+          <span className="text-[13px] text-gray-500 font-medium">Set up your personal repo first</span>
+        </div>
+      )}
+      <div className={disabled ? "opacity-30" : ""}>
       {flash && (
         <div
           className={`mb-3 rounded px-3 py-2 text-[12px] ${
@@ -1014,6 +1025,7 @@ function McpSection({ disabled }: { disabled: boolean }) {
         </div>
       )}
       <McpStatusPanel variant="settings" />
+    </div>
     </div>
   )
 }

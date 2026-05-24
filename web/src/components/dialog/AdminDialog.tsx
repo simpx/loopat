@@ -1,7 +1,11 @@
 import { useState, useEffect, useCallback } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { cn } from "@/lib/utils"
 import { Plus, Trash2 } from "lucide-react"
+
+const inputClass = "w-full px-2.5 py-1.5 border border-gray-300 rounded text-[13px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors disabled:bg-gray-50 disabled:text-gray-400"
 import {
   listAdminUsers,
   activateAdminUser,
@@ -460,8 +464,6 @@ export function WorkspacePanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <style>{`.ip { width: 100%; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; outline: none; background: white; } .ip:focus { border-color: #111827; } .ip:disabled { background: #f3f4f6; color: #9ca3af; }`}</style>
-
       {names.map((name) => {
         const p = draft.providers[name]
         const isAddingModel = addingModel[name] ?? false
@@ -470,16 +472,12 @@ export function WorkspacePanel() {
           <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden">
             {/* Provider header */}
             <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50/50 border-b border-gray-100">
-              <label
-                className={`flex items-center gap-2 flex-1 min-w-0 select-none ${hasKey ? "cursor-pointer" : ""}`}
-                title={hasKey ? undefined : "set an API key to enable this provider"}
-              >
-                <input
-                  type="checkbox"
+              <label className="flex items-center gap-2.5 flex-1 min-w-0 select-none">
+                <Switch
                   checked={p.enabled}
-                  onChange={(e) => hasKey ? updateProv(name, { enabled: e.target.checked }) : undefined}
+                  onCheckedChange={(v) => hasKey ? updateProv(name, { enabled: v }) : undefined}
                   disabled={!hasKey}
-                  className="h-3.5 w-3.5 rounded"
+                  size="sm"
                 />
                 {editingProvName === name ? (
                   <input
@@ -491,7 +489,7 @@ export function WorkspacePanel() {
                       if (e.key === "Enter") renameProvider(name)
                       if (e.key === "Escape") setEditingProvName(null)
                     }}
-                    className="ip text-[13px] font-semibold flex-1 min-w-0"
+                    className={cn(inputClass, "text-[13px] font-semibold flex-1 min-w-0")}
                   />
                 ) : (
                   <button
@@ -524,7 +522,7 @@ export function WorkspacePanel() {
                     value={p.baseUrl}
                     onChange={(e) => updateProv(name, { baseUrl: e.target.value })}
                     placeholder="https://api.example.com"
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
                 <Labeled label="Max context tokens">
@@ -533,7 +531,7 @@ export function WorkspacePanel() {
                     value={p.maxContextTokens ?? ""}
                     onChange={(e) => updateProv(name, { maxContextTokens: e.target.value ? Number(e.target.value) : undefined })}
                     placeholder="auto"
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
                 <Labeled label={p.hasKey && !p.keyDirty ? "API Key (set — type to overwrite)" : "API Key"} className="sm:col-span-2">
@@ -542,7 +540,7 @@ export function WorkspacePanel() {
                     value={p.apiKey}
                     onChange={(e) => updateProv(name, { apiKey: e.target.value, keyDirty: true })}
                     placeholder={p.hasKey && !p.keyDirty ? "•••••• stored" : "API key"}
-                    className="ip"
+                    className={inputClass}
                   />
                 </Labeled>
               </div>
@@ -570,10 +568,10 @@ export function WorkspacePanel() {
                       onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
                       onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
                       placeholder="model ID (e.g. claude-sonnet-4-20250514)"
-                      className="ip flex-1 text-[11px]"
+                      className={cn(inputClass, "flex-1 text-[11px]")}
                     />
-                    <button onClick={() => addModel(name)} className="px-2.5 h-6 rounded bg-gray-900 text-white text-[10px] font-medium hover:bg-gray-700">add</button>
-                    <button onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))} className="text-[10px] text-gray-400 hover:text-gray-600">cancel</button>
+                    <Button size="xs" onClick={() => addModel(name)}>add</Button>
+                    <Button variant="ghost" size="xs" onClick={() => setAddingModel((a) => ({ ...a, [name]: false }))}>cancel</Button>
                   </div>
                 )}
 
@@ -603,7 +601,7 @@ export function WorkspacePanel() {
                           type="checkbox"
                           checked={m.enabled !== false}
                           onChange={() => toggleModel(name, m.id)}
-                          className="h-3 w-3 rounded"
+                          className="h-3.5 w-3.5 rounded border-gray-300 text-gray-900 accent-gray-900"
                         />
                       </label>
                       <div className="flex-1 min-w-0 flex items-center gap-1">
@@ -617,7 +615,7 @@ export function WorkspacePanel() {
                               if (e.key === "Enter") renameModel(name, m.id)
                               if (e.key === "Escape") setEditingModelKey(null)
                             }}
-                            className="ip text-[11px] flex-1 min-w-0"
+                            className={cn(inputClass, "text-[11px] flex-1 min-w-0")}
                           />
                         ) : (
                           <code
@@ -745,7 +743,7 @@ export function WorkspacePanel() {
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") addProvider(); if (e.key === "Escape") setAdding(false) }}
             placeholder="provider name"
-            className="ip flex-1"
+            className={cn(inputClass, "flex-1")}
           />
           <button onClick={addProvider} className="px-2.5 h-7 rounded bg-gray-900 text-white text-xs hover:bg-gray-700">add</button>
           <button onClick={() => { setAdding(false); setNewName("") }} className="text-xs text-gray-400 hover:text-gray-700">cancel</button>
@@ -759,15 +757,11 @@ export function WorkspacePanel() {
         </button>
       )}
 
-      <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
-        {err && <span className="text-[11px] text-red-600">{err}</span>}
-        <button
-          onClick={save}
-          disabled={saving}
-          className="px-3 h-8 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 disabled:opacity-50"
-        >
+      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
+        {err && <span className="text-xs text-red-600">{err}</span>}
+        <Button size="sm" onClick={save} disabled={saving}>
           {saving ? "saving…" : "save providers"}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -851,22 +845,12 @@ export function ServePanel() {
       </div>
 
       <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={https}
-            onChange={(e) => setServeHttps(e.target.checked)}
-            className="rounded border-gray-300"
-          />
+        <label className="flex items-center gap-2.5 text-sm text-gray-700">
+          <Switch checked={https} onCheckedChange={setServeHttps} size="sm" />
           HTTPS
         </label>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            checked={withPort}
-            onChange={(e) => setServeWithPort(e.target.checked)}
-            className="rounded border-gray-300"
-          />
+        <label className="flex items-center gap-2.5 text-sm text-gray-700">
+          <Switch checked={withPort} onCheckedChange={setServeWithPort} size="sm" />
           Show port in URL
         </label>
       </div>
