@@ -131,17 +131,25 @@ content type:
 | `agents/<name>.md` | Symlink union, same rule. |
 | `mise.toml` / `mise.lock` | TOML table-level union — `[tools]` and `[env]` sections each merge by key. |
 
-The result is written to `loops/<loop-id>/.claude/`. When the SDK starts,
-`CLAUDE_CONFIG_DIR` points here and CC's user tier reads it directly.
+The result is written to `loops/<loop-id>/.claude/` **once, when the loop
+is created** — and from then on **the snapshot is immutable**. Later admin
+pushes to knowledge don't change what an existing loop sees. This is what
+makes loops reproducible: spawn the same loop tomorrow and it loads the
+same plugin set, the same skills, the same CLAUDE.md, with the same
+contents as the day it was created. (See ["Plugin version lock"](#plugin-version-lock-the-loop-snapshot)
+below for how the snapshot also pins specific plugin versions, not just
+which plugins.)
 
 **Inside the sandbox, two `.claude/` directories actually exist** — and
 that's by design:
 
 1. **`loops/<id>/.claude/`** — the merged user tier, the loopat-composed
-   source of truth. Mounted at the SDK's `CLAUDE_CONFIG_DIR`.
+   source of truth, **frozen at loop creation**. Mounted at the SDK's
+   `CLAUDE_CONFIG_DIR`.
 2. **`<workdir>/.claude/`** — the repo's own `.claude/`, read as project
-   tier (and local tier for `*.local.*` files) directly by the SDK. Loopat
-   does not merge this; the repo contributes whatever it contributes.
+   tier (and local tier for `*.local.*` files) directly by the SDK at every
+   spawn. Loopat does not merge this; the repo contributes whatever it
+   contributes, and editing it takes effect on the next spawn.
 
 There is no third `.claude/` — **the sandbox does not see your host
 machine's `~/.claude/`**. The sandbox `$HOME` is a fresh overlay with an
@@ -153,6 +161,85 @@ because they don't depend on whatever happens to be in your home directory.
 ro-bound wholesale so the SDK can resolve marketplace plugins. Sibling
 files like `~/.claude.json` and `~/.claude/.credentials.json` stay
 invisible — see the next section.)
+
+---
+
+## Plugin version lock: the loop snapshot
+
+`enabledPlugins` in `settings.json` only carries an **on/off switch** — it
+doesn't say *which version* of each plugin to load. Without a version pin,
+a member running `claude plugin update` on the host would silently change
+what an already-created loop sees on its next spawn. That violates
+reproducibility.
+
+CC already provides the right primitive: **`~/.claude/plugins/installed_plugins.json`**.
+It records, per spec, the `version`, the marketplace's `gitCommitSha` at
+install time, and the local `installPath`. Personal CC users don't think
+of it as a lockfile, but it is one — it's the only place the *specific
+code* of each installed plugin is identified.
+
+Loopat treats `installed_plugins.json` as a **CC-native lockfile** and
+brings it into the tier merge:
+
+- **`knowledge/.loopat/.claude/plugins/installed_plugins.json`** — team
+  lock, committed by admin
+- **`personal/<user>/.loopat/.claude/plugins/installed_plugins.json`** —
+  personal override, never pushed to team
+- merged per-spec, last-wins (same rule as `enabledPlugins`)
+- snapshot written to **`loops/<id>/.claude/plugins/installed_plugins.json`**
+  at loop creation, never changes
+- bwrap file-binds this snapshot **over** the sandbox's host installed
+  state, so the SDK reads pinned versions
+
+### What "version" and "sha" mean in this model
+
+| Field | Role |
+|---|---|
+| `version` | **canonical identifier** — used by CC to name the cache directory (`~/.claude/plugins/cache/<m>/<plugin>/<version>/`) and to decide "is this already installed?". |
+| `gitCommitSha` | **audit metadata** — records what marketplace commit produced this install. Used for warnings and bug-triage, not lookups. |
+
+This mirrors CC's own design intent: **plugin authors are trusted to bump
+the version when code changes**. If they don't, two different shas can
+share a version label — the second `install` overwrites the first in
+cache. Loopat doesn't try to police this contract; if authors break it,
+sha-mismatch warnings surface during spawn so users can investigate.
+
+### Three principles, one mechanism
+
+1. **Old loops never change** — the snapshot at `loops/<id>/.claude/plugins/installed_plugins.json`
+   is immutable. Even after admin pushes a new lock or member runs
+   `claude plugin update`, an existing loop's pinned versions don't move.
+   The sandbox bind ensures the SDK reads the snapshot's `installPath`,
+   which points into the host's cache (`~/.claude/plugins/cache/.../<version>/`).
+   As long as that cache directory survives (which it does unless someone
+   explicitly `claude plugin uninstall`'s it), the loop runs the same code
+   forever.
+2. **Admin gates team-wide use** — without admin's commit to
+   `knowledge/.loopat/.claude/plugins/installed_plugins.json` (or to
+   `settings.json`'s `enabledPlugins`), no member's *new* loop will install
+   a new plugin. Old loops are already frozen.
+3. **Personal can override locally** — a user can put their own
+   `personal/.loopat/.claude/plugins/installed_plugins.json` to pin a
+   different version of any spec; their own future loops use it, the team
+   stays unaffected.
+
+### What happens when the host can't honor the pin
+
+Spawning a loop whose lock says `cicd@dashscope-skills version 0.1.0`:
+
+- **Host has 0.1.0 in cache** → silent fast path. SDK reads snapshot →
+  loads cache/.../0.1.0/. ✓
+- **Host doesn't have 0.1.0** (member's marketplace clone has advanced;
+  CC's `install` would now produce a different version) → loopat runs
+  `claude plugin install`, then checks the resulting `version`. If it
+  doesn't match the pin, **spawn fails with a clear message** telling the
+  user how to recover (admin bumps the team lock, or member manually
+  restores the pinned version via marketplace clone checkout). This is
+  **fail-loud, not auto-heal** — option (a) in our design discussions.
+- **Future enhancement**: option (b), where loopat performs the
+  marketplace checkout dance automatically to install the exact sha. Not
+  yet implemented; the manual recovery path is fine as long as version
+  drift is rare.
 
 ---
 
@@ -245,6 +332,7 @@ loopat each activate it, and where it lands inside the sandbox.
 | **How the SDK activates it** | Discovered via `settingSources` (`'user'`, `'project'`). Narrowing option: `skills: 'all' \| string[]`. | Discovered via `settingSources` *or* defined programmatically via `agents: { <name>: { ... } }`. | Either via `settingSources` (settings.json) *or* directly via the `mcpServers:` option (loopat uses this so it can inject credentials). | Either via `settingSources` (CC plugin cache resolution) *or* programmatically via `plugins: [{type:"local", path:...}]`. | Either via `settingSources` *or* programmatically via the `hooks:` option. | Not an SDK concept. |
 | **How loopat activates it** | Drop into any tier's `.claude/skills/`. Merged into `loops/<id>/.claude/skills/` as a symlink union; SDK discovers via `settingSources: 'user'`. | Drop into any tier's `.claude/agents/`. Same merge mechanism. | Add to any tier's `.claude/settings.json` `mcpServers`. Compose merges by key; loopat then reads the selected vault, injects credentials, and passes the augmented map via the `mcpServers:` SDK option. | Add to any tier's `.claude/settings.json` `enabledPlugins`. Compose merges. `ensureLoopPluginsInstalled` runs `claude plugin install` on host for anything missing; bwrap ro-binds `~/.claude/plugins/` wholesale so SDK resolves natively. | Add to any tier's `.claude/settings.json` `hooks`. Standard `settingSources` discovery. | Add to any tier's `.claude/mise.toml`. Bwrap runs `mise install` + `mise env --json` on the merged file before sandbox spawn and injects `PATH` / env via `--setenv`. |
 | **Where it lands in the sandbox** | `loops/<id>/.claude/skills/<name>/` — a symlink to the source tier's host path. | `loops/<id>/.claude/agents/<name>.md` — symlink to the source tier's host path. | Server config lives in `loops/<id>/.claude/settings.json` (no creds). Augmented config (with creds) reaches the SDK in memory; the running server is a regular host process the SDK talks to. | Plugin code is at `~/.claude/plugins/marketplaces/<m>/plugins/<n>/` (ro-bound wholesale into the sandbox). Activation is via the loop's merged `enabledPlugins`. | `loops/<id>/.claude/settings.json` hooks field; script lives at its source tier's host path (covered by the workspace / personal binds). | `loops/<id>/.claude/mise.toml` + injected env vars; tool binaries from host `~/.local/share/mise/` (also bound in). |
+| **Version lock** | The file contents are themselves the "lock" — a skill is just markdown. compose symlinks point to a specific host path; renaming or rewriting the source file changes any loop's spawn-time view. (Frozen for the loop only if the source file itself stops changing.) | Same as skill — the `.md` file is the lock. | The `mcpServers` entry (transport / command / args / env-keys) IS the spec; it's deep-merged into the loop's `settings.json` snapshot at creation, so the loop sees the merged config forever. Credentials are injected fresh from the active vault at each spawn (intentionally not pinned). | **`.claude/plugins/installed_plugins.json`** — CC-native, same shape host writes. Merged across tiers (per-spec last-wins), snapshotted into `loops/<id>/.claude/plugins/installed_plugins.json` at creation, file-bound over the host's at spawn. Pins both `version` (used for cache resolution) and `gitCommitSha` (audit). | The script path in `settings.json` is the "lock". As with skills, the script *content* is whatever is at that path at spawn time. (Hooks pointing into team-managed source dirs are effectively pinned by the source not being rewritten.) | `.claude/mise.lock` — CC-extended, mise-native. Compose merges per-tool last-wins; snapshot frozen with the loop. `mise install` uses the lockfile to resolve identical versions across machines. |
 
 ---
 

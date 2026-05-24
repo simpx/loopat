@@ -64,6 +64,7 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
   const [data, setData] = useState<TiersResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set(["personal"]))
+  const [profilesOpen, setProfilesOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -83,9 +84,23 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
     })
   }
 
-  const sorted = data?.tiers
-    ? [...data.tiers].sort((a, b) => tierOrder(a.id) - tierOrder(b.id))
-    : []
+  const all = data?.tiers ?? []
+  const profileTiers = all.filter((t) => t.id.startsWith("profile:"))
+  const nonProfileTiers = all.filter((t) => !t.id.startsWith("profile:")).sort((a, b) => tierOrder(a.id) - tierOrder(b.id))
+
+  // Summed stats across all profiles
+  const profileSummary = {
+    pluginCount: profileTiers.reduce((s, t) => s + t.pluginCount, 0),
+    mcpServerCount: profileTiers.reduce((s, t) => s + t.mcpServerCount, 0),
+    overrideCount: profileTiers.reduce((s, t) => s + Object.keys(t.overrides).length, 0),
+  }
+
+  // Build summary bar tiles: team, profiles-group, personal, project, local
+  const summaryTiles = [
+    ...nonProfileTiers.filter((t) => tierOrder(t.id) < 3),
+    ...(profileTiers.length > 0 ? [{ id: "__profiles__", label: `Profiles (${profileTiers.length})`, tier: profileTiers[0], isGroup: true }] : []),
+    ...nonProfileTiers.filter((t) => tierOrder(t.id) >= 3),
+  ] as Array<TierInfo | { id: string; label: string; tier: TierInfo; isGroup: true }>
 
   if (loading && !data) {
     return <div className="flex items-center gap-2 py-12 justify-center text-[13px] text-gray-400"><RefreshCw size={13} className="animate-spin" /> loading tiers…</div>
@@ -100,7 +115,7 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
           <div>
             <span className="text-[13px] font-medium text-gray-900">Claude Config Composition</span>
             <span className="text-[11px] text-gray-400 ml-2">
-              {sorted.filter((t) => t.exists).length} active tiers · merged at loop spawn
+              {all.filter((t) => t.exists).length} active tiers · merged at loop spawn
             </span>
           </div>
           <div className="flex-1" />
@@ -111,7 +126,11 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
 
         {/* Tier summary bar */}
         <div className="flex flex-wrap gap-px bg-gray-100">
-          {sorted.map((tier) => {
+          {summaryTiles.map((tile) => {
+            if ("isGroup" in tile) {
+              return <ProfilesTileButton key="__profiles__" profiles={profileTiers} expanded={expanded} summary={profileSummary} open={profilesOpen} onToggle={() => setProfilesOpen(!profilesOpen)} />
+            }
+            const tier = tile as TierInfo
             const meta = getTierMeta(tier.id)
             const Icon = meta.icon
             const isExp = expanded.has(tier.id)
@@ -143,10 +162,46 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
             )
           })}
         </div>
+
+        {/* Profiles expansion — full width below the tiles row */}
+        {profilesOpen && profileTiers.length > 0 && (
+          <div className="border-t border-gray-200 bg-gray-50/50 px-4 py-2 space-y-0.5">
+            <div className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1 mb-1">
+              Select a profile to expand
+            </div>
+            {profileTiers.map((p) => {
+              const isExp = expanded.has(p.id)
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    toggleExpand(p.id)
+                    setProfilesOpen(false)
+                    // scroll to the expanded tier detail
+                    setTimeout(() => {
+                      document.getElementById(`tier-${p.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }, 50)
+                  }}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-white/80 text-left transition-colors"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isExp ? "bg-blue-400" : "bg-gray-300"}`} />
+                  <span className="text-[12px] text-gray-700 flex-1">{p.label.replace("Profile: ", "")}</span>
+                  <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+                    {p.pluginCount > 0 && <>{p.pluginCount}p </>}
+                    {p.mcpServerCount > 0 && <>{p.mcpServerCount}m</>}
+                    {!p.pluginCount && !p.mcpServerCount && "—"}
+                  </span>
+                  {isExp && <ChevronDown size={9} className="text-blue-400 shrink-0" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
-      {/* Expanded tier detail */}
-      {sorted.map((tier) => (
+      {/* Expanded tier detail — profile tiers rendered after non-profiles */}
+      {[...nonProfileTiers, ...profileTiers].map((tier) => (
         <TierDetail
           key={tier.id}
           tier={tier}
@@ -212,7 +267,7 @@ function TierDetail({
   const overrideCount = Object.keys(tier.overrides).length
 
   return (
-    <div className={`rounded-xl border overflow-hidden transition-shadow ${canEdit ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50/50"}`}>
+    <div id={`tier-${tier.id}`} className={`rounded-xl border overflow-hidden transition-shadow ${canEdit ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50/50"}`}>
       {/* Header */}
       <div className={`flex items-center gap-3 px-4 py-3 border-b border-gray-100 border-l-2 ${meta.borderClass}`}>
         <Icon size={16} className="text-gray-500 shrink-0" />
@@ -550,5 +605,49 @@ function MarketplaceEditor({
         </button>
       )}
     </div>
+  )
+}
+
+// ── profiles dropdown tile ──
+
+function ProfilesTileButton({
+  profiles,
+  expanded,
+  summary,
+  open,
+  onToggle,
+}: {
+  profiles: TierInfo[]
+  expanded: Set<string>
+  summary: { pluginCount: number; mcpServerCount: number; overrideCount: number }
+  open: boolean
+  onToggle: () => void
+}) {
+  const anyExpanded = profiles.some((p) => expanded.has(p.id))
+
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`flex-1 min-w-[120px] flex items-center gap-2 px-3 py-2.5 bg-white hover:bg-gray-50 transition-colors text-left ${anyExpanded || open ? "bg-gray-50" : ""}`}
+    >
+      <Blocks size={14} className="text-blue-400 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-medium text-gray-700 truncate">
+            Profiles ({profiles.length})
+          </span>
+        </div>
+        <div className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1.5">
+          {summary.pluginCount > 0 && <span>{summary.pluginCount}p</span>}
+          {summary.mcpServerCount > 0 && <span>{summary.mcpServerCount}m</span>}
+          {summary.pluginCount === 0 && summary.mcpServerCount === 0 && <span>—</span>}
+          {summary.overrideCount > 0 && (
+            <span className="text-amber-500">{summary.overrideCount}↗</span>
+          )}
+        </div>
+      </div>
+      {open ? <ChevronDown size={10} className="text-gray-400 shrink-0" /> : <ChevronRight size={10} className="text-gray-400 shrink-0" />}
+    </button>
   )
 }
