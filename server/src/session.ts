@@ -320,13 +320,17 @@ class LoopSession {
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
 
-    // Compose skills + agents + profile doctrine into the loop's
-    // private .claude/. Re-run every spawn so newly-added workspace/personal
-    // skills + profile CLAUDE.md edits show up.
-    // Pass loopWorkdir as the 5th-layer source — if it has a .claude/, it
-    // gets merged in as repo-tier (CC project-tier semantics).
-    const { loopWorkdir } = await import("./paths")
-    await composeLoopClaudeConfig(loopId, driver, meta.config?.profiles, loopWorkdir(loopId))
+    // Compose runs ONCE at loop creation (loops.ts:createLoop). At spawn we
+    // only re-compose if the snapshot is missing — this happens for loops
+    // created before the snapshot model landed, and self-heals on first spawn.
+    //
+    // The "compose once and freeze" semantics is what makes principle 1
+    // (old loops never change) work: subsequent admin pushes to knowledge
+    // don't affect a loop that's already been materialized.
+    const composedSettingsPath = join(loopClaudeDir(loopId), "settings.json")
+    if (!existsSync(composedSettingsPath)) {
+      await composeLoopClaudeConfig(loopId, driver, meta.config?.profiles)
+    }
     // Ensure host CC has every marketplace registered + every enabled plugin
     // installed. We don't need the resolved paths (sandbox sees host
     // ~/.claude/plugins/ via a wholesale ro-bind in bwrap, and the inner SDK
