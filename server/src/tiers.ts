@@ -503,23 +503,15 @@ export async function refreshMarketplaces(user: string): Promise<{ ok: boolean; 
       const src = (entry as any)?.source
       if (!src) continue
 
-      // Determine the add path
+      // Determine the add path. CC auto-detects source type from the path
+      // (URL → git, owner/repo → github, absolute path → directory).
       let addPath: string | undefined
-      let sourceFlag: string | undefined
-      let sourceValue: string | undefined
-
       if (src.source === "directory" && typeof src.path === "string") {
         addPath = src.path
-        sourceFlag = "--source"
-        sourceValue = "directory"
       } else if (src.source === "github" && typeof src.repo === "string") {
         addPath = src.repo
-        sourceFlag = "--source"
-        sourceValue = "github"
       } else if ((src.source === "git" || src.source === "url") && typeof src.url === "string") {
         addPath = src.url
-        sourceFlag = "--source"
-        sourceValue = "git"
       }
 
       if (!addPath) continue
@@ -552,11 +544,9 @@ export async function refreshMarketplaces(user: string): Promise<{ ok: boolean; 
         await runClaude(["plugin", "marketplace", "remove", existing])
       }
 
-      // Build add command: claude plugin marketplace add <name> <path> --source <type> [--branch <b>]
+      // Build add command: claude plugin marketplace add <name> <path> [--branch <b>]
+      // CC auto-detects source type from path; no --source flag needed.
       const args = ["plugin", "marketplace", "add", name, addPath]
-      if (sourceFlag && sourceValue) {
-        args.push(sourceFlag, sourceValue)
-      }
       if (typeof src.branch === "string" && src.branch) {
         args.push("--branch", src.branch)
       }
