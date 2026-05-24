@@ -839,3 +839,113 @@ describe("composeFromPlan — CLAUDE.md", () => {
   })
 })
 
+// ─── 11. installed_plugins.json (per-loop plugin version lock) ───────────
+
+/**
+ * Helper: write a .claude/plugins/installed_plugins.json under the given
+ * .claude/ dir, in the CC-native shape.
+ */
+async function writeInstalledPlugins(
+  claudeDir: string,
+  plugins: Record<string, { version: string; gitCommitSha?: string; installPath?: string }>,
+) {
+  const pluginsDir = join(claudeDir, "plugins")
+  await mkdir(pluginsDir, { recursive: true })
+  const ip = {
+    version: 1,
+    plugins: Object.fromEntries(
+      Object.entries(plugins).map(([spec, v]) => [
+        spec,
+        [{
+          scope: "user",
+          installPath: v.installPath ?? `/host/cache/${spec}/${v.version}`,
+          version: v.version,
+          installedAt: "2026-05-24T00:00:00.000Z",
+          lastUpdated: "2026-05-24T00:00:00.000Z",
+          gitCommitSha: v.gitCommitSha ?? "0000000",
+        }],
+      ]),
+    ),
+  }
+  await writeFile(join(pluginsDir, "installed_plugins.json"), JSON.stringify(ip, null, 2))
+}
+
+describe("compose — installed_plugins.json (plugin version lock)", () => {
+  test("team's lock is snapshotted into loops/<id>/.claude/plugins/installed_plugins.json", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "cicd@market": true } } })
+    await writeInstalledPlugins(workspaceTeamClaudeDir(), {
+      "cicd@market": { version: "0.1.0", gitCommitSha: "abc123" },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-lock-1", "alice")
+    expect(result.installedPluginsPath).not.toBeNull()
+    const snapshot = JSON.parse(await readFile(result.installedPluginsPath!, "utf8"))
+    expect(snapshot.plugins["cicd@market"][0].version).toBe("0.1.0")
+    expect(snapshot.plugins["cicd@market"][0].gitCommitSha).toBe("abc123")
+  })
+
+  test("personal lock overrides team lock per spec (version + sha both replaced)", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "cicd@market": true } } })
+    await writeInstalledPlugins(workspaceTeamClaudeDir(), {
+      "cicd@market": { version: "0.1.0", gitCommitSha: "abc" },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+    await writeInstalledPlugins(personalClaudeDir("alice"), {
+      "cicd@market": { version: "9.9.9-alice-fork", gitCommitSha: "deadbeef" },
+    })
+
+    const result = await composeLoopClaudeConfig("loop-lock-2", "alice")
+    const snapshot = JSON.parse(await readFile(result.installedPluginsPath!, "utf8"))
+    expect(snapshot.plugins["cicd@market"][0].version).toBe("9.9.9-alice-fork")
+    expect(snapshot.plugins["cicd@market"][0].gitCommitSha).toBe("deadbeef")
+  })
+
+  test("specs only in one tier coexist with specs only in another (per-spec union)", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "team-only@m": true } } })
+    await writeInstalledPlugins(workspaceTeamClaudeDir(), {
+      "team-only@m": { version: "1.0.0", gitCommitSha: "team-sha" },
+    })
+    await makePersonal("alice", {
+      defaultProfiles: [],
+      settings: { enabledPlugins: { "alice-only@m": true } },
+    })
+    await writeInstalledPlugins(personalClaudeDir("alice"), {
+      "alice-only@m": { version: "2.0.0", gitCommitSha: "alice-sha" },
+    })
+
+    const result = await composeLoopClaudeConfig("loop-lock-3", "alice")
+    const snapshot = JSON.parse(await readFile(result.installedPluginsPath!, "utf8"))
+    expect(Object.keys(snapshot.plugins).sort()).toEqual(["alice-only@m", "team-only@m"])
+    expect(snapshot.plugins["team-only@m"][0].version).toBe("1.0.0")
+    expect(snapshot.plugins["alice-only@m"][0].version).toBe("2.0.0")
+  })
+
+  test("no tier publishes installed_plugins.json → installedPluginsPath is null + file absent", async () => {
+    await makeTeam({ settings: { enabledPlugins: { "foo@m": true } } })
+    await makePersonal("alice", { defaultProfiles: [] })
+
+    const result = await composeLoopClaudeConfig("loop-lock-4", "alice")
+    expect(result.installedPluginsPath).toBeNull()
+    expect(existsSync(join(loopClaudeDir("loop-lock-4"), "plugins", "installed_plugins.json"))).toBe(false)
+  })
+
+  test("re-running compose with the lock removed cleans up the previous snapshot", async () => {
+    // First compose: a lock exists
+    await makeTeam({ settings: { enabledPlugins: { "x@m": true } } })
+    await writeInstalledPlugins(workspaceTeamClaudeDir(), {
+      "x@m": { version: "1.0.0" },
+    })
+    await makePersonal("alice", { defaultProfiles: [] })
+    const first = await composeLoopClaudeConfig("loop-lock-5", "alice")
+    expect(first.installedPluginsPath).not.toBeNull()
+
+    // Now wipe the lock at the source, re-compose: stale lock must be removed
+    await rm(join(workspaceTeamClaudeDir(), "plugins"), { recursive: true })
+    const second = await composeLoopClaudeConfig("loop-lock-5", "alice")
+    expect(second.installedPluginsPath).toBeNull()
+    expect(existsSync(join(loopClaudeDir("loop-lock-5"), "plugins", "installed_plugins.json"))).toBe(false)
+  })
+})
+
+

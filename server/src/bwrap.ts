@@ -253,6 +253,21 @@ export async function buildBwrapArgs(
   const userClaudePluginsDir = join(home, ".claude", "plugins")
   args.push("--ro-bind-try", userClaudePluginsDir, userClaudePluginsDir)
 
+  // Plugin version lock: if compose wrote a per-loop installed_plugins.json
+  // snapshot, file-level bind it OVER host's. This is what makes principle 1
+  // (loops are frozen at creation) work — the SDK reads pinned versions from
+  // the snapshot, not whatever host happens to have installed now.
+  // bwrap layers binds in order: the wholesale dir bind above lands first,
+  // then this file bind shadows the single file inside it.
+  const loopInstalledPlugins = join(loopClaudePath, "plugins", "installed_plugins.json")
+  if (existsSync(loopInstalledPlugins)) {
+    args.push(
+      "--ro-bind",
+      loopInstalledPlugins,
+      join(userClaudePluginsDir, "installed_plugins.json"),
+    )
+  }
+
   // ── vault symlink ──
   // Personal is bound wholesale above, so all named vaults under
   // .loopat/vaults/ are visible inside the sandbox (no isolation between

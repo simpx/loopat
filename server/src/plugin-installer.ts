@@ -140,17 +140,59 @@ async function ensureExtraMarketplaces(
   }
 }
 
+/**
+ * Install + version-pin check.
+ *
+ * `lockedVersions` maps spec → required version label, sourced from the loop's
+ * snapshot installed_plugins.json (compose merged it from team/profile/personal
+ * tiers). When provided we check the host already has that exact version in
+ * its CC cache; if not, run `claude plugin install` and verify the resulting
+ * version matches.
+ *
+ * Mismatch is loud-failure (option a — see docs/composition.md). The recovery
+ * is for the user to either restore the pinned version manually (e.g. via
+ * marketplace clone checkout dance) or for admin to bump the team lock.
+ * Option b (loopat does the checkout dance automatically) is a future add.
+ *
+ * When `lockedVersions[spec]` is null/undefined: no version pin → fall back to
+ * the old "install if missing" behavior.
+ */
 async function ensurePluginsInstalled(
   specs: string[],
   ip: InstalledPluginsFile | null,
+  lockedVersions: Record<string, string | undefined>,
 ): Promise<void> {
   if (specs.length === 0) return
   const installedKeys = new Set(Object.keys(ip?.plugins ?? {}))
   for (const spec of specs) {
-    if (installedKeys.has(spec)) continue
+    const wantVersion = lockedVersions[spec]
+    const hostEntry = ip?.plugins?.[spec]?.[0]
+    const hostVersion = hostEntry?.version
+
+    if (wantVersion && hostVersion === wantVersion) continue  // pinned + matches
+    if (!wantVersion && installedKeys.has(spec)) continue     // not pinned + installed
+
     const r = await runClaude(["plugin", "install", spec, "--scope=user"])
     if (!r.ok) {
       console.warn(`[plugins] install failed for "${spec}": ${r.err.trim().split("\n").slice(-2).join(" | ")}`)
+      continue
+    }
+
+    // Verify post-install version matches the pin, if there is one.
+    if (wantVersion) {
+      const ip2 = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+      const got = ip2?.plugins?.[spec]?.[0]?.version
+      if (got !== wantVersion) {
+        throw new Error(
+          `[plugins] version mismatch for "${spec}": loop pinned "${wantVersion}", ` +
+          `host installed "${got ?? "<unknown>"}".  CC's marketplace clone has likely ` +
+          `advanced past the pinned version. Options:\n` +
+          `  1. Admin: bump the team lock — set this spec's version to "${got ?? "<new>"}" ` +
+          `in knowledge/.loopat/.claude/plugins/installed_plugins.json + git push knowledge.\n` +
+          `  2. Member: restore the pinned version manually — checkout marketplace at the ` +
+          `pinned gitCommitSha, run \`claude plugin install ${spec}\`, then checkout master.`,
+        )
+      }
     }
   }
 }
@@ -192,8 +234,18 @@ export async function ensureLoopPluginsInstalled(loopId: string): Promise<void> 
   const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
   const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
 
+  // Read the loop's plugin version lock (compose's merged installed_plugins.json
+  // snapshot). When present, ensurePluginsInstalled enforces the pinned
+  // version per spec; otherwise it falls back to "install if missing".
+  const lockPath = join(loopClaudeDir(loopId), "plugins", "installed_plugins.json")
+  const lock = await readJsonOpt<InstalledPluginsFile>(lockPath)
+  const lockedVersions: Record<string, string | undefined> = {}
+  for (const [spec, entries] of Object.entries(lock?.plugins ?? {})) {
+    lockedVersions[spec] = entries[0]?.version
+  }
+
   await ensureExtraMarketplaces(settings?.extraKnownMarketplaces, loopId, km)
-  await ensurePluginsInstalled(enabled, ip)
+  await ensurePluginsInstalled(enabled, ip, lockedVersions)
 
   ensureCache.set(loopId, { mtime })
 }

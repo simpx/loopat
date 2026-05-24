@@ -196,6 +196,9 @@ type ResolvedSource = {
   agentsDir?: string
   miseToml?: string
   miseLock?: string
+  /** `.claude/plugins/installed_plugins.json` — CC-native plugin version lock.
+   *  Same shape as host's. We merge across tiers by spec key (last-wins). */
+  installedPlugins?: string
 }
 
 function resolveSource(s: { source: string; dir: string }, user: string): ResolvedSource {
@@ -209,6 +212,7 @@ function resolveSource(s: { source: string; dir: string }, user: string): Resolv
       agentsDir: personalAgentsDir(user),
       miseToml: join(personalClaudeDir(user), "mise.toml"),
       miseLock: join(personalClaudeDir(user), "mise.lock"),
+      installedPlugins: join(personalClaudeDir(user), "plugins", "installed_plugins.json"),
     }
   }
   // team / profile / repo — dir IS the .claude/ dir
@@ -220,6 +224,7 @@ function resolveSource(s: { source: string; dir: string }, user: string): Resolv
     agentsDir: join(s.dir, "agents"),
     miseToml: join(s.dir, "mise.toml"),
     miseLock: join(s.dir, "mise.lock"),
+    installedPlugins: join(s.dir, "plugins", "installed_plugins.json"),
   }
 }
 
@@ -233,22 +238,30 @@ export type ComposeResult = {
   miseTomlPath: string | null
   /** Path to merged mise.lock in loop's .claude/, or null if no source declared lock. */
   miseLockPath: string | null
+  /** Path to merged installed_plugins.json in loop's .claude/plugins/, or null if no tier declared one. */
+  installedPluginsPath: string | null
 }
 
 /**
- * Compose loop .claude/ from the loop's plan. Returns paths for downstream
- * use (plugin-installer reads merged settings; spawn reads CLAUDE_CONFIG_DIR).
+ * Compose loop .claude/ from the loop's plan. Runs ONCE at loop creation;
+ * the snapshot is then immutable so subsequent admin pushes to knowledge
+ * don't change what an existing loop sees (principle 1: loops never change).
+ *
+ * Workdir is NOT a tier here — it's read by the SDK as project tier directly
+ * (settingSources includes 'project'). Compose only merges the user-tier
+ * sources: workspace + N profiles + personal.
+ *
+ * Returns paths for downstream use (plugin-installer reads merged settings;
+ * spawn reads CLAUDE_CONFIG_DIR).
  */
 export async function composeLoopClaudeConfig(
   loopId: string,
   user: string,
   profiles?: string[],
-  workdir?: string,
 ): Promise<ComposeResult> {
   const plan: LoopPlan = await resolveLoopPlan({
     user,
     overrideProfiles: profiles,
-    workdir,
   })
   return composeFromPlan(loopId, plan)
 }
@@ -344,6 +357,44 @@ export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<C
     await rm(join(dst, "mise.lock"), { force: true })
   }
 
+  // 6. Merge installed_plugins.json (CC-native plugin version lock).
+  //
+  // Each tier may publish a .claude/plugins/installed_plugins.json with the
+  // same shape CC writes to ~/.claude/plugins/. We union by spec key,
+  // last-wins (personal overrides team). The merged file is the loop's lock —
+  // bwrap binds it over the sandbox's ~/.claude/plugins/installed_plugins.json
+  // so the inner SDK resolves each plugin to the pinned version, not whatever
+  // happens to be on the host right now.
+  //
+  // Why include this at all: without a per-loop snapshot, member's
+  // `claude plugin update` on host would silently change what a previously-
+  // created loop sees on next spawn. Locking via this file freezes the loop's
+  // plugin set at creation time (principle 1).
+  let mergedInstalledPlugins: { version?: number; plugins?: Record<string, any[]> } | null = null
+  for (const r of resolved) {
+    if (!r.installedPlugins) continue
+    const obj = await readJson<{ version?: number; plugins?: Record<string, any[]> }>(
+      r.installedPlugins,
+    )
+    if (!obj) continue
+    if (!mergedInstalledPlugins) {
+      mergedInstalledPlugins = { version: obj.version ?? 1, plugins: {} }
+    }
+    for (const [spec, entries] of Object.entries(obj.plugins ?? {})) {
+      mergedInstalledPlugins.plugins![spec] = entries // per-spec last-wins
+    }
+  }
+  let installedPluginsPath: string | null = null
+  if (mergedInstalledPlugins) {
+    const ipDir = join(dst, "plugins")
+    await mkdir(ipDir, { recursive: true })
+    installedPluginsPath = join(ipDir, "installed_plugins.json")
+    await writeFile(installedPluginsPath, JSON.stringify(mergedInstalledPlugins, null, 2))
+  } else {
+    // No tier declared a lock → ensure no stale lock from a previous compose
+    await rm(join(dst, "plugins", "installed_plugins.json"), { force: true })
+  }
+
   const enabledPlugins = Object.keys(
     (mergedSettings.enabledPlugins ?? {}) as Record<string, boolean>,
   ).filter((k) => mergedSettings.enabledPlugins[k])
@@ -360,6 +411,7 @@ export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<C
     extraMarketplaces,
     miseTomlPath,
     miseLockPath,
+    installedPluginsPath,
   }
 }
 

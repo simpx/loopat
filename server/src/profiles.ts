@@ -59,8 +59,12 @@ export type ResolveInput = {
   overrideProfiles?: string[]
   /** Override vault selection. */
   vaultOverride?: string
-  /** Repo workdir — if it has a `.claude/`, it becomes the 5th merge layer
-   *  (highest precedence; CC project-tier semantics). */
+  /** @deprecated Workdir is the SDK's project tier, read directly via
+   *  settingSources='project'. It is NOT merged into the user tier any more
+   *  (otherwise edits to workdir/.claude/ would change a frozen loop's
+   *  user-tier snapshot, violating principle 1). The field is kept for the
+   *  loopat CLI which still bundles workdir into a one-shot compose; remove
+   *  once that path is gone. */
   workdir?: string
 }
 
