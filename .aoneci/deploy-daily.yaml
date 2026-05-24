@@ -1,0 +1,73 @@
+name: Deploy daily
+
+# DAILY env:
+#   - push to origin/main → auto-deploy main
+#   - manual run from Aone CI page → user picks any branch via `branch` param
+# In both cases the CI runner resolves origin/<branch>'s tip SHA and ships it
+# to the deploy box webhook, so the deploy box never sees a moving ref.
+#
+# Setup (create / update — use create the first time, update to change values):
+#   a1 ci variable create DEPLOY_WEBHOOK_DAILY_URL \
+#       -v "http://<daily-box-ip>:9000/__deploy"
+#   printf '%s' "<token>" | \
+#       a1 ci secret create DEPLOY_WEBHOOK_DAILY_TOKEN --value-stdin
+
+triggers:
+  push:
+    branches:
+      - main
+
+params:
+  branch:
+    type: string
+    default: main
+    description: "要部署的远端分支，默认 main。手动运行时可填任意分支名（auto-update / feature/xxx 等），CI 会 resolve 该分支的最新 commit 后推给部署机。"
+
+strategy:
+  fast-fail: true
+  concurrency:
+    group: deploy-daily
+    parallelism: 1
+    cancel-in-progress: true
+
+jobs:
+  notify:
+    name: Ping daily webhook
+    runs-on: [ aone-hosted, linux, amd64 ]
+    timeout: 5m
+    envs:
+      DEPLOY_ENV:           "daily"
+      DEPLOY_TARGET_BRANCH: "${{params.branch}}"
+      DEPLOY_WEBHOOK_URL:   "${{vars.DEPLOY_WEBHOOK_DAILY_URL ?: ''}}"
+      DEPLOY_WEBHOOK_TOKEN: "${{secrets.DEPLOY_WEBHOOK_DAILY_TOKEN}}"
+    steps:
+      - name: Checkout origin
+        uses: checkout
+        with:
+          fetch-depth: 1
+
+      - name: Notify
+        # Inlined deliberately — the deploy machinery lives in the separate
+        # loopat-ops repo, so we don't reference any in-repo script here.
+        # All this step does: resolve the tip SHA for the selected branch
+        # on the CI side (so the deploy box never sees a moving ref), then
+        # POST it to the webhook with the shared token.
+        run: |-
+          set -euo pipefail
+          : "${DEPLOY_WEBHOOK_URL:?DEPLOY_WEBHOOK_URL is required}"
+          : "${DEPLOY_WEBHOOK_TOKEN:?DEPLOY_WEBHOOK_TOKEN is required}"
+          : "${DEPLOY_TARGET_BRANCH:?DEPLOY_TARGET_BRANCH is required}"
+          git fetch --no-tags origin "$DEPLOY_TARGET_BRANCH"
+          SHA="$(git rev-parse FETCH_HEAD)"
+          echo "[notify] env=$DEPLOY_ENV url=$DEPLOY_WEBHOOK_URL ref=$DEPLOY_TARGET_BRANCH sha=$SHA"
+          printf '{"env":"%s","sha":"%s","ref":"%s"}' \
+              "$DEPLOY_ENV" "$SHA" "$DEPLOY_TARGET_BRANCH" | curl \
+            --fail --silent --show-error \
+            --max-time 60 --retry 3 --retry-delay 5 --retry-connrefused \
+            -X POST "$DEPLOY_WEBHOOK_URL" \
+            -H "X-Deploy-Token: $DEPLOY_WEBHOOK_TOKEN" \
+            -H "X-Deploy-Env: $DEPLOY_ENV" \
+            -H "Content-Type: application/json" \
+            --data-binary @-
+          echo
+          echo "[notify] ok"

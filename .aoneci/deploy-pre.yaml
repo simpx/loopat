@@ -1,0 +1,62 @@
+name: Deploy pre
+
+# PRE env: manual trigger only (click run from the Aone CI page).
+# Always ships main — there is no branch param, the env hardcodes it. The CI
+# runner resolves origin/main's tip SHA and ships it to the pre webhook.
+#
+# Setup (create / update — use create the first time, update to change values):
+#   a1 ci variable create DEPLOY_WEBHOOK_PRE_URL \
+#       -v "http://<pre-box-ip>:9001/__deploy"
+#   printf '%s' "<token>" | \
+#       a1 ci secret create DEPLOY_WEBHOOK_PRE_TOKEN --value-stdin
+
+# triggers: block intentionally omitted — page-only manual trigger.
+
+strategy:
+  fast-fail: true
+  concurrency:
+    group: deploy-pre
+    parallelism: 1
+    cancel-in-progress: true
+
+jobs:
+  notify:
+    name: Ping pre webhook
+    runs-on: [ aone-hosted, linux, amd64 ]
+    timeout: 5m
+    envs:
+      DEPLOY_ENV:           "pre"
+      DEPLOY_TARGET_BRANCH: "main"
+      DEPLOY_WEBHOOK_URL:   "${{vars.DEPLOY_WEBHOOK_PRE_URL ?: ''}}"
+      DEPLOY_WEBHOOK_TOKEN: "${{secrets.DEPLOY_WEBHOOK_PRE_TOKEN}}"
+    steps:
+      - name: Checkout origin
+        uses: checkout
+        with:
+          fetch-depth: 1
+
+      - name: Notify
+        # Inlined deliberately — the deploy machinery lives in the separate
+        # loopat-ops repo, so we don't reference any in-repo script here.
+        # Identical body to deploy-daily.yaml; kept duplicated rather than
+        # extracted because there are only two callers and the indirection
+        # would cost more than the duplication saves.
+        run: |-
+          set -euo pipefail
+          : "${DEPLOY_WEBHOOK_URL:?DEPLOY_WEBHOOK_URL is required}"
+          : "${DEPLOY_WEBHOOK_TOKEN:?DEPLOY_WEBHOOK_TOKEN is required}"
+          : "${DEPLOY_TARGET_BRANCH:?DEPLOY_TARGET_BRANCH is required}"
+          git fetch --no-tags origin "$DEPLOY_TARGET_BRANCH"
+          SHA="$(git rev-parse FETCH_HEAD)"
+          echo "[notify] env=$DEPLOY_ENV url=$DEPLOY_WEBHOOK_URL ref=$DEPLOY_TARGET_BRANCH sha=$SHA"
+          printf '{"env":"%s","sha":"%s","ref":"%s"}' \
+              "$DEPLOY_ENV" "$SHA" "$DEPLOY_TARGET_BRANCH" | curl \
+            --fail --silent --show-error \
+            --max-time 60 --retry 3 --retry-delay 5 --retry-connrefused \
+            -X POST "$DEPLOY_WEBHOOK_URL" \
+            -H "X-Deploy-Token: $DEPLOY_WEBHOOK_TOKEN" \
+            -H "X-Deploy-Env: $DEPLOY_ENV" \
+            -H "Content-Type: application/json" \
+            --data-binary @-
+          echo
+          echo "[notify] ok"
