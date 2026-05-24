@@ -183,6 +183,7 @@ export async function buildBwrapArgs(
   knowledgeRw?: boolean,
   homeOverlay: boolean = true,
   mountAllLoops?: boolean,
+  pluginPaths: string[] = [],
 ): Promise<string[]> {
   const home = homedir()
 
@@ -226,16 +227,34 @@ export async function buildBwrapArgs(
     knowledgeRw ? "--bind" : "--ro-bind", loopContextKnowledge(loopId), V_CONTEXT_KNOWLEDGE,
     "--bind", loopContextNotes(loopId), V_CONTEXT_NOTES,
     "--bind", personalDir(createdBy), V_CONTEXT_PERSONAL,
+    // ALSO re-bind personal at its host absolute path. compose.ts creates
+    // symlinks under loops/<id>/.claude/skills/<name> → personalDir/.claude/skills/<name>
+    // (host absolute). The sandbox $HOME is an empty overlay, so without this
+    // re-bind the symlink target doesn't resolve. Same pattern as
+    // knowledgeRepo / notesRepo / reposDir below (git internals need it too).
+    "--bind", personalDir(createdBy), personalDir(createdBy),
     // loopat install dir (claude binary lives here). Also covers builtin
     // plugins shipped under server/templates/plugins/<name>/, which the SDK
     // plugins option passes as host paths.
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
-  // Note: sandbox plugin caches live under
-  // knowledge/.loopat/sandboxes/<name>/.claude/, which is already covered by
-  // the knowledge bind above. Plugin installPaths (absolute, host-format)
-  // resolve naturally inside the sandbox via that bind.
+  // External plugin paths (resolved by plugin-installer from
+  // ~/.claude/plugins/{marketplaces,cache}/...) live under host $HOME, but the
+  // sandbox's $HOME is an overlayfs whose lower layer (sandbox-home-skel/) is
+  // empty — so without a bind, the SDK-passed `--plugin-dir <host-path>` args
+  // resolve to nothing and CC silently loads zero plugins.
+  //
+  // We ro-bind each resolved plugin's host path at the same path inside the
+  // sandbox. Builtin (loopat@builtin) lives under LOOPAT_INSTALL_DIR which is
+  // already bound — skip it to avoid a redundant nested bind. Other paths under
+  // already-bound prefixes are still added (bwrap layers them on top, last-write-wins
+  // semantics; harmless).
+  for (const p of pluginPaths) {
+    if (!p) continue
+    if (p === LOOPAT_INSTALL_DIR || p.startsWith(LOOPAT_INSTALL_DIR + "/")) continue
+    args.push("--ro-bind-try", p, p)
+  }
 
   // ── vault symlink ──
   // Personal is bound wholesale above, so all named vaults under

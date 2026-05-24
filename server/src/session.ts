@@ -408,7 +408,20 @@ class LoopSession {
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
     const useOverlay = await isHomeOverlaySupported()
-    const bwrapBase = await buildBwrapArgs(loopId, driver, extraEnv, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
+    const bwrapBase = await buildBwrapArgs(
+      loopId,
+      driver,
+      extraEnv,
+      meta.config?.vault,
+      meta.config?.knowledge_rw,
+      useOverlay,
+      meta.config?.mount_all_loops,
+      // Plugin host paths (e.g. ~/.claude/plugins/marketplaces/<m>/plugins/<n>)
+      // need explicit ro-binds — the SDK passes them via `--plugin-dir <path>`
+      // to the inner CC process, and host paths under $HOME aren't visible
+      // through the overlay's empty lower layer otherwise.
+      resolvedPlugins.map((p) => p.path),
+    )
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
     // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)
@@ -536,7 +549,10 @@ class LoopSession {
         // from CLAUDE_CONFIG_DIR/settings.json (SDK auto-memory uses that path).
         // project-tier: auto-load <workdir>/CLAUDE.md so per-repo conventions
         // (e.g. the project's own CLAUDE.md) layer on top of platform doctrine.
-        settingSources: ["user", "project"],
+        // local-tier: pick up <workdir>/.claude/settings.local.json + .local.md
+        // agents/skills so users can drop per-checkout overrides without
+        // committing them.
+        settingSources: ["user", "project", "local"],
         // Inner SDK sandbox disabled — outer bwrap (single layer) wraps the
         // CLI process itself; bash subprocesses inherit the same namespace.
         // No nested sandbox needed.
