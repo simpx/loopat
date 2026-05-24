@@ -123,7 +123,7 @@ export const workspaceSecretsDir = () => join(workspaceDir(), "secrets")
 
 // ─── Profile composition model (post-2026-05 design, CC-native refactor) ─
 //
-// See docs/design/composition-model.md. The team workspace lives inside the
+// See docs/composition.md. The team workspace lives inside the
 // knowledge git repo at `.loopat/`, structured as a stack of CC-native
 // `.claude/` directories — one per tier (team / profile). loopat materializes
 // a merge of selected tiers into each loop's `.claude/`.

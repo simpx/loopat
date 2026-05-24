@@ -12,7 +12,7 @@
  *   3. Reads merged settings.json's `enabledPlugins` + `extraKnownMarketplaces`
  *      to drive plugin installation (handled by plugin-installer.ts)
  *
- * See docs/design/composition-model.md.
+ * See docs/composition.md.
  */
 
 import { existsSync } from "node:fs"

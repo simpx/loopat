@@ -3,7 +3,7 @@
  * from the workspace (`context/profiles/<name>/`). `base` is implicit and
  * shown as "always on". Empty selection still works (base + personal only).
  *
- * See docs/design/composition-model.md for the model.
+ * See docs/composition.md for the model.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { getDefaultProfiles, getLoopStats, listProfiles, listRepos, listVaults, type LoopStats, type ProfileEntry, type RepoEntry } from "../../api"

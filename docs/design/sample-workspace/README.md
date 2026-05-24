@@ -1,6 +1,6 @@
 # Sample loopat workspace
 
-> 这是 [composition-model.md](../composition-model.md) 描述的形态的**具体样例**。
+> 这是 [../../composition.md](../../composition.md) 描述的形态的**具体样例**。
 > 一个虚构公司 "acme" 的 loopat workspace 长什么样。
 >
 > 文件内容是简化的占位，**重点看目录结构、profile.json 和 plugin 的关系**。
@@ -101,4 +101,4 @@ sample-workspace/
 
 ---
 
-参考 [`../composition-model.md`](../composition-model.md) 看完整概念模型。
+参考 [`../../composition.md`](../../composition.md) 看完整概念模型。

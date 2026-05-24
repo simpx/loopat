@@ -148,6 +148,9 @@ Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
   environment variables.
 - **[Architecture](docs/architecture.md)** — the read/write path, layered
   context model, distillation pipeline, Claude config injection paths.
+- **[.claude composition](docs/composition.md)** — how team / profile /
+  personal / repo `.claude/` tiers merge into the loop runtime, and what
+  you can put in each tier.
 - **[Sandbox](docs/sandbox.md)** — bwrap mount mechanics, three-tier mount
   authority, what stops the agent from escaping.
 - **[Troubleshooting](docs/troubleshoot.md)** — chat won't start, banner

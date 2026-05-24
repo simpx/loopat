@@ -190,5 +190,5 @@ $ loopat run +mode-oncall --dry-run
 
 ## 看完这个，回头读
 
-- [`../composition-model.md`](../composition-model.md) — 完整概念模型
+- [`../../composition.md`](../../composition.md) — 完整概念模型
 - [`./README.md`](./README.md) — sample 导览

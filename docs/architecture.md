@@ -22,7 +22,7 @@ better than they render.
 
 For the **`.claude/` composition model** specifically — how team / profile /
 personal / repo tiers merge into the loop's `.claude/` and how the SDK reads
-it — see [design/composition-model.md](./design/composition-model.md).
+it — see [composition.md](composition.md).
 
 ---
 

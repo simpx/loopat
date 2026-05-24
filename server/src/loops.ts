@@ -97,7 +97,7 @@ export type LoopMeta = {
      * Empty / undefined = no profile-driven plugins, base CLAUDE.md only
      * (if it exists), personal CLAUDE.md only. CC still runs.
      *
-     * See docs/design/composition-model.md.
+     * See docs/composition.md.
      */
     profiles?: string[]
     /**
