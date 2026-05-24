@@ -30,6 +30,7 @@ import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { McpStatusPanel } from "../components/McpStatusPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
+import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
@@ -179,7 +180,7 @@ export function SettingsPage() {
                     <li key={t.id} className="shrink-0 sm:px-1">
                       <button
                         type="button"
-                        onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
+                        onClick={() => navigate(`/settings/${t.id}`)}
                         className={
                           "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                           (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
@@ -200,7 +201,7 @@ export function SettingsPage() {
                       <li key={t.id} className="shrink-0 sm:px-1">
                         <button
                           type="button"
-                          onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
+                          onClick={() => navigate(`/settings/${t.id}`)}
                           className={
                             "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                             (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
@@ -223,7 +224,7 @@ export function SettingsPage() {
                           <li key={t.id} className="shrink-0 sm:px-1">
                             <button
                               type="button"
-                              onClick={() => navigate(t.id === "token-usage" ? "/usage" : `/settings/${t.id}`)}
+                              onClick={() => navigate(`/settings/${t.id}`)}
                               className={
                                 "w-full text-left px-2.5 py-1.5 rounded text-[13px] flex items-center gap-2 transition-colors whitespace-nowrap " +
                                 (isActive ? "bg-gray-100 text-gray-900 font-medium" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900")
@@ -290,6 +291,9 @@ export function SettingsPage() {
                   )}
                   {active === "claude-config" && (
                     <ClaudeConfigPanel disabled={isGatedAndLocked} />
+                  )}
+                  {active === "token-usage" && (
+                    <TokenUsagePage />
                   )}
                   {active === "admin-users" && (
                     <UsersPanel currentUserId={ws.currentUser?.id ?? ""} />

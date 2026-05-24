@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
-import { ArrowLeft, BarChart3, Hash, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
+import { BarChart3, Hash, MessageSquare, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react"
 import { getDailyTokenUsage, getLoopTokenUsage, type DailyUsage, type LoopTokenUsage } from "@/api"
 
 type ViewMode = "models" | "daily" | "loops"
@@ -498,23 +498,7 @@ export function TokenUsagePage() {
   }
 
   return (
-    <div className="h-full overflow-auto bg-gray-50">
-      <div className="max-w-[960px] mx-auto px-4 sm:px-6 py-6">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <div className="flex-1">
-            <h1 className="text-[16px] font-semibold text-gray-900">Token Usage</h1>
-            <p className="text-[12px] text-gray-500">Aggregated across all your loops</p>
-          </div>
-        </div>
-
+    <div>
         {/* View tabs + time filter */}
         <div className="flex items-center gap-1 mb-6">
           {VIEWS.map(v => (
@@ -555,7 +539,6 @@ export function TokenUsagePage() {
         {view === "models" && <ModelsView dailyUsage={dailyUsage} timeRange={timeRange} />}
         {view === "daily" && <DailyView dailyUsage={dailyUsage} timeRange={timeRange} />}
         {view === "loops" && <LoopsView loopUsage={loopUsage} timeRange={timeRange} />}
-      </div>
     </div>
   )
 }

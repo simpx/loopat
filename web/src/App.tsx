@@ -19,7 +19,6 @@ import { ContextPage } from "./pages/ContextPage"
 import { KanbanPage } from "./pages/KanbanPage"
 import { ChatPage } from "./pages/ChatPage"
 import { SettingsPage } from "./pages/SettingsPage"
-import { TokenUsagePage } from "./pages/TokenUsagePage"
 import { AdminSystemPage } from "./pages/AdminSystemPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
@@ -413,7 +412,6 @@ export function App() {
             <Route path="/chat/:convId" element={<ChatPage />} />
             <Route path="/settings" element={<Navigate to="/settings/personal-repo" replace />} />
             <Route path="/settings/:tab" element={<SettingsPage />} />
-            <Route path="/usage" element={<TokenUsagePage />} />
             <Route path="/admin/system" element={<AdminSystemPage />} />
           </Route>
         </Routes>
