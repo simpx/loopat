@@ -14,12 +14,12 @@
  */
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { join, isAbsolute, dirname, resolve as resolvePath } from "node:path"
+import { join } from "node:path"
 import {
   workspaceTeamClaudeDir,
   workspaceProfileClaudeDir,
 } from "./paths"
+import { lookupPluginInstallPath } from "./plugin-installer"
 
 export type LoopStats = {
   plugins: number
@@ -83,49 +83,6 @@ function countHooks(s: Settings | null): number {
     return n
   }
   return 0
-}
-
-/** Resolve a host path for a plugin spec, if locally available. */
-async function resolvePluginPath(spec: string): Promise<string | null> {
-  const userClaudeDir = join(homedir(), ".claude")
-  const ipPath = join(userClaudeDir, "plugins", "installed_plugins.json")
-  const kmPath = join(userClaudeDir, "plugins", "known_marketplaces.json")
-  if (!existsSync(ipPath)) return null
-
-  let ip: any
-  let km: any
-  try {
-    ip = JSON.parse(await readFile(ipPath, "utf8"))
-    km = existsSync(kmPath) ? JSON.parse(await readFile(kmPath, "utf8")) : {}
-  } catch {
-    return null
-  }
-
-  const entry = ip.plugins?.[spec]?.[0]
-  if (!entry?.installPath) return null
-
-  // Prefer local marketplace source path (has the latest content)
-  const atIdx = spec.lastIndexOf("@")
-  if (atIdx >= 0) {
-    const pluginName = spec.slice(0, atIdx)
-    const marketName = spec.slice(atIdx + 1)
-    const market = km?.[marketName]
-    if (market?.installLocation) {
-      const mpJsonPath = join(market.installLocation, ".claude-plugin", "marketplace.json")
-      if (existsSync(mpJsonPath)) {
-        try {
-          const catalog = JSON.parse(await readFile(mpJsonPath, "utf8"))
-          const cat = catalog?.plugins?.find((p: any) => p.name === pluginName)
-          const src = typeof cat?.source === "string" ? cat.source : null
-          if (src?.startsWith("./")) {
-            const p = join(market.installLocation, src)
-            if (existsSync(p)) return p
-          }
-        } catch {}
-      }
-    }
-  }
-  return existsSync(entry.installPath) ? entry.installPath : null
 }
 
 /**
@@ -215,7 +172,7 @@ export async function computeLoopStats(profiles: string[]): Promise<LoopStats> {
 
   // Now scan each enabled plugin for its contributions
   for (const spec of enabledPluginSet) {
-    const pluginDir = await resolvePluginPath(spec)
+    const pluginDir = await lookupPluginInstallPath(spec)
     if (!pluginDir) continue
     const scan = await scanPlugin(pluginDir)
     for (const s of scan.skills) skillSet.add(`${spec.split("@")[0]}:${s}`)

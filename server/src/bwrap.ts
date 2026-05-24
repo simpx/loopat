@@ -183,7 +183,6 @@ export async function buildBwrapArgs(
   knowledgeRw?: boolean,
   homeOverlay: boolean = true,
   mountAllLoops?: boolean,
-  pluginPaths: string[] = [],
 ): Promise<string[]> {
   const home = homedir()
 
@@ -239,22 +238,20 @@ export async function buildBwrapArgs(
     "--ro-bind", LOOPAT_INSTALL_DIR, LOOPAT_INSTALL_DIR,
   )
 
-  // External plugin paths (resolved by plugin-installer from
-  // ~/.claude/plugins/{marketplaces,cache}/...) live under host $HOME, but the
-  // sandbox's $HOME is an overlayfs whose lower layer (sandbox-home-skel/) is
-  // empty — so without a bind, the SDK-passed `--plugin-dir <host-path>` args
-  // resolve to nothing and CC silently loads zero plugins.
+  // Plugin visibility: wholesale ro-bind ~/.claude/plugins/ so the inner SDK
+  // resolves enabledPlugins natively via settings.json + installed_plugins.json,
+  // and finds each plugin's installPath. The sandbox's $HOME is otherwise an
+  // empty overlay, so without this bind:
+  //   - SDK can't read installed_plugins.json → can't map "foo@bar" to a path
+  //   - Even if it could, the installPath under ~/.claude/plugins/ wouldn't exist
   //
-  // We ro-bind each resolved plugin's host path at the same path inside the
-  // sandbox. Builtin (loopat@builtin) lives under LOOPAT_INSTALL_DIR which is
-  // already bound — skip it to avoid a redundant nested bind. Other paths under
-  // already-bound prefixes are still added (bwrap layers them on top, last-write-wins
-  // semantics; harmless).
-  for (const p of pluginPaths) {
-    if (!p) continue
-    if (p === LOOPAT_INSTALL_DIR || p.startsWith(LOOPAT_INSTALL_DIR + "/")) continue
-    args.push("--ro-bind-try", p, p)
-  }
+  // We bind the entire dir (not per-plugin) so loopat doesn't need to enumerate
+  // resolved plugins ahead of time. Activation is still gated by the merged
+  // settings.json `enabledPlugins` field — anything not enabled is reachable on
+  // fs but inert. Install state is shared with host CC by design (a single
+  // global install cache, same as host CC's own UX).
+  const userClaudePluginsDir = join(home, ".claude", "plugins")
+  args.push("--ro-bind-try", userClaudePluginsDir, userClaudePluginsDir)
 
   // ── vault symlink ──
   // Personal is bound wholesale above, so all named vaults under

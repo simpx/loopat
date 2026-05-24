@@ -681,30 +681,45 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
     ),
   )
 
-  // Plugin tier: scan each resolved plugin's .mcp.json. CC auto-registers
+  // Plugin tier: scan each enabled plugin's .mcp.json. CC auto-registers
   // these at runtime when the plugin loads; we surface them here so users
   // can see + reason about them without spawning a session.
-  const { resolveLoopPlugins } = await import("./plugin-installer")
+  const { lookupPluginInstallPath } = await import("./plugin-installer")
+  const { loopClaudeDir: lcd } = await import("./paths")
   const { readFile: rf } = await import("node:fs/promises")
   const { existsSync: esync } = await import("node:fs")
   const { join: pjoin } = await import("node:path")
-  // resolveLoopPlugins needs the loop's materialized settings; for the
-  // /api/mcp-servers view (which runs without spawning), we just list
-  // builtins if no loopId provided. With loopId, returns the loop's
-  // currently resolved set.
-  const resolved = loopId ? await resolveLoopPlugins(loopId) : []
+  // Read enabledPlugins from the loop's merged settings and look each one up.
+  // With no loopId (Settings page), no plugin tier.
   type PluginEntry = { name: string; type: string; url?: string; pluginSource: string; oauthSupport?: OAuthSupport }
   const pluginTierRaw: PluginEntry[] = []
-  for (const p of resolved) {
-    const mcpPath = pjoin(p.path, ".mcp.json")
-    if (!esync(mcpPath)) continue
-    try {
-      const j = JSON.parse(await rf(mcpPath, "utf8"))
-      for (const [srvName, srv] of Object.entries((j?.mcpServers ?? {}) as Record<string, any>)) {
-        pluginTierRaw.push({ name: srvName, ...shape(srv), pluginSource: p.name })
+  if (loopId) {
+    const settingsPath = pjoin(lcd(loopId), "settings.json")
+    if (esync(settingsPath)) {
+      try {
+        const settings = JSON.parse(await rf(settingsPath, "utf8")) as {
+          enabledPlugins?: Record<string, boolean>
+        }
+        const enabled = Object.entries(settings.enabledPlugins ?? {})
+          .filter(([_, v]) => v)
+          .map(([k]) => k)
+        for (const spec of enabled) {
+          const path = await lookupPluginInstallPath(spec)
+          if (!path) continue
+          const mcpPath = pjoin(path, ".mcp.json")
+          if (!esync(mcpPath)) continue
+          try {
+            const j = JSON.parse(await rf(mcpPath, "utf8"))
+            for (const [srvName, srv] of Object.entries((j?.mcpServers ?? {}) as Record<string, any>)) {
+              pluginTierRaw.push({ name: srvName, ...shape(srv), pluginSource: spec })
+            }
+          } catch (e: any) {
+            console.warn(`[mcp] plugin ${spec} .mcp.json unreadable: ${e?.message ?? e}`)
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[mcp] loop ${loopId} settings read failed: ${e?.message ?? e}`)
       }
-    } catch (e: any) {
-      console.warn(`[mcp] plugin ${p.name} .mcp.json unreadable: ${e?.message ?? e}`)
     }
   }
   const pluginTier = await Promise.all(pluginTierRaw.map((e) => withOAuthSupport(e)))

@@ -1,7 +1,7 @@
 import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
-import { createWriteStream, mkdirSync } from "node:fs"
+import { createWriteStream, mkdirSync, existsSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
@@ -9,7 +9,7 @@ import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, loadPersonalClaudeJson, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
-import { resolveLoopPlugins } from "./plugin-installer"
+import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
 import { loadMcpTokens, mergeMcpTokens } from "./mcp-tokens"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
@@ -327,11 +327,13 @@ class LoopSession {
     // gets merged in as repo-tier (CC project-tier semantics).
     const { loopWorkdir } = await import("./paths")
     await composeLoopClaudeConfig(loopId, driver, meta.config?.profiles, loopWorkdir(loopId))
-    // Resolve plugins from the loop's merged settings.json (just written by
-    // composeLoopClaudeConfig). Loopat orchestrates marketplace registration
-    // + `claude plugin install --scope=user` based on enabledPlugins /
-    // extraKnownMarketplaces from the merged config. See plugin-installer.ts.
-    const resolvedPlugins = await resolveLoopPlugins(loopId)
+    // Ensure host CC has every marketplace registered + every enabled plugin
+    // installed. We don't need the resolved paths (sandbox sees host
+    // ~/.claude/plugins/ via a wholesale ro-bind in bwrap, and the inner SDK
+    // resolves enabledPlugins natively from settings.json). This is purely
+    // side-effectful: drive `claude plugin marketplace add/remove` +
+    // `claude plugin install` as needed. See plugin-installer.ts.
+    await ensureLoopPluginsInstalled(loopId)
 
     // Nuke CC's MCP-related cache files that linger across spawns:
     //
@@ -416,11 +418,6 @@ class LoopSession {
       meta.config?.knowledge_rw,
       useOverlay,
       meta.config?.mount_all_loops,
-      // Plugin host paths (e.g. ~/.claude/plugins/marketplaces/<m>/plugins/<n>)
-      // need explicit ro-binds — the SDK passes them via `--plugin-dir <path>`
-      // to the inner CC process, and host paths under $HOME aren't visible
-      // through the overlay's empty lower layer otherwise.
-      resolvedPlugins.map((p) => p.path),
     )
     // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
     // sync spawnClaudeCodeProcess callback below has the paths ready.
@@ -449,10 +446,13 @@ class LoopSession {
         ...(this.currentPermissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
         mcpServers,
-        // SDK turns each into `--plugin-dir <path>`. Only type:"local" is
-        // supported by the SDK (sdk.mjs throws on others). Paths are host
-        // absolute and sandbox-visible via existing bwrap ro-binds.
-        plugins: resolvedPlugins.map((p) => ({ type: "local" as const, path: p.path })),
+        // External marketplace plugins (enabledPlugins in settings.json) are
+        // resolved natively by the inner SDK now — ~/.claude/plugins/ is
+        // ro-bound wholesale, so installed_plugins.json + each installPath is
+        // reachable inside the sandbox. The only thing we still pass via
+        // `plugins:` is the loopat-shipped builtin, which lives under
+        // LOOPAT_INSTALL_DIR (not in CC's plugin cache).
+        plugins: [{ type: "local" as const, path: BUILTIN_LOOPAT_PLUGIN_PATH }],
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
         pathToClaudeCodeExecutable: CLAUDE_BINARY,
         canUseTool: async (toolName, input, { toolUseID, signal, title, displayName }) => {
@@ -865,26 +865,30 @@ class LoopSession {
     for (const name of await this.listDirNames(personalSkillsDir(user))) {
       map.set(name, await readSkillDescription(personalSkillsDir(user), name))
     }
-    // Plugin sub-commands: scan each resolved plugin's skills/ dir and
-    // surface as `<plugin>:<skill>`. resolveLoopPlugins returns the same
-    // paths the SDK will pass via `--plugin-dir` at spawn, so the seed
-    // matches what CC will report on init. Names from the resolver are
-    // `plugin@marketplace`; strip the marketplace suffix for the slash form.
+    // Plugin sub-commands: scan each enabled plugin's skills/ dir on the host
+    // and surface as `<plugin>:<skill>`. Best-effort pre-spawn seed so the
+    // chip shows useful numbers before CC's init payload arrives; CC's init
+    // is the authoritative list.
     try {
-      // resolveLoopPlugins reads loop's merged settings.json — only meaningful
-      // post-compose. For pre-spawn skill seeding here, this returns just
-      // builtins if loop's .claude/ hasn't been materialized yet (acceptable;
-      // SDK's init payload will provide accurate skill list post-spawn).
-      const resolvedPlugins = await resolveLoopPlugins(this.id)
-      for (const plugin of resolvedPlugins) {
-        const pluginName = plugin.name.split("@")[0]
-        const skillsDir = join(plugin.path, "skills")
-        for (const skill of await this.listDirNames(skillsDir)) {
-          map.set(`${pluginName}:${skill}`, await readSkillDescription(skillsDir, skill))
+      const settingsPath = join(loopClaudeDir(this.id), "settings.json")
+      if (existsSync(settingsPath)) {
+        const settings = JSON.parse(await readFile(settingsPath, "utf8")) as {
+          enabledPlugins?: Record<string, boolean>
+        }
+        const enabled = Object.entries(settings.enabledPlugins ?? {})
+          .filter(([_, v]) => v)
+          .map(([k]) => k)
+        for (const spec of enabled) {
+          const pluginPath = await lookupPluginInstallPath(spec)
+          if (!pluginPath) continue
+          const pluginName = spec.split("@")[0]
+          const skillsDir = join(pluginPath, "skills")
+          for (const skill of await this.listDirNames(skillsDir)) {
+            map.set(`${pluginName}:${skill}`, await readSkillDescription(skillsDir, skill))
+          }
         }
       }
     } catch (e: any) {
-      // Seed is best-effort; CC's init payload fills in the truth at spawn.
       console.warn(`[session ${this.id.slice(0,8)}] seed plugin scan failed: ${e?.message ?? e}`)
     }
     return [...map.entries()]

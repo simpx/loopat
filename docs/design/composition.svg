@@ -190,14 +190,15 @@
     <path d="M 1100 415 C 1140 415, 1140 250, 1140 232" marker-end="url(#arr-green)"/>
   </g>
 
-  <!-- Plugin paths (orthogonal channel) -->
+  <!-- Plugin paths (wholesale bind) -->
   <g>
     <rect x="820" y="520" width="280" height="100" rx="8" fill="#fafbfd" stroke="#9ba3ad" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="836" y="542" font-size="13" font-weight="700" fill="#5b6776">plugin paths</text>
-    <text x="836" y="558" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">~/.claude/plugins/marketplaces/…</text>
-    <text x="836" y="572" font-size="10" fill="#7e8794" font-style="italic">passed to SDK via `plugins:` option;</text>
-    <text x="836" y="586" font-size="10" fill="#7e8794" font-style="italic">each path ro-bound into sandbox at the same host path.</text>
-    <text x="836" y="608" font-size="10" fill="#7e8794">Skills/agents inside plugins surface namespaced (<tspan font-family="ui-monospace, monospace">plugin:skill</tspan>).</text>
+    <text x="836" y="542" font-size="13" font-weight="700" fill="#5b6776">plugin cache</text>
+    <text x="836" y="558" font-size="10" font-family="ui-monospace, monospace" fill="#5b6776">~/.claude/plugins/   (wholesale ro-bind)</text>
+    <text x="836" y="572" font-size="10" fill="#7e8794" font-style="italic">SDK natively resolves settings.json enabledPlugins</text>
+    <text x="836" y="586" font-size="10" fill="#7e8794" font-style="italic">via installed_plugins.json. loopat builtin is the only</text>
+    <text x="836" y="600" font-size="10" fill="#7e8794" font-style="italic">plugin still passed via `plugins:` option.</text>
+    <text x="836" y="614" font-size="10" fill="#7e8794">Plugin skills/agents surface as <tspan font-family="ui-monospace, monospace">plugin:skill</tspan>.</text>
   </g>
   <g fill="none" stroke="#7e8794" stroke-width="1.5" stroke-dasharray="3 3">
     <path d="M 1100 555 C 1150 555, 1160 280, 1140 232" marker-end="url(#arr-gray)"/>

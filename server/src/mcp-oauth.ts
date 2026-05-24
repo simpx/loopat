@@ -304,19 +304,35 @@ export async function startMcpAuth(opts: {
 }): Promise<StartResult> {
   const { user, vault, serverName, loopId, publicBaseUrl } = opts
 
-  // Walk plugin-bundled .mcp.json files (from the loop's resolved plugins).
-  // resolveLoopPlugins reads loop's merged settings.json — needs the loop
-  // to have been spawned at least once (so compose has materialized it).
-  // Returns [] if no loopId (settings page case).
+  // Walk plugin-bundled .mcp.json files (from the loop's enabled plugins).
+  // Reads the loop's merged settings.json for enabledPlugins, then resolves
+  // each spec to its host path via lookupPluginInstallPath. Needs the loop
+  // to have been spawned at least once (so compose has materialized
+  // settings.json). Returns [] if no loopId (settings page case).
   let srv: McpServerConfig | undefined
-  const resolved: Array<{ name: string; path: string }> = []
-  if (loopId) {
-    const { resolveLoopPlugins } = await import("./plugin-installer")
-    resolved.push(...(await resolveLoopPlugins(loopId)))
-  }
   const { existsSync } = await import("node:fs")
   const { readFile: rf } = await import("node:fs/promises")
   const { join: pjoin } = await import("node:path")
+  const resolved: Array<{ path: string }> = []
+  if (loopId) {
+    const { lookupPluginInstallPath } = await import("./plugin-installer")
+    const { loopClaudeDir } = await import("./paths")
+    const settingsPath = pjoin(loopClaudeDir(loopId), "settings.json")
+    if (existsSync(settingsPath)) {
+      try {
+        const settings = JSON.parse(await rf(settingsPath, "utf8")) as {
+          enabledPlugins?: Record<string, boolean>
+        }
+        const enabled = Object.entries(settings.enabledPlugins ?? {})
+          .filter(([_, v]) => v)
+          .map(([k]) => k)
+        for (const spec of enabled) {
+          const p = await lookupPluginInstallPath(spec)
+          if (p) resolved.push({ path: p })
+        }
+      } catch {}
+    }
+  }
   for (const p of resolved) {
     const mcpPath = pjoin(p.path, ".mcp.json")
     if (!existsSync(mcpPath)) continue

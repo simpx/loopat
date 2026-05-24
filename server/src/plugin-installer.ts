@@ -1,21 +1,21 @@
 /**
- * Plugin resolver — CC-native model (post-2026-05 refactor).
+ * Plugin orchestration on the host. Post-wholesale-bind (2026-05): the inner
+ * SDK now resolves enabledPlugins natively because bwrap.ts ro-binds
+ * ~/.claude/plugins/ wholesale into the sandbox. So loopat's job here is
+ * purely host-side preparation:
  *
- * Inputs: loop's merged settings.json (produced by compose.ts) at
- * `loops/<id>/.claude/settings.json`, containing `enabledPlugins` +
- * `extraKnownMarketplaces` (both CC-native fields).
+ *   1. Make sure every marketplace declared in the loop's merged
+ *      `extraKnownMarketplaces` is registered with the host CC.
+ *   2. Make sure every spec in `enabledPlugins` is installed in the host CC
+ *      cache (otherwise SDK would find an enabled-but-uninstalled spec and
+ *      fail to load it).
  *
- * Flow at loop spawn:
- *   1. Read merged settings → get marketplace declarations + plugin specs
- *   2. Auto-register team's `.loopat/marketplace/` if it exists (convention)
- *   3. Register each `extraKnownMarketplaces` entry with CC (idempotent)
- *   4. For each enabledPlugins spec, `claude plugin install --scope=user`
- *      (cross-marketplace works — we drive each install explicitly)
- *   5. Resolve installed paths from CC's user-tier cache
- *   6. Return ResolvedLoopPlugin[] for SDK `plugins` option
+ * That's it — no path resolution, no return value beyond success/failure. The
+ * `plugins:` SDK option is reserved for the loopat-shipped builtin (which
+ * lives under LOOPAT_INSTALL_DIR, not in CC's plugin cache).
  *
- * The SDK loads from absolute paths (bypasses CC's cache lookup), so
- * per-loop selection works regardless of what's globally enabled on the host.
+ * `lookupPluginInstallPath` remains a host-side utility for the slash-command
+ * pre-seed (session.ts) and the loop-stats preview (loop-stats.ts).
  */
 import { existsSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
@@ -27,17 +27,8 @@ import { TEMPLATES_DIR, loopClaudeDir } from "./paths"
 
 const execFileP = promisify(execFile)
 
-export type ResolvedLoopPlugin = {
-  /** `plugin@marketplace` (or `plugin@builtin`). */
-  name: string
-  /** Host path to plugin root (contains .claude-plugin/plugin.json). */
-  path: string
-}
-
-/** Platform-shipped plugins. Always loaded. */
-function resolveBuiltinPlugins(): ResolvedLoopPlugin[] {
-  return [{ name: "loopat@builtin", path: join(TEMPLATES_DIR, "plugins", "loopat") }]
-}
+/** loopat-shipped builtin plugin (not in CC's plugin cache; passed via SDK option). */
+export const BUILTIN_LOOPAT_PLUGIN_PATH = join(TEMPLATES_DIR, "plugins", "loopat")
 
 const USER_CLAUDE_DIR = join(homedir(), ".claude")
 const USER_INSTALLED_PLUGINS = join(USER_CLAUDE_DIR, "plugins", "installed_plugins.json")
@@ -47,7 +38,7 @@ type InstalledPluginsFile = {
   version: number
   plugins: Record<string, Array<{ installPath: string; version: string; scope?: string }>>
 }
-type KnownMarketplacesFile = Record<string, { installLocation?: string }>
+type KnownMarketplacesFile = Record<string, { installLocation?: string; source?: any }>
 type MarketplaceCatalog = {
   plugins?: Array<{ name: string; source: string | { source: string; [k: string]: any } }>
 }
@@ -89,23 +80,14 @@ export function sourcesMatch(declared: any, existing: any): boolean {
     case "url":
       return declared.url === existing.url
     case "github":
-      // Both shapes seen: `repo: "owner/name"` and `repository: "owner/name"`
       return (declared.repo ?? declared.repository) === (existing.repo ?? existing.repository)
     case "directory":
       return declared.path === existing.path
     default:
-      // Unknown shape — fall back to JSON equality
       return JSON.stringify(declared) === JSON.stringify(existing)
   }
 }
 
-/**
- * Ensure a marketplace is registered with CC. Idempotent + URL-drift aware.
- *
- * Reads CC's known_marketplaces.json directly (no `claude plugin marketplace
- * list` subprocess — saves ~1s per spawn). Only shells out when add / remove
- * is actually needed.
- */
 async function ensureMarketplace(
   name: string,
   addPath: string,
@@ -114,9 +96,7 @@ async function ensureMarketplace(
 ): Promise<void> {
   const existing = (km?.[name] as any)?.source
   if (existing) {
-    if (sourcesMatch(declaredSource, existing)) {
-      return // already registered with correct source — fast path, no subprocess
-    }
+    if (sourcesMatch(declaredSource, existing)) return
     console.warn(
       `[plugins] marketplace "${name}" source drift; re-registering ` +
       `(was ${JSON.stringify(existing)}, want ${JSON.stringify(declaredSource)})`,
@@ -129,11 +109,6 @@ async function ensureMarketplace(
   }
 }
 
-/**
- * Register each extraKnownMarketplaces entry from merged settings.
- * Skips entries CC already knows AND whose declared source matches.
- * Detects drift (e.g., team admin changed the URL) and re-registers.
- */
 async function ensureExtraMarketplaces(
   extras: Record<string, { source?: any }> | undefined,
   loopId: string,
@@ -143,12 +118,10 @@ async function ensureExtraMarketplaces(
   for (const [name, entry] of Object.entries(extras)) {
     const src = entry?.source as any
     let addPath: string | undefined
-    // Normalize the declared source into a canonical shape for drift comparison
-    // AND pick the addPath to pass to `claude plugin marketplace add`.
     let normalized: any = src
     if (typeof src === "string") {
       addPath = src
-      normalized = { source: "github", repo: src } // best-effort shorthand
+      normalized = { source: "github", repo: src }
     } else if (src?.source === "directory" && typeof src.path === "string") {
       addPath = resolvePath(loopClaudeDir(loopId), src.path)
       normalized = { source: "directory", path: addPath }
@@ -167,11 +140,6 @@ async function ensureExtraMarketplaces(
   }
 }
 
-/**
- * Install each spec via `claude plugin install --scope=user`. Reads
- * installed_plugins.json directly to short-circuit (no `claude plugin list`
- * subprocess — saves ~1s per spawn).
- */
 async function ensurePluginsInstalled(
   specs: string[],
   ip: InstalledPluginsFile | null,
@@ -188,14 +156,60 @@ async function ensurePluginsInstalled(
 }
 
 /**
- * Resolve a `name@marketplace` spec to a host path. Prefers the marketplace's
- * source path (preserves symlinks); falls back to CC cache.
+ * Mtime cache on loops/<id>/.claude/settings.json — we only re-run marketplace
+ * registration + install when compose actually rewrote settings.
  */
-async function resolveSpecPath(
-  spec: string,
-  ip: InstalledPluginsFile | null,
-  km: KnownMarketplacesFile | null,
-): Promise<string | null> {
+type EnsureCacheEntry = { mtime: number }
+const ensureCache = new Map<string, EnsureCacheEntry>()
+
+/**
+ * Idempotently ensure the host CC has every marketplace + enabled plugin
+ * installed that the loop's merged settings.json declares. No return value —
+ * the inner SDK resolves enabledPlugins natively at spawn time (via the
+ * wholesale ~/.claude/plugins/ bind in bwrap.ts).
+ */
+export async function ensureLoopPluginsInstalled(loopId: string): Promise<void> {
+  const settingsPath = join(loopClaudeDir(loopId), "settings.json")
+  const mtime = existsSync(settingsPath) ? statSync(settingsPath).mtimeMs : 0
+
+  const cached = ensureCache.get(loopId)
+  if (cached && cached.mtime === mtime) return
+
+  const settings = await readJsonOpt<{
+    enabledPlugins?: Record<string, boolean>
+    extraKnownMarketplaces?: Record<string, { source?: any }>
+  }>(settingsPath)
+
+  const enabled = Object.entries(settings?.enabledPlugins ?? {})
+    .filter(([_, v]) => v)
+    .map(([k]) => k)
+
+  if (enabled.length === 0 && !settings?.extraKnownMarketplaces) {
+    ensureCache.set(loopId, { mtime })
+    return
+  }
+
+  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
+  const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+
+  await ensureExtraMarketplaces(settings?.extraKnownMarketplaces, loopId, km)
+  await ensurePluginsInstalled(enabled, ip)
+
+  ensureCache.set(loopId, { mtime })
+}
+
+/**
+ * Resolve a `name@marketplace` spec to a host path (best-effort, no install
+ * side-effect). Used by:
+ *   - session.ts: pre-seed plugin slash-commands before CC's init payload
+ *   - loop-stats.ts: count plugin contributions for the NewLoopDialog preview
+ *
+ * Prefers the marketplace's local source dir (preserves symlinks); falls back
+ * to the CC cache installPath. Returns null if not installed.
+ */
+export async function lookupPluginInstallPath(spec: string): Promise<string | null> {
+  const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
+  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
   if (!ip) return null
   const entry = ip.plugins?.[spec]?.[0]
   if (!entry?.installPath) return null
@@ -218,71 +232,4 @@ async function resolveSpecPath(
     }
   }
   return existsSync(entry.installPath) ? entry.installPath : null
-}
-
-/**
- * In-memory cache keyed by loopId, invalidated when the loop's settings.json
- * mtime changes. Compose rewrites settings.json on every spawn, so re-spawns
- * naturally bust the cache. Multiple callers within one spawn cycle
- * (session.ts spawn + slash-command seed, /api/mcp-servers, etc.) share the
- * cached result — cuts attach time from ~6s to ~50ms when nothing changed.
- */
-type ResolveCacheEntry = { mtime: number; plugins: ResolvedLoopPlugin[] }
-const resolveCache = new Map<string, ResolveCacheEntry>()
-
-/**
- * Main entry — called at loop spawn after compose has written the loop's
- * merged settings.json. Reads enabledPlugins + extraKnownMarketplaces from
- * that file, orchestrates marketplace registration + plugin install, then
- * returns absolute paths for the SDK's `plugins` option.
- *
- * Result cached by settings.json mtime; bypasses CC CLI subprocess calls
- * (reads ~/.claude/plugins/{installed,known_marketplaces}.json directly).
- */
-export async function resolveLoopPlugins(loopId: string): Promise<ResolvedLoopPlugin[]> {
-  const settingsPath = join(loopClaudeDir(loopId), "settings.json")
-  const mtime = existsSync(settingsPath) ? statSync(settingsPath).mtimeMs : 0
-
-  const cached = resolveCache.get(loopId)
-  if (cached && cached.mtime === mtime) return cached.plugins
-
-  const builtins = resolveBuiltinPlugins()
-  const settings = await readJsonOpt<{
-    enabledPlugins?: Record<string, boolean>
-    extraKnownMarketplaces?: Record<string, { source?: any }>
-  }>(settingsPath)
-
-  const enabled = Object.entries(settings?.enabledPlugins ?? {})
-    .filter(([_, v]) => v)
-    .map(([k]) => k)
-
-  if (enabled.length === 0) {
-    resolveCache.set(loopId, { mtime, plugins: builtins })
-    return builtins
-  }
-
-  // Read CC state files once; pass to helpers (avoids redundant disk reads).
-  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
-  const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
-
-  await ensureExtraMarketplaces(settings?.extraKnownMarketplaces, loopId, km)
-  await ensurePluginsInstalled(enabled, ip)
-
-  // Re-read installed_plugins.json after any installs (km too, in case
-  // ensureExtraMarketplaces touched it).
-  const ip2 = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
-  const km2 = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
-
-  const out: ResolvedLoopPlugin[] = [...builtins]
-  for (const spec of enabled) {
-    const path = await resolveSpecPath(spec, ip2, km2)
-    if (path) {
-      out.push({ name: spec, path })
-    } else {
-      console.warn(`[plugins] could not resolve path for "${spec}" (install may have failed)`)
-    }
-  }
-
-  resolveCache.set(loopId, { mtime, plugins: out })
-  return out
 }

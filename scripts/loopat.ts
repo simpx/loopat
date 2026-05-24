@@ -16,7 +16,7 @@ import { spawn } from "node:child_process"
 import { join } from "node:path"
 import { listProfiles, resolveLoopPlan, type LoopPlan } from "../server/src/profiles"
 import { composeFromPlan, type ComposeResult } from "../server/src/compose"
-import { resolveLoopPlugins } from "../server/src/plugin-installer"
+import { ensureLoopPluginsInstalled } from "../server/src/plugin-installer"
 import {
   LOOPAT_HOME,
   loopDir,
@@ -246,13 +246,11 @@ async function main() {
   const compose = await composeFromPlan(loopId, plan)
   printCompose(compose)
 
-  // Trigger plugin install + path resolution (returns paths; CLI doesn't pass
-  // to SDK because we use the claude CLI to actually run — but installing
-  // ensures plugins exist on host, and the materialized settings.json has
-  // enabledPlugins for any future SDK consumer).
-  console.log("\n[loopat] resolving + installing plugins …")
-  const resolved = await resolveLoopPlugins(loopId)
-  for (const r of resolved) console.log(`  ✓ ${r.name}  →  ${r.path}`)
+  // Ensure host CC has every marketplace registered + plugin installed.
+  // The CLI claude reads enabledPlugins from settings.json natively (same as
+  // the SDK does now post-2026-05).
+  console.log("\n[loopat] installing plugins …")
+  await ensureLoopPluginsInstalled(loopId)
 
   if (!args.doSpawn) {
     console.log("\n(materialize complete — pass --spawn or --bwrap to launch claude)")

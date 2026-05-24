@@ -36,6 +36,7 @@ const {
   personalDir,
   LOOPAT_INSTALL_DIR,
 } = await import("../src/paths")
+const { homedir } = await import("node:os")
 // Always align our fixture to whatever LOOPAT_HOME paths.ts actually resolved.
 const TEST_HOME = LOOPAT_HOME
 
@@ -80,13 +81,13 @@ function collectBinds(argv: string[]): Map<string, string[]> {
 
 describe("buildBwrapArgs — merged .claude visibility", () => {
   test("loops/<id>/.claude is bound at V_LOOP_CLAUDE", async () => {
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [])
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
     const binds = collectBinds(argv)
     expect(binds.get(loopClaudeDir(LOOP_ID))).toContain(V_LOOP_CLAUDE(LOOP_ID))
   })
 
   test("loops/<id>/workdir is bound at V_LOOP_WORKDIR", async () => {
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [])
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
     const binds = collectBinds(argv)
     expect(binds.get(loopWorkdir(LOOP_ID))).toContain(V_LOOP_WORKDIR(LOOP_ID))
   })
@@ -96,54 +97,32 @@ describe("buildBwrapArgs — merged .claude visibility", () => {
     // loops/<id>/.claude/skills/<name> whose targets are host-absolute paths
     // into personalDir(user). Without the host-abs re-bind, those targets
     // would not resolve inside the sandbox ($HOME is an empty overlay).
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [])
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
     const binds = collectBinds(argv)
     const dsts = binds.get(personalDir(USER)) ?? []
     expect(dsts).toContain(V_CONTEXT_PERSONAL)
     expect(dsts).toContain(personalDir(USER))
   })
 
-  test("LOOPAT_INSTALL_DIR is ro-bound at host-absolute path (covers builtin plugins)", async () => {
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [])
+  test("LOOPAT_INSTALL_DIR is ro-bound at host-absolute path (covers builtin loopat plugin)", async () => {
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
     const binds = collectBinds(argv)
     expect(binds.get(LOOPAT_INSTALL_DIR)).toContain(LOOPAT_INSTALL_DIR)
   })
 })
 
-describe("buildBwrapArgs — plugin path visibility (the main regression we're locking in)", () => {
-  test("each external plugin path is added as a ro-bind at the same host-absolute path", async () => {
-    const pluginPaths = [
-      "/home/alice/.claude/plugins/marketplaces/acme/plugins/cicd",
-      "/home/alice/.claude/plugins/marketplaces/legal/plugins/ip-legal",
-      "/home/alice/.claude/plugins/cache/foo/bar/1.0.0",
-    ]
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, pluginPaths)
-    const binds = collectBinds(argv)
-    for (const p of pluginPaths) {
-      expect(binds.get(p)).toContain(p)
-    }
-  })
-
-  test("builtin plugin paths under LOOPAT_INSTALL_DIR are NOT double-bound (already covered)", async () => {
-    const builtinPath = join(LOOPAT_INSTALL_DIR, "server", "templates", "plugins", "loopat")
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [builtinPath])
-    const binds = collectBinds(argv)
-    // The builtin path itself should NOT have a bind entry (it's under
-    // LOOPAT_INSTALL_DIR which is already ro-bound wholesale).
-    expect(binds.get(builtinPath)).toBeUndefined()
-  })
-
-  test("empty / falsy plugin paths are skipped", async () => {
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, ["", null as any, undefined as any])
-    // Just verify no crash and no empty-string bind.
-    const binds = collectBinds(argv)
-    expect(binds.has("")).toBe(false)
-  })
-
-  test("default (no pluginPaths arg) doesn't error and produces a sensible argv", async () => {
+describe("buildBwrapArgs — plugin visibility via wholesale ~/.claude/plugins/ bind", () => {
+  test("~/.claude/plugins/ is ro-bound wholesale at the host-absolute path", async () => {
+    // The wholesale bind is what lets the inner SDK natively resolve
+    // enabledPlugins (settings.json declares specs → SDK looks up
+    // installPath in ~/.claude/plugins/installed_plugins.json → loads
+    // each plugin dir under ~/.claude/plugins/marketplaces|cache/).
+    // Without this bind, every spec resolution would fail and CC would
+    // silently load zero external plugins.
     const argv = await buildBwrapArgs(LOOP_ID, USER)
-    expect(argv).toContain("--bind")
-    expect(argv).toContain(loopClaudeDir(LOOP_ID))
+    const binds = collectBinds(argv)
+    const pluginsDir = join(homedir(), ".claude", "plugins")
+    expect(binds.get(pluginsDir)).toContain(pluginsDir)
   })
 })
 
@@ -153,7 +132,7 @@ describe("buildBwrapArgs — CLAUDE_CONFIG_DIR contract", () => {
     // session.ts sets CLAUDE_CONFIG_DIR = V_LOOP_CLAUDE(loopId). So as long as
     // V_LOOP_CLAUDE is bound to the loop's merged .claude dir, all three
     // artifacts are visible. This test pins that wiring.
-    const argv = await buildBwrapArgs(LOOP_ID, USER, {}, undefined, false, false, false, [])
+    const argv = await buildBwrapArgs(LOOP_ID, USER)
     const binds = collectBinds(argv)
     expect(binds.get(loopClaudeDir(LOOP_ID))).toContain(V_LOOP_CLAUDE(LOOP_ID))
     // The bind must be writable (--bind), not --ro-bind — CC writes session
