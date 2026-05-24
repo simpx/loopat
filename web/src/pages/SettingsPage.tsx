@@ -30,12 +30,11 @@ import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { McpStatusPanel } from "../components/McpStatusPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
-import { ProfilesPanel } from "../components/settings/ProfilesPanel"
 import { useWorkspace } from "@/ctx"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search } from "lucide-react"
 import { useSearchParams } from "react-router-dom"
 
-type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-profiles"
+type TabId = "personal-repo" | "providers" | "envs" | "mounts" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles." },
@@ -49,7 +48,6 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string }[] 
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove." },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration." },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings." },
-  { id: "admin-profiles", label: "Profiles",              gated: false, description: "Manage workspace profiles — team-level .claude/ configurations for loops." },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -301,9 +299,6 @@ export function SettingsPage() {
                   )}
                   {active === "admin-serve" && (
                     <ServePanel />
-                  )}
-                  {active === "admin-profiles" && (
-                    <ProfilesPanel />
                   )}
                 </div>
               </>
