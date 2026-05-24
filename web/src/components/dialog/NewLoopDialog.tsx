@@ -6,7 +6,7 @@
  * See docs/design/composition-model.md for the model.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { getDefaultProfiles, listProfiles, listRepos, listVaults, type ProfileEntry, type RepoEntry } from "../../api"
+import { getDefaultProfiles, getLoopStats, listProfiles, listRepos, listVaults, type LoopStats, type ProfileEntry, type RepoEntry } from "../../api"
 
 export function NewLoopDialog({
   onClose,
@@ -25,6 +25,8 @@ export function NewLoopDialog({
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [profiles, setProfiles] = useState<ProfileEntry[]>([])
   const [vaults, setVaults] = useState<string[]>([])
+  const [stats, setStats] = useState<LoopStats | null>(null)
+  const [statsLoading, setStatsLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -51,6 +53,18 @@ export function NewLoopDialog({
     const available = new Set(profiles.map((p) => p.name))
     setSelectedProfiles(new Set(defaultProfileNames.filter((n) => available.has(n) && n !== "base")))
   }
+
+  // Re-fetch loop stats when the selection changes (debounced so toggling
+  // multiple checkboxes in quick succession only fires once).
+  useEffect(() => {
+    setStatsLoading(true)
+    const t = setTimeout(() => {
+      getLoopStats([...selectedProfiles])
+        .then(setStats)
+        .finally(() => setStatsLoading(false))
+    }, 120)
+    return () => clearTimeout(t)
+  }, [selectedProfiles])
 
   const isDirtyFromDefaults = (() => {
     const defaults = new Set(defaultProfileNames.filter((n) => n !== "base"))
@@ -193,6 +207,30 @@ export function NewLoopDialog({
                 >
                   reset to defaults
                 </button>
+              )}
+            </div>
+
+            {/* Loop preview: total contributions across team + selected profiles.
+                Includes plugin internals (skills/agents/MCPs from each enabled plugin's dir). */}
+            <div className="mt-1.5 px-1.5 py-1 text-[11px] text-gray-600 bg-gray-50 border border-gray-200 rounded">
+              {statsLoading && !stats ? (
+                <span className="text-gray-400">computing…</span>
+              ) : stats ? (
+                <span title="Totals across team + selected profiles + their plugins (deduped by name)">
+                  <span className={stats.plugins > 0 ? "" : "text-gray-400"}>{stats.plugins} plugins</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span className={stats.skills > 0 ? "" : "text-gray-400"}>{stats.skills} skills</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span className={stats.agents > 0 ? "" : "text-gray-400"}>{stats.agents} agents</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span className={stats.hooks > 0 ? "" : "text-gray-400"}>{stats.hooks} hooks</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span className={stats.mcpServers > 0 ? "" : "text-gray-400"}>{stats.mcpServers} MCP servers</span>
+                  {statsLoading && <span className="ml-1.5 text-gray-400">·</span>}
+                  {statsLoading && <span className="ml-1 text-gray-400">updating…</span>}
+                </span>
+              ) : (
+                <span className="text-gray-400">—</span>
               )}
             </div>
           </DialogField>

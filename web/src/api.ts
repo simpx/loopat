@@ -323,6 +323,21 @@ export async function getDefaultProfiles(): Promise<string[]> {
   return Array.isArray(j.default_profiles) ? j.default_profiles : []
 }
 
+export type LoopStats = {
+  plugins: number
+  skills: number
+  agents: number
+  hooks: number
+  mcpServers: number
+}
+/** Preview of what a loop with the given profile selection will contain.
+ *  Team layer is always implicit. */
+export async function getLoopStats(profiles: string[]): Promise<LoopStats | null> {
+  const r = await apiFetch(`/api/loop-stats?profiles=${encodeURIComponent(profiles.join(","))}`)
+  if (!r.ok) return null
+  return (await r.json()) as LoopStats
+}
+
 export async function listVaults(): Promise<string[]> {
   const r = await apiFetch("/api/vaults")
   if (!r.ok) return []

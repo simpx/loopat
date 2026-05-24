@@ -1300,6 +1300,22 @@ app.get("/api/personal/default-profiles", requireAuth, async (c) => {
 // is a directory with a profile.json. Returns name + description so the UI
 // can render a multi-select. Base profile is included if present — UI may
 // choose to render it as "always on" / non-toggleable.
+/**
+ * Compute totals for a hypothetical loop with the given profile selection.
+ * Team layer is always implicit. Used by NewLoopDialog to show "23 plugins ·
+ * 7 skills · ..." preview before the user creates the loop.
+ *
+ * Reads .claude/ dirs of team + selected profiles + each enabled plugin
+ * (host-installed cache OR local marketplace source).
+ */
+app.get("/api/loop-stats", requireAuth, async (c) => {
+  const { computeLoopStats } = await import("./loop-stats")
+  const profilesParam = c.req.query("profiles") ?? ""
+  const profiles = profilesParam.split(",").map((s) => s.trim()).filter(Boolean)
+  const stats = await computeLoopStats(profiles)
+  return c.json(stats)
+})
+
 app.get("/api/profiles", requireAuth, async (c) => {
   // Profile = a subdir of `.loopat/profiles/` with a `.claude/` inside.
   // No loopat-invented metadata file (no profile.json) — descriptions, if
