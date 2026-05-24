@@ -1564,11 +1564,43 @@ export type PluginEntry = {
   description?: string
 }
 
+export type PluginWithStatus = PluginEntry & {
+  installed: boolean
+  marketplaceName: string
+}
+
+export type MarketplaceSource = {
+  name: string
+  source: any
+  installLocation?: string
+}
+
 export async function listAvailablePlugins(): Promise<PluginEntry[]> {
   const r = await apiFetch("/api/plugins/available")
   if (!r.ok) return []
   const j = await r.json()
   return (j.plugins as PluginEntry[]) ?? []
+}
+
+export async function browseMarketplacePlugins(): Promise<PluginWithStatus[]> {
+  const r = await apiFetch("/api/plugins/browse")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.plugins as PluginWithStatus[]) ?? []
+}
+
+export async function listMarketplaces(): Promise<MarketplaceSource[]> {
+  const r = await apiFetch("/api/marketplaces")
+  if (!r.ok) return []
+  const j = await r.json()
+  return (j.marketplaces as MarketplaceSource[]) ?? []
+}
+
+export async function refreshMarketplaces(): Promise<{ ok: boolean; added?: string[]; error?: string }> {
+  const r = await apiFetch("/api/plugins/refresh", { method: "POST" })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `refresh failed (${r.status})` }
+  return { ok: true, added: j.added }
 }
 
 // ── profile CRUD (admin) ──
