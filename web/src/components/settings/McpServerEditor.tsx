@@ -1,5 +1,119 @@
 import { useState } from "react"
-import { Plus, Trash2, Server } from "lucide-react"
+import { Plus, Trash2, Server, Zap } from "lucide-react"
+
+// ── parsers for quick-add ──
+
+/** Try to parse CLI input: `claude mcp add <name> <url> [-t <type>] [-H "K: V"]` */
+function parseCli(input: string): McpServerRow | null {
+  const s = input.trim()
+  if (!s.includes("claude") || !s.includes("mcp") || !s.includes("add")) return null
+
+  // Split into tokens respecting quoted strings
+  const tokens: string[] = []
+  let i = 0
+  while (i < s.length) {
+    if (s[i] === " " || s[i] === "\t") { i++; continue }
+    if (s[i] === '"' || s[i] === "'") {
+      const quote = s[i]
+      const end = s.indexOf(quote, i + 1)
+      if (end === -1) { tokens.push(s.slice(i + 1)); break }
+      tokens.push(s.slice(i + 1, end))
+      i = end + 1
+    } else {
+      let j = i
+      while (j < s.length && s[j] !== " " && s[j] !== "\t") j++
+      tokens.push(s.slice(i, j))
+      i = j
+    }
+  }
+
+  // Find "add" and take name + url after it
+  const addIdx = tokens.findIndex((t) => t === "add")
+  if (addIdx === -1 || addIdx + 2 >= tokens.length) return null
+
+  const name = tokens[Math.min(addIdx + 1, tokens.length - 1)]
+  const second = tokens[Math.min(addIdx + 2, tokens.length - 1)]
+
+  // Determine if second token is URL or command
+  let url = ""
+  let command = ""
+  let type: McpServerRow["type"] = "stdio"
+  const headers: string[] = []
+  const envs: string[] = []
+
+  if (second.startsWith("http://") || second.startsWith("https://")) {
+    url = second
+    type = "http"
+  } else if (!second.startsWith("-")) {
+    command = second
+  }
+
+  for (let ti = addIdx + 3; ti < tokens.length; ti++) {
+    const t = tokens[ti]
+    if (t === "-t" || t === "--type") {
+      const v = tokens[++ti]
+      if (v === "http" || v === "sse" || v === "stdio") type = v
+    } else if (t === "-H" || t === "--header") {
+      headers.push(tokens[++ti] ?? "")
+    } else if (t === "-e" || t === "--env") {
+      envs.push(tokens[++ti] ?? "")
+    } else if (t === "-a" || t === "--args") {
+      // args follow — collect until next flag
+    } else if (!t.startsWith("-")) {
+      if (!command) command = t
+    }
+  }
+
+  return {
+    name,
+    type,
+    url,
+    command,
+    args: "",
+    env: envs.join("\n"),
+    headers: headers.join("\n"),
+  }
+}
+
+/** Try to parse JSON input: { "mcpServers": { "name": { ... } } } */
+function parseJson(input: string): McpServerRow | null {
+  try {
+    const obj = JSON.parse(input.trim())
+    // Handle both { mcpServers: { name: {...} } } and just { name: {...} }
+    let servers: Record<string, any>
+    if (obj.mcpServers) {
+      servers = obj.mcpServers
+    } else if (obj.mcp) {
+      servers = obj.mcp
+    } else if (typeof Object.values(obj)[0] === "object" && Object.values(obj)[0] !== null && !Array.isArray(Object.values(obj)[0])) {
+      servers = obj
+    } else {
+      return null
+    }
+    const [name, srv] = Object.entries(servers)[0] ?? []
+    if (!name || !srv || typeof srv !== "object") return null
+
+    const type = srv?.type === "http" || srv?.type === "sse" || srv?.type === "remote" ? "http" as const
+      : srv?.type === "sse" ? "sse" as const
+      : "stdio" as const
+
+    return {
+      name,
+      type,
+      url: srv?.url ?? "",
+      command: srv?.command ?? "",
+      args: srv?.args ? (Array.isArray(srv.args) ? srv.args.join(" ") : String(srv.args)) : "",
+      env: srv?.env ? Object.entries(srv.env).map(([k, v]) => `${k}=${v}`).join("\n") : "",
+      headers: srv?.headers ? Object.entries(srv.headers).map(([k, v]) => `${k}: ${v}`).join("\n") : "",
+    }
+  } catch {
+    return null
+  }
+}
+
+function parseQuickAdd(input: string): McpServerRow | null {
+  return parseJson(input) ?? parseCli(input)
+}
 
 export type McpServerRow = {
   name: string
@@ -8,26 +122,37 @@ export type McpServerRow = {
   command: string
   args: string
   env: string
+  headers: string
 }
 
 function emptyRow(): McpServerRow {
-  return { name: "", type: "stdio", url: "", command: "", args: "", env: "" }
+  return { name: "", type: "stdio", url: "", command: "", args: "", env: "", headers: "" }
 }
 
 function rowFromJson(name: string, srv: any): McpServerRow {
   return {
     name,
-    type: (srv?.type === "http" || srv?.type === "sse") ? srv.type : "stdio",
+    type: (srv?.type === "http" || srv?.type === "sse" || srv?.type === "remote") ? "http" : "stdio",
     url: srv?.url ?? "",
     command: srv?.command ?? "",
     args: srv?.args ? (Array.isArray(srv.args) ? srv.args.join(" ") : String(srv.args)) : "",
     env: srv?.env ? Object.entries(srv.env).map(([k, v]) => `${k}=${v}`).join("\n") : "",
+    headers: srv?.headers ? Object.entries(srv.headers).map(([k, v]) => `${k}: ${v}`).join("\n") : "",
   }
 }
 
 function rowToJson(r: McpServerRow): any {
   if (r.type === "http" || r.type === "sse") {
-    return { type: r.type, url: r.url }
+    const out: any = { type: r.type, url: r.url }
+    if (r.headers.trim()) {
+      out.headers = Object.fromEntries(
+        r.headers.split("\n").filter(Boolean).map((line) => {
+          const colon = line.indexOf(":")
+          return colon >= 0 ? [line.slice(0, colon).trim(), line.slice(colon + 1).trim()] : [line.trim(), ""]
+        }),
+      )
+    }
+    return out
   }
   const out: any = { command: r.command }
   if (r.args.trim()) out.args = r.args.split(/\s+/)
@@ -182,6 +307,14 @@ export function McpServerEditor({
               />
             </div>
           )}
+          {(newRow.type === "http" || newRow.type === "sse") && (
+            <textarea
+              value={newRow.headers}
+              onChange={(e) => setNewRow((r) => ({ ...r, headers: e.target.value }))}
+              placeholder="headers (Key: Value, one per line)"
+              className="ip text-[12px] w-full font-mono resize-none h-14"
+            />
+          )}
           <div className="flex items-center gap-2">
             <button onClick={commitAdd} className="px-3 h-7 rounded-lg bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
             <button onClick={() => { setAdding(false); setNewRow(emptyRow()) }} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
@@ -190,13 +323,16 @@ export function McpServerEditor({
       )}
 
       {!readonly && (
-        <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1.5 px-3 py-2 text-[12px] text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg w-full transition-colors"
-        >
-          <Plus size={13} />
-          Add MCP server
-        </button>
+        <>
+          <QuickAdd onParse={(row) => { setNewRow(row); setAdding(true) }} />
+          <button
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-[12px] text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg w-full transition-colors"
+          >
+            <Plus size={13} />
+            Add MCP server
+          </button>
+        </>
       )}
     </div>
   )
@@ -297,8 +433,80 @@ function ServerRow({
           />
         </div>
       )}
+      {(row.type === "http" || row.type === "sse") && (
+        <textarea
+          value={row.headers}
+          onChange={(e) => onCommit({ headers: e.target.value })}
+          placeholder="headers (Key: Value, one per line)"
+          className="ip text-[12px] w-full font-mono resize-none h-14"
+        />
+      )}
       <div className="flex items-center gap-2">
         <button onClick={onEdit} className="px-2.5 h-7 rounded-lg bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Done</button>
+      </div>
+    </div>
+  )
+}
+
+// ── quick-add: paste JSON or CLI command ──
+
+function QuickAdd({ onParse }: { onParse: (row: McpServerRow) => void }) {
+  const [open, setOpen] = useState(false)
+  const [input, setInput] = useState("")
+  const [err, setErr] = useState<string | null>(null)
+
+  const handleParse = () => {
+    const trimmed = input.trim()
+    if (!trimmed) return
+    setErr(null)
+    const result = parseQuickAdd(trimmed)
+    if (!result) {
+      setErr("Couldn't parse. Paste a JSON object with mcpServers, or a `claude mcp add ...` command.")
+      return
+    }
+    onParse(result)
+    setInput("")
+    setOpen(false)
+    setErr(null)
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-2 text-[12px] text-gray-400 hover:text-gray-700 hover:bg-gray-50 rounded-lg w-full transition-colors"
+      >
+        <Zap size={13} />
+        Paste JSON / CLI
+      </button>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Zap size={13} className="text-amber-500 shrink-0" />
+        <span className="text-[12px] font-medium text-gray-700">Paste JSON or CLI command</span>
+        <div className="flex-1" />
+        <button onClick={() => { setOpen(false); setInput(""); setErr(null) }} className="text-[11px] text-gray-400 hover:text-gray-600">cancel</button>
+      </div>
+      <textarea
+        autoFocus
+        value={input}
+        onChange={(e) => { setInput(e.target.value); setErr(null) }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleParse()
+        }}
+        placeholder={`Paste JSON:\n{ "mcpServers": { "name": { "type": "http", "url": "...", "headers": { "Key": "Value" } } } }\n\nOr CLI:\nclaude mcp add name url -t http -H "Key: Value"`}
+        className="ip text-[12px] w-full font-mono resize-y min-h-[80px]"
+        rows={4}
+      />
+      {err && (
+        <div className="text-[11px] text-red-600">{err}</div>
+      )}
+      <div className="flex items-center gap-2">
+        <button onClick={handleParse} className="px-3 h-7 rounded-lg bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Parse &amp; Fill</button>
+        <span className="text-[10px] text-gray-400">or Ctrl+Enter</span>
       </div>
     </div>
   )
