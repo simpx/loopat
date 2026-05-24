@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useWorkspace } from "@/ctx"
-import { getTiers, saveTierSettings, type TierInfo, type TiersResponse } from "@/api"
+import { getTiers, saveTierSettings, createProfile, deleteProfile, type TierInfo, type TiersResponse } from "@/api"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { McpServerEditor, mcpServersFromJson } from "./McpServerEditor"
 import { PluginToggleList } from "./PluginToggleList"
-import { ChevronDown, ChevronRight, Lock, RefreshCw, Check, Layers, AlertCircle, Globe, User, Blocks, FolderGit2, FileCode2, ExternalLink, Plus, Store, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronRight, Lock, RefreshCw, Check, Layers, AlertCircle, Globe, User, Blocks, FolderGit2, FileCode2, Plus, Store, Trash2 } from "lucide-react"
 
 // ── tier metadata ──
 
@@ -63,7 +64,17 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
 
   const [data, setData] = useState<TiersResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["personal"]))
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // expanded state synced to URL ?expand=personal,profile:dev
+  const expandParam = searchParams.get("expand") ?? "personal"
+  const expanded = new Set<string>(expandParam.split(",").filter(Boolean))
+  const setExpanded = (next: Set<string>) => {
+    const val = [...next].join(",")
+    if (val) setSearchParams({ expand: val }, { replace: true })
+    else setSearchParams({}, { replace: true })
+  }
+
   const [profilesOpen, setProfilesOpen] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -76,12 +87,10 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
   useEffect(() => { refresh() }, [refresh])
 
   const toggleExpand = (id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    const next = new Set(expanded)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setExpanded(next)
   }
 
   const all = data?.tiers ?? []
@@ -196,6 +205,22 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
                 </button>
               )
             })}
+            {/* Create profile (admin only) */}
+            {isAdmin && (
+              <CreateProfileButton
+                onCreated={(name) => {
+                  setProfilesOpen(false)
+                  refresh().then(() => {
+                    // Auto-expand the new profile
+                    const newId = `profile:${name}`
+                    toggleExpand(newId)
+                    setTimeout(() => {
+                      document.getElementById(`tier-${newId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }, 100)
+                  })
+                }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -236,6 +261,8 @@ function TierDetail({
   const Icon = meta.icon
   const canEdit = tier.editable && (tier.managedBy === "user" || (tier.managedBy === "admin" && isAdmin))
   const isSdk = tier.managedBy === "sdk"
+  const isProfile = tier.id.startsWith("profile:")
+  const profileName = isProfile ? tier.id.slice("profile:".length) : ""
   const lockReason = !canEdit && tier.managedBy === "admin" && !isAdmin ? "Admin access required" : null
 
   const [draft, setDraft] = useState<Record<string, any>>({})
@@ -243,6 +270,7 @@ function TierDetail({
   const [err, setErr] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const navigate = useNavigate()
+  const focusMarketplaceRef = useRef<(() => void) | null>(null)
 
   const ctxUrl = tierContextUrl(tier)
 
@@ -300,13 +328,17 @@ function TierDetail({
         </div>
         {/* Edit raw in Context */}
         {ctxUrl && (
-          <button
-            onClick={() => navigate(`/context/${ctxUrl.vault}?file=${encodeURIComponent(ctxUrl.file)}&edit=1`)}
-            className="shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
-            title={`Edit raw settings.json in Context → ${ctxUrl.vault}`}
-          >
-            <ExternalLink size={13} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => navigate(`/context/${ctxUrl.vault}?file=${encodeURIComponent(ctxUrl.file)}&edit=1`)}
+                className="shrink-0 p-1.5 rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <FileCode2 size={13} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>edit {ctxUrl.vault}/{ctxUrl.file}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -370,6 +402,7 @@ function TierDetail({
                 <PluginToggleList
                   enabledPlugins={(draft?.enabledPlugins as Record<string, boolean>) ?? {}}
                   readonly={!canEdit || disabled}
+                  focusMarketplaceRef={focusMarketplaceRef}
                   onChange={(enabled) => setDraft((d) => d ? { ...d, enabledPlugins: enabled } : { enabledPlugins: enabled })}
                 />
               )}
@@ -394,6 +427,7 @@ function TierDetail({
                 marketplaces={(draft?.extraKnownMarketplaces as Record<string, any>) ?? {}}
                 readonly={!canEdit || disabled}
                 onChange={(mps) => setDraft((d) => d ? { ...d, extraKnownMarketplaces: mps } : { extraKnownMarketplaces: mps })}
+                focusRef={focusMarketplaceRef}
               />
             </SubSection>
 
@@ -414,8 +448,40 @@ function TierDetail({
               </div>
             )}
 
-            {/* Save */}
-            {canEdit && (
+            {/* Delete profile (admin only) */}
+            {isProfile && isAdmin && (
+              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Delete profile "${profileName}"? This removes all its .claude/ contents permanently.`)) return
+                    const r = await deleteProfile(profileName)
+                    if (!r.ok) { setErr(r.error ?? "delete failed"); return }
+                    onSaved()
+                  }}
+                  className="px-3 h-7 rounded-lg text-[11px] text-red-500 hover:bg-red-50 hover:text-red-600 transition-colors"
+                >
+                  Delete profile
+                </button>
+                <div className="flex items-center gap-2">
+                  {err && <span className="text-[12px] text-red-600">{err}</span>}
+                  {saved && (
+                    <span className="text-[12px] text-emerald-600 flex items-center gap-1">
+                      <Check size={13} /> saved
+                    </span>
+                  )}
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || disabled}
+                    className="px-4 h-8 rounded-lg bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Save (non-profile tiers) */}
+            {canEdit && !isProfile && (
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                 {err && <span className="text-[12px] text-red-600">{err}</span>}
                 {saved && (
@@ -478,20 +544,45 @@ function SubSection({
 
 // ── marketplace editor ──
 
-function MarketplaceEditor({
+/** Extract a repo name from a git URL. e.g. "https://github.com/owner/repo.git" → "repo" */
+function extractNameFromUrl(url: string): string {
+  try {
+    // Strip trailing .git and query/hash
+    let cleaned = url.trim().replace(/\.git$/, "").split(/[?#]/)[0]
+    // Get last path segment
+    const parts = cleaned.replace(/\/$/, "").split("/")
+    return parts[parts.length - 1] || ""
+  } catch { return "" }
+}
+
+export function MarketplaceEditor({
   marketplaces,
   readonly,
   onChange,
+  focusRef,
 }: {
   marketplaces: Record<string, any>
   readonly?: boolean
   onChange: (mps: Record<string, any>) => void
+  focusRef?: React.MutableRefObject<(() => void) | null>
 }) {
   const [adding, setAdding] = useState(false)
   const [newName, setNewName] = useState("")
   const [newSource, setNewSource] = useState<"git" | "github" | "directory">("git")
   const [newValue, setNewValue] = useState("")
   const [newBranch, setNewBranch] = useState("main")
+  const [nameTouched, setNameTouched] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  // Expose a focus function to the parent via ref
+  useEffect(() => {
+    if (focusRef) {
+      focusRef.current = () => {
+        setAdding(true)
+        setTimeout(() => nameInputRef.current?.focus(), 50)
+      }
+    }
+  }, [focusRef])
 
   const entries = Object.entries(marketplaces)
 
@@ -511,6 +602,7 @@ function MarketplaceEditor({
     setNewName("")
     setNewValue("")
     setNewBranch("main")
+    setNameTouched(false)
     setAdding(false)
   }
 
@@ -557,16 +649,17 @@ function MarketplaceEditor({
         <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <input
+              ref={nameInputRef}
               autoFocus
               value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { setAdding(false); setNewName("") } }}
+              onChange={(e) => { setNewName(e.target.value); setNameTouched(true) }}
+              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { setAdding(false); setNewName(""); setNameTouched(false) } }}
               placeholder="marketplace name"
               className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
             />
             <select
               value={newSource}
-              onChange={(e) => setNewSource(e.target.value as any)}
+              onChange={(e) => { setNewSource(e.target.value as any); if (e.target.value === "directory") { setNameTouched(true) } }}
               className="w-24 shrink-0 border border-gray-300 rounded px-2 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
             >
               <option value="git">git URL</option>
@@ -576,7 +669,14 @@ function MarketplaceEditor({
           </div>
           <input
             value={newValue}
-            onChange={(e) => setNewValue(e.target.value)}
+            onChange={(e) => {
+              setNewValue(e.target.value)
+              // Auto-fill name from URL if not manually edited
+              if ((newSource === "git" || newSource === "github") && !nameTouched) {
+                const extracted = extractNameFromUrl(e.target.value)
+                if (extracted) setNewName(extracted)
+              }
+            }}
             placeholder={newSource === "git" ? "https://..." : newSource === "github" ? "owner/repo" : "/path/to/marketplace"}
             className="ip text-[12px] w-full font-mono"
           />
@@ -649,5 +749,54 @@ function ProfilesTileButton({
       </div>
       {open ? <ChevronDown size={10} className="text-gray-400 shrink-0" /> : <ChevronRight size={10} className="text-gray-400 shrink-0" />}
     </button>
+  )
+}
+
+// ── profile lifecycle helpers ──
+
+function CreateProfileButton({ onCreated }: { onCreated: (name: string) => void }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState("")
+  const [err, setErr] = useState<string | null>(null)
+
+  const create = async () => {
+    const n = name.trim()
+    if (!n) return
+    setErr(null)
+    const r = await createProfile(n)
+    if (!r.ok) { setErr(r.error ?? "create failed"); return }
+    setName("")
+    setAdding(false)
+    onCreated(n)
+  }
+
+  if (!adding) {
+    return (
+      <button
+        onClick={() => setAdding(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-gray-400 hover:text-gray-700 hover:bg-white/80 rounded w-full transition-colors"
+      >
+        <Plus size={12} />
+        Create profile
+      </button>
+    )
+  }
+
+  return (
+    <div className="px-3 py-1.5 space-y-1.5">
+      <input
+        autoFocus
+        value={name}
+        onChange={(e) => { setName(e.target.value); setErr(null) }}
+        onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") { setAdding(false); setName("") } }}
+        placeholder="profile name"
+        className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white w-full"
+      />
+      {err && <div className="text-[11px] text-red-600">{err}</div>}
+      <div className="flex items-center gap-2">
+        <button onClick={create} className="px-3 h-7 rounded-lg bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Create</button>
+        <button onClick={() => { setAdding(false); setName(""); setErr(null) }} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
+      </div>
+    </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus, Trash2, Server, Zap } from "lucide-react"
 
 // ── parsers for quick-add ──
@@ -181,12 +181,18 @@ export function McpServerEditor({
   onChange: (servers: Record<string, any>) => void
   readonly?: boolean
 }) {
-  const [rows, setRows] = useState<McpServerRow[]>(
-    [...servers.entries()].map(([k, v]) => rowFromJson(k, v)),
-  )
+  const buildRows = () => [...servers.entries()].map(([k, v]) => rowFromJson(k, v))
+  const [rows, setRows] = useState<McpServerRow[]>(buildRows)
   const [adding, setAdding] = useState(false)
   const [newRow, setNewRow] = useState<McpServerRow>(emptyRow())
   const [editing, setEditing] = useState<number | null>(null)
+
+  // Sync rows when servers prop changes (e.g. parent re-fetches data after save)
+  useEffect(() => {
+    setRows(buildRows())
+    setEditing(null)
+    setAdding(false)
+  }, [servers])
 
   const emit = (rs: McpServerRow[]) => {
     setRows(rs)
