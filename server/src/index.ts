@@ -1661,6 +1661,9 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
     if (!t) return c.json({ error: "title cannot be empty" }, 400)
     if (t.length > 200) return c.json({ error: "title too long (max 200)" }, 400)
     patch.title = t
+    // User rename = permanent opt-out of auto-name. maybeAutoName() checks
+    // this flag and bails when false.
+    patch.titleAuto = false
   }
   // Share config fields
   if (typeof body.shareEnabled === "boolean") patch.shareEnabled = body.shareEnabled

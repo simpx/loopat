@@ -17,7 +17,7 @@ import { ensureContainer, buildPodmanExecArgs, buildLoopEnv, markActive, markIna
 import { updateLoopStatus, setLoopPhase } from "./loop-status"
 import { tracer, withSpan } from "./tracer"
 import { SpanStatusCode, type Span } from "@opentelemetry/api"
-import { generateTitle } from "./auto-title"
+import { maybeAutoName } from "./auto-name"
 
 // Tests override LOOPAT_CLAUDE_BIN to point at a mock binary (a script that
 // reads stream-json from stdin and writes canned messages back) so we can
@@ -207,10 +207,6 @@ class LoopSession {
   private ttfbSpan: Span | null = null
   private usageSession = 0
   private currentDriver: string | null = null
-  private autoTitleDone = false
-  private providerApiKey: string | null = null
-  private providerBaseUrl: string | null = null
-  private resolvedProvider: ProviderConfig | null = null
 
   constructor(id: string) {
     this.id = id
@@ -354,9 +350,6 @@ class LoopSession {
     }
     const providerName = resolved.name
     const provider = resolved.provider
-    this.providerApiKey = provider.apiKey
-    this.providerBaseUrl = provider.baseUrl
-    this.resolvedProvider = provider
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
@@ -737,10 +730,14 @@ class LoopSession {
           resultReceived = true
           this.turnSpan?.end()
           this.turnSpan = null
-          if (!(msg as any).parent_tool_use_id && !this.autoTitleDone) {
-            this.autoTitleDone = true
-            this.tryAutoTitle()
-          }
+          // Fire-and-forget: try to auto-name the loop if title is still
+          // "untitled". maybeAutoName() is fully idempotent + best-effort
+          // (no-ops if title is already set or user has opted out).
+          maybeAutoName(this.id).then(async (didName) => {
+            if (!didName) return
+            const fresh = await getLoop(this.id)
+            if (fresh) this.broadcast({ type: "meta_updated", meta: fresh })
+          }).catch(() => {})
         } else if (
           // Inject queued messages at tool-result boundaries — matching
           // real Claude Code's per-step queue consumption.
@@ -960,38 +957,6 @@ class LoopSession {
     if (msg.type === "result" || msg.stop_reason || msg.type === "message_stop") {
       updateLoopStatus(this.id, "Done")
     }
-  }
-
-  private tryAutoTitle() {
-    if (!this.providerApiKey || !this.providerBaseUrl || !this.resolvedProvider) return
-    const apiKey = this.providerApiKey
-    const baseUrl = this.providerBaseUrl
-    const model = getModelByTier(this.resolvedProvider, "haiku")?.id ?? this.resolvedProvider.models[0]?.id ?? ""
-    const loopId = this.id
-    const history = this.history
-
-    getLoop(loopId).then((meta) => {
-      if (!meta || meta.title !== "untitled") return
-      const userMsg = history.find((m: any) => m.type === "user")
-      const userText = typeof userMsg?.content === "string"
-        ? userMsg.content
-        : (userMsg as any)?.message?.content?.[0]?.text ?? ""
-      if (!userText) return
-      const assistantText = history
-        .filter((m: any) => m.type === "assistant")
-        .flatMap((m: any) => m.message?.content ?? m.content ?? [])
-        .find((b: any) => b?.type === "text")?.text ?? ""
-
-      generateTitle(baseUrl, apiKey, model, userText, assistantText)
-        .then(async (title) => {
-          if (!title) return
-          const current = await getLoop(loopId)
-          if (!current || current.title !== "untitled") return
-          await patchLoopMeta(loopId, { title })
-          this.broadcast({ type: "title_changed", title })
-        })
-        .catch(() => {})
-    }).catch(() => {})
   }
 
   /**
