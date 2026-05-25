@@ -6,6 +6,7 @@ import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
+import { listLoopAgents } from "./compose"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, mcpServerEnvVarName, type OAuthSupport } from "./mcp-oauth"
 import {
   initChat,
@@ -1671,6 +1672,16 @@ app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
   const session = getSession(id)
   const r = await session.stripThinkingBlocks()
   return c.json(r)
+})
+
+// List sub-agents composed into this loop's .claude/agents/ (workspace +
+// personal tiers). Returns {name, description, color?} per agent — same shape
+// consumed by the @-mention dropdown in Composer. Read-only; auth required.
+app.get("/api/loops/:id/agents", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const agents = await listLoopAgents(id)
+  return c.json({ agents })
 })
 
 app.get("/api/loops/:id/context", requireAuth, async (c) => {
