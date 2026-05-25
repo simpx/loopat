@@ -4,35 +4,32 @@ import { createLoop, getLoop, provisionUserPersonal } from "./loops"
 import { LOOPAT_HOME } from "./paths"
 import { getSession } from "./session"
 
-export type ChimpTurnRequest = {
+export type ExternalTurnRequest = {
   turnId?: string
-  sessionId?: number
-  sessionUuid?: string
-  platform?: string
-  traceId?: string
-  externalChatId?: string
+  externalSource?: string
+  externalThreadId?: string
   externalUserId?: string
-  senderNick?: string
-  conversationType?: string
-  conversationTitle?: string
-  userMessage?: string
+  message?: string
+  title?: string
+  metadata?: Record<string, unknown>
+  traceId?: string
   recentTurns?: Array<{ role?: string; content?: string }>
   mock?: boolean
 }
 
 type LoopMap = Record<string, string>
 
-const LOOP_MAP_PATH = join(LOOPAT_HOME, "chimp-gateway", "loop-map.json")
-const CHIMP_USER = (process.env.LOOPAT_CHIMP_USER || "chimp").trim() || "chimp"
+const LOOP_MAP_PATH = join(LOOPAT_HOME, "external-gateway", "thread-loop-map.json")
+const GATEWAY_USER = (process.env.LOOPAT_GATEWAY_USER || "external").trim() || "external"
 
-export function isChimpGatewayAuthorized(authHeader: string | null): boolean {
-  const token = (process.env.LOOPAT_CHIMP_TOKEN || "").trim()
+export function isExternalGatewayAuthorized(authHeader: string | null): boolean {
+  const token = (process.env.LOOPAT_GATEWAY_TOKEN || "").trim()
   if (!token) return false
   const expected = `Bearer ${token}`
   return authHeader === expected
 }
 
-export function chimpSseHeaders(): HeadersInit {
+export function externalSseHeaders(): HeadersInit {
   return {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -41,11 +38,11 @@ export function chimpSseHeaders(): HeadersInit {
   }
 }
 
-function mappingKey(req: ChimpTurnRequest): string {
-  const platform = (req.platform || "UNKNOWN").trim().toUpperCase()
-  const externalChatId = (req.externalChatId || "").trim()
-  if (!externalChatId) throw new Error("externalChatId required")
-  return `${platform}:${externalChatId}`
+function mappingKey(req: ExternalTurnRequest): string {
+  const externalSource = (req.externalSource || "unknown").trim().toLowerCase()
+  const externalThreadId = (req.externalThreadId || "").trim()
+  if (!externalThreadId) throw new Error("externalThreadId required")
+  return `${externalSource}:${externalThreadId}`
 }
 
 async function readLoopMap(): Promise<LoopMap> {
@@ -61,23 +58,24 @@ async function writeLoopMap(map: LoopMap) {
   await writeFile(LOOP_MAP_PATH, JSON.stringify(map, null, 2))
 }
 
-export async function resolveChimpLoop(req: ChimpTurnRequest): Promise<string> {
+export async function resolveExternalLoop(req: ExternalTurnRequest): Promise<string> {
   const key = mappingKey(req)
   const map = await readLoopMap()
   const existing = map[key]
   if (existing && await getLoop(existing)) return existing
 
-  await provisionUserPersonal(CHIMP_USER).catch(() => ({ publicKey: null }))
+  await provisionUserPersonal(GATEWAY_USER).catch(() => ({ publicKey: null }))
   const title = titleForTurn(req)
-  const meta = await createLoop({ title, createdBy: CHIMP_USER })
+  const meta = await createLoop({ title, createdBy: GATEWAY_USER })
   map[key] = meta.id
   await writeLoopMap(map)
   return meta.id
 }
 
-function titleForTurn(req: ChimpTurnRequest): string {
-  const title = (req.conversationTitle || req.externalChatId || "ChimpMate").trim()
-  return `ChimpMate - ${title}`.slice(0, 120)
+function titleForTurn(req: ExternalTurnRequest): string {
+  const source = (req.externalSource || "external").trim()
+  const title = (req.title || req.externalThreadId || "conversation").trim()
+  return `${source} - ${title}`.slice(0, 120)
 }
 
 function sseEncode(event: string, data: unknown): string {
@@ -94,25 +92,25 @@ function textDeltaFromMessage(msg: any): string {
   return ""
 }
 
-export async function streamChimpTurn(req: ChimpTurnRequest): Promise<Response> {
+export async function streamExternalTurn(req: ExternalTurnRequest): Promise<Response> {
   const turnId = (req.turnId || crypto.randomUUID()).trim()
-  if (req.mock === true && process.env.LOOPAT_CHIMP_MOCK_ENABLED === "true") {
+  if (req.mock === true && process.env.LOOPAT_GATEWAY_MOCK_ENABLED === "true") {
     return streamMockTurn(turnId)
   }
-  const userMessage = (req.userMessage || "").trim()
-  if (!userMessage) {
-    return new Response(sseEncode("error", { turnId, errorMessage: "userMessage required" }), {
+  const message = (req.message || "").trim()
+  if (!message) {
+    return new Response(sseEncode("error", { turnId, errorMessage: "message required" }), {
       status: 400,
-      headers: chimpSseHeaders(),
+      headers: externalSseHeaders(),
     })
   }
 
-  const loopId = await resolveChimpLoop(req)
+  const loopId = await resolveExternalLoop(req)
   const session = getSession(loopId)
   if (session.isBusy()) {
     return new Response(
       sseEncode("error", { turnId, loopId, errorMessage: "loop is busy; retry after current turn finishes" }),
-      { status: 409, headers: chimpSseHeaders() },
+      { status: 409, headers: externalSseHeaders() },
     )
   }
 
@@ -164,7 +162,7 @@ export async function streamChimpTurn(req: ChimpTurnRequest): Promise<Response> 
       heartbeat = setInterval(() => send("ping", {}), 15_000)
       send("start", { turnId, loopId })
       try {
-        await session.sendUserText(userMessage)
+        await session.sendUserText(message)
       } catch (e: any) {
         send("error", { turnId, loopId, errorMessage: e?.message ?? String(e) })
         close()
@@ -175,7 +173,7 @@ export async function streamChimpTurn(req: ChimpTurnRequest): Promise<Response> 
     },
   })
 
-  return new Response(stream, { headers: chimpSseHeaders() })
+  return new Response(stream, { headers: externalSseHeaders() })
 }
 
 function streamMockTurn(turnId: string): Response {
@@ -198,5 +196,5 @@ function streamMockTurn(turnId: string): Response {
       controller.close()
     },
   })
-  return new Response(stream, { headers: chimpSseHeaders() })
+  return new Response(stream, { headers: externalSseHeaders() })
 }

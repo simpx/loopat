@@ -13,10 +13,10 @@ services:
       - LOOPAT_HOME=/home/loopat/.loopat
       - HOST=0.0.0.0
       - LOOPAT_SERVE_HOST=0.0.0.0
-      # Chimp Gateway SSE. Set LOOPAT_CHIMP_TOKEN in the deploy environment.
-      - LOOPAT_CHIMP_TOKEN=${LOOPAT_CHIMP_TOKEN:?set LOOPAT_CHIMP_TOKEN}
-      - LOOPAT_CHIMP_USER=chimpmate
-      - LOOPAT_CHIMP_MOCK_ENABLED=false
+      # External Runtime Gateway SSE. Set LOOPAT_GATEWAY_TOKEN in the deploy environment.
+      - LOOPAT_GATEWAY_TOKEN=${LOOPAT_GATEWAY_TOKEN:?set LOOPAT_GATEWAY_TOKEN}
+      - LOOPAT_GATEWAY_USER=${LOOPAT_GATEWAY_USER:-external}
+      - LOOPAT_GATEWAY_MOCK_ENABLED=false
     restart: unless-stopped
 
 volumes:
