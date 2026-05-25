@@ -52,7 +52,7 @@ export function Editor({ loopId, path }: { loopId: string; path: string | null }
   return (
     <>
       <div
-        className="flex-1 min-h-0"
+        className="flex-1 min-h-0 relative"
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "s") {
             e.preventDefault()

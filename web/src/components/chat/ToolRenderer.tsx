@@ -10,6 +10,7 @@ import {
   FileTextIcon,
   GlobeIcon,
   WrenchIcon,
+  ExternalLink,
 } from "lucide-react";
 import {
   Collapsible,
@@ -106,10 +107,24 @@ function getToolMeta(toolName: string): ToolMeta {
   return { category: "default", icon: WrenchIcon, borderClass: "border-l-gray-300" };
 }
 
+/* ─── Path shortening ─── */
+
+function shortPath(p: string): string {
+  // Strip absolute prefix down to the meaningful relative part
+  const idx = p.indexOf("workdir/")
+  if (idx !== -1) return p.slice(idx)
+  const ctxIdx = p.indexOf("context/")
+  if (ctxIdx !== -1) return p.slice(ctxIdx)
+  // If it's an absolute /loopat/loops/<id>/... path, strip to last two segments
+  const loopMatch = p.match(/\/loops\/[^/]+\/(.+)/)
+  if (loopMatch) return loopMatch[1]
+  return p
+}
+
 /* ─── Extract summary from args ─── */
 
 function getSummary(toolName: string, args: Record<string, unknown>): string {
-  const filePath = (args.file_path as string) || (args.filePath as string) || "";
+  const filePath = shortPath((args.file_path as string) || (args.filePath as string) || "");
   switch (toolName) {
     case "Bash":
       return (args.command as string) || (args.description as string) || "";
@@ -145,96 +160,227 @@ function getSummary(toolName: string, args: Record<string, unknown>): string {
   }
 }
 
-/* ─── Diff renderer ─── */
+/* ─── Diff renderer with line numbers ─── */
 
-interface DiffLine {
-  type: "add" | "del" | "hdr" | "ctx";
-  text: string;
+interface DiffHunk {
+  header: string
+  lines: DiffLine[]
 }
 
-function parseDiff(text: string): DiffLine[] | null {
-  const lines = text.split("\n");
-  let hasDiffMarkers = false;
-  const parsed: DiffLine[] = [];
+interface DiffLine {
+  type: "add" | "del" | "ctx"
+  oldNum: number | null
+  newNum: number | null
+  text: string
+}
+
+function parseDiff(raw: string): { filePath: string; hunks: DiffHunk[] } | null {
+  const lines = raw.split("\n")
+  let filePath = ""
+  const hunks: DiffHunk[] = []
+  let currentHunk: DiffHunk | null = null
+  let oldNum = 0
+  let newNum = 0
+  let hasDiffMarkers = false
 
   for (const line of lines) {
-    if (/^@@\s/.test(line)) {
-      hasDiffMarkers = true;
-      parsed.push({ type: "hdr", text: line });
-    } else if (/^\+/.test(line)) {
-      hasDiffMarkers = true;
-      parsed.push({ type: "add", text: line });
-    } else if (/^-/.test(line)) {
-      hasDiffMarkers = true;
-      parsed.push({ type: "del", text: line });
-    } else if (/^(---|\+\+\+)/.test(line)) {
-      hasDiffMarkers = true;
-      parsed.push({ type: "hdr", text: line });
+    if (/^--- /.test(line)) {
+      filePath = line.replace(/^--- /, "").replace(/\t.*$/, "")
+      continue
+    }
+    if (/^\+\+\+ /.test(line)) {
+      const to = line.replace(/^\+\+\+ /, "").replace(/\t.*$/, "")
+      if (!filePath || filePath === "/dev/null") filePath = to
+      if (to !== "/dev/null" && filePath !== to) filePath = `${filePath} → ${to}`
+      continue
+    }
+
+    const hunkMatch = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/)
+    if (hunkMatch) {
+      hasDiffMarkers = true
+      if (currentHunk) hunks.push(currentHunk)
+      oldNum = parseInt(hunkMatch[1], 10)
+      newNum = parseInt(hunkMatch[3], 10)
+      currentHunk = { header: line, lines: [] }
+      continue
+    }
+
+    if (!currentHunk) {
+      if (/^[+-]/.test(line)) hasDiffMarkers = true
+      continue
+    }
+
+    if (line.startsWith("+")) {
+      currentHunk.lines.push({ type: "add", oldNum: null, newNum: newNum, text: line.slice(1) })
+      newNum++
+      hasDiffMarkers = true
+    } else if (line.startsWith("-")) {
+      currentHunk.lines.push({ type: "del", oldNum: oldNum, newNum: null, text: line.slice(1) })
+      oldNum++
+      hasDiffMarkers = true
+    } else if (line.startsWith(" ")) {
+      currentHunk.lines.push({ type: "ctx", oldNum: oldNum, newNum: newNum, text: line.slice(1) })
+      oldNum++
+      newNum++
     } else {
-      parsed.push({ type: "ctx", text: line });
+      currentHunk.lines.push({ type: "ctx", oldNum: oldNum, newNum: newNum, text: line })
+      oldNum++
+      newNum++
     }
   }
+  if (currentHunk) hunks.push(currentHunk)
 
-  return hasDiffMarkers ? parsed : null;
+  return hasDiffMarkers ? { filePath, hunks } : null
 }
 
 function DiffView({ text, maxLines }: { text: string; maxLines?: number }) {
-  const diff = parseDiff(text);
-  if (!diff) return null;
+  const parsed = parseDiff(text)
+  if (!parsed) return null
 
-  const lines = maxLines ? diff.slice(0, maxLines) : diff;
-  const truncated = maxLines && diff.length > maxLines;
+  let totalLines = 0
+  let truncated = false
+  const displayHunks = parsed.hunks.map((hunk) => {
+    if (maxLines !== undefined && totalLines >= maxLines) {
+      truncated = true
+      return { ...hunk, lines: [] as DiffLine[] }
+    }
+    const remaining = maxLines !== undefined ? maxLines - totalLines : Infinity
+    const lines = hunk.lines.slice(0, remaining)
+    totalLines += lines.length
+    if (maxLines !== undefined && lines.length < hunk.lines.length) truncated = true
+    return { ...hunk, lines }
+  })
+
+  const total = parsed.hunks.reduce((s, h) => s + h.lines.length, 0)
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 font-mono text-xs leading-relaxed">
+    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-5">
+      {parsed.filePath && (
+        <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 bg-gray-50">
+          <FileTextIcon className="h-3 w-3 text-gray-400 shrink-0" />
+          <span className="text-[10px] text-gray-500 truncate">{shortPath(parsed.filePath)}</span>
+        </div>
+      )}
+      {displayHunks.map((hunk, hi) => (
+        <div key={hi}>
+          <div className="px-3 py-0.5 bg-blue-50/70 text-blue-700 font-medium border-b border-blue-100/50 text-[10px]">
+            {hunk.header}
+          </div>
+          {hunk.lines.map((ln, li) => {
+            const isAdd = ln.type === "add"
+            const isDel = ln.type === "del"
+            return (
+              <div
+                key={li}
+                className={"flex " + (isAdd ? "bg-emerald-50/50" : isDel ? "bg-red-50/50" : "")}
+              >
+                <span className="w-12 shrink-0 text-right pr-2 py-px text-[9px] text-gray-300 select-none border-r border-gray-100 bg-gray-50/50">
+                  {ln.oldNum ?? ""}
+                </span>
+                <span className={
+                  "w-12 shrink-0 text-right pr-2 py-px text-[9px] select-none border-r border-gray-100 " +
+                  (isAdd ? "bg-emerald-100/60 text-emerald-600" : isDel ? "bg-red-100/60 text-red-400" : "text-gray-300 bg-gray-50/50")
+                }>
+                  {ln.newNum ?? ""}
+                </span>
+                <span className={
+                  "pl-2 py-px whitespace-pre-wrap break-all flex-1 " +
+                  (isAdd ? "text-emerald-800" : isDel ? "text-red-700" : "text-gray-700")
+                }>
+                  <span className="select-none text-[9px] mr-1 opacity-50">
+                    {isAdd ? "+" : isDel ? "−" : " "}
+                  </span>
+                  {ln.text}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+      {truncated && (
+        <div className="px-3 py-1.5 text-[10px] text-gray-400 italic border-t border-gray-100 bg-gray-50/50">
+          ... {total - (maxLines ?? total)} more lines
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Compact diff preview for collapsed state — line-number-free for space */
+function DiffPreview({ text, maxLines = 8 }: { text: string; maxLines?: number }) {
+  const parsed = parseDiff(text)
+  if (!parsed) return null
+
+  const flat: { type: "hdr" | "ctx" | "add" | "del"; text: string }[] = []
+  for (const h of parsed.hunks) {
+    flat.push({ type: "hdr", text: h.header })
+    for (const l of h.lines) flat.push({ type: l.type, text: l.text })
+  }
+
+  const lines = flat.slice(0, maxLines)
+  const truncated = flat.length > maxLines
+
+  return (
+    <div className="overflow-hidden rounded border border-gray-200 font-mono text-[10px] leading-relaxed opacity-70">
+      {parsed.filePath && (
+        <div className="px-2 py-0.5 bg-gray-50 border-b border-gray-100 text-gray-400 truncate">
+          {shortPath(parsed.filePath)}
+        </div>
+      )}
       {lines.map((line, i) => (
         <div
           key={i}
           className={cn(
-            "px-3 py-px whitespace-pre-wrap break-all",
+            "px-2 py-px whitespace-pre-wrap break-all",
             line.type === "add" && "bg-emerald-50 text-emerald-800",
             line.type === "del" && "bg-red-50 text-red-800",
             line.type === "hdr" && "bg-blue-50 text-blue-700 font-medium",
-            line.type === "ctx" && "text-gray-500",
+            line.type === "ctx" && "text-gray-400",
           )}
         >
-          {line.text}
+          {line.type === "hdr" ? line.text : line.type === "add" ? `+${line.text}` : line.type === "del" ? `-${line.text}` : ` ${line.text}`}
         </div>
       ))}
       {truncated && (
-        <div className="px-3 py-1 text-gray-400 italic">
-          ... {diff.length - (maxLines ?? 0)} more lines
-        </div>
+        <div className="px-2 py-0.5 text-gray-400 italic">...</div>
       )}
     </div>
-  );
+  )
 }
 
-/* ─── Write content block ─── */
+/* ─── Write content block with line numbers ─── */
 
-function WriteContentBlock({ filePath, content, maxChars }: { filePath: string; content: string; maxChars?: number }) {
-  const truncated = maxChars && content.length > maxChars;
-  const display = truncated ? content.slice(0, maxChars) : content;
+function WriteContentBlock({ content, maxChars }: { content: string; maxChars?: number }) {
+  const truncated = maxChars && content.length > maxChars
+  const display = truncated ? content.slice(0, maxChars) : content
+  const lines = display.split("\n")
+  const lineCount = content.split("\n").length
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200 bg-gray-50 font-mono text-xs leading-relaxed">
-      <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 bg-gray-100">
-        <FileTextIcon className="h-3 w-3 text-gray-400" />
-        <span className="text-[10px] text-gray-500 truncate">{filePath}</span>
-        <span className="ml-auto text-[10px] text-gray-400">
-          {content.length.toLocaleString()} chars
+    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-5">
+      <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-1.5 bg-gray-50">
+        <FileTextIcon className="h-3 w-3 text-gray-400 shrink-0" />
+        <span className="text-[10px] text-gray-500 truncate">
+          {lineCount.toLocaleString()} lines · {content.length.toLocaleString()} chars
         </span>
       </div>
-      <pre className="overflow-x-auto px-3 py-2 text-gray-700 whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
-        {display}
+      <div className="overflow-auto max-h-80">
+        {lines.map((line, i) => (
+          <div key={i} className="flex">
+            <span className="w-12 shrink-0 text-right pr-3 py-px text-[9px] text-gray-300 select-none border-r border-gray-100 bg-gray-50/50">
+              {i + 1}
+            </span>
+            <span className="pl-2 py-px whitespace-pre-wrap break-all text-gray-700">{line}</span>
+          </div>
+        ))}
         {truncated && (
-          <span className="text-gray-400 italic">
-            {"\n"}... {content.length - (maxChars ?? 0)} more chars
-          </span>
+          <div className="pl-14 py-1 text-[10px] text-gray-400 italic">
+            ... {content.length - (maxChars ?? 0)} more chars
+          </div>
         )}
-      </pre>
+      </div>
     </div>
-  );
+  )
 }
 
 function briefContent(text: string, maxLen: number): string {
@@ -245,55 +391,77 @@ function briefContent(text: string, maxLen: number): string {
 /* ─── Old→New string change block (for Edit without diff result) ─── */
 
 function EditChangeBlock({ oldStr, newStr, maxLen }: { oldStr: string; newStr: string; maxLen?: number }) {
-  const truncOld = maxLen && oldStr.length > maxLen;
-  const truncNew = maxLen && newStr.length > maxLen;
-  const displayOld = truncOld ? oldStr.slice(0, maxLen) : oldStr;
-  const displayNew = truncNew ? newStr.slice(0, maxLen) : newStr;
+  const truncOld = maxLen && oldStr.length > maxLen
+  const truncNew = maxLen && newStr.length > maxLen
+  const displayOld = truncOld ? oldStr.slice(0, maxLen) : oldStr
+  const displayNew = truncNew ? newStr.slice(0, maxLen) : newStr
+  const oldLines = oldStr.split("\n")
+  const newLines = newStr.split("\n")
 
   return (
-    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-relaxed">
-      <div className="px-3 py-px bg-red-50 text-red-800 whitespace-pre-wrap break-all">
-        <span className="select-none text-red-400">- </span>
-        {displayOld}
-        {truncOld && <span className="text-red-400 italic">…</span>}
+    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-5">
+      <div className="flex items-center gap-2 border-b border-gray-200 px-3 py-1 bg-red-50/50">
+        <span className="text-[10px] text-red-500 font-medium">− {oldLines.length} line{oldLines.length !== 1 ? "s" : ""}</span>
       </div>
-      <div className="px-3 py-px bg-emerald-50 text-emerald-800 whitespace-pre-wrap break-all">
-        <span className="select-none text-emerald-400">+ </span>
-        {displayNew}
-        {truncNew && <span className="text-emerald-400 italic">…</span>}
+      {displayOld.split("\n").map((line, i) => (
+        <div key={i} className="flex bg-red-50/30">
+          <span className="w-10 shrink-0 text-right pr-2 py-px text-[9px] text-red-300 select-none border-r border-red-100">{i + 1}</span>
+          <span className="pl-2 py-px whitespace-pre-wrap break-all text-red-800">{line}</span>
+        </div>
+      ))}
+      {truncOld && <div className="px-3 py-0.5 text-[10px] text-red-400 italic bg-red-50/30">...</div>}
+      <div className="flex items-center gap-2 border-y border-gray-200 px-3 py-1 bg-emerald-50/50">
+        <span className="text-[10px] text-emerald-500 font-medium">+ {newLines.length} line{newLines.length !== 1 ? "s" : ""}</span>
       </div>
+      {displayNew.split("\n").map((line, i) => (
+        <div key={i} className="flex bg-emerald-50/30">
+          <span className="w-10 shrink-0 text-right pr-2 py-px text-[9px] text-emerald-300 select-none border-r border-emerald-100">{i + 1}</span>
+          <span className="pl-2 py-px whitespace-pre-wrap break-all text-emerald-800">{line}</span>
+        </div>
+      ))}
+      {truncNew && <div className="px-3 py-0.5 text-[10px] text-emerald-400 italic bg-emerald-50/30">...</div>}
     </div>
-  );
+  )
 }
 
 /* ─── Code block ─── */
 
 function CodeBlock({ text }: { text: string }) {
+  const lines = text.split("\n")
   return (
-    <pre className="overflow-x-auto rounded-md border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-700 whitespace-pre-wrap break-all font-mono">
-      {text}
-    </pre>
-  );
+    <div className="overflow-hidden rounded-md border border-gray-200 font-mono text-xs leading-5">
+      <div className="max-h-80 overflow-auto">
+        {lines.map((line, i) => (
+          <div key={i} className="flex">
+            <span className="w-12 shrink-0 text-right pr-3 py-px text-[9px] text-gray-300 select-none border-r border-gray-100 bg-gray-50/50">
+              {i + 1}
+            </span>
+            <span className="pl-2 py-px whitespace-pre-wrap break-all text-gray-700">{line}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 /* ─── Terminal block ─── */
 
 function TerminalBlock({ command, output }: { command: string; output?: string }) {
   return (
-    <div className="overflow-hidden rounded-md border border-gray-700 bg-gray-900 text-xs">
+    <div className="overflow-hidden rounded-md bg-[#0d1117] border border-gray-700 text-xs">
       {command && (
-        <div className="flex items-center gap-2 border-b border-gray-700 px-3 py-2 text-green-400 font-mono">
-          <span className="select-none text-gray-500">$</span>
-          <span className="whitespace-pre-wrap break-all">{command}</span>
+        <div className="flex items-center gap-2 border-b border-gray-700/50 px-3 py-1.5 text-green-400 font-mono">
+          <span className="select-none text-gray-500 text-[10px]">$</span>
+          <span className="whitespace-pre-wrap break-all font-medium">{command}</span>
         </div>
       )}
       {output !== undefined && (
         <pre className="max-h-64 overflow-auto px-3 py-2 text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">
-          {output}
+          {output || <span className="text-gray-500 italic">(no output)</span>}
         </pre>
       )}
     </div>
-  );
+  )
 }
 
 /* ─── Main renderer ─── */
@@ -317,7 +485,7 @@ export default function ToolRenderer({
   const statusCfg = STATUS_CONFIG[status];
   const isMobile = useIsMobile();
 
-  const { permissionPrompt, answerPermission } = useLoopRuntimeExtra();
+  const { permissionPrompt, answerPermission, openFile } = useLoopRuntimeExtra();
   const needsPermission = isActionNeeded || (permissionPrompt?.toolUseId === toolCallId);
 
   // Auto-expand when waiting for permission
@@ -339,6 +507,10 @@ export default function ToolRenderer({
   const editOld = (args.old_string as string) ?? "";
   const editNew = (args.new_string as string) ?? "";
   const editHasChange = isEdit && editOld && editNew;
+
+  const rawFilePath = (args.file_path as string) || (args.filePath as string) || ""
+  const filePath = shortPath(rawFilePath)
+  const canOpenInEditor = !!(openFile && filePath && isDone)
 
   // Parse todos from args
   const todos = isTodo
@@ -419,23 +591,8 @@ export default function ToolRenderer({
                 {collapsedPreview}
               </pre>
             ) : collapsedPreview.type === "edit" ? (
-              collapsedPreview.diff ? (
-                <div className="overflow-hidden rounded border border-gray-200 font-mono text-[10px] leading-relaxed opacity-70">
-                  {collapsedPreview.diff.slice(0, 8).map((line, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        "px-2 py-px whitespace-pre-wrap break-all",
-                        line.type === "add" && "bg-emerald-50 text-emerald-800",
-                        line.type === "del" && "bg-red-50 text-red-800",
-                        line.type === "hdr" && "bg-blue-50 text-blue-700",
-                        line.type === "ctx" && "text-gray-400",
-                      )}
-                    >
-                      {line.text}
-                    </div>
-                  ))}
-                </div>
+              collapsedPreview.diff && result ? (
+                <DiffPreview text={result} />
               ) : (
                 <div className="opacity-70">
                   <EditChangeBlock oldStr={collapsedPreview.oldStr} newStr={collapsedPreview.newStr} maxLen={200} />
@@ -465,9 +622,21 @@ export default function ToolRenderer({
             />
           )}
 
-          {/* Write — show full content with file header */}
+          {/* Open in Editor — for tools that reference a file */}
+          {canOpenInEditor && (
+            <button
+              type="button"
+              onClick={() => openFile!(filePath)}
+              className="inline-flex items-center gap-1 mb-2 px-2 py-1 rounded text-[11px] border border-gray-200 bg-white hover:bg-gray-50 text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open in Editor
+            </button>
+          )}
+
+          {/* Write — show full content with line numbers */}
           {isWrite && isDone && writeContent && (
-            <WriteContentBlock filePath={summary} content={writeContent} />
+            <WriteContentBlock content={writeContent} />
           )}
 
           {/* Edit / ApplyPatch — show diff (if result has one) or old→new change */}

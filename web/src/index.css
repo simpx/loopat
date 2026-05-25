@@ -14,20 +14,20 @@ html, body {
    produce sensible dark-mode colors without per-element dark: variants. */
 
 .dark {
-  /* gray scale — GitHub-inspired dark palette, lightest→darkest inverted */
-  --color-gray-50: #0d1117;
-  --color-gray-100: #161b22;
-  --color-gray-200: #21262d;
-  --color-gray-300: #30363d;
-  --color-gray-400: #484f58;
-  --color-gray-500: #6e7681;
-  --color-gray-600: #8b949e;
-  --color-gray-700: #b1bac4;
-  --color-gray-800: #c9d1d9;
-  --color-gray-900: #e6edf3;
+  /* gray scale — neutral dark palette, lightest→darkest inverted */
+  --color-gray-50: #0f0f12;
+  --color-gray-100: #1a1a1e;
+  --color-gray-200: #26262b;
+  --color-gray-300: #35353b;
+  --color-gray-400: #4e4e56;
+  --color-gray-500: #73737d;
+  --color-gray-600: #92929b;
+  --color-gray-700: #b5b5bd;
+  --color-gray-800: #ceced4;
+  --color-gray-900: #e6e6eb;
 
   /* white → card surface in dark mode; black stays black for overlays */
-  --color-white: #161b22;
+  --color-white: #1a1a1e;
 
   /* blue — used for links, primary actions, status */
   --color-blue-50: #0d1b33;
@@ -216,7 +216,7 @@ html, body {
   pointer-events: none;
 }
 .dark .user-msg-fade {
-  background: linear-gradient(to top, #161b22 0%, transparent 100%);
+  background: linear-gradient(to top, #1a1a1e 0%, transparent 100%);
 }
 
 /* ─── Milkdown editor dark mode ─── */
@@ -254,21 +254,84 @@ html, body {
   background: #161b22;
 }
 
-/* ─── CodeMirror dark mode overrides ─── */
-.dark .cm-gutters {
-  border-right-color: #21262d !important;
-  color: #484f58 !important;
+/* ─── CodeMirror theme ───
+   Light: CodeMirror defaults.
+   Dark:  One Dark (Atom) — exact palette from atom.io/one-dark-syntax */
+
+:root {
+  --cm-bg: transparent;
+  --cm-text: inherit;
+  --cm-border: #e5e7eb;
+  --cm-gutter: #9ca3af;
+  --cm-activeLine: #f3f4f6;
+  --cm-cursor: #111827;
+  --cm-selection: #bfdbfe;
+  --cm-matchBracket: #dbeafe;
+  /* syntax — CodeMirror default light */
+  --cm-keyword: #7c3aed;
+  --cm-string: #059669;
+  --cm-number: #2563eb;
+  --cm-comment: #9ca3af;
+  --cm-def: #1d4ed8;
+  --cm-typeName: #9333ea;
+  --cm-propertyName: #db2777;
+  --cm-operator: #374151;
+  --cm-constant: #d97706;
+  --cm-variableName: #1f2937;
+  --cm-labelName: #1f2937;
+  --cm-tag: #2563eb;
+  --cm-attribute: #db2777;
+  --cm-link: #2563eb;
+  --cm-regexp: #059669;
+  --cm-bracket: #6b7280;
 }
-.dark .cm-activeLine {
-  background-color: #161b22 !important;
+.dark {
+  /* chrome — neutral dark, good contrast for all syntax colors */
+  --cm-bg: #1e1e24;
+  --cm-text: #c8ccd4;
+  --cm-border: #181a1f;
+  --cm-gutter: #636d83;
+  --cm-activeLine: #2c313c;
+  --cm-cursor: #528bff;
+  --cm-selection: #3e4451;
+  --cm-matchBracket: #3a3a3a;
+  /* syntax — One Dark syntax theme exactly */
+  --cm-keyword: #c678dd;
+  --cm-string: #98c379;
+  --cm-number: #d19a66;
+  --cm-comment: #5c6370;
+  --cm-def: #6cb8ff;
+  --cm-typeName: #e5c07b;
+  --cm-propertyName: #abb2bf;
+  --cm-operator: #56b6c2;
+  --cm-constant: #56b6c2;
+  --cm-variableName: #e06c75;
+  --cm-labelName: #abb2bf;
+  --cm-tag: #e06c75;
+  --cm-attribute: #d19a66;
+  --cm-link: #6cb8ff;
+  --cm-regexp: #56b6c2;
+  --cm-bracket: #abb2bf;
 }
-.dark .cm-cursor {
-  border-left-color: #e6edf3 !important;
-}
-.dark .cm-selectionBackground,
-.dark ::selection {
-  background-color: #1a3360 !important;
-}
+
+/* Apply syntax token colors — !important to override CM's defaultHighlightStyle scoped rules */
+.cm-editor .cm-keyword { color: var(--cm-keyword) !important; }
+.cm-editor .cm-string, .cm-editor .cm-specialCharString { color: var(--cm-string) !important; }
+.cm-editor .cm-number { color: var(--cm-number) !important; }
+.cm-editor .cm-comment { color: var(--cm-comment) !important; font-style: italic; }
+.cm-editor .cm-def { color: var(--cm-def) !important; }
+.cm-editor .cm-typeName { color: var(--cm-typeName) !important; }
+.cm-editor .cm-propertyName { color: var(--cm-propertyName) !important; }
+.cm-editor .cm-operator { color: var(--cm-operator) !important; }
+.cm-editor .cm-atom { color: var(--cm-constant) !important; }
+.cm-editor .cm-variableName { color: var(--cm-variableName) !important; }
+.cm-editor .cm-labelName { color: var(--cm-labelName) !important; }
+.cm-editor .cm-tag { color: var(--cm-tag) !important; }
+.cm-editor .cm-attribute { color: var(--cm-attribute) !important; }
+.cm-editor .cm-link { color: var(--cm-link) !important; }
+.cm-editor .cm-bracket { color: var(--cm-bracket) !important; }
+.cm-editor .cm-matchingBracket { background-color: var(--cm-matchBracket) !important; }
+.cm-editor .cm-nonmatchingBracket { color: var(--cm-variableName) !important; }
 
 /* ─── Kanban progress bar background ─── */
 .dark .kanban-progress-bg {

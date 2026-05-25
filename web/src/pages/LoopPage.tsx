@@ -284,7 +284,6 @@ function LoopsList({ currentId }: { currentId: string }) {
 function LoopMain({ meta }: { meta: LoopMeta }) {
   const ws = useWorkspace()
   const isMobile = useIsMobile()
-  const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "")
   const [openPanels, setOpenPanels] = useState<RightMode[]>([])
   const [fullscreenPanel, setFullscreenPanel] = useState<RightMode | null>(null)
   const [pickedFile, setPickedFile] = useState<string | null>(null)
@@ -292,6 +291,11 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
+  const openFile = (path: string) => {
+    setPickedFile(path)
+    setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
+  }
+  const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "", openFile)
   useEffect(() => {
     getContext(meta.id).then(setMounts)
     markLoopViewed(meta.id)
@@ -316,11 +320,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
       if (prev.includes(m)) return prev.filter((p) => p !== m)
       return [...prev, m]
     })
-  }
-
-  const openFile = (path: string) => {
-    setPickedFile(path)
-    setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
   }
 
   const closePanel = (m: RightMode) => {
