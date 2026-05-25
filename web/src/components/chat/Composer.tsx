@@ -45,7 +45,6 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
   const [includeEditorFile, setIncludeEditorFile] = useState(false)
   const [addedFiles, setAddedFiles] = useState<string[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
-  const addFileBtnRef = useRef<HTMLButtonElement>(null)
 
   // Debug: log pickedFile changes
   useEffect(() => {
@@ -349,20 +348,17 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
                   {shortFileName(pickedFile)}
                 </button>
               )}
-              <div className="relative">
-                <button
-                  ref={addFileBtnRef}
-                  type="button"
-                  onClick={() => setPickerOpen((v) => !v)}
-                  className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-gray-50 w-[21px] h-[21px] mt-px text-gray-500 hover:bg-gray-100 transition-colors"
-                  title="Add file to context"
-                >
-                  <FilePlus size={12} />
-                </button>
-                {pickerOpen && (
-                  <FilePicker loopId={loopId} onPick={addFile} onClose={() => setPickerOpen(false)} anchorRect={addFileBtnRef.current?.getBoundingClientRect()} />
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => setPickerOpen((v) => !v)}
+                className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-gray-50 w-[21px] h-[21px] mt-px text-gray-500 hover:bg-gray-100 transition-colors"
+                title="Add file to context"
+              >
+                <FilePlus size={12} />
+              </button>
+              {pickerOpen && (
+                <FilePicker loopId={loopId} onPick={addFile} onClose={() => setPickerOpen(false)} />
+              )}
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
