@@ -18,6 +18,8 @@ export type LoopMeta = {
   rfdRequestedBy?: string
   repo?: string
   branch?: string
+  /** AI backend: "claude-code" (default) or "pi-agent". */
+  backend?: "claude-code" | "pi-agent"
   archived?: boolean
   archivedAt?: string
   /** If true, /share/:id is publicly viewable. Toggle via setLoopPublic. */
@@ -293,6 +295,8 @@ export async function createLoop(opts: {
   vault?: string
   knowledgeRw?: boolean
   mountAllLoops?: boolean
+  /** AI backend: "claude-code" (default) or "pi-agent". */
+  backend?: "claude-code" | "pi-agent"
 }): Promise<LoopMeta> {
   const { knowledgeRw, mountAllLoops, ...rest } = opts
   const body: Record<string, unknown> = { ...rest }

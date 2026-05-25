@@ -78,6 +78,13 @@ export type LoopMeta = {
   pendingDriverNote?: { from: string; to: string; at: string }
   repo?: string
   branch?: string
+  /**
+   * AI backend for this loop. Determines which agent system powers the
+   * conversation. "claude-code" uses the Claude Agent SDK (default).
+   * "pi-agent" uses pi's RPC mode. Legacy loops omit this field and
+   * default to "claude-code".
+   */
+  backend?: "claude-code" | "pi-agent"
   config?: {
     default_model?: string
     default_model_source?: "personal" | "workspace"
@@ -1382,6 +1389,7 @@ export async function createLoop(opts: {
   vault?: string
   knowledgeRw?: boolean
   mountAllLoops?: boolean
+  backend?: "claude-code" | "pi-agent"
 }): Promise<LoopMeta> {
   await ensureWorkspaceDirs()
   const id = randomUUID()
@@ -1393,6 +1401,9 @@ export async function createLoop(opts: {
     createdBy: opts.createdBy,
     driver: opts.createdBy,
     driverHistory: [{ driver: opts.createdBy, since: createdAt }],
+  }
+  if (opts.backend && opts.backend !== "claude-code") {
+    meta.backend = opts.backend
   }
   if (opts.profiles && opts.profiles.length > 0) {
     meta.config = { ...(meta.config ?? {}), profiles: opts.profiles }

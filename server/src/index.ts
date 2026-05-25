@@ -1504,6 +1504,7 @@ app.post("/api/loops", requireAuth, async (c) => {
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
   const knowledgeRw = body.knowledge_rw === true
   const mountAllLoops = body.mount_all_loops === true
+  const backend = body.backend === "pi-agent" ? "pi-agent" as const : undefined
   if (mountAllLoops) {
     // Cross-loop view exposes every other loop's chats / workdir / meta.
     // Admin-only — checked server-side so a non-admin can't just POST the
@@ -1514,7 +1515,7 @@ app.post("/api/loops", requireAuth, async (c) => {
     }
   }
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, profiles, vault, knowledgeRw, mountAllLoops })
+    const meta = await createLoop({ title, repo, createdBy: userId, profiles, vault, knowledgeRw, mountAllLoops, backend })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)

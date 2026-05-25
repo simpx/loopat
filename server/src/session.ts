@@ -14,6 +14,8 @@ import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
+import type { BackendAdapter, BackendType } from "./backend"
+import { PiRpcAdapter } from "./pi-session"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
@@ -207,6 +209,7 @@ class LoopSession {
   id: string
   private q: Query | null = null
   private input = pushIterable<SDKUserMessage>()
+  private backendAdapter: BackendAdapter | null = null
   private subscribers = new Map<WSContext, SubscriberState>()
   private history: SDKMessage[] = []
   private historyLoaded: Promise<void>
@@ -329,6 +332,11 @@ class LoopSession {
    * a no-op. Fire-and-forget; the interrupt runs in the background.
    */
   restartOnNextMessage() {
+    if (this.backendAdapter) {
+      const dying = this.backendAdapter
+      this.backendAdapter = null
+      dying.interrupt().catch(() => {})
+    }
     if (this.q) {
       const dying = this.q
       this.q = null
@@ -350,7 +358,7 @@ class LoopSession {
   }
 
   private async ensureStarted() {
-    if (this.q) return
+    if (this.q || this.backendAdapter) return
     const shouldContinue = await hasPriorSdkSession(this.id)
     const meta = await getLoop(this.id)
     if (!meta) {
@@ -369,6 +377,38 @@ class LoopSession {
     }
     const providerName = resolved.name
     const provider = resolved.provider
+
+    // ── pi-agent backend ──
+    // If this loop uses pi-agent, spawn pi in RPC mode instead of the
+    // Claude Code SDK. pi manages its own sandbox and tool execution.
+    if (meta.backend === "pi-agent") {
+      const loopatAppend = await buildLoopatAppend(meta)
+      const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
+      const piAdapter = new PiRpcAdapter()
+      this.backendAdapter = piAdapter
+
+      // Build env for pi process
+      const piEnv: Record<string, string> = {
+        ...personalCfg.vaultEnvs,
+        ANTHROPIC_API_KEY: provider.apiKey,
+        ANTHROPIC_BASE_URL: provider.baseUrl,
+      }
+
+      const messageIter = await piAdapter.start({
+        loopId: this.id,
+        cwd: V_LOOP_WORKDIR(this.id),
+        env: piEnv,
+        systemPromptAppend: loopatAppend,
+        continue: shouldContinue,
+        model: meta.config?.default_model_id || provider.models.find(m => m.enabled !== false)?.id || provider.models[0]?.id,
+        backendConfig: {
+          anthropicApiKey: provider.apiKey,
+        },
+      })
+
+      this.consumeGeneric(messageIter)
+      return
+    }
 
     const loopatAppend = await buildLoopatAppend(meta)
     const loopId = this.id
@@ -777,6 +817,57 @@ class LoopSession {
     }
   }
 
+  /**
+   * Generic consume loop for non-Claude-Code backends (e.g. pi-agent).
+   * Works with any AsyncIterable<SDKMessage> without Query-specific logic.
+   */
+  private async consumeGeneric(iter: AsyncIterable<SDKMessage>) {
+    this.consuming = true
+    const tag = this.id.slice(0, 8)
+    try {
+      for await (const msg of iter) {
+        if (DEBUG) {
+          const subtype = (msg as any).subtype ? `/${(msg as any).subtype}` : ""
+          console.error(`[pi:${tag}] msg ${msg.type}${subtype}`)
+        }
+        // Track generating state
+        if (msg.type === "system" && (msg as any).subtype === "init") {
+          this.generating = true
+        } else if (msg.type === "result") {
+          this.generating = false
+          this.queueProcessing = false
+          this.backendAdapter = null
+          this.processNextInQueue()
+        }
+
+        // ephemeral live-feed events: don't persist or replay
+        const ephemeral = msg.type === "stream_event" || msg.type === "tool_progress"
+        if (!ephemeral) {
+          this.history.push(msg)
+          this.persist(msg)
+        }
+        this.broadcast(msg)
+        this.updateStatus(msg)
+      }
+    } catch (e: any) {
+      console.error(`[pi:${tag}] consume error:`, e?.message ?? e)
+      if (DEBUG && e?.stack) console.error(e.stack)
+      const err = { type: "error", message: e?.message ?? String(e) }
+      this.history.push(err as any)
+      this.persist(err)
+      this.broadcast(err)
+    } finally {
+      if (this.backendAdapter) return // new adapter started by processNextInQueue
+      this.consuming = false
+      this.generating = false
+      this.queueProcessing = false
+      const result = { type: "result" as const }
+      this.history.push(result as any)
+      this.broadcast(result)
+      if (this.subscribers.size === 0) this.scheduleIdleCleanup()
+    }
+  }
+
   private persist(msg: any) {
     const stamped = { ...msg, _ts: new Date().toISOString() }
     appendFile(loopHistoryPath(this.id), JSON.stringify(stamped) + "\n").catch((e) => {
@@ -1131,7 +1222,12 @@ class LoopSession {
     this.history.push(userMsg)
     this.persist(userMsg)
     this.broadcast(userMsg)
-    this.input.push(userMsg)
+    // Route to the appropriate backend
+    if (this.backendAdapter) {
+      this.backendAdapter.sendUserMessage(userMsg)
+    } else {
+      this.input.push(userMsg)
+    }
   }
 
   /** Process the next queued message. Called from consume()'s finally block
@@ -1191,7 +1287,11 @@ class LoopSession {
 
   async interrupt() {
     this.generating = false
-    if (this.q) await this.q.interrupt().catch(() => {})
+    if (this.backendAdapter) {
+      await this.backendAdapter.interrupt().catch(() => {})
+    } else if (this.q) {
+      await this.q.interrupt().catch(() => {})
+    }
   }
 
   getQueueLength(): number {
@@ -1219,6 +1319,10 @@ class LoopSession {
     this.queueProcessing = false
     this.messageQueue = []
     sessions.delete(this.id)
+    if (this.backendAdapter) {
+      try { await this.backendAdapter.destroy() } catch {}
+      this.backendAdapter = null
+    }
     if (this.q) {
       try { await this.q.interrupt() } catch {}
       this.q = null

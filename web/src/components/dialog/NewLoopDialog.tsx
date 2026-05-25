@@ -14,7 +14,7 @@ export function NewLoopDialog({
   initialTitle,
 }: {
   onClose: () => void
-  onCreate: (opts: { title: string; repo?: string; profiles?: string[]; vault?: string }) => Promise<string> | string
+  onCreate: (opts: { title: string; repo?: string; profiles?: string[]; vault?: string; backend?: "claude-code" | "pi-agent" }) => Promise<string> | string
   initialTitle?: string
 }) {
   const [title, setTitle] = useState(initialTitle ?? "")
@@ -22,6 +22,7 @@ export function NewLoopDialog({
   const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set())
   const [defaultProfileNames, setDefaultProfileNames] = useState<string[]>([])
   const [vault, setVault] = useState("default")
+  const [backend, setBackend] = useState<"claude-code" | "pi-agent">("claude-code")
   const [repos, setRepos] = useState<RepoEntry[]>([])
   const [profiles, setProfiles] = useState<ProfileEntry[]>([])
   const [vaults, setVaults] = useState<string[]>([])
@@ -96,6 +97,7 @@ export function NewLoopDialog({
         repo: repo || undefined,
         profiles: selectedProfiles.size > 0 ? [...selectedProfiles] : undefined,
         vault: vault || undefined,
+        backend: backend !== "claude-code" ? backend : undefined,
       })
     } finally {
       setBusy(false)
@@ -130,6 +132,22 @@ export function NewLoopDialog({
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
                 No repos registered. Run `git clone` into context/repos/&lt;name&gt;/.
+              </div>
+            )}
+          </DialogField>
+
+          <DialogField label="Backend" hint="AI agent backend. Claude Code is the default; pi-agent uses the Pi coding agent.">
+            <select
+              value={backend}
+              onChange={(e) => setBackend(e.target.value as "claude-code" | "pi-agent")}
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
+            >
+              <option value="claude-code">Claude Code (default)</option>
+              <option value="pi-agent">pi-agent</option>
+            </select>
+            {backend === "pi-agent" && (
+              <div className="text-[11px] text-gray-400 mt-1">
+                Uses the Pi coding agent. Make sure <code className="bg-gray-100 px-1 rounded">pi</code> is installed and configured.
               </div>
             )}
           </DialogField>
