@@ -316,7 +316,7 @@ export default function SlashCommand() {
     return (
       <div className="relative">
         <div className="absolute bottom-0 left-0 mb-1 w-[28rem] rounded-lg border border-gray-200 bg-white shadow-lg z-20">
-          <McpStatusPanel variant="popover" onClose={() => setMcpOpen(false)} loopId={loopId} />
+          <McpStatusPanel onClose={() => setMcpOpen(false)} loopId={loopId} />
         </div>
       </div>
     );
@@ -328,7 +328,7 @@ export default function SlashCommand() {
     <div className="relative">
       {mcpOpen && (
         <div className="absolute bottom-0 left-0 mb-1 w-[28rem] rounded-lg border border-gray-200 bg-white shadow-lg z-30">
-          <McpStatusPanel variant="popover" onClose={() => setMcpOpen(false)} loopId={loopId} />
+          <McpStatusPanel onClose={() => setMcpOpen(false)} loopId={loopId} />
         </div>
       )}
       <div className="absolute bottom-0 left-0 mb-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg z-20">

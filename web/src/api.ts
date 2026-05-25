@@ -1417,79 +1417,33 @@ export async function markOnboardingDone(): Promise<boolean> {
   return r.ok
 }
 
-// ── MCP auth ──
+// ── MCP servers ──
 
 /**
- * MCP auth status — the backend returns a map keyed by **env var name**
- * (e.g. "MCP_COOP_TOKEN") rather than server name, because env vars are the
- * physical storage and server name → env var mapping isn't 1-to-1 reversible
- * (servers with spaces / dots both collapse to underscores). UI consumers
- * derive the lookup key with `mcpServerEnvVarName(serverName)`.
+ * MCP server, as returned by /api/mcp-servers. The list is derived from the
+ * loop's merged settings.json (team + profile + personal + plugin defaults).
+ *
+ * `authed` is a pure existence check on the env file named by `authTokenEnv`
+ * in the user's personal default vault — it does NOT validate the token
+ * (no expiry check, no probe). Click "Re-authorize" anytime to refresh it.
  */
-export type McpAuthStatus = Record<string, { connected: boolean; varName: string }>
-
-/** Mirror of server `mcpServerEnvVarName` — derive the vault env file name
- *  for a given MCP server. Keep in sync with server/src/mcp-oauth.ts. */
-export function mcpServerEnvVarName(serverName: string): string {
-  const sanitized = serverName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
-  return `MCP_${sanitized || "SERVER"}_TOKEN`
-}
-
-/** List the user's MCP auth state for a given vault. Keyed by env var name. */
-export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStatus> {
-  const r = await apiFetch(`/api/mcp-auth?vault=${encodeURIComponent(vault)}`)
-  if (!r.ok) return {}
-  return (await r.json()) as McpAuthStatus
-}
-
-/** Begin OAuth flow. Returns the authorizationUrl the browser should navigate to. */
-export async function startMcpAuth(
-  serverName: string,
-  vault: string = "default",
-  loopId?: string,
-): Promise<{ authorizationUrl?: string; error?: string }> {
-  const r = await apiFetch("/api/mcp-auth/start", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ serverName, vault, ...(loopId ? { loopId } : {}) }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { error: j.error ?? "start failed" }
-  return { authorizationUrl: j.authorizationUrl }
-}
-
-export async function deleteMcpAuth(serverName: string, vault: string = "default"): Promise<boolean> {
-  const r = await apiFetch(`/api/mcp-auth/${encodeURIComponent(serverName)}?vault=${encodeURIComponent(vault)}`, {
-    method: "DELETE",
-  })
-  return r.ok
-}
-
-/** Public-facing MCP server config (workspace-defined). Used by Settings → MCP Auth
- *  to know which servers are available to connect. */
 export type McpServerEntry = {
   name: string
   type: "http" | "sse" | "stdio"
   url?: string
-  /** Personal-tier only: this entry shadows a same-named workspace entry. */
-  shadowsWorkspace?: boolean
-  /** Plugin-tier only: which plugin contributes this server (e.g. "privacy-legal@claude-for-legal"). */
-  pluginSource?: string
+  /** Env var name parsed from `Authorization: Bearer ${VAR}` in headers.
+   *  null when the server doesn't use a Bearer-template (stdio servers,
+   *  static-keyed servers, non-Bearer auth schemes). */
+  authTokenEnv: string | null
+  /** True iff a non-empty env file exists at `<personal default vault>/envs/<authTokenEnv>`. */
+  authed: boolean
   /** OAuth capability probe result. dcr=loopat can auto-auth; manual=admin
-   *  must register an app (loopat can't); none=no OAuth (CC handles directly);
-   *  unreachable=probe failed. */
+   *  must register an app (loopat can't); none=no OAuth (server is public or
+   *  uses non-OAuth auth); unreachable=probe failed. */
   oauthSupport?: "dcr" | "manual" | "none" | "unreachable"
 }
 
-export type McpServerTier = {
-  id: "team" | "plugin" | "personal"
-  label: string
-  /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. Empty for plugin tier. */
-  path: string
-  servers: McpServerEntry[]
-}
-
-export type McpServerInventory = { tiers: McpServerTier[] }
+export type McpServerInventory = { servers: McpServerEntry[] }
 
 export async function reprobeMcpServers(url?: string): Promise<void> {
   await apiFetch("/api/mcp-servers/reprobe", {
@@ -1502,8 +1456,32 @@ export async function reprobeMcpServers(url?: string): Promise<void> {
 export async function listMcpServers(loopId?: string): Promise<McpServerInventory> {
   const q = loopId ? `?loopId=${encodeURIComponent(loopId)}` : ""
   const r = await apiFetch(`/api/mcp-servers${q}`)
-  if (!r.ok) return { tiers: [] }
+  if (!r.ok) return { servers: [] }
   return (await r.json()) as McpServerInventory
+}
+
+/** Begin OAuth flow for an MCP server visible in the loop's merged settings.
+ *  Returns the authorizationUrl the browser should navigate to. */
+export async function startMcpAuth(
+  serverName: string,
+  loopId: string,
+): Promise<{ authorizationUrl?: string; error?: string }> {
+  const r = await apiFetch("/api/mcp-auth/start", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ serverName, loopId }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j.error ?? "start failed" }
+  return { authorizationUrl: j.authorizationUrl }
+}
+
+/** Forget an MCP token — deletes the env file from the user's personal
+ *  default vault. This is the inverse of OAuth: subsequent /api/mcp-servers
+ *  responses will show `authed: false` for any server keyed on this env. */
+export async function deleteEnv(name: string): Promise<boolean> {
+  const r = await apiFetch(`/api/envs/${encodeURIComponent(name)}`, { method: "DELETE" })
+  return r.ok
 }
 
 /** Restart a loop's in-memory SDK session — interrupt the current query()

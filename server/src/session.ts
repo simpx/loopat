@@ -422,8 +422,9 @@ class LoopSession {
     }
 
     // Build sandbox env. Order matters: vault envs first (so the spawned binary
-    // can substitute ${VAR} in mcpServers headers / .mcp.json), then platform-
-    // controlled vars (which can't be overridden by a stray vault env file).
+    // can substitute ${VAR} in mcpServers headers passed via SDK options),
+    // then platform-controlled vars (which can't be overridden by a stray
+    // vault env file).
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     const extraEnv: Record<string, string> = {
       ...personalCfg.vaultEnvs,

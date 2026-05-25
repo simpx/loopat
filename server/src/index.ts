@@ -6,7 +6,8 @@ import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
-import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, mcpServerEnvVarName, type OAuthSupport } from "./mcp-oauth"
+import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
+import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
 import {
   initChat,
   listChannels,
@@ -49,7 +50,7 @@ import {
   workspaceRepoDir,
   workspaceReposDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadPersonalClaudeJson, type ProviderConfig, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
@@ -618,13 +619,18 @@ app.post("/api/onboarding/done", requireAuth, async (c) => {
 
 // ── MCP OAuth (auth required) ──
 // loopat owns the OAuth dance entirely: discovery + DCR + auth code + PKCE
-// + token exchange happen server-side. The resulting access token is stashed
-// at `vaults/<v>/envs/MCP_<NAME>_TOKEN`; workspace `.mcp.json` references it
-// via `${MCP_<NAME>_TOKEN}` substitution (the spawned claude binary expands
-// against its own env, which inherits the vault envs we inject at spawn).
-// Per-vault by storage location → auto-encrypted by git-crypt and isolated.
+// + token exchange happen server-side. The resulting access token is written
+// to the user's personal default vault as a plain env file named by the
+// server's `Authorization: Bearer ${VAR}` header — i.e. the same env every
+// CC spawn already substitutes into request headers. MCP tokens are thus
+// indistinguishable from any other vault env (git-crypt encrypted on disk,
+// auto-injected at sandbox spawn).
 
 const VAULT_RE = /^[a-zA-Z0-9_-]+$/
+const ENV_NAME_RE = /^[A-Z_][A-Z0-9_]*$/
+// Server names can have spaces, dots etc. ("Google Drive", "Solve Intelligence").
+// Allow common printable chars; reject path/shell metas.
+const SERVER_NAME_RE = /^[A-Za-z0-9 ._-]{1,64}$/
 
 /** Best-effort recovery of the public URL the user's browser is hitting us
  *  on. Order: LOOPAT_PUBLIC_URL env → X-Forwarded-* headers → request Host
@@ -639,167 +645,54 @@ function publicBaseUrl(c: any): string {
   return `${proto}://${host}`
 }
 
-// Lists MCP servers visible to a loop, grouped by source tier:
-//   plugin:  from each plugin's .mcp.json (auto-loaded by CC when plugin loads)
-//   personal: per-user overrides
-//
-// Profile-model rewrite (2026-05): the old "sandbox tier" source
-// (.claude/.claude.json under each sandbox) is dropped; plugin .mcp.json is
-// the canonical source for team-shared MCPs. Personal still overlays.
-//
-// Query param `loopId` selects which loop's profiles to use. Without it,
-// only personal-tier servers are listed (e.g. Settings page with no loop).
+// List the MCP servers visible to a loop. Single source = the loop's merged
+// `.claude/settings.json` (composed by compose.ts from team/profile/personal
+// settings + plugin-shipped defaults). Each server reports whether its
+// `Authorization: Bearer ${VAR}` env is set in the user's personal default
+// vault — that's the `authed` flag. `authed` does NOT validate the token
+// (no expiry check, no probe), it only means "the env file exists & non-empty".
 app.get("/api/mcp-servers", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const loopId = c.req.query("loopId")
-  let profiles: string[] | undefined
+
+  let mcpServers: Record<string, any> = {}
   if (loopId) {
-    const loop = await getLoop(loopId)
-    profiles = loop?.config?.profiles
-  }
-  const ps = await loadPersonalClaudeJson(userId)
-
-  const shape = (srv: any) => ({
-    type: (srv?.type ?? "stdio") as string,
-    ...(srv?.url ? { url: srv.url as string } : {}),
-  })
-
-  // Probe OAuth support for any HTTP/SSE server with a URL. In-memory cache
-  // makes second+ calls instant; first call pays ~1-2s for N servers in
-  // parallel. Errors degrade to "unreachable" — never throw.
-  async function withOAuthSupport<T extends { type: string; url?: string }>(s: T): Promise<T & { oauthSupport?: OAuthSupport }> {
-    if (!s.url || (s.type !== "http" && s.type !== "sse")) return s
-    try {
-      return { ...s, oauthSupport: await probeOAuthSupport(s.url) }
-    } catch {
-      return { ...s, oauthSupport: "unreachable" as OAuthSupport }
-    }
-  }
-
-  // Team tier: shared workspace mcpServers from knowledge/.loopat/.claude/settings.json.
-  // Read directly (rather than via composer) because we want to show the
-  // tier even when no loop is active.
-  const { workspaceTeamSettingsPath } = await import("./paths")
-  const { readFile: rf0 } = await import("node:fs/promises")
-  const { existsSync: esync0 } = await import("node:fs")
-  let teamMcpServers: Record<string, any> = {}
-  const teamSettingsPath = workspaceTeamSettingsPath()
-  if (esync0(teamSettingsPath)) {
-    try {
-      const parsed = JSON.parse(await rf0(teamSettingsPath, "utf8"))
-      teamMcpServers = (parsed?.mcpServers ?? {}) as Record<string, any>
-    } catch (e: any) {
-      console.warn(`[mcp] team settings.json unreadable: ${e?.message ?? e}`)
-    }
-  }
-  const teamTier = await Promise.all(
-    Object.entries(teamMcpServers).map(async ([name, srv]) =>
-      withOAuthSupport({ name, ...shape(srv) }),
-    ),
-  )
-
-  const personalTier = await Promise.all(
-    Object.entries(ps.mcpServers ?? {}).map(async ([name, srv]) => {
-      // Flag personal entries that shadow a same-named team entry so the UI
-      // can warn (CC composition is last-wins; personal silently overrides).
-      const shadowsWorkspace = name in teamMcpServers
-      return { ...(await withOAuthSupport({ name, ...shape(srv) })), shadowsWorkspace }
-    }),
-  )
-
-  // Plugin tier: scan each enabled plugin's .mcp.json. CC auto-registers
-  // these at runtime when the plugin loads; we surface them here so users
-  // can see + reason about them without spawning a session.
-  const { lookupPluginInstallPath } = await import("./plugin-installer")
-  const { loopClaudeDir: lcd } = await import("./paths")
-  const { readFile: rf } = await import("node:fs/promises")
-  const { existsSync: esync } = await import("node:fs")
-  const { join: pjoin } = await import("node:path")
-  // Read enabledPlugins from the loop's merged settings and look each one up.
-  // With no loopId (Settings page), no plugin tier.
-  type PluginEntry = { name: string; type: string; url?: string; pluginSource: string; oauthSupport?: OAuthSupport }
-  const pluginTierRaw: PluginEntry[] = []
-  if (loopId) {
-    const settingsPath = pjoin(lcd(loopId), "settings.json")
-    if (esync(settingsPath)) {
+    const { loopClaudeDir } = await import("./paths")
+    const { readFile: rf } = await import("node:fs/promises")
+    const settingsPath = pathJoin(loopClaudeDir(loopId), "settings.json")
+    if (existsSync(settingsPath)) {
       try {
-        const settings = JSON.parse(await rf(settingsPath, "utf8")) as {
-          enabledPlugins?: Record<string, boolean>
-        }
-        const enabled = Object.entries(settings.enabledPlugins ?? {})
-          .filter(([_, v]) => v)
-          .map(([k]) => k)
-        for (const spec of enabled) {
-          const path = await lookupPluginInstallPath(spec)
-          if (!path) continue
-          const mcpPath = pjoin(path, ".mcp.json")
-          if (!esync(mcpPath)) continue
-          try {
-            const j = JSON.parse(await rf(mcpPath, "utf8"))
-            for (const [srvName, srv] of Object.entries((j?.mcpServers ?? {}) as Record<string, any>)) {
-              pluginTierRaw.push({ name: srvName, ...shape(srv), pluginSource: spec })
-            }
-          } catch (e: any) {
-            console.warn(`[mcp] plugin ${spec} .mcp.json unreadable: ${e?.message ?? e}`)
-          }
-        }
+        const j = JSON.parse(await rf(settingsPath, "utf8"))
+        mcpServers = (j?.mcpServers ?? {}) as Record<string, any>
       } catch (e: any) {
-        console.warn(`[mcp] loop ${loopId} settings read failed: ${e?.message ?? e}`)
+        console.warn(`[mcp] loop ${loopId} settings unreadable: ${e?.message ?? e}`)
       }
     }
   }
-  const pluginTier = await Promise.all(pluginTierRaw.map((e) => withOAuthSupport(e)))
 
-  return c.json({
-    tiers: [
-      {
-        id: "team",
-        label: "Workspace MCPs (team-shared)",
-        path: "context/knowledge/.loopat/.claude/settings.json",
-        servers: teamTier,
-      },
-      {
-        id: "plugin",
-        label: "Plugin MCPs (auto-loaded from profile-declared plugins)",
-        path: "",
-        servers: pluginTier,
-      },
-      {
-        id: "personal",
-        label: "Personal MCPs (per-user, your overrides)",
-        path: `personal/${userId}/.loopat/.claude/settings.json`,
-        servers: personalTier,
-      },
-    ],
-  })
+  const envs = await loadVaultEnvs(userId, DEFAULT_VAULT)
+
+  const servers = await Promise.all(
+    Object.entries(mcpServers).map(async ([name, srv]) => {
+      const type = (srv?.type ?? "stdio") as string
+      const url = (srv as any)?.url as string | undefined
+      const authTokenEnv = parseBearerEnvName(srv)
+      const authed = authTokenEnv ? !!envs[authTokenEnv] : false
+      let oauthSupport: OAuthSupport | undefined
+      if (url && (type === "http" || type === "sse")) {
+        try {
+          oauthSupport = await probeOAuthSupport(url)
+        } catch {
+          oauthSupport = "unreachable"
+        }
+      }
+      return { name, type, url, authTokenEnv, authed, oauthSupport }
+    }),
+  )
+
+  return c.json({ servers })
 })
 
-app.get("/api/mcp-auth", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const vault = c.req.query("vault") || "default"
-  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault name" }, 400)
-  // Connected = the vault env file `MCP_<NAME>_TOKEN` exists and is non-empty.
-  // Server names are walked from merged settings.json + plugin .mcp.json
-  // dynamically at /api/mcp-servers — but here we don't know that set, so we
-  // just enumerate all MCP_*_TOKEN env files and let the UI cross-reference.
-  const { loadVaultEnvs } = await import("./vaults")
-  const envs = await loadVaultEnvs(userId, vault)
-  const summary: Record<string, { connected: boolean; varName: string }> = {}
-  for (const [varName, value] of Object.entries(envs)) {
-    const m = varName.match(/^MCP_(.+)_TOKEN$/)
-    if (!m) continue
-    // The reverse mapping (env var → server name) isn't deterministic for
-    // server names with spaces / dashes (both collapse to underscores). UI
-    // uses varName for keying; if it needs the human server name, it should
-    // look it up via /api/mcp-servers and apply mcpServerEnvVarName().
-    summary[varName] = { connected: !!value, varName }
-  }
-  return c.json(summary)
-})
-
-// Server names from plugin .mcp.json can have spaces, dots etc. ("Google Drive",
-// "Solve Intelligence"). Allow common printable chars; reject path/shell metas.
-const SERVER_NAME_RE = /^[A-Za-z0-9 ._-]{1,64}$/
 // Force re-probe of OAuth support. POST with no body clears entire cache;
 // body {url: ...} evicts just that URL. Useful after admin fixes a server
 // URL or adds a previously-unreachable server.
@@ -814,13 +707,11 @@ app.post("/api/mcp-auth/start", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
   const serverName = typeof body.serverName === "string" ? body.serverName.trim() : ""
-  const vault = typeof body.vault === "string" && body.vault ? body.vault.trim() : "default"
   const loopId = typeof body.loopId === "string" ? body.loopId.trim() : ""
   if (!serverName || !SERVER_NAME_RE.test(serverName)) return c.json({ error: "invalid serverName" }, 400)
-  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
+  if (!loopId) return c.json({ error: "loopId required" }, 400)
   const r = await startMcpAuth({
     user: userId,
-    vault,
     serverName,
     loopId,
     publicBaseUrl: publicBaseUrl(c),
@@ -837,16 +728,16 @@ app.get("/api/mcp-auth/callback", async (c) => {
   const code = c.req.query("code") ?? ""
   const errParam = c.req.query("error")
   if (errParam) {
-    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(errParam)}`)
+    return c.redirect(`/?mcp_auth=error&reason=${encodeURIComponent(errParam)}`)
   }
   if (!state || !code) {
-    return c.redirect(`/settings/mcp?status=error&reason=missing_state_or_code`)
+    return c.redirect(`/?mcp_auth=error&reason=missing_state_or_code`)
   }
   const r = await completeMcpAuth({ state, code })
   if (!r.ok) {
-    return c.redirect(`/settings/mcp?status=error&reason=${encodeURIComponent(r.error)}`)
+    return c.redirect(`/?mcp_auth=error&reason=${encodeURIComponent(r.error)}`)
   }
-  return c.redirect(`/settings/mcp?status=ok&server=${encodeURIComponent(r.serverName)}`)
+  return c.redirect(`/?mcp_auth=ok&server=${encodeURIComponent(r.serverName)}`)
 })
 
 // Restart the in-memory LoopSession for a loop (interrupt the running
@@ -864,13 +755,15 @@ app.post("/api/loops/:id/restart-session", requireAuth, async (c) => {
   return c.json({ ok: true, restarted })
 })
 
-app.delete("/api/mcp-auth/:server", requireAuth, async (c) => {
+// "Forget" an MCP token = delete the env file in the user's personal default
+// vault. The UI passes the env name from /api/mcp-servers' `authTokenEnv`.
+// This endpoint deliberately accepts any valid env name (not MCP-specific):
+// MCP tokens are indistinguishable from other vault envs in the new design.
+app.delete("/api/envs/:name", requireAuth, async (c) => {
   const userId = c.get("userId") as string
-  const server = c.req.param("server")
-  const vault = c.req.query("vault") || "default"
-  if (!VAULT_RE.test(vault)) return c.json({ error: "invalid vault" }, 400)
-  if (!SERVER_NAME_RE.test(server)) return c.json({ error: "invalid server name" }, 400)
-  await deleteVaultEnv(userId, vault, mcpServerEnvVarName(server))
+  const name = c.req.param("name")
+  if (!ENV_NAME_RE.test(name)) return c.json({ error: "invalid env name" }, 400)
+  await deleteVaultEnv(userId, DEFAULT_VAULT, name)
   return c.json({ ok: true })
 })
 

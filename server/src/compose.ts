@@ -43,6 +43,47 @@ async function readJson<T = unknown>(path: string): Promise<T | null> {
   }
 }
 
+/**
+ * Fill `mergedSettings.mcpServers` with defaults from each enabled plugin's
+ * own `settings.json` mcpServers. Plugins are the lowest-priority source:
+ * a plugin's server is only added if no higher tier (team/profile/personal)
+ * already defines a server with the same name.
+ *
+ * Plugins shipping `.mcp.json` are NOT read here — loopat treats `.mcp.json`
+ * as deprecated; plugin authors should put mcpServers in `settings.json`.
+ */
+async function fillPluginMcpDefaults(mergedSettings: Record<string, any>): Promise<void> {
+  const enabled = Object.entries(
+    (mergedSettings.enabledPlugins ?? {}) as Record<string, boolean>,
+  )
+    .filter(([_, v]) => v)
+    .map(([k]) => k)
+  if (enabled.length === 0) return
+
+  const { lookupPluginInstallPath } = await import("./plugin-installer")
+  const existing = { ...((mergedSettings.mcpServers ?? {}) as Record<string, any>) }
+  const merged: Record<string, any> = { ...existing }
+
+  for (const spec of enabled) {
+    const pluginDir = await lookupPluginInstallPath(spec)
+    if (!pluginDir) continue
+    const ps = await readJson<{ mcpServers?: Record<string, any> }>(
+      join(pluginDir, "settings.json"),
+    )
+    const pluginServers = ps?.mcpServers
+    if (!pluginServers) continue
+    for (const [name, srv] of Object.entries(pluginServers)) {
+      if (merged[name] === undefined) {
+        merged[name] = srv
+      }
+    }
+  }
+
+  if (Object.keys(merged).length > 0) {
+    mergedSettings.mcpServers = merged
+  }
+}
+
 /** Read TOML, return null if missing/malformed. */
 async function readToml<T = Record<string, any>>(path: string): Promise<T | null> {
   if (!existsSync(path)) return null
@@ -280,6 +321,13 @@ export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<C
     const obj = await readJson<Record<string, any>>(r.settings)
     if (obj) mergedSettings = mergeSettings(mergedSettings, obj, r.settings)
   }
+
+  // 1.5 Fill `mcpServers` defaults from enabled plugins (those plugins' own
+  // settings.json mcpServers — never `.mcp.json`, which loopat doesn't read).
+  // Plugins are the lowest priority: their entries only fill keys not
+  // already defined by team / profile / personal merge above.
+  await fillPluginMcpDefaults(mergedSettings)
+
   const settingsPath = join(dst, "settings.json")
   // Inject loopat-managed fields that downstream code expects.
   mergedSettings.autoMemoryEnabled = mergedSettings.autoMemoryEnabled ?? true
