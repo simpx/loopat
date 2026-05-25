@@ -1468,12 +1468,21 @@ app.get("/api/loop-stats", requireAuth, async (c) => {
 
 app.get("/api/profiles", requireAuth, async (c) => {
   // Profile = a subdir of `.loopat/profiles/` with a `.claude/` inside.
-  // No loopat-invented metadata file (no profile.json) — descriptions, if
-  // wanted, could come from the profile's CLAUDE.md first heading. For now
-  // the UI just lists names.
+  // No loopat-invented metadata file: `description` is pulled from the
+  // profile's CLAUDE.md frontmatter `description:` field (preferred) or
+  // its first heading (legacy fallback) — see extractProfileDescription.
   const { listProfiles } = await import("./profiles")
+  const { extractProfileDescription } = await import("./tiers")
+  const { workspaceProfileClaudeMdPath } = await import("./paths")
+  const { existsSync } = await import("node:fs")
+  const { readFile } = await import("node:fs/promises")
   const names = await listProfiles()
-  return c.json({ profiles: names.map((name) => ({ name })) })
+  const profiles = await Promise.all(names.map(async (name) => {
+    const mdPath = workspaceProfileClaudeMdPath(name)
+    const md = existsSync(mdPath) ? await readFile(mdPath, "utf8").catch(() => null) : null
+    return { name, description: extractProfileDescription(md) ?? undefined }
+  }))
+  return c.json({ profiles })
 })
 
 app.post("/api/loops", requireAuth, async (c) => {

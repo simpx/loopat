@@ -11,7 +11,7 @@ import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, distillLoop, type ContextMount, type LoopMeta, markLoopViewed } from "../api"
+import { getContext, distillLoop, listProfiles, type ContextMount, type LoopMeta, markLoopViewed } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { useLoopStatus } from "../useLoopStatus"
@@ -722,14 +722,11 @@ function LoopHeader({
       </div>
 
       {/* profile row — which profiles are active. Profile model re-composes
-          on every spawn, so no "update available" prompt is needed. */}
+          on every spawn, so no "update available" prompt is needed. Each
+          chip shows the profile's description (from CLAUDE.md frontmatter
+          or first heading) as a hover tooltip. */}
       {meta.config?.profiles && meta.config.profiles.length > 0 && (
-        <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
-          <span className="text-gray-400">profiles:</span>
-          {meta.config.profiles.map((p) => (
-            <ContextChip key={p} label={p} value="active" />
-          ))}
-        </div>
+        <ProfileChipsRow profiles={meta.config.profiles as string[]} />
       )}
 
       {/* vault row — which credential bundle was bound into this loop's sandbox.
@@ -881,12 +878,41 @@ function DriveToggle({ meta }: { meta: LoopMeta }) {
   )
 }
 
-function ContextChip({ label, value }: { label: string; value: string }) {
+function ContextChip({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-[11px]">
+    <span
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 text-[11px]"
+      title={title}
+    >
       <span className="text-gray-500">{label}:</span>
       <span className="text-gray-900 font-medium">{value}</span>
     </span>
+  )
+}
+
+/** Profile chips row — fetches descriptions once and surfaces them via
+ *  native hover tooltips on each chip. */
+function ProfileChipsRow({ profiles }: { profiles: string[] }) {
+  const [desc, setDesc] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    listProfiles().then((all) => {
+      if (cancelled) return
+      const map: Record<string, string> = {}
+      for (const p of all) {
+        if (p.description) map[p.name] = p.description
+      }
+      setDesc(map)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  return (
+    <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
+      <span className="text-gray-400">profiles:</span>
+      {profiles.map((p) => (
+        <ContextChip key={p} label={p} value="active" title={desc[p]} />
+      ))}
+    </div>
   )
 }
 
