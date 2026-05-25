@@ -118,7 +118,7 @@ export function ClaudeConfigPanel({ disabled: parentDisabled }: { disabled?: boo
   return (
     <div className="flex flex-col gap-5">
       {/* Intro + stats bar */}
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden transition-shadow hover:shadow-sm">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2.5">
           <Layers size={15} className="text-gray-400" />
           <div>
@@ -295,7 +295,7 @@ function TierDetail({
   const overrideCount = Object.keys(tier.overrides).length
 
   return (
-    <div id={`tier-${tier.id}`} className={`rounded-xl border overflow-hidden transition-shadow ${canEdit ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50/50"}`}>
+    <div id={`tier-${tier.id}`} className={`rounded-lg border overflow-hidden transition-shadow hover:shadow-sm ${canEdit ? "border-gray-200 bg-white" : "border-gray-200 bg-gray-50/50"}`}>
       {/* Header */}
       <div className={`flex items-center gap-3 px-4 py-3 border-b border-gray-100 border-l-2 ${meta.borderClass}`}>
         <Icon size={16} className="text-gray-500 shrink-0" />
@@ -320,6 +320,7 @@ function TierDetail({
           <StatChip label="MCP" value={tier.mcpServerCount} />
           {tier.skillCount > 0 && <StatChip label="Skills" value={tier.skillCount} />}
           {tier.agentCount > 0 && <StatChip label="Agents" value={tier.agentCount} />}
+          {tier.toolchainCount > 0 && <StatChip label="Toolchain" value={tier.toolchainCount} />}
           {overrideCount > 0 && (
             <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full font-medium">
               {overrideCount} override{overrideCount > 1 ? "s" : ""}

@@ -64,8 +64,9 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
     const useOverlay = await isHomeOverlaySupported()
     const bwrapArgs = await buildBwrapArgs(loopId, driver, {
-      // User envs go first so platform-managed vars below can't be clobbered.
-      ...(personalCfg.envs ?? {}),
+      // Vault envs go first so platform-managed vars below can't be clobbered
+      // by a stray vault entry named TERM / XDG_*.
+      ...personalCfg.vaultEnvs,
       TERM: "xterm-256color",
       XDG_DATA_HOME: fishData,
       XDG_RUNTIME_DIR: fishRuntime,

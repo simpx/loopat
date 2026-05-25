@@ -126,15 +126,10 @@ function TreeNode({
   nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
   reloadKey?: number
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(() => getExpanded(treeId).has(entry.path))
   const [children, setChildren] = useState<TreeNodeData[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null)
-
-  useEffect(() => {
-    const expanded = getExpanded(treeId)
-    setOpen(expanded.has(entry.path))
-  }, [treeId, entry.path])
 
   const toggleOpen = useCallback(() => {
     const expanded = getExpanded(treeId)

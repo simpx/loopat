@@ -34,8 +34,23 @@
  */
 import { createHash, randomBytes } from "node:crypto"
 
-import { type McpServerConfig } from "./config"
-import { putMcpToken, type McpServerToken } from "./mcp-tokens"
+import { type McpServerConfig, writeVaultEnv } from "./config"
+
+/**
+ * Map an MCP server name to the env var name loopat writes the access token
+ * to. Spaces / dots / hyphens are normalized to underscores, name is upper-
+ * cased, prefixed with `MCP_` and suffixed with `_TOKEN`. Workspace
+ * `.mcp.json` references the same name via `${MCP_<NAME>_TOKEN}` substitution.
+ *
+ * Examples:
+ *   github       → MCP_GITHUB_TOKEN
+ *   Google Drive → MCP_GOOGLE_DRIVE_TOKEN
+ *   linear-mcp   → MCP_LINEAR_MCP_TOKEN
+ */
+export function mcpServerEnvVarName(serverName: string): string {
+  const sanitized = serverName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+  return `MCP_${sanitized || "SERVER"}_TOKEN`
+}
 
 const STATE_TTL_MS = 10 * 60 * 1000 // 10 minutes — generous; OAuth flows are slow
 
@@ -462,20 +477,13 @@ export async function completeMcpAuth(opts: {
   const tok = await resp.json().catch(() => null)
   if (!tok?.access_token) return { ok: false, error: `token response missing access_token` }
 
-  const expiresIn = typeof tok.expires_in === "number" ? tok.expires_in : null
-  const stored: McpServerToken = {
-    accessToken: tok.access_token,
-    ...(tok.refresh_token ? { refreshToken: tok.refresh_token } : {}),
-    ...(expiresIn ? { expiresAt: Date.now() + expiresIn * 1000 } : {}),
-    ...(tok.scope ? { scope: tok.scope } : flow.scope ? { scope: flow.scope } : {}),
-    clientId: flow.clientId,
-    ...(flow.clientSecret ? { clientSecret: flow.clientSecret } : {}),
-    serverUrl: flow.serverUrl,
-    authorizationEndpoint: flow.authorizationEndpoint,
-    tokenEndpoint: flow.tokenEndpoint,
-  }
-
-  await putMcpToken(flow.user, flow.vault, flow.serverName, stored)
+  // Persist only the access token as a vault env. Refresh/revoke aren't
+  // implemented yet, so the OAuth metadata (refresh_token, clientId, token
+  // endpoint, etc.) would be dead-on-disk noise — drop it. If/when refresh
+  // lands, the natural home is additional env files named like
+  // MCP_<NAME>_REFRESH_TOKEN / MCP_<NAME>_CLIENT_ID.
+  const envName = mcpServerEnvVarName(flow.serverName)
+  await writeVaultEnv(flow.user, flow.vault, envName, tok.access_token)
 
   // Token is persisted, but **already-running** LoopSessions still hold the
   // old `query()` options. We intentionally do NOT auto-restart them here:

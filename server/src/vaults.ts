@@ -2,11 +2,13 @@
  * Vault catalog & resolution.
  *
  * A vault is a named bundle of credentials owned by one user. Each loop
- * selects one vault at spawn time and gets a sandbox-side symlink at
- * `/loopat/context/vault` pointing to that vault's real dir under
- * `/loopat/context/personal/.loopat/vaults/<active>/`. AI is taught (via
- * doctrine) to use the symlink and ignore other vaults visible under
- * `personal/.loopat/vaults/`.
+ * selects one vault at spawn time. The vault is NOT mounted into the sandbox
+ * as a directory; instead, two filesystem conventions drive automatic delivery:
+ *
+ *   vaults/<v>/envs/<NAME>           → injected as env var $NAME
+ *   vaults/<v>/mounts/home/<rel>/... → bound at $HOME/<rel>/...
+ *
+ * AI sees a configured machine, not a "vault" directory.
  *
  * Filesystem:
  *   personal/<user>/.loopat/vaults/<name>/...
@@ -17,9 +19,15 @@
  * own tree are a privilege-escalation vector and never bind into the sandbox.
  */
 import { existsSync, readdirSync, statSync } from "node:fs"
-import { realpath, readdir, stat } from "node:fs/promises"
+import { readFile, realpath, readdir, stat } from "node:fs/promises"
 import { join, relative, sep } from "node:path"
-import { personalDir, personalVaultDir, personalVaultsDir } from "./paths"
+import {
+  personalDir,
+  personalVaultDir,
+  personalVaultsDir,
+  personalVaultEnvsDir,
+  personalVaultMountsHomeDir,
+} from "./paths"
 
 export const DEFAULT_VAULT = "default"
 
@@ -109,4 +117,73 @@ export async function* walkVaultFiles(
   }
 
   yield* visit(vaultRoot, "")
+}
+
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * Load every file in `vaults/<v>/envs/` as an env-var map. Filename is the
+ * env var name; content is the value with one trailing newline stripped.
+ *
+ * Subdirectories under `envs/` are ignored. Files with non-env-var names
+ * (e.g. containing dashes or dots) are skipped — they're almost always
+ * accidental dotfiles or backup swap files, not real env entries.
+ *
+ * Missing vault or missing envs/ → empty map.
+ */
+export async function loadVaultEnvs(user: string, vault: string): Promise<Record<string, string>> {
+  const dir = personalVaultEnvsDir(user, vault)
+  if (!existsSync(dir)) return {}
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return {}
+  }
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    if (!ENV_NAME_RE.test(name)) continue
+    let st
+    try {
+      st = await stat(join(dir, name))
+    } catch {
+      continue
+    }
+    if (!st.isFile()) continue
+    try {
+      const raw = await readFile(join(dir, name), "utf8")
+      out[name] = raw.replace(/[\r\n]+$/, "")
+    } catch {}
+  }
+  return out
+}
+
+/** A single sandbox bind derived from `vaults/<v>/mounts/home/<top>`. */
+export type VaultHomeMount = {
+  /** Absolute host path (under the vault dir). */
+  src: string
+  /** Path relative to sandbox $HOME (e.g. ".ssh", ".config/gh"). */
+  rel: string
+}
+
+/**
+ * Enumerate top-level entries under `vaults/<v>/mounts/home/`. Each one
+ * produces a single bind: `<vault>/mounts/home/<name>` → `$HOME/<name>`.
+ *
+ * Top-level only by design: binding the whole `.ssh/` directory means the
+ * sandbox sees vault-owned `.ssh/`, no other writes allowed. Binding individual
+ * deeper files would require enumerating and re-running on every spawn — and
+ * users almost always want the whole directory owned by the source.
+ */
+export function listVaultHomeMounts(user: string, vault: string): VaultHomeMount[] {
+  const dir = personalVaultMountsHomeDir(user, vault)
+  if (!existsSync(dir)) return []
+  try {
+    return readdirSync(dir).filter((n) => n && !n.startsWith(".#")).map((name) => ({
+      src: join(dir, name),
+      rel: name,
+    }))
+  } catch {
+    return []
+  }
 }
