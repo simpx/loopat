@@ -75,8 +75,8 @@ function HBarChart({ data, maxVal, height = 24, gap = 6 }: {
         const outputW = maxVal > 0 ? (d.output / maxVal) * w : 0
         return (
           <g key={d.label}>
-            <rect x={0} y={y} width={inputW} height={height} rx={3} fill="#3b82f6" opacity={0.7} />
-            <rect x={inputW} y={y} width={outputW} height={height} rx={3} fill="#22c55e" opacity={0.7} />
+            <rect x={0} y={y} width={inputW} height={height} rx={3} fill="var(--color-blue-500)" opacity={0.7} />
+            <rect x={inputW} y={y} width={outputW} height={height} rx={3} fill="var(--color-green-500)" opacity={0.7} />
             <text x={inputW + outputW + 4} y={y + height / 2} dominantBaseline="central" className="fill-gray-500 text-[10px]">{d.label}</text>
           </g>
         )
@@ -115,16 +115,16 @@ function AreaChart({ data, w = 600, h = 180 }: {
       {/* Grid lines */}
       {yTicks.map(t => (
         <g key={t.label}>
-          <line x1={pad.left} y1={t.y} x2={w - pad.right} y2={t.y} stroke="#e5e7eb" strokeDasharray="3,2" />
+          <line x1={pad.left} y1={t.y} x2={w - pad.right} y2={t.y} stroke="var(--color-gray-200)" strokeDasharray="3,2" />
           <text x={pad.left - 6} y={t.y} textAnchor="end" dominantBaseline="central" className="fill-gray-400 text-[9px]">{t.label}</text>
         </g>
       ))}
       {/* Area: output (stacked on top of input) */}
-      <polygon points={`${totalPoints} ${bottomLine}`} fill="#22c55e" opacity={0.2} />
-      <polyline points={totalPoints} fill="none" stroke="#22c55e" strokeWidth={1.5} opacity={0.6} />
+      <polygon points={`${totalPoints} ${bottomLine}`} fill="var(--color-green-500)" opacity={0.2} />
+      <polyline points={totalPoints} fill="none" stroke="var(--color-green-500)" strokeWidth={1.5} opacity={0.6} />
       {/* Area: input only */}
-      <polygon points={`${inputPoints} ${bottomLine}`} fill="#3b82f6" opacity={0.2} />
-      <polyline points={inputPoints} fill="none" stroke="#3b82f6" strokeWidth={1.5} />
+      <polygon points={`${inputPoints} ${bottomLine}`} fill="var(--color-blue-500)" opacity={0.2} />
+      <polyline points={inputPoints} fill="none" stroke="var(--color-blue-500)" strokeWidth={1.5} />
       {/* Date labels */}
       {data.filter((_, i) => data.length <= 14 || i % Math.ceil(data.length / 14) === 0 || i === data.length - 1).map((d, i) => {
         const origIdx = data.indexOf(d)

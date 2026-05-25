@@ -329,6 +329,8 @@ export type LoopStats = {
   agents: number
   hooks: number
   mcpServers: number
+  /** Toolchain tools (mise.toml [tools] entries) deduped across all tiers. */
+  toolchain: number
 }
 /** Preview of what a loop with the given profile selection will contain.
  *  Team layer is always implicit. */
@@ -1080,36 +1082,29 @@ export async function updatePersonalSettings(patch: {
 
 // ── disk-shape settings (rich Settings page) ──
 
-/** `ConfigValue` mirror — used by both apiKey and envs values. */
-export type ConfigValue = string | { vault: string } | { file: string }
-
-/** `PathRef` mirror — used by mount.src. */
-export type PathRef = string | { vault: string }
-
 export type ProviderDisk = {
   model?: string
   models?: ModelEntry[]
   baseUrl: string
-  apiKey?: ConfigValue
+  /** Plain string; may contain `${VAR}` references resolved against vault envs/ at load. */
+  apiKey?: string
   maxContextTokens?: number
   enabled?: boolean
-}
-
-export type MountDisk = {
-  src: PathRef
-  dst: string
-  rw?: boolean
 }
 
 export type PersonalConfigDisk = {
   /** Mixed map: "default" key carries a string; other keys carry ProviderDisk. */
   providers: Record<string, ProviderDisk | string>
-  envs?: Record<string, ConfigValue>
-  mounts?: MountDisk[]
   shell?: string
 }
 
-export type RefExistsMap = Record<string, { kind: string; exists: boolean }>
+/**
+ * For each `providers.<name>.apiKey` ref the backend reports:
+ *   - kind: "literal" | "var" | "mixed" | "empty"
+ *   - exists: whether the vault env file referenced by `${VAR}` exists
+ *   - varName: the `${VAR}` name (only when kind === "var")
+ */
+export type RefExistsMap = Record<string, { kind: string; exists: boolean; varName?: string }>
 
 export async function getPersonalDisk(): Promise<{ disk: PersonalConfigDisk; refExists: RefExistsMap } | null> {
   const r = await apiFetch("/api/settings/personal/disk")
@@ -1128,19 +1123,16 @@ export async function savePersonalDisk(patch: Partial<PersonalConfigDisk>): Prom
   return { ok: true }
 }
 
-export type PersonalEntry = { path: string; type: "file" | "dir" }
-export async function listPersonalEntries(root: "personal" | "vault"): Promise<PersonalEntry[]> {
-  const r = await apiFetch(`/api/settings/personal/entries?root=${root}`)
-  if (!r.ok) return []
-  const j = await r.json()
-  return (j.entries as PersonalEntry[]) ?? []
-}
-
-export async function writePersonalValue(ref: ConfigValue, value: string): Promise<{ ok: boolean; error?: string }> {
+/**
+ * Write a value to a vault env file. `name` is the env var name (e.g.
+ * "ANTHROPIC_API_KEY"); `vault` defaults to "default". The next personal
+ * config load picks up the new value via `${VAR}` substitution in apiKey.
+ */
+export async function writeVaultEnv(name: string, value: string, vault: string = "default"): Promise<{ ok: boolean; error?: string }> {
   const r = await apiFetch("/api/settings/personal/value", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ref, value }),
+    body: JSON.stringify({ name, value, vault }),
   })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) return { ok: false, error: j.error ?? `write failed (${r.status})` }
@@ -1420,9 +1412,23 @@ export async function markOnboardingDone(): Promise<boolean> {
 
 // ── MCP auth ──
 
-export type McpAuthStatus = Record<string, { connected: boolean; expiresAt?: number; scope?: string }>
+/**
+ * MCP auth status — the backend returns a map keyed by **env var name**
+ * (e.g. "MCP_COOP_TOKEN") rather than server name, because env vars are the
+ * physical storage and server name → env var mapping isn't 1-to-1 reversible
+ * (servers with spaces / dots both collapse to underscores). UI consumers
+ * derive the lookup key with `mcpServerEnvVarName(serverName)`.
+ */
+export type McpAuthStatus = Record<string, { connected: boolean; varName: string }>
 
-/** List the user's MCP auth state for a given vault. */
+/** Mirror of server `mcpServerEnvVarName` — derive the vault env file name
+ *  for a given MCP server. Keep in sync with server/src/mcp-oauth.ts. */
+export function mcpServerEnvVarName(serverName: string): string {
+  const sanitized = serverName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
+  return `MCP_${sanitized || "SERVER"}_TOKEN`
+}
+
+/** List the user's MCP auth state for a given vault. Keyed by env var name. */
 export async function getMcpAuth(vault: string = "default"): Promise<McpAuthStatus> {
   const r = await apiFetch(`/api/mcp-auth?vault=${encodeURIComponent(vault)}`)
   if (!r.ok) return {}
@@ -1469,7 +1475,7 @@ export type McpServerEntry = {
 }
 
 export type McpServerTier = {
-  id: "workspace" | "plugin" | "personal"
+  id: "team" | "plugin" | "personal"
   label: string
   /** Filesystem path (relative to LOOPAT_HOME) where this tier is configured. Empty for plugin tier. */
   path: string
@@ -1525,6 +1531,8 @@ export type TierInfo = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this tier's mise.toml. */
+  toolchainCount: number
   overrides: Record<string, { overrides: string; value: any }>
 }
 
@@ -1619,6 +1627,8 @@ export type ProfileDetail = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this profile's mise.toml. */
+  toolchainCount: number
 }
 
 export async function listProfilesRich(): Promise<ProfileDetail[]> {

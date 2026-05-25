@@ -16,6 +16,7 @@ import {
   deleteMcpAuth,
   listMcpServers,
   restartLoopSession,
+  mcpServerEnvVarName,
   type McpAuthStatus,
   type McpServerInventory,
 } from "@/api"
@@ -229,7 +230,7 @@ function ServerRows({
   onConnect,
   onDisconnect,
 }: {
-  tier: "workspace" | "plugin" | "personal"
+  tier: "team" | "plugin" | "personal"
   servers: import("@/api").McpServerEntry[]
   status: McpAuthStatus
   variant: Variant
@@ -243,7 +244,9 @@ function ServerRows({
         // Plugin tier can have duplicate names (e.g. Slack from multiple
         // plugins); composite key keeps each row distinct.
         const rowKey = tier === "plugin" ? `${s.pluginSource ?? ""}::${s.name}` : s.name
-        const st = status[s.name]
+        // status is keyed by env var name (MCP_<NAME>_TOKEN); derive the key
+        // from the server name to look up.
+        const st = status[mcpServerEnvVarName(s.name)]
         const isConnected = !!st?.connected
         const isHttp = s.type === "http" || s.type === "sse"
         const needsAuth = isHttp && !isConnected

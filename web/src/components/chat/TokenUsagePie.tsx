@@ -14,9 +14,9 @@ export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {
   const offset = circumference - (percentage / 100) * circumference;
 
   const getColor = () => {
-    if (percentage < 50) return "#3b82f6";
-    if (percentage < 75) return "#f59e0b";
-    return "#ef4444";
+    if (percentage < 50) return "var(--color-blue-500)";
+    if (percentage < 75) return "var(--color-amber-500)";
+    return "var(--color-red-500)";
   };
 
   return (

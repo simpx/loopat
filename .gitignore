@@ -8,6 +8,10 @@ dist/
 .DS_Store
 bun.lock
 *.tsbuildinfo
+test-results/
+playwright-report/
+e2e/.auth.json
+e2e/.test-meta.json
 server/src/*.js
 server/src/*.js.map
 

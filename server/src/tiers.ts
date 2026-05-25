@@ -26,6 +26,7 @@ import {
   workspaceTeamSkillsDir,
   workspaceTeamAgentsDir,
 } from "./paths"
+import { countToolchainTools } from "./loop-stats"
 
 // ── types ──
 
@@ -47,6 +48,8 @@ export type TierInfo = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this tier's mise.toml. */
+  toolchainCount: number
   /** Keys in this tier that shadow same-name keys from a lower tier. */
   overrides: Record<string, { overrides: string; value: any }>
 }
@@ -81,6 +84,40 @@ async function countDir(path: string): Promise<number> {
     const entries = await readdir(path)
     return entries.filter((e) => !e.startsWith(".")).length
   } catch { return 0 }
+}
+
+/**
+ * Pull a one-line description from a profile's CLAUDE.md. Priority:
+ *   1. YAML frontmatter `description:` field (mirrors SKILL.md / agent.md
+ *      idiom — CC SDK already parses this for tool routing)
+ *   2. First non-empty heading (`# ...` line), with `#` stripped — legacy
+ *      convention, kept as fallback so older profiles "just work"
+ *
+ * Returns null when neither is present. Pure text op; no I/O.
+ */
+export function extractProfileDescription(md: string | null): string | null {
+  if (!md) return null
+  // 1. Frontmatter (YAML) — between leading `---\n` and `---\n`
+  const fm = md.match(/^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/)
+  if (fm) {
+    const desc = fm[1].match(/^description:\s*(.+?)\s*$/m)
+    if (desc) {
+      // Strip optional surrounding quotes (YAML allows "..." / '...')
+      const raw = desc[1].trim()
+      const stripped = raw.replace(/^["'](.*)["']$/, "$1").trim()
+      if (stripped) return stripped
+    }
+  }
+  // 2. First heading — legacy fallback
+  const body = fm ? md.slice(fm[0].length) : md
+  for (const line of body.split("\n")) {
+    const t = line.trim()
+    if (!t) continue
+    if (t.startsWith("#")) return t.replace(/^#+\s*/, "").trim() || null
+    // First non-empty non-heading line ends the search — description is "missing"
+    return null
+  }
+  return null
 }
 
 function computeOverrides(
@@ -171,6 +208,7 @@ export async function getTiers(user: string, isAdmin: boolean): Promise<TiersRes
     ...settingsSummary(teamSettings),
     skillCount: await countDir(workspaceTeamSkillsDir()),
     agentCount: await countDir(workspaceTeamAgentsDir()),
+    toolchainCount: countToolchainTools(teamDir).length,
     overrides: {},
   })
   if (teamSettings) merged = shallowUnion(merged, teamSettings)
@@ -197,6 +235,7 @@ export async function getTiers(user: string, isAdmin: boolean): Promise<TiersRes
         ...settingsSummary(ps),
         skillCount: await countDir(workspaceProfileSkillsDir(e.name)),
         agentCount: await countDir(workspaceProfileAgentsDir(e.name)),
+        toolchainCount: countToolchainTools(claudeDir).length,
         overrides,
       })
       if (ps) merged = shallowUnion(merged, ps)
@@ -219,6 +258,7 @@ export async function getTiers(user: string, isAdmin: boolean): Promise<TiersRes
     ...settingsSummary(personalSettings),
     skillCount: await countDir(personalSkillsDir(user)),
     agentCount: await countDir(personalAgentsDir(user)),
+    toolchainCount: countToolchainTools(personalCdir).length,
     overrides: personalOverrides,
   })
   const finalMerged = personalSettings ? shallowUnion(merged, personalSettings) : merged
@@ -239,6 +279,7 @@ export async function getTiers(user: string, isAdmin: boolean): Promise<TiersRes
     hookCount: 0,
     skillCount: 0,
     agentCount: 0,
+    toolchainCount: 0,
     overrides: {},
   })
 
@@ -258,6 +299,7 @@ export async function getTiers(user: string, isAdmin: boolean): Promise<TiersRes
     hookCount: 0,
     skillCount: 0,
     agentCount: 0,
+    toolchainCount: 0,
     overrides: {},
   })
 
@@ -579,6 +621,8 @@ export type ProfileDetail = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this profile's mise.toml. */
+  toolchainCount: number
 }
 
 export async function listProfilesRich(): Promise<ProfileDetail[]> {
@@ -592,7 +636,7 @@ export async function listProfilesRich(): Promise<ProfileDetail[]> {
     if (!existsSync(cd)) continue
     const settings = await readJsonOrNull(workspaceProfileSettingsPath(e.name))
     const md = await readMdOrNull(workspaceProfileClaudeMdPath(e.name))
-    const desc = md ? md.split("\n")[0].replace(/^#+\s*/, "").trim() : null
+    const desc = extractProfileDescription(md)
     out.push({
       name: e.name,
       path: cd,
@@ -602,6 +646,7 @@ export async function listProfilesRich(): Promise<ProfileDetail[]> {
       ...settingsSummary(settings),
       skillCount: await countDir(workspaceProfileSkillsDir(e.name)),
       agentCount: await countDir(workspaceProfileAgentsDir(e.name)),
+      toolchainCount: countToolchainTools(cd).length,
     })
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
@@ -627,7 +672,7 @@ export async function getProfile(name: string): Promise<ProfileDetail | null> {
   if (!existsSync(cd)) return null
   const settings = await readJsonOrNull(workspaceProfileSettingsPath(name))
   const md = await readMdOrNull(workspaceProfileClaudeMdPath(name))
-  const desc = md ? md.split("\n")[0].replace(/^#+\s*/, "").trim() : null
+  const desc = extractProfileDescription(md)
   return {
     name,
     path: cd,
@@ -637,6 +682,7 @@ export async function getProfile(name: string): Promise<ProfileDetail | null> {
     ...settingsSummary(settings),
     skillCount: await countDir(workspaceProfileSkillsDir(name)),
     agentCount: await countDir(workspaceProfileAgentsDir(name)),
+    toolchainCount: countToolchainTools(cd).length,
   }
 }
 

@@ -74,17 +74,15 @@ export const loopKindClaudePath = (kind: string) => join(loopKindTemplateDir(kin
 // Personal `.loopat/` reserved namespace: per-user loopat config + vaults.
 // Mirrors `knowledge/.loopat/` as the personal counterpart.
 //
-// Vault model: each loop selects one vault (default = "default"). The selected
-// vault's contents are mounted into the sandbox at
-// `/loopat/context/personal/.loopat/vault/` (singular — one active vault per
-// loop). Other vaults on the host are hidden inside the sandbox.
+// Vault model: each loop selects one vault (default = "default"). The vault is
+// NOT exposed to the sandbox as a directory. Instead two filesystem conventions
+// inside the vault drive automatic delivery at spawn time:
+//   - `vaults/<v>/envs/<NAME>`            → injected as env var $NAME
+//   - `vaults/<v>/mounts/home/<rel>/...`  → bound at $HOME/<rel>/...
+// AI never sees "vault" as a concept — it just sees a configured machine.
 export const personalLoopatDir = (user: string) => join(personalDir(user), ".loopat")
 export const personalLoopatConfigPath = (user: string) => join(personalLoopatDir(user), "config.json")
 export const personalVaultsDir = (user: string) => join(personalLoopatDir(user), "vaults")
-/** Per-(user, vault) MCP OAuth token store. Inside the vault so it's covered
- *  by git-crypt — content is per-active-vault, never seen across vaults. */
-export const personalMcpTokensPath = (user: string, vault: string) =>
-  join(personalVaultsDir(user), vault, "mcp-tokens.json")
 // Personal `.claude/` — CC-native shape. The 4th layer in loopat's tiered
 // .claude merge (workspace + profiles + personal + repo). Lives under
 // `.loopat/` to mirror the team convention (`knowledge/.loopat/.claude/`):
@@ -106,12 +104,18 @@ export const loopComposedAgentsDir = (id: string) => join(loopDir(id), ".claude"
 // They're always loaded into every loop (plugin-installer.ts:resolveBuiltinPlugins).
 // No marketplace wrapper — direct path injection via SDK plugins option.
 export const personalVaultDir = (user: string, vault: string) => join(personalVaultsDir(user), vault)
-/** Sandbox-internal path: symlink to the active vault's real dir under
- *  personal/.loopat/vaults/<active>/. AI is taught to use this entrypoint. */
-export const sandboxVaultMountPoint = () => "/loopat/context/vault"
-/** Provider apiKey file inside a specific vault. */
-export const personalProviderKeyPath = (user: string, vault: string, providerName: string) =>
-  join(personalVaultDir(user, vault), "provider-keys", providerName)
+/** Convention dir: every file under this dir is auto-injected as an env var
+ *  at spawn time. Filename = env var name. content = value (trailing newline
+ *  stripped). Subdirs not recursed. */
+export const personalVaultEnvsDir = (user: string, vault: string) =>
+  join(personalVaultDir(user, vault), "envs")
+/** Path to a specific env-var file inside the vault. */
+export const personalVaultEnvPath = (user: string, vault: string, name: string) =>
+  join(personalVaultEnvsDir(user, vault), name)
+/** Convention dir: every top-level entry under this is auto-bound at the
+ *  corresponding $HOME-relative path. e.g. `mounts/home/.ssh/` → `$HOME/.ssh/`. */
+export const personalVaultMountsHomeDir = (user: string, vault: string) =>
+  join(personalVaultDir(user, vault), "mounts", "home")
 
 // Host-only per-user state: deploy key (loopat → personal repo) and git-crypt
 // key (decrypts secrets/ inside the cloned personal repo). Kept OUTSIDE

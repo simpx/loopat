@@ -301,7 +301,29 @@ small loopat-side extensions:
 - **Hooks** — declared in `.claude/settings.json` under `hooks`. Scripts
   triggered on `SessionStart`, `PreToolUse`, `PostToolUse`, etc.
 - **`CLAUDE.md`** — team doctrine, role expectations, system prompt
-  fragments. Concatenated across tiers.
+  fragments. Concatenated across tiers. **Profile authors: lead with a
+  one-line description** so the New Loop dialog and per-loop header can
+  surface what each profile is for. Two formats supported:
+
+  ```markdown
+  ---
+  description: ML training oncall — sls + spectrum + dashscope CLI ready
+  ---
+
+  # ML Test 角色
+  ...
+  ```
+
+  Or the legacy form (kept for backward compat):
+
+  ```markdown
+  # ML Test 角色 — generate and verify mock data
+  ...
+  ```
+
+  Frontmatter `description:` wins when present; otherwise loopat falls
+  back to the first heading text (stripped of `#`). Frontmatter is the
+  recommended form: it survives doctrine edits that rewrite the heading.
 - **Mise toolchain** — `.claude/mise.toml` + `.claude/mise.lock`. Loopat's
   own addition: pins the version of every tool the loop's shell will see.
   Team can pin Node, profile can add Python, personal can override a single

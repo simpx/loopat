@@ -43,9 +43,9 @@ your admin.
 ## 2. Personal repo — the credential vault
 
 Everything else in Settings is **gated** behind setting up your
-personal repo. This is by design: providers, mounts, and envs all
-reference values that live in your personal repo, encrypted with
-git-crypt. No personal repo, nowhere to put your keys.
+personal repo. This is by design: provider apiKey values, MCP OAuth
+tokens, SSH keys, CLI dotfiles all live in your personal repo's vault,
+encrypted with git-crypt. No personal repo, nowhere to put your keys.
 
 ### Why a separate repo?
 
@@ -101,8 +101,10 @@ recovery flow with your existing git-crypt key.
 Add a provider entry — pick a name (`anthropic`, `bailian`,
 `openrouter`, whatever you want), fill in `model`, `baseUrl`,
 `API key`. The API key gets written to your vault at
-`personal/<you>/.loopat/vaults/default/provider-keys/<name>` and
-encrypted by git-crypt on commit.
+`personal/<you>/.loopat/vaults/default/envs/<NAME>_API_KEY` (where
+`<NAME>` is the uppercase provider name) and encrypted by git-crypt
+on commit. config.json carries a `"${<NAME>_API_KEY}"` reference,
+never the literal value.
 
 Example for direct Anthropic:
 
@@ -123,103 +125,67 @@ UI gives a dropdown per loop too.
 
 ## 4. Stock your vault
 
-The **vault** is where every credential — apiKey, ssh, gh tokens,
-dotfiles you only want in sandboxes — lives. Default vault path:
+The **vault** is where every credential lives. There's no config
+file — the vault uses two **filesystem conventions** to drive
+automatic sandbox delivery:
 
 ```
 ~/.loopat/personal/<you>/.loopat/vaults/default/
+├── envs/                          ← auto-injected as env vars
+│   ├── ANTHROPIC_API_KEY          ← created by step 3
+│   ├── MCP_GITHUB_TOKEN           ← MCP OAuth callback writes here
+│   ├── SENTRY_AUTH_TOKEN          ← any custom env
+│   └── …
+└── mounts/home/                   ← auto-bound to sandbox $HOME
+    ├── .ssh/                      ← drop your ssh keys here
+    │   ├── id_ed25519
+    │   ├── id_ed25519.pub
+    │   └── config
+    ├── .config/gh/                ← gh CLI auth
+    ├── .gitconfig                 ← git identity
+    ├── .vimrc
+    └── .secrets/                  ← optional: ad-hoc per-service keys
+        ├── sls/AK_ID
+        └── …
 ```
 
-Drop whatever your loops need:
+**Rules**:
 
-```
-vaults/default/
-├── provider-keys/
-│   └── anthropic                  ← created by step 3
-├── .ssh/                          ← copy or symlink your private key dir
-│   ├── id_ed25519
-│   ├── id_ed25519.pub
-│   └── config
-├── .config/
-│   └── gh/                        ← gh CLI auth
-└── envs/
-    └── MY_SECRET                  ← any per-env-var file
-```
-
-Everything under `vaults/**` is auto-encrypted by git-crypt before
-push — committed to your private repo as ciphertext, decrypted on
-clone.
+- `envs/<NAME>` — filename is the env var name, file content (with
+  trailing newline stripped) is the value. The spawn process injects
+  every entry as `$NAME`; provider apiKey can reference them as
+  `"${NAME}"`; workspace MCP configs can reference them as
+  `"Authorization": "Bearer ${MCP_<SERVER>_TOKEN}"`.
+- `mounts/home/<entry>` — each top-level entry (file or directory) is
+  `--bind`'d at sandbox `$HOME/<entry>`. No config, no declaration —
+  putting a file there IS the configuration.
+- Everything under `vaults/**` is auto-encrypted by git-crypt before
+  push — committed to your private repo as ciphertext, decrypted on
+  clone.
 
 **Multi-vault** is supported but optional: create a sibling dir
 (`vaults/prod/`, `vaults/test/`) and loops can pick which vault to
-mount. Cross-vault symlinks are fine as long as `realpath` stays
+activate. Cross-vault symlinks are fine as long as `realpath` stays
 inside your `personal/<you>/` tree. See
 [sandbox.md §Vault](sandbox.md#vault凭据隔离) for the model.
 
----
-
-## 5. Sandbox mounts — link credentials into `$HOME`
-
-Storing a file under `vaults/default/.ssh/id_ed25519` is half the
-work. The other half is **mounting** it so the sandbox sees it at
-`$HOME/.ssh/id_ed25519` where `ssh` actually looks.
-
-**Settings → Sandbox Mounts**.
-
-Each mount: `src` (where in your personal repo) → `dst` (where in
-the sandbox). Two `src` flavors:
-
-- **vault** — relative to the loop's active vault root. Rebinds
-  when the user switches vault. Use this for credentials.
-- **personal** — bare string, relative to your `personal/<you>/`
-  root. Vault-agnostic. Use this for dotfiles (`.gitconfig`,
-  `.vimrc`) you want everywhere.
-
-A reasonable starter set:
-
-| src | dst | rw |
-|---|---|---|
-| `{ "vault": ".ssh" }` | `$HOME/.ssh` |  |
-| `{ "vault": ".config/gh" }` | `$HOME/.config/gh` |  |
-| `.gitconfig` | `$HOME/.gitconfig` |  |
-| `.vimrc` | `$HOME/.vimrc` |  |
-
-`dst` must be sandbox-rooted (`$HOME/...`, `~/...`, or `/...`). `src`
-cannot escape your personal tree — no absolute paths, no `..`.
-
-Once mounted, you can `ssh git@github.com` / `gh auth status` /
-`git push` from inside any loop.
+Once stocked, sandbox CLIs Just Work: `ssh git@github.com` /
+`gh auth status` / `git push` all use the credentials you dropped in.
 
 ---
 
-## 6. Environment variables (optional)
-
-**Settings → Environment Variables**.
-
-Same model as providers — pick a name, paste a value, gets written
-to `vaults/default/envs/<NAME>` and encrypted. Injected into every
-loop's process env.
-
-Use this for secrets that don't fit the provider/mount model:
-`SENTRY_AUTH_TOKEN`, `DATADOG_API_KEY`, etc.
-
-For non-secret values, you can also use plain literal strings — these
-land in `config.json` directly (visible in plaintext).
-
----
-
-## 7. Terminal shell (optional)
+## 5. Terminal shell (optional)
 
 **Settings → Terminal Shell**.
 
 PTY shell binary for loop terminals. Default is `/bin/bash`.
 
-Set to `/usr/bin/zsh` etc. if you've also exposed it via mounts or
-via a profile's `mise.toml`.
+Set to `/usr/bin/zsh` etc. if you've also exposed it via
+`vaults/<active>/mounts/home/...` or via a profile's `mise.toml`.
 
 ---
 
-## 8. Spawn your first loop
+## 6. Spawn your first loop
 
 **Loops → New loop**. Pick:
 

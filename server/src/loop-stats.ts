@@ -15,6 +15,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { parse as parseToml } from "smol-toml"
 import {
   workspaceTeamClaudeDir,
   workspaceProfileClaudeDir,
@@ -27,6 +28,28 @@ export type LoopStats = {
   agents: number
   hooks: number
   mcpServers: number
+  /** Toolchain tools (mise.toml [tools] entries) declared across all
+   *  sources, deduped by tool key. */
+  toolchain: number
+}
+
+/**
+ * Count tools declared in a .claude/mise.toml. Each top-level key under
+ * [tools] is one tool (bare like `python = "3.12"` or nested like
+ * `[tools."http:a1"]`). Missing file or malformed toml → 0.
+ *
+ * Exported so listProfilesRich() / getTiers() can reuse the same parse.
+ */
+export function countToolchainTools(claudeDir: string): string[] {
+  const p = join(claudeDir, "mise.toml")
+  if (!existsSync(p)) return []
+  try {
+    const raw = require("node:fs").readFileSync(p, "utf8") as string
+    const parsed = parseToml(raw) as { tools?: Record<string, unknown> }
+    return Object.keys(parsed.tools ?? {})
+  } catch {
+    return []
+  }
 }
 
 type Settings = {
@@ -147,6 +170,7 @@ export async function computeLoopStats(profiles: string[]): Promise<LoopStats> {
   const skillSet = new Set<string>()
   const agentSet = new Set<string>()
   const mcpServerSet = new Set<string>()
+  const toolchainSet = new Set<string>()
   let hookCount = 0
 
   for (const s of sources) {
@@ -168,6 +192,13 @@ export async function computeLoopStats(profiles: string[]): Promise<LoopStats> {
     for (const name of countDirEntries(join(s.dir, "agents"), { suffix: ".md" })) {
       agentSet.add(name.replace(/\.md$/, ""))
     }
+    // Toolchain tools from this tier's mise.toml (last-wins semantics for mise
+    // overrides happen at compose time; for the preview "how many distinct
+    // tools will end up in PATH", we dedupe by key — which matches the merged
+    // toolchain since later tiers overwrite same-keyed entries).
+    for (const tool of countToolchainTools(s.dir)) {
+      toolchainSet.add(tool)
+    }
   }
 
   // Now scan each enabled plugin for its contributions
@@ -187,5 +218,6 @@ export async function computeLoopStats(profiles: string[]): Promise<LoopStats> {
     agents: agentSet.size,
     hooks: hookCount,
     mcpServers: mcpServerSet.size,
+    toolchain: toolchainSet.size,
   }
 }
