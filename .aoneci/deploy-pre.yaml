@@ -12,6 +12,12 @@ name: Deploy pre
 
 # triggers: block intentionally omitted — page-only manual trigger.
 
+params:
+  force_restart:
+    type: boolean
+    default: false
+    description: "跳过 deps-diff 启发式，强制 stop + start。用于 schema 变更、init-time side effects、原生依赖等 bun --hot 接不住的场景。"
+
 strategy:
   fast-fail: true
   concurrency:
@@ -27,6 +33,7 @@ jobs:
     envs:
       DEPLOY_ENV:           "pre"
       DEPLOY_TARGET_BRANCH: "main"
+      DEPLOY_FORCE_RESTART: "${{params.force_restart}}"
       DEPLOY_WEBHOOK_URL:   "${{vars.DEPLOY_WEBHOOK_PRE_URL ?: ''}}"
       DEPLOY_WEBHOOK_TOKEN: "${{secrets.DEPLOY_WEBHOOK_PRE_TOKEN}}"
     steps:
@@ -48,9 +55,10 @@ jobs:
           : "${DEPLOY_TARGET_BRANCH:?DEPLOY_TARGET_BRANCH is required}"
           git fetch --no-tags origin "$DEPLOY_TARGET_BRANCH"
           SHA="$(git rev-parse FETCH_HEAD)"
-          echo "[notify] env=$DEPLOY_ENV url=$DEPLOY_WEBHOOK_URL ref=$DEPLOY_TARGET_BRANCH sha=$SHA"
-          printf '{"env":"%s","sha":"%s","ref":"%s"}' \
-              "$DEPLOY_ENV" "$SHA" "$DEPLOY_TARGET_BRANCH" | curl \
+          FORCE_RESTART="${DEPLOY_FORCE_RESTART:-false}"
+          echo "[notify] env=$DEPLOY_ENV url=$DEPLOY_WEBHOOK_URL ref=$DEPLOY_TARGET_BRANCH sha=$SHA force_restart=$FORCE_RESTART"
+          printf '{"env":"%s","sha":"%s","ref":"%s","force_restart":%s}' \
+              "$DEPLOY_ENV" "$SHA" "$DEPLOY_TARGET_BRANCH" "$FORCE_RESTART" | curl \
             --fail --silent --show-error \
             --max-time 60 --retry 3 --retry-delay 5 --retry-connrefused \
             -X POST "$DEPLOY_WEBHOOK_URL" \
