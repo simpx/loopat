@@ -333,18 +333,7 @@ export function SettingsPage() {
 /** Preset providers with Anthropic-compatible endpoints.
  *  loopat uses the Claude Agent SDK which speaks the Anthropic Messages API.
  *  Only providers that expose an Anthropic-compatible endpoint work directly. */
-const PRESETS: Array<{ name: string; baseUrl: string; models: string[] }> = [
-  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
-    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
-  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
-  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
-    models: ["kimi-k2.6"] },
-  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
-    models: ["MiniMax-M2.7"] },
-  { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1",
-    models: ["anthropic/claude-sonnet-4", "openai/gpt-4o", "google/gemini-2.5-flash"] },
-]
+import { PROVIDER_PRESETS as PRESETS } from "../../../server/src/presets"
 
 type ProvidersDraft = {
   default: string

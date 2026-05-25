@@ -291,8 +291,10 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
+  const [editorSelection, setEditorSelection] = useState<{ from: number; to: number } | null>(null)
   const openFile = (path: string) => {
     setPickedFile(path)
+    setEditorSelection(null)
     setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
   }
   const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "", openFile)
@@ -365,8 +367,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
       localStorage.setItem("loopat:otherPct", String(Math.round(layout.otherCol)))
     }
   }
-  console.log("[layout] render", { hasEditorCol, hasOtherCol, chatSize, otherSize })
-
   const renderPanel = (mode: RightMode) => {
     if (mode === "git") {
       return <GitDiffSidebar key={mode} loopId={meta.id} onClose={() => closePanel("git")} onPickFile={openFile} />
@@ -384,6 +384,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         currentUserId={ws.currentUser?.id ?? ""}
         isFullscreen={isFullscreen}
         onToggleFullscreen={() => setFullscreenPanel(isFullscreen ? null : mode)}
+        onEditorSelection={setEditorSelection}
       />
     )
   }
@@ -418,6 +419,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 rfdRequestedAt={meta.rfdRequestedAt}
                 rfdRequestedBy={meta.rfdRequestedBy}
                 onTakeDrive={() => ws.takeDrive(meta.id)}
+                pickedFile={pickedFile}
+                editorSelection={editorSelection}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -442,6 +445,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                   rfdRequestedAt={meta.rfdRequestedAt}
                   rfdRequestedBy={meta.rfdRequestedBy}
                   onTakeDrive={() => ws.takeDrive(meta.id)}
+                  pickedFile={pickedFile}
+                  editorSelection={editorSelection}
                 />
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
@@ -514,6 +519,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 rfdRequestedAt={meta.rfdRequestedAt}
                 rfdRequestedBy={meta.rfdRequestedBy}
                 onTakeDrive={() => ws.takeDrive(meta.id)}
+                pickedFile={pickedFile}
+                editorSelection={editorSelection}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -927,6 +934,7 @@ function RightPanel({
   currentUserId,
   isFullscreen,
   onToggleFullscreen,
+  onEditorSelection,
 }: {
   loopId: string
   meta: LoopMeta
@@ -937,6 +945,7 @@ function RightPanel({
   currentUserId: string
   isFullscreen?: boolean
   onToggleFullscreen?: () => void
+  onEditorSelection?: (sel: { from: number; to: number } | null) => void
 }) {
   const isMobile = useIsMobile()
 
@@ -982,7 +991,7 @@ function RightPanel({
       )}
 
       <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading...</div>}>
-        {mode === "editor" && <Editor loopId={loopId} path={pickedFile} />}
+        {mode === "editor" && <Editor loopId={loopId} path={pickedFile} onSelectionChange={onEditorSelection} />}
         {mode === "terminal" && (
           <div className="flex-1 min-h-0 bg-[#1a1c20] overflow-auto">
             <Terminal loopId={loopId} currentUserId={currentUserId} />

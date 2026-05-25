@@ -16,7 +16,7 @@ function getStoredWordWrap(): boolean {
   return true
 }
 
-export function Editor({ loopId, path }: { loopId: string; path: string | null }) {
+export function Editor({ loopId, path, onSelectionChange }: { loopId: string; path: string | null; onSelectionChange?: (sel: { from: number; to: number } | null) => void }) {
   const [original, setOriginal] = useState("")
   const [draft, setDraft] = useState("")
   const [loading, setLoading] = useState(false)
@@ -75,7 +75,7 @@ export function Editor({ loopId, path }: { loopId: string; path: string | null }
             loading…
           </div>
         ) : (
-          <CodeEditor path={path} value={draft} onChange={setDraft} wordWrap={wordWrap} />
+          <CodeEditor path={path} value={draft} onChange={setDraft} wordWrap={wordWrap} onSelectionChange={onSelectionChange} />
         )}
       </div>
       <div className="border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 flex items-center gap-3">

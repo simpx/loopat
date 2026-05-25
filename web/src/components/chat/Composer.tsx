@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   ComposerPrimitive,
   AuiIf,
@@ -10,6 +10,9 @@ import {
   SquareIcon,
   ListOrderedIcon,
   X,
+  FileText,
+  Plus,
+  FilePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClaudeStatus from "./ClaudeStatus";
@@ -19,8 +22,14 @@ import ModelSelector from "./ModelSelector";
 import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
+<<<<<<< HEAD
 import { useLoopRuntimeExtra, type ImageInput } from "@/useLoopRuntime";
 import { getChatHistory, appendChatHistory } from "@/api";
+=======
+import { FilePicker } from "./FilePicker";
+import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { getChatHistory, appendChatHistory, readFile } from "@/api";
+>>>>>>> upstream/main
 
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
@@ -59,7 +68,7 @@ function readFileAsBase64(file: File): Promise<string> {
 
 let pendingImageCounter = 0;
 
-export default function Composer() {
+export default function Composer({ pickedFile, editorSelection }: { pickedFile?: string | null; editorSelection?: { from: number; to: number } | null }) {
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const hasInput = useAuiState(
     (s) => typeof s.composer.text === "string" && s.composer.text.trim().length > 0,
@@ -71,6 +80,7 @@ export default function Composer() {
 
   const aui = useAui();
 
+<<<<<<< HEAD
   // ── pending pasted images ──
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -148,6 +158,92 @@ export default function Composer() {
     }
     if (next.length > 0) setPendingImages((prev) => [...prev, ...next]);
   };
+=======
+  // ── File references ──
+  const [includeEditorFile, setIncludeEditorFile] = useState(false)
+  const [addedFiles, setAddedFiles] = useState<string[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  // Debug: log pickedFile changes
+  useEffect(() => {
+    console.log(`%c[Composer] %cpickedFile: %c${pickedFile || "(none)"} %csel: %c${editorSelection ? `${editorSelection.from}-${editorSelection.to}` : "none"}`, "color:#98c379", "color:#666", "color:#61afef", "color:#666", "color:#e5c07b")
+  }, [pickedFile, editorSelection?.from, editorSelection?.to])
+
+  const allFileRefs = [
+    ...(includeEditorFile && pickedFile ? [pickedFile] : []),
+    ...addedFiles,
+  ]
+
+  const toggleEditorFile = () => setIncludeEditorFile((v) => !v)
+
+  const addFile = (path: string) => {
+    setAddedFiles((prev) => prev.includes(path) ? prev : [...prev, path])
+    setPickerOpen(false)
+  }
+
+  const removeFile = (path: string) => {
+    setAddedFiles((prev) => prev.filter((p) => p !== path))
+  }
+
+  const shortFileName = (path: string) => {
+    const idx = path.lastIndexOf("/")
+    return idx >= 0 ? path.slice(idx + 1) : path
+  }
+
+  // Pre-computed file context, updated when file refs change
+  const fileContextRef = useRef("")
+  const fileBlocksRef = useRef<{ path: string; content: string }[]>([])
+  const [fileContextLoading, setFileContextLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function build() {
+      if (allFileRefs.length === 0) {
+        fileContextRef.current = ""
+        fileBlocksRef.current = []
+        return
+      }
+      setFileContextLoading(true)
+      const parts: string[] = []
+      const blocks: { path: string; content: string }[] = []
+      for (const path of allFileRefs) {
+        if (cancelled) return
+        try {
+          const r = await readFile(loopId, path)
+          if (r && r.content) {
+            const ext = path.includes(".") ? path.split(".").pop() ?? "" : ""
+            const sel = (path === pickedFile) ? editorSelection : null
+            let content = r.content
+            let label = path
+            if (sel) {
+              const allLines = r.content.split("\n")
+              const fromIdx = Math.max(0, sel.from - 1)
+              const toIdx = Math.min(allLines.length, sel.to)
+              content = allLines.slice(fromIdx, toIdx).join("\n")
+              label = `${path} (${sel.from}-${sel.to})`
+            }
+            // Escape ``` in content so the regex-based parser in UserMessage can reliably detect boundaries
+            const safe = content.replace(/```/g, "``​`")
+            parts.push(`\n# File: ${label}\n\`\`\`${ext}\n${safe}\n\`\`\`\n`)
+            blocks.push({ path: label, content })
+          }
+        } catch {}
+      }
+      if (!cancelled) {
+        fileContextRef.current = parts.join("")
+        fileBlocksRef.current = blocks
+        setFileContextLoading(false)
+      }
+    }
+    build()
+    return () => { cancelled = true }
+  }, [allFileRefs.join(","), loopId, pickedFile, editorSelection?.from, editorSelection?.to])
+
+  const wrapWithContext = (text: string) => {
+    const ctx = fileContextRef.current
+    return ctx ? `${ctx}\n${text}` : text
+  }
+>>>>>>> upstream/main
 
   // ── chat history ──
   const [history, setHistory] = useState<string[]>([]);
@@ -182,17 +278,30 @@ export default function Composer() {
    *  goes onto the queue, otherwise it kicks off a new run. */
   const handleSend = () => {
     const text = typeof composerText === "string" ? composerText.trim() : "";
+<<<<<<< HEAD
     const images = consumePendingImages();
     if (!text && images.length === 0) return;
     if (text) saveToHistory(text);
     enqueueMessage(text, images.length > 0 ? images : undefined);
+=======
+    if (!text) return;
+    saveToHistory(text);
+    if (fileContextRef.current) {
+      try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
+    }
+    enqueueMessage(wrapWithContext(text));
+>>>>>>> upstream/main
     aui.composer().setText("");
     setPasteError(null);
   };
 
   const handleSubmit = () => {
     const text = textRef.current.trim();
-    if (text) saveToHistory(text);
+    if (!text) return;
+    saveToHistory(text);
+    if (fileContextRef.current) {
+      try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -296,6 +405,37 @@ export default function Composer() {
         </div>
       )}
 
+      {/* File references chips */}
+      {allFileRefs.length > 0 && (
+        <div className="flex items-center gap-1.5 px-1 mb-1 flex-wrap">
+          {allFileRefs.map((path) => (
+            <span
+              key={path}
+              className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700"
+            >
+              <FileText size={11} className="shrink-0" />
+              <span className="truncate max-w-[160px]">{shortFileName(path)}</span>
+              {path !== pickedFile && (
+                <button
+                  onClick={() => removeFile(path)}
+                  className="ml-0.5 hover:text-blue-900"
+                >
+                  <X size={11} />
+                </button>
+              )}
+              {path === pickedFile && includeEditorFile && (
+                <span className="text-[9px] text-blue-400 ml-0.5">
+                  {editorSelection ? `(${editorSelection.from}-${editorSelection.to})` : "editor"}
+                </span>
+              )}
+            </span>
+          ))}
+          {fileContextLoading && (
+            <span className="text-[10px] text-gray-400">loading...</span>
+          )}
+        </div>
+      )}
+
       <div
         data-slot="composer-shell"
         className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
@@ -355,7 +495,6 @@ export default function Composer() {
 
               <PluginsButton
                 onPick={(slashCommand) => {
-                  // Insert at end + a trailing space so user can keep typing args.
                   const current = textRef.current
                   const next = current.length === 0 || current.endsWith(" ")
                     ? `${current}${slashCommand}`
@@ -363,6 +502,34 @@ export default function Composer() {
                   aui.composer().setText(next)
                 }}
               />
+
+              {/* File reference buttons */}
+              {pickedFile && (
+                <button
+                  type="button"
+                  onClick={toggleEditorFile}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                    includeEditorFile
+                      ? "bg-blue-50 text-blue-600 border border-blue-200"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  }`}
+                  title={includeEditorFile ? "Remove editor file from context" : "Include editor file in context"}
+                >
+                  <FileText size={12} />
+                  {shortFileName(pickedFile)}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPickerOpen((v) => !v)}
+                className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-gray-50 w-[21px] h-[21px] mt-px text-gray-500 hover:bg-gray-100 transition-colors"
+                title="Add file to context"
+              >
+                <FilePlus size={12} />
+              </button>
+              {pickerOpen && (
+                <FilePicker loopId={loopId} onPick={addFile} onClose={() => setPickerOpen(false)} />
+              )}
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
