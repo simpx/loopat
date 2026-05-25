@@ -164,6 +164,19 @@ export type LoopMeta = {
     messageCount: number
     snapshotAt: string
   }
+  /**
+   * Last metadata received from the external runtime gateway. Written by
+   * `recordExternalMeta` on each turn so the UI / admin can see which
+   * external platform and user this loop serves. Only present on loops
+   * created via the gateway SSE API.
+   */
+  lastExternalMeta?: {
+    source: string | null
+    userId: string | null
+    metadata: Record<string, unknown> | null
+    traceId: string | null
+    at: string
+  }
 }
 
 const PERSONAL_MEMORY_INDEX_STUB = `# Personal memory index

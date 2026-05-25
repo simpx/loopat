@@ -1670,3 +1670,35 @@ export async function saveDefaultProfiles(profiles: string[]): Promise<{ ok: boo
   if (!r.ok) return { ok: false, error: j.error ?? `save failed (${r.status})` }
   return { ok: true }
 }
+
+// ── gateway tokens ──
+
+export type GatewayTokenEntry = {
+  tokenHint: string
+  label: string
+  createdAt: string
+}
+
+export async function listGatewayTokens(): Promise<GatewayTokenEntry[]> {
+  const r = await apiFetch("/api/gateway-tokens")
+  if (!r.ok) return []
+  const j = await r.json().catch(() => ({ tokens: [] }))
+  return j.tokens ?? []
+}
+
+export async function createGatewayToken(label: string): Promise<{ token: string; label: string; createdAt: string } | null> {
+  const r = await apiFetch("/api/gateway-tokens", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label }),
+  })
+  if (!r.ok) return null
+  return await r.json().catch(() => null)
+}
+
+export async function revokeGatewayToken(tokenHint: string): Promise<boolean> {
+  const r = await apiFetch(`/api/gateway-tokens/${encodeURIComponent(tokenHint)}`, {
+    method: "DELETE",
+  })
+  return r.ok
+}
