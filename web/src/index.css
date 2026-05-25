@@ -259,31 +259,40 @@ html, body {
    Dark:  One Dark (Atom) — exact palette from atom.io/one-dark-syntax */
 
 :root {
-  --cm-bg: transparent;
-  --cm-text: inherit;
-  --cm-border: #e5e7eb;
-  --cm-gutter: #9ca3af;
-  --cm-activeLine: #f3f4f6;
-  --cm-cursor: #111827;
-  --cm-selection: #bfdbfe;
-  --cm-matchBracket: #dbeafe;
-  /* syntax — CodeMirror default light */
-  --cm-keyword: #7c3aed;
-  --cm-string: #059669;
-  --cm-number: #2563eb;
-  --cm-comment: #9ca3af;
-  --cm-def: #1d4ed8;
-  --cm-typeName: #9333ea;
-  --cm-propertyName: #db2777;
-  --cm-operator: #374151;
-  --cm-constant: #d97706;
-  --cm-variableName: #1f2937;
-  --cm-labelName: #1f2937;
-  --cm-tag: #2563eb;
-  --cm-attribute: #db2777;
-  --cm-link: #2563eb;
-  --cm-regexp: #059669;
-  --cm-bracket: #6b7280;
+  --cm-bg: #ffffff;
+  --cm-text: #24292e;
+  --cm-border: #e1e4e8;
+  --cm-gutter: #959da5;
+  --cm-activeLine: #f6f8fa;
+  --cm-cursor: #24292e;
+  --cm-selection: #c8e1ff;
+  --cm-matchBracket: #c8e1ff;
+  /* diff / code blocks */
+  --cm-diff-add-bg: #dcffe4;
+  --cm-diff-add-text: #22863a;
+  --cm-diff-del-bg: #ffeef0;
+  --cm-diff-del-text: #cb2431;
+  --cm-diff-hdr-bg: #f1f8ff;
+  --cm-diff-hdr-text: #0366d6;
+  --cm-code-bg: #f8f9fa;
+  --cm-code-border: #e1e4e8;
+  /* syntax — GitHub light (matching github.css) */
+  --cm-keyword: #d73a49;
+  --cm-string: #032f62;
+  --cm-number: #005cc5;
+  --cm-comment: #6a737d;
+  --cm-def: #6f42c1;
+  --cm-typeName: #6f42c1;
+  --cm-propertyName: #005cc5;
+  --cm-operator: #d73a49;
+  --cm-constant: #005cc5;
+  --cm-variableName: #24292e;
+  --cm-labelName: #24292e;
+  --cm-tag: #22863a;
+  --cm-attribute: #6f42c1;
+  --cm-link: #032f62;
+  --cm-regexp: #032f62;
+  --cm-bracket: #24292e;
 }
 .dark {
   /* chrome — neutral dark, good contrast for all syntax colors */
@@ -312,9 +321,18 @@ html, body {
   --cm-link: #6cb8ff;
   --cm-regexp: #56b6c2;
   --cm-bracket: #abb2bf;
+  /* diff / code blocks — dark */
+  --cm-diff-add-bg: #12261c;
+  --cm-diff-add-text: #7ee787;
+  --cm-diff-del-bg: #261216;
+  --cm-diff-del-text: #ffa198;
+  --cm-diff-hdr-bg: #121e33;
+  --cm-diff-hdr-text: #a5cdfd;
+  --cm-code-bg: #1a1a1e;
+  --cm-code-border: #26262b;
 }
 
-/* Apply syntax token colors — !important to override CM's defaultHighlightStyle scoped rules */
+/* Apply syntax token colors via CodeMirror classes */
 .cm-editor .cm-keyword { color: var(--cm-keyword) !important; }
 .cm-editor .cm-string, .cm-editor .cm-specialCharString { color: var(--cm-string) !important; }
 .cm-editor .cm-number { color: var(--cm-number) !important; }
@@ -332,6 +350,45 @@ html, body {
 .cm-editor .cm-bracket { color: var(--cm-bracket) !important; }
 .cm-editor .cm-matchingBracket { background-color: var(--cm-matchBracket) !important; }
 .cm-editor .cm-nonmatchingBracket { color: var(--cm-variableName) !important; }
+
+/* highlight.js dark overrides — uses github.css for light, One Dark for dark */
+.dark .hljs { background: transparent !important; color: var(--cm-text) !important; }
+.dark .hljs-keyword { color: var(--cm-keyword) !important; }
+.dark .hljs-string { color: var(--cm-string) !important; }
+.dark .hljs-number { color: var(--cm-number) !important; }
+.dark .hljs-comment { color: var(--cm-comment) !important; font-style: italic; }
+.dark .hljs-function { color: var(--cm-def) !important; }
+.dark .hljs-type { color: var(--cm-typeName) !important; }
+.dark .hljs-built_in { color: var(--cm-typeName) !important; }
+.dark .hljs-title { color: var(--cm-def) !important; }
+.dark .hljs-title.function_ { color: var(--cm-def) !important; }
+.dark .hljs-title.class_ { color: var(--cm-typeName) !important; }
+.dark .hljs-params { color: var(--cm-variableName) !important; }
+.dark .hljs-attr { color: var(--cm-attribute) !important; }
+.dark .hljs-attribute { color: var(--cm-attribute) !important; }
+.dark .hljs-selector-tag { color: var(--cm-tag) !important; }
+.dark .hljs-selector-class { color: var(--cm-typeName) !important; }
+.dark .hljs-selector-id { color: var(--cm-attribute) !important; }
+.dark .hljs-variable { color: var(--cm-variableName) !important; }
+.dark .hljs-literal { color: var(--cm-constant) !important; }
+.dark .hljs-meta { color: var(--cm-constant) !important; }
+.dark .hljs-tag { color: var(--cm-tag) !important; }
+.dark .hljs-name { color: var(--cm-tag) !important; }
+.dark .hljs-regexp { color: var(--cm-regexp) !important; }
+.dark .hljs-symbol { color: var(--cm-constant) !important; }
+.dark .hljs-bullet { color: var(--cm-constant) !important; }
+.dark .hljs-link { color: var(--cm-link) !important; }
+.dark .hljs-deletion { color: var(--cm-diff-del-text) !important; }
+.dark .hljs-addition { color: var(--cm-diff-add-text) !important; }
+.dark .hljs-punctuation { color: var(--cm-bracket) !important; }
+.dark .hljs-operator { color: var(--cm-operator) !important; }
+.dark .hljs-property { color: var(--cm-propertyName) !important; }
+.dark .hljs-section { color: var(--cm-def) !important; font-weight: bold; }
+
+/* Diff line base text — overridden by hljs token classes */
+.diff-line-add { color: var(--cm-diff-add-text); }
+.diff-line-del { color: var(--cm-diff-del-text); }
+.diff-line-ctx { color: var(--cm-text); }
 
 /* ─── Kanban progress bar background ─── */
 .dark .kanban-progress-bg {

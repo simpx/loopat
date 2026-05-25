@@ -1,17 +1,27 @@
 /**
- * Right-panel editor mode. Layout follows phase1-prototype:
+ * Right-panel editor mode.
  *   <body: CodeMirror>
- *   <footer: path · unsaved · utf-8·LF>
+ *   <footer: path · unsaved · word-wrap · utf-8·LF>
  */
 import { useEffect, useState } from "react"
 import { readFile, writeFile } from "./api"
 import { CodeEditor } from "./components/markdown/CodeEditor"
+import { WrapText } from "lucide-react"
+
+function getStoredWordWrap(): boolean {
+  try {
+    const v = localStorage.getItem("loopat:editor:wordWrap")
+    if (v === "0") return false
+  } catch {}
+  return true
+}
 
 export function Editor({ loopId, path }: { loopId: string; path: string | null }) {
   const [original, setOriginal] = useState("")
   const [draft, setDraft] = useState("")
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [wordWrap, setWordWrap] = useState(getStoredWordWrap)
 
   useEffect(() => {
     if (!path) {
@@ -65,7 +75,7 @@ export function Editor({ loopId, path }: { loopId: string; path: string | null }
             loading…
           </div>
         ) : (
-          <CodeEditor path={path} value={draft} onChange={setDraft} />
+          <CodeEditor path={path} value={draft} onChange={setDraft} wordWrap={wordWrap} />
         )}
       </div>
       <div className="border-t border-gray-200 px-3 py-1.5 text-[11px] text-gray-500 flex items-center gap-3">
@@ -75,7 +85,19 @@ export function Editor({ loopId, path }: { loopId: string; path: string | null }
             {saving ? "saving…" : "unsaved · save"}
           </button>
         )}
-        <span className="ml-auto">utf-8 · LF</span>
+        <span className="flex-1" />
+        <button
+          onClick={() => {
+            const next = !wordWrap
+            setWordWrap(next)
+            try { localStorage.setItem("loopat:editor:wordWrap", next ? "1" : "0") } catch {}
+          }}
+          className={`flex items-center gap-1 hover:text-gray-700 transition-colors ${wordWrap ? "text-gray-500" : "text-gray-300"}`}
+          title={wordWrap ? "word wrap: on" : "word wrap: off"}
+        >
+          <WrapText size={13} />
+        </button>
+        <span>utf-8 · LF</span>
       </div>
     </>
   )

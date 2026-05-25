@@ -89,7 +89,7 @@ const langExt = (path: string) => {
   return fn ? fn() : []
 }
 
-const oneDarkHighlight = syntaxHighlighting(
+const syntaxHighlight = syntaxHighlighting(
   HighlightStyle.define([
     { tag: tags.keyword, color: "var(--cm-keyword)" },
     { tag: tags.string, color: "var(--cm-string)" },
@@ -127,7 +127,7 @@ const baseTheme = EditorView.theme({
   },
   ".cm-content": { padding: "10px 0", color: "var(--cm-text)", caretColor: "var(--cm-cursor)" },
   ".cm-gutters": {
-    backgroundColor: "transparent",
+    backgroundColor: "var(--cm-bg)",
     borderRight: "1px solid var(--cm-border)",
     color: "var(--cm-gutter)",
   },
@@ -144,14 +144,17 @@ export function CodeEditor({
   path,
   value,
   onChange,
+  wordWrap = true,
 }: {
   path: string
   value: string
   onChange: (v: string) => void
+  wordWrap?: boolean
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const langCompartment = useRef(new Compartment())
+  const wrapCompartment = useRef(new Compartment())
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
@@ -161,8 +164,9 @@ export function CodeEditor({
       doc: value,
       extensions: [
         basicSetup,
-        oneDarkHighlight,
+        syntaxHighlight,
         baseTheme,
+        wrapCompartment.current.of(wordWrap ? EditorView.lineWrapping : []),
         langCompartment.current.of(langExt(path)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString())
@@ -178,6 +182,15 @@ export function CodeEditor({
     // re-create editor only when path changes (language switches)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
+
+  // Toggle word wrap without recreating editor
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: wrapCompartment.current.reconfigure(wordWrap ? EditorView.lineWrapping : []),
+    })
+  }, [wordWrap])
 
   // sync external `value` changes into editor (without losing cursor when same)
   useEffect(() => {
