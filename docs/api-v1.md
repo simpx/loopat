@@ -37,7 +37,7 @@ v1 API surface = "聊天对话"
 | 外部程序 | `Authorization: Bearer la_<hex>` |
 | Web（同源） | Session cookie |
 
-Token 创建、撤销、列表全部走 web —— **不**在 v1 API 内。Token 落盘前做 SHA-256，明文只在创建时返回一次。
+Token 由 web Settings 页面创建/撤销 —— 见 [`/me/tokens`](#me-tokens-token-管理-cookie-only)。Bot **不能**用自己的 token 创建新 token（防止泄露横向扩散）。Token 落盘前做 SHA-256，明文只在创建时返回一次。
 
 认证失败：`401` + 标准 error body（见[错误格式](#错误格式)）。
 
@@ -124,6 +124,20 @@ POST /api/v1/loops
 `201 Created` 返回完整 Loop 对象。
 
 字段语义与 web 上的"New Loop"对话框完全等价 —— web 也调用这个端点。
+
+### `/me/tokens` — Token 管理（cookie-only）
+
+这三个端点的 path 在 `/api/v1` 下，但**只接受 session cookie**，不接受 Bearer token。这是有意的安全边界：bot 拿到 token 不能自己增殖出更多 token。
+
+```
+POST   /api/v1/me/tokens     { label }       → 201 { tokenId, token, label, createdAt }
+GET    /api/v1/me/tokens                     → 200 { tokens: [{ tokenId, label, createdAt, lastUsedAt? }] }
+DELETE /api/v1/me/tokens/{tokenId}           → 204
+```
+
+- `token` 形如 `la_<48 hex>`，**只在创建响应里返回一次**，server 不留明文（SHA-256 哈希存储）。
+- `tokenId` 形如 `tok_<12 hex>`，稳定不变，列出 + 撤销用它。
+- 用 Bearer auth 调这三个端点 → `401`。
 
 ### 列出 loops
 
@@ -396,22 +410,118 @@ POST /api/v1/loops/{id}/interrupt
 < event: done ...
 ```
 
-## 与 web 的关系
+---
 
-Web 的 chat 体验（NewLoopDialog、ChatInterface）将逐步迁移到这套 API：
+# 现状 (Implementation Status, 2026-05-26)
 
-- "New Loop" 对话框 → `POST /api/v1/loops`
-- 主聊天面板 → `POST /api/v1/loops/{id}/messages`（SSE）
-- 权限/问题弹窗 → `POST /api/v1/loops/{id}/choices/{id}`
-- 取消按钮 → `POST /api/v1/loops/{id}/interrupt`
+> 这一节描述**当前实现**，区别于上面是**契约**。改 v1 实现前先看这里。
 
-Web **不**迁移的部分（继续走原 WS / 原内部 REST）：
+## 端点实现对照表
+
+| 端点 | spec | 实现 | 单测 | web 已切到 v1？ | 备注 |
+|---|---|---|---|---|---|
+| `POST /api/v1/loops` | ✅ | `api-v1.ts` | ✅ | NewLoopDialog | admin flag (knowledge_rw / mount_all_loops) 仍走 legacy `/api/loops` |
+| `GET  /api/v1/loops` | ✅ | `api-v1.ts` | ✅ | — | web sidebar 用 legacy 端点（带更多字段） |
+| `GET  /api/v1/loops/{id}` | ✅ | `api-v1.ts` | ✅ | — | 同上 |
+| `DELETE /api/v1/loops/{id}` | ✅ | `api-v1.ts` | ✅ | — | web 用 legacy PATCH (archived=true) |
+| `POST /api/v1/loops/{id}/messages` | ✅ | `api-v1.ts` | ⚠️ SSE 路径跳过 (无 provider) | enqueueMessage / onNew | `files` 字段 v1 不接受，有附件仍走 ws.send |
+| `GET  /api/v1/loops/{id}/events` | ✅ | `api-v1.ts` | ⚠️ SSE 路径跳过 | useLoopRuntime SSE 监听 | snapshot 只含当前 turn，不重放历史 |
+| `POST /api/v1/loops/{id}/choices/{id}` | ✅ | `api-v1.ts` | ✅ | answerPermission, sendAnswers | |
+| `POST /api/v1/loops/{id}/interrupt` | ✅ | `api-v1.ts` | ✅ | onCancel | |
+| `POST/GET/DELETE /api/v1/me/tokens` | ✅ | `api-v1.ts` + `api-tokens.ts` | ✅ | SettingsPage | cookie-only 已强制 |
+
+测试覆盖：`server/test/api-v1.test.ts` 31 个，`e2e/loop.spec.ts` 含 2 个 v1 端到端（create + send/receive）。
+
+## Web Hybrid 传输（当前 useLoopRuntime）
+
+为了不重写 ~1400 行的 SDK 消息 dispatch pipeline，当前是 hybrid：
+
+```
+                ┌─ WS  /ws/loop/:id ───────────────────────────────┐
+web ◄───receive ┤                                                  │
+                └─ SSE /api/v1/loops/{id}/events  (sdk_message)────┘
+                                                  ↓
+                                  uuid dedupe → dispatchMsg
+
+web ─────send ──── POST /api/v1/loops/{id}/messages         (user text)
+                   POST /api/v1/loops/{id}/interrupt        (cancel)
+                   POST /api/v1/loops/{id}/choices/{id}     (permission/question answer)
+
+web ─── operator ── ws.send (set_goal, complete_goal, provider_select,
+                              set_max_thinking_tokens, get_context_usage,
+                              clear, queue_clear, queue_remove)
+```
+
+**uuid 去重**：WS + SSE 同时传 SDK 消息，按 `msg.uuid` 在 `dispatchMsg` 入口去重。非 uuid 消息（queue_update / viewers / provider）是幂等状态更新，重复 dispatch 没副作用。
+
+**v1 SSE 的 `sdk_message` 事件**是 web 内部用的逃生口：把整个原始 SDK message 转发给 web。Bot 不应消费它（shape 不稳定）。
+
+## 不在 v1 spec 内的活跃端点
+
+| 端点 | 用途 | 现在谁在用 |
+|---|---|---|
+| `/api/loops/*` (legacy REST) | admin 创建 (knowledge_rw 等) / list / patch | web sidebar、admin 操作 |
+| `/api/loops/:id/chat-history` | DM 历史 | 暂未启用 chat 功能 |
+| `/ws/loop/:id` | history 回放 + initial state + operator 出站 | useLoopRuntime |
+| `/ws/loop-status` | sidebar 状态点 | useLoopStatus |
+| `/ws/kanban` | 看板 | useKanbanWebSocket |
+| `/ws/loop/:id/term` | 终端 PTY | Terminal.tsx |
+| `/ws/chat` | DM/频道 | useChatWebSocket（功能未开放）|
+| `/api/personal/*`, `/api/admin/*`, `/api/serve/*` | web 私有功能 | SettingsPage、admin UI |
+
+## 已知 gap（待办，按优先级）
+
+1. **解耦 useLoopRuntime 的 WS 读** — 让 v1 SSE 成为唯一接收通道。需要先建：
+   - `GET /api/loops/:id/initial-state` 内部端点，返回 `{ provider, permission_mode, goal, history[] }`
+   - useLoopRuntime 用 fetch 拿 initial state → dispatch → 再开 SSE listen live
+   - 移除 WS read，WS 仅作 operator 出站
+2. **operator 功能 REST 化** — `clear / queue_clear / queue_remove / set_goal / complete_goal / set_max_thinking_tokens / get_context_usage / provider_select` 各 1 个内部 endpoint。web 完全去 WS。
+3. **`files` 字段加进 POST /messages** — 当前附件场景仍走 WS。需要 spec 增项：`files?: [{ path, content }]`。
+4. **`sdk_message` 事件计划淘汰** — 当上面 1+2+3 完成，web 可以直接消费 bot-facing v1 事件。届时 `sdk_message` 从 spec 移除。
+5. **Idempotency 持久化** — 当前 `Map<string, IdempotencyRecord>` 在进程内存，server 重启丢。落 JSON 文件或 SQLite。
+6. **GET /loops/{id}/messages 历史** — 当前 spec 无此端点，bot 想看历史只能保存自己的事件流副本。要不要加？取决于是否有 bot 需求。
+7. **Token 创建支持 Bearer？** — 当前 spec 锁定 cookie-only，反对意见可重新讨论。
+8. **GET /events 的 snapshot 不包含历史 turn** — 只有当前在进行的 turn。如果 bot 重连想看刚结束的 turn，看不到。
+
+## 关键文件 + 行数
+
+| 文件 | 内容 | 行数 |
+|---|---|---|
+| `server/src/api-v1.ts` | 所有 v1 路由 + SSE 流 + idempotency + ID prefixing | ~620 |
+| `server/src/api-tokens.ts` | SHA-256 hashed token store | ~140 |
+| `server/src/session.ts` | LoopSession：`onMessage`/`notifyListeners`/`sendUserText`/`interrupt`/`answerPermission`/`answerQuestions`/`isBusy`/`getQueueLength`/`hasPendingPermission`/`hasPendingQuestion` | ~1420 |
+| `server/src/loops.ts` | `createLoop` / `patchLoopMeta` / `getLoop` / `listLoops`；LoopMeta 类型含 `metadata` 字段 | ~1540 |
+| `server/test/api-v1.test.ts` | bun 集成测试 31 个 | ~320 |
+| `web/src/api.ts` | fetch-based v1 client（`createLoop` / `listApiTokens` / etc.）+ legacy LoopMeta shape 翻译层 | ~1750 |
+| `web/src/useLoopRuntime.tsx` | hybrid WS+SSE 消费 + chat 出站 POST | ~1450 |
+| `web/src/pages/SettingsPage.tsx` | API tokens 管理 UI（用 `/me/tokens`）| 大 |
+| `e2e/loop.spec.ts` | Playwright 11 个测试，含 2 个 v1 端到端 | ~210 |
+| `docs/api-v1.md` | 本文 | — |
+
+## 改这套东西的时候记得
+
+1. **改 spec → 同步更新本节"已知 gap"和"实现对照表"**。  
+2. **加 v1 endpoint** → spec 段先描述契约，再实现，再写测试，最后 web 集成。顺序很重要 —— 别先写实现再补 spec。
+3. **去掉 hybrid（任务 1）时**，注意 reconnect 路径：现在 WS reconnect 触发完整 history 回放；SSE-only 后需要 initial-state fetch + 单独的 history 回放或重订阅。
+4. **v1 spec 字段命名 = `snake_case`**，但**内部 LoopMeta 仍用 `camelCase`**。`metaToApi` 在 `api-v1.ts` 做翻译。新加字段时两边都要改。
+5. **`metadata` 不能给 sandbox 内的 agent 看见**（spec 承诺）—— 写 metadata 处理代码时确认它没被注入 sandbox env / prompt。
+
+## 与 web 的关系（已部分实现）
+
+Web 的 chat 体验逐步迁到 v1：
+
+- ✅ "New Loop" 对话框 → `POST /api/v1/loops`
+- ✅ 用户消息 → `POST /api/v1/loops/{id}/messages`
+- ✅ 权限/问题弹窗 → `POST /api/v1/loops/{id}/choices/{id}`
+- ✅ 取消按钮 → `POST /api/v1/loops/{id}/interrupt`
+- ✅ Live SDK 事件 → `GET /api/v1/loops/{id}/events` SSE（与 WS 并行，uuid 去重）
+- ❌ 历史回放、initial state、operator 写入 → 仍是 WS
+
+Web **永远不会迁**到 v1 的部分（per spec 边界）：
 
 - Loop 列表小红点 / 状态指示（`/ws/loop-status`）
 - 看板（`/ws/kanban`）
-- 终端 PTY（`/ws/loop/:id/term`）—— 真双向，SSE 不适合
-- Token 用量进度条（如保留则走原 WS）
+- 终端 PTY（`/ws/loop/:id/term`）
+- Token 用量进度条（如果保留）
 - DM / 频道（`/ws/chat`）
 - 各种 admin / personal repo / 文件浏览端点
-
-迁移完成后："**API 测了 = chat 体验也基本测过了**"成立。
