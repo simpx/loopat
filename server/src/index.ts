@@ -73,8 +73,6 @@ import {
   deleteUser,
 } from "./auth"
 import { getCookie } from "hono/cookie"
-import { authenticateAndStreamTurn, type ExternalTurnRequest } from "./external-gateway"
-import { createGatewayToken, listGatewayTokens, revokeGatewayToken } from "./gateway-tokens"
 
 const execFileP = promisify(execFile)
 
@@ -111,13 +109,10 @@ app.get("/api/version", (c) => {
   return c.json({ branch, commit })
 })
 
-app.post("/api/runtime/v1/turn/stream", async (c) => {
-  const body = await c.req.json().catch(() => null) as ExternalTurnRequest | null
-  if (!body || typeof body !== "object") {
-    return c.json({ error: "invalid json body" }, 400)
-  }
-  return await authenticateAndStreamTurn(c.req.header("authorization") ?? null, body)
-})
+// Loop API v1 — see docs/api-v1.md. Public surface for bot frameworks + the
+// web app's chat experience. All other web features stay on internal WS/REST.
+import { buildApiV1 } from "./api-v1"
+app.route("/api/v1", buildApiV1())
 
 // ── workspace serve config ──
 
@@ -320,30 +315,6 @@ app.get("/api/auth/me", async (c) => {
   const user = await findUser(userId)
   if (!user) return c.json({ error: "unauthorized" }, 401)
   return c.json({ user: { id: user.id, role: user.role, status: user.status } })
-})
-
-// ── gateway tokens (per-user) ──
-
-app.get("/api/gateway-tokens", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const tokens = await listGatewayTokens(userId)
-  return c.json({ tokens })
-})
-
-app.post("/api/gateway-tokens", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const body = await c.req.json().catch(() => ({}))
-  const label = typeof body.label === "string" ? body.label.trim() : "default"
-  const entry = await createGatewayToken(userId, label)
-  return c.json({ token: entry.token, label: entry.label, createdAt: entry.createdAt })
-})
-
-app.delete("/api/gateway-tokens/:tokenHint", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const tokenHint = c.req.param("tokenHint") ?? ""
-  const deleted = await revokeGatewayToken(userId, tokenHint)
-  if (!deleted) return c.json({ error: "token not found" }, 404)
-  return c.json({ ok: true })
 })
 
 // ── admin (requireAdmin) ──

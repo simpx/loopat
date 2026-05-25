@@ -98,6 +98,34 @@ test.describe("/loop page", () => {
     await expect(page.locator("aside span.text-amber-800")).toBeVisible();
   });
 
+  test("creates a loop via NewLoopDialog hitting v1 API", async ({ page }) => {
+    await page.goto("/loop");
+    const sidebar = page.locator("aside");
+    await expect(sidebar).toBeVisible({ timeout: 10_000 });
+
+    // Capture the create request (set up AFTER navigation so we don't time
+    // out on unrelated traffic). The v1 endpoint is what we assert below.
+    const createReq = page.waitForRequest(
+      (req) => req.url().includes("/api/v1/loops") && req.method() === "POST",
+      { timeout: 15_000 },
+    );
+
+    // Open NewLoopDialog (header button — App.tsx:168).
+    await page.getByRole("button", { name: /^\+ New Loop$/i }).click();
+    await expect(page.getByText("New loop", { exact: true })).toBeVisible({ timeout: 5_000 });
+
+    await page.getByPlaceholder("refactor-gateway").fill("v1-e2e-create");
+    await page.getByRole("button", { name: "create", exact: true }).click();
+
+    const req = await createReq;
+    expect(req.url()).toContain("/api/v1/loops");
+    const body = req.postDataJSON();
+    expect(body.title).toBe("v1-e2e-create");
+
+    // Navigation to the new loop's page (the create resolves async).
+    await expect(page).toHaveURL(/\/loop\/[a-f0-9-]+/, { timeout: 10_000 });
+  });
+
   test("scope tabs filter loops", async ({ page }) => {
     await page.goto("/loop");
     const sidebar = page.locator("aside");

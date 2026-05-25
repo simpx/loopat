@@ -287,23 +287,68 @@ export async function listLoops(filter: "active" | "all" | "archived" = "active"
 export async function createLoop(opts: {
   title: string
   repo?: string
-  /** Active profiles for this loop (post-2026-05 model). Base is auto-included
-   *  server-side. Empty/undefined = base + personal CLAUDE.md only, no plugins. */
+  /** Active profiles for this loop. Base is auto-included server-side.
+   *  Empty/undefined = base + personal CLAUDE.md only, no plugins. */
   profiles?: string[]
   vault?: string
+  /** Admin-only flags — still go via the internal `/api/loops` endpoint;
+   *  v1 doesn't surface them. */
   knowledgeRw?: boolean
   mountAllLoops?: boolean
 }): Promise<LoopMeta> {
-  const { knowledgeRw, mountAllLoops, ...rest } = opts
-  const body: Record<string, unknown> = { ...rest }
-  if (knowledgeRw) body.knowledge_rw = true
-  if (mountAllLoops) body.mount_all_loops = true
-  const r = await apiFetch("/api/loops", {
+  // Admin-flag path keeps using the internal endpoint (those flags aren't in v1).
+  if (opts.knowledgeRw || opts.mountAllLoops) {
+    const body: Record<string, unknown> = {
+      title: opts.title,
+      repo: opts.repo,
+      profiles: opts.profiles,
+      vault: opts.vault,
+    }
+    if (opts.knowledgeRw) body.knowledge_rw = true
+    if (opts.mountAllLoops) body.mount_all_loops = true
+    const r = await apiFetch("/api/loops", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    return (await r.json()) as LoopMeta
+  }
+  // Normal create → v1 API. Translate snake_case + loop_ prefix back to the
+  // web's LoopMeta shape so existing callers don't change.
+  const r = await apiFetch("/api/v1/loops", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      title: opts.title,
+      profiles: opts.profiles,
+      vault: opts.vault,
+      repo: opts.repo,
+    }),
   })
-  return (await r.json()) as LoopMeta
+  if (!r.ok) throw new Error(`createLoop failed (${r.status})`)
+  const v1 = await r.json() as {
+    id: string
+    title: string
+    created_at: string
+    created_by: string
+    archived: boolean
+    profiles: string[]
+    vault: string
+    repo: string | null
+  }
+  const rawId = v1.id.startsWith("loop_") ? v1.id.slice("loop_".length) : v1.id
+  return {
+    id: rawId,
+    title: v1.title,
+    createdAt: v1.created_at,
+    createdBy: v1.created_by,
+    archived: v1.archived,
+    repo: v1.repo ?? undefined,
+    config: {
+      profiles: v1.profiles,
+      vault: v1.vault,
+    },
+  } as LoopMeta
 }
 
 export type ProfileEntry = { name: string; description?: string }
@@ -1671,23 +1716,24 @@ export async function saveDefaultProfiles(profiles: string[]): Promise<{ ok: boo
   return { ok: true }
 }
 
-// ── gateway tokens ──
+// ── API tokens (v1 /me/tokens) ──
 
-export type GatewayTokenEntry = {
-  tokenHint: string
+export type ApiTokenEntry = {
+  tokenId: string
   label: string
   createdAt: string
+  lastUsedAt?: string
 }
 
-export async function listGatewayTokens(): Promise<GatewayTokenEntry[]> {
-  const r = await apiFetch("/api/gateway-tokens")
+export async function listApiTokens(): Promise<ApiTokenEntry[]> {
+  const r = await apiFetch("/api/v1/me/tokens")
   if (!r.ok) return []
   const j = await r.json().catch(() => ({ tokens: [] }))
   return j.tokens ?? []
 }
 
-export async function createGatewayToken(label: string): Promise<{ token: string; label: string; createdAt: string } | null> {
-  const r = await apiFetch("/api/gateway-tokens", {
+export async function createApiToken(label: string): Promise<{ tokenId: string; token: string; label: string; createdAt: string } | null> {
+  const r = await apiFetch("/api/v1/me/tokens", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ label }),
@@ -1696,8 +1742,8 @@ export async function createGatewayToken(label: string): Promise<{ token: string
   return await r.json().catch(() => null)
 }
 
-export async function revokeGatewayToken(tokenHint: string): Promise<boolean> {
-  const r = await apiFetch(`/api/gateway-tokens/${encodeURIComponent(tokenHint)}`, {
+export async function revokeApiToken(tokenId: string): Promise<boolean> {
+  const r = await apiFetch(`/api/v1/me/tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
   })
   return r.ok

@@ -1120,6 +1120,23 @@ class LoopSession {
     }
   }
 
+  /** Push a synthetic message through the broadcast pipeline. Used by the
+   *  v1 API to dispatch control events (choice_resolved / interrupted) to
+   *  all active SSE listeners without polluting persisted history. */
+  notifyListeners(msg: any): void {
+    for (const listener of this.messageListeners) {
+      try { listener(msg) } catch {}
+    }
+  }
+
+  hasPendingPermission(toolUseId: string): boolean {
+    return this.pendingPermissions.has(toolUseId)
+  }
+
+  hasPendingQuestion(toolUseId: string): boolean {
+    return this.pendingQuestions.has(toolUseId)
+  }
+
   private async _pushUserMessage(text: string, permissionMode?: SdkPermissionMode) {
     if (permissionMode && permissionMode !== this.currentPermissionMode) {
       this.currentPermissionMode = permissionMode

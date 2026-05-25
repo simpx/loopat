@@ -138,6 +138,13 @@ export type LoopMeta = {
   archived?: boolean
   archivedAt?: string
   /**
+   * Free-form key/value metadata attached by the caller of the v1 Loop API.
+   * Not interpreted by loopat; not exposed to the sandbox. Used by external
+   * integrations (e.g. a bot framework storing "slack_thread: C123:1234").
+   * Capped at 16 KB JSON-serialized.
+   */
+  metadata?: Record<string, unknown>
+  /**
     * If true, this loop's chat (and only the chat) is readable by anonymous
     * visitors at `/share/:id`. Everything else (workspace, files, kanban, ...)
     * still requires auth. Only the loop's `createdBy` may toggle it.

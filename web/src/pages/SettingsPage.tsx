@@ -18,14 +18,14 @@ import {
   savePersonalDisk,
   writeVaultEnv,
   testProviderConnection,
-  listGatewayTokens,
-  createGatewayToken,
-  revokeGatewayToken,
+  listApiTokens,
+  createApiToken,
+  revokeApiToken,
   type PersonalConfigDisk,
   type ProviderDisk,
   type RefExistsMap,
   type ModelEntry,
-  type GatewayTokenEntry,
+  type ApiTokenEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
@@ -974,7 +974,7 @@ function ShellSection({ disk, onChanged, disabled }: {
 // ────────────────────────────────────────────────────────────────────────────
 
 function GatewayTokensSection() {
-  const [tokens, setTokens] = useState<GatewayTokenEntry[]>([])
+  const [tokens, setTokens] = useState<ApiTokenEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [label, setLabel] = useState("")
   const [creating, setCreating] = useState(false)
@@ -984,7 +984,7 @@ function GatewayTokensSection() {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const list = await listGatewayTokens()
+    const list = await listApiTokens()
     setTokens(list)
     setLoading(false)
   }, [])
@@ -994,7 +994,7 @@ function GatewayTokensSection() {
   const handleCreate = async () => {
     if (creating) return
     setCreating(true)
-    const result = await createGatewayToken(label.trim() || "default")
+    const result = await createApiToken(label.trim() || "default")
     setCreating(false)
     if (result) {
       setNewToken(result.token)
@@ -1004,8 +1004,8 @@ function GatewayTokensSection() {
     }
   }
 
-  const handleRevoke = async (tokenHint: string) => {
-    await revokeGatewayToken(tokenHint)
+  const handleRevoke = async (tokenId: string) => {
+    await revokeApiToken(tokenId)
     setDeleteConfirm(null)
     refresh()
   }
@@ -1077,16 +1077,16 @@ function GatewayTokensSection() {
             </thead>
             <tbody>
               {tokens.map((t) => (
-                <tr key={t.tokenHint} className="border-b border-gray-50 hover:bg-gray-50">
+                <tr key={t.tokenId} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-4 py-2.5 text-gray-900">{t.label}</td>
-                  <td className="px-4 py-2.5 font-mono text-[12px] text-gray-500">{t.tokenHint}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-gray-500">{t.tokenId}</td>
                   <td className="px-4 py-2.5 text-gray-500 text-[12px]">{new Date(t.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-2.5">
-                    {deleteConfirm === t.tokenHint ? (
+                    {deleteConfirm === t.tokenId ? (
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => handleRevoke(t.tokenHint)}
+                          onClick={() => handleRevoke(t.tokenId)}
                           className="text-[11px] text-red-600 hover:text-red-800 font-medium"
                         >
                           confirm
@@ -1102,7 +1102,7 @@ function GatewayTokensSection() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setDeleteConfirm(t.tokenHint)}
+                        onClick={() => setDeleteConfirm(t.tokenId)}
                         className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
                         title="revoke token"
                       >
