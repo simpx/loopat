@@ -29,8 +29,8 @@ RUN_DIR="$REPO_ROOT/.run"
 LOG_FILE="${LOG_FILE:-$RUN_DIR/production.log}"
 RESTART_DELAY="${RESTART_DELAY:-3}"
 
-export HOST="${HOST:-0.0.0.0}"
-export LOOPAT_SERVE_HOST="${LOOPAT_SERVE_HOST:-0.0.0.0}"
+export HOST="${HOST:-127.0.0.1}"
+export LOOPAT_SERVE_HOST="${LOOPAT_SERVE_HOST:-127.0.0.1}"
 export NODE_ENV=production
 
 mkdir -p "$RUN_DIR"
