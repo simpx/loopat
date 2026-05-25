@@ -1,6 +1,10 @@
 export type LoopMeta = {
   id: string
   title: string
+  /** True iff title was set by auto-name and the user hasn't renamed since.
+   *  False = user-owned title (locks out future auto-name attempts).
+   *  Undefined = never auto-named (fresh loop). */
+  titleAuto?: boolean
   createdAt: string
   createdBy: string
   /** Active driver. Use `loop.driver ?? loop.createdBy` everywhere "who is

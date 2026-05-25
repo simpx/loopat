@@ -551,9 +551,16 @@ function LoopHeader({
           />
         ) : (
           <span
-            className={"text-[14px] md:text-[15px] font-medium text-gray-900 " + (canEditTitle ? "cursor-pointer hover:bg-gray-100 rounded px-1 -mx-1" : "")}
+            className={
+              "text-[14px] md:text-[15px] font-medium px-1 -mx-1 rounded " +
+              // Auto-named titles render italic + lighter to signal "AI guessed
+              // this, you may want to fix it". One click on the title still
+              // opens rename inline.
+              (meta.titleAuto ? "text-gray-500 italic " : "text-gray-900 ") +
+              (canEditTitle ? "cursor-pointer hover:bg-gray-100" : "")
+            }
             onClick={() => { if (canEditTitle) { setTitleDraft(meta.title); setEditingTitle(true) } }}
-            title={canEditTitle ? "click to rename" : undefined}
+            title={canEditTitle ? (meta.titleAuto ? "auto-named · click to rename" : "click to rename") : undefined}
           >
             {meta.title}
           </span>

@@ -116,6 +116,21 @@ export function useWorkspaceState(): WorkspaceState {
     setLoops((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
   }, [])
 
+  // Listen for server-side meta updates (currently fires from auto-name). The
+  // per-loop WS in useLoopRuntime forwards `meta_updated` events into a
+  // window event, so workspace state can patch its loops array without a
+  // full refetch. Decoupled this way to avoid threading setters through
+  // refs/contexts.
+  useEffect(() => {
+    const handler = (ev: Event) => {
+      const detail = (ev as CustomEvent).detail as { id: string; meta: LoopMeta } | undefined
+      if (!detail?.meta) return
+      setLoops((prev) => prev.map((l) => (l.id === detail.id ? { ...l, ...detail.meta } : l)))
+    }
+    window.addEventListener("loopat:meta-updated", handler)
+    return () => window.removeEventListener("loopat:meta-updated", handler)
+  }, [])
+
   const requestDrive = useCallback(async (id: string) => {
     const updated = await apiRequestDrive(id)
     if (!updated) return

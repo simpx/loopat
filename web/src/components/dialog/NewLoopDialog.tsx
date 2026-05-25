@@ -283,6 +283,16 @@ export function NewLoopDialog({
             )}
           </DialogField>
 
+          <DialogField label="Name" hint="Optional — leave empty and the loop will auto-name itself after the first turn.">
+            <input
+              ref={inputRef}
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="refactor-gateway"
+              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+            />
+          </DialogField>
         </form>
 
         {/* Sticky footer — always visible */}
