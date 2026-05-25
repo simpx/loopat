@@ -108,7 +108,11 @@ export function KanbanColumn({
         {adding && (
           <div className="rounded-lg border border-gray-300 bg-white px-2 py-1.5">
             <input type="text" value={newText} onChange={(e) => setNewText(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd() }; if (e.key === "Escape") { setAdding(false); setNewText("") } }}
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing) return
+                if (e.key === "Enter") { e.preventDefault(); handleAdd() }
+                if (e.key === "Escape") { setAdding(false); setNewText("") }
+              }}
               onBlur={() => { if (!newText.trim()) { setAdding(false); setNewText("") } }}
               className="w-full text-[13px] border-0 outline-none bg-transparent text-gray-900 placeholder:text-gray-400" placeholder="Card title…" />
             <div className="flex items-center gap-1.5 mt-1.5">
