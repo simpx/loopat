@@ -9,6 +9,9 @@ import { getVersion, getBuildInfo, type ModelEntry } from "@/api"
 
 type SlashCommandInfo = { name: string; description: string }
 
+/** Sub-agent metadata, mirrors server's AgentMeta (compose.ts). */
+export type AgentMeta = { name: string; description: string; color?: string }
+
 function normalizeSlashCommands(cmds: unknown[]): SlashCommandInfo[] {
   const result: SlashCommandInfo[] = []
   for (const c of cmds) {
@@ -388,6 +391,8 @@ export interface LoopRuntimeExtra {
    *  ("loopat:onboarding"). Empty until the first init message arrives;
    *  may include duplicates if CC ever reports them — caller should dedup. */
   availableSlashCommands: SlashCommandInfo[]
+  /** Sub-agents composed into this loop, for the @-mention dropdown. */
+  availableAgents: AgentMeta[]
   /** Set by Composer before navigating history with ArrowUp/ArrowDown.
    *  SlashCommand reads it to suppress the dropdown so it doesn't pop up
    *  when the history entry happens to start with "/". */
@@ -447,6 +452,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   showHistory: false,
   toggleShowHistory: () => {},
   availableSlashCommands: [],
+  availableAgents: [],
   suppressSlashRef: { current: false },
   hasOlderMessages: false,
   loadMoreMessages: () => {},
@@ -498,6 +504,20 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       return ["help", "model", "compress", "review", "init", "foxtrot"].map(name => ({ name, description: "" }))
     },
   )
+
+  // Sub-agents composed into this loop's .claude/agents/. Fetched once per
+  // loopId; endpoint failure → empty array (the @-mention dropdown simply
+  // doesn't open).
+  const [availableAgents, setAvailableAgents] = useState<AgentMeta[]>([])
+  useEffect(() => {
+    if (!loopId) { setAvailableAgents([]); return }
+    let cancelled = false
+    fetch(`/api/loops/${loopId}/agents`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { agents: [] }))
+      .then((d) => { if (!cancelled) setAvailableAgents(Array.isArray(d?.agents) ? d.agents : []) })
+      .catch(() => { if (!cancelled) setAvailableAgents([]) })
+    return () => { cancelled = true }
+  }, [loopId])
   const suppressSlashRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
   // Ref (not state) so ws.onmessage closure sees fresh value without
@@ -784,8 +804,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, availableAgents, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, availableAgents, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
   )
 
   useEffect(() => {

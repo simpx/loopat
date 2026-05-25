@@ -18,6 +18,7 @@ import PlanModeToggle from "./PlanModeToggle";
 import ModelSelector from "./ModelSelector";
 import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
+import AgentMention from "./AgentMention";
 import TokenUsagePie from "./TokenUsagePie";
 import { useLoopRuntimeExtra, type ImageInput } from "@/useLoopRuntime";
 import { getChatHistory, appendChatHistory } from "@/api";
@@ -301,6 +302,7 @@ export default function Composer() {
         className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
       >
         <SlashCommand />
+        <AgentMention />
 
         {/* Pasted-image previews */}
         {hasPendingImages && (
