@@ -1,70 +1,292 @@
 @import "tailwindcss";
 @import "tw-shimmer";
 
+/* ─── Class-based dark mode ─── */
+@variant dark (&.dark);
+
 html, body {
   touch-action: pan-x pan-y;
 }
 
-/* Markdown rendering for Context tab DocView (and elsewhere). */
-.prose-loopat {
-  font-size: 14px;
-  line-height: 1.65;
-  color: #1f2937;
-}
-.prose-loopat h1 { font-size: 1.6em; font-weight: 600; margin: 1.2em 0 0.6em; line-height: 1.2; }
-.prose-loopat h2 { font-size: 1.3em; font-weight: 600; margin: 1.1em 0 0.5em; line-height: 1.25; }
-.prose-loopat h3 { font-size: 1.1em; font-weight: 600; margin: 1em 0 0.4em; }
-.prose-loopat h4 { font-weight: 600; margin: 0.9em 0 0.3em; }
-.prose-loopat p { margin: 0.7em 0; }
-.prose-loopat ul, .prose-loopat ol { margin: 0.7em 0; padding-left: 1.3em; }
-.prose-loopat ul li { list-style: disc; margin: 0.2em 0; }
-.prose-loopat ol li { list-style: decimal; margin: 0.2em 0; }
-.prose-loopat blockquote {
-  border-left: 3px solid #d1d5db;
-  padding-left: 0.8em;
-  color: #4b5563;
-  margin: 0.8em 0;
-}
-.prose-loopat code:not(pre code) {
-  background: #f3f4f6;
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
-  font-family: ui-monospace, monospace;
-  font-size: 0.88em;
-}
-.prose-loopat pre {
-  background: #f6f8fa;
-  padding: 0.8em 1em;
-  border-radius: 6px;
-  overflow-x: auto;
-  margin: 0.8em 0;
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-.prose-loopat pre code {
-  background: transparent;
-  padding: 0;
-  border-radius: 0;
-}
-.prose-loopat table {
-  border-collapse: collapse;
-  margin: 0.8em 0;
-}
-.prose-loopat th, .prose-loopat td {
-  border: 1px solid #e5e7eb;
-  padding: 0.4em 0.7em;
-  text-align: left;
-}
-.prose-loopat th { background: #f9fafb; font-weight: 600; }
-.prose-loopat hr { border: none; border-top: 1px solid #e5e7eb; margin: 1.5em 0; }
+/* ─── Dark mode: gray scale inversion ─── */
+/* Light mode uses Tailwind default grays. Dark mode remaps every shade so
+   existing bg-gray-* / text-gray-* / border-gray-* classes automatically
+   produce sensible dark-mode colors without per-element dark: variants. */
 
-/* ─── Chat dot animations ─── */
+.dark {
+  /* gray scale — GitHub-inspired dark palette, lightest→darkest inverted */
+  --color-gray-50: #0d1117;
+  --color-gray-100: #161b22;
+  --color-gray-200: #21262d;
+  --color-gray-300: #30363d;
+  --color-gray-400: #484f58;
+  --color-gray-500: #6e7681;
+  --color-gray-600: #8b949e;
+  --color-gray-700: #b1bac4;
+  --color-gray-800: #c9d1d9;
+  --color-gray-900: #e6edf3;
+
+  /* white → card surface in dark mode; black stays black for overlays */
+  --color-white: #161b22;
+
+  /* blue — used for links, primary actions, status */
+  --color-blue-50: #0d1b33;
+  --color-blue-100: #132444;
+  --color-blue-200: #0d2f6a;
+  --color-blue-300: #1a4496;
+  --color-blue-400: #58a6ff;
+  --color-blue-500: #58a6ff;
+  --color-blue-600: #79b8ff;
+  --color-blue-700: #a5cdfd;
+  --color-blue-800: #c4ddfe;
+  --color-blue-900: #dceafe;
+
+  /* red — destructive actions, errors */
+  --color-red-50: #1f1315;
+  --color-red-100: #2d1518;
+  --color-red-200: #461920;
+  --color-red-300: #6e212a;
+  --color-red-400: #f85149;
+  --color-red-500: #f85149;
+  --color-red-600: #ff7b72;
+  --color-red-700: #ffa198;
+  --color-red-800: #ffc1ba;
+  --color-red-900: #ffdcd7;
+
+  /* green / emerald — success, connected state */
+  --color-green-50: #0d1b14;
+  --color-green-100: #132218;
+  --color-green-200: #15301f;
+  --color-green-300: #1a482b;
+  --color-green-400: #3fb950;
+  --color-green-500: #3fb950;
+  --color-green-600: #56d364;
+  --color-green-700: #7ee787;
+  --color-green-800: #a5f0af;
+  --color-green-900: #caf7d0;
+
+  --color-emerald-50: #0d1b14;
+  --color-emerald-100: #132218;
+  --color-emerald-200: #15301f;
+  --color-emerald-300: #1a482b;
+  --color-emerald-400: #3fb950;
+  --color-emerald-500: #3fb950;
+  --color-emerald-600: #56d364;
+  --color-emerald-700: #7ee787;
+  --color-emerald-800: #a5f0af;
+  --color-emerald-900: #caf7d0;
+
+  /* amber / yellow — warnings, pending */
+  --color-amber-50: #1b1810;
+  --color-amber-100: #272114;
+  --color-amber-200: #3a2e0f;
+  --color-amber-300: #5c4412;
+  --color-amber-400: #d29922;
+  --color-amber-500: #d29922;
+  --color-amber-600: #e3b341;
+  --color-amber-700: #ecc95e;
+  --color-amber-800: #f3db85;
+  --color-amber-900: #f8eab0;
+
+  --color-yellow-50: #1b1810;
+  --color-yellow-100: #272114;
+  --color-yellow-200: #3a2e0f;
+  --color-yellow-300: #5c4412;
+  --color-yellow-400: #d29922;
+  --color-yellow-500: #d29922;
+  --color-yellow-600: #e3b341;
+  --color-yellow-700: #ecc95e;
+
+  /* purple / violet — agent badges, secondary accent */
+  --color-purple-50: #17122c;
+  --color-purple-100: #1f1837;
+  --color-purple-200: #2d1f58;
+  --color-purple-300: #442e8a;
+  --color-purple-400: #a371f7;
+  --color-purple-500: #a371f7;
+  --color-purple-600: #b892f9;
+  --color-purple-700: #cab2fb;
+  --color-purple-800: #dbcefd;
+  --color-purple-900: #eae2fe;
+
+  --color-violet-50: #17122c;
+  --color-violet-100: #1f1837;
+  --color-violet-200: #2d1f58;
+  --color-violet-300: #442e8a;
+  --color-violet-400: #a371f7;
+  --color-violet-500: #a371f7;
+  --color-violet-600: #b892f9;
+  --color-violet-700: #cab2fb;
+  --color-violet-800: #dbcefd;
+  --color-violet-900: #eae2fe;
+
+  /* sky / cyan — tool renderer accents, links */
+  --color-sky-50: #0c1726;
+  --color-sky-100: #101e33;
+  --color-sky-200: #0e2c52;
+  --color-sky-300: #0e3d7a;
+  --color-sky-400: #58a6ff;
+  --color-sky-500: #79b8ff;
+  --color-sky-600: #a5cdfd;
+  --color-sky-700: #c4ddfe;
+
+  --color-cyan-50: #0c1726;
+  --color-cyan-100: #101e33;
+  --color-cyan-200: #0e2c52;
+  --color-cyan-300: #0e3d7a;
+  --color-cyan-400: #58a6ff;
+  --color-cyan-500: #79b8ff;
+
+  /* indigo */
+  --color-indigo-50: #16122d;
+  --color-indigo-100: #1d1738;
+  --color-indigo-200: #281f5e;
+  --color-indigo-300: #3b2e96;
+  --color-indigo-400: #6f5cf7;
+  --color-indigo-500: #8b7cf9;
+  --color-indigo-600: #a69afa;
+  --color-indigo-700: #c0b8fc;
+
+  /* orange */
+  --color-orange-50: #1b1410;
+  --color-orange-100: #261b13;
+  --color-orange-200: #3d230f;
+  --color-orange-300: #603312;
+  --color-orange-400: #f0883e;
+  --color-orange-500: #f0883e;
+  --color-orange-600: #f4a261;
+  --color-orange-700: #f7ba88;
+
+  /* pink */
+  --color-pink-50: #1b1220;
+  --color-pink-100: #27172e;
+  --color-pink-200: #3d1747;
+  --color-pink-300: #601e70;
+  --color-pink-400: #f778ba;
+  --color-pink-500: #f778ba;
+}
+
+/* ─── Shell / body dark mode ─── */
+.dark body {
+  color: #b1bac4;
+  background: #0d1117;
+}
+
+/* ─── Markdown prose dark mode ─── */
+.dark .prose-loopat {
+  color: #b1bac4;
+}
+.dark .prose-loopat h1,
+.dark .prose-loopat h2,
+.dark .prose-loopat h3,
+.dark .prose-loopat h4 {
+  color: #e6edf3;
+}
+.dark .prose-loopat blockquote {
+  border-left-color: #30363d;
+  color: #8b949e;
+}
+.dark .prose-loopat code:not(pre code) {
+  background: #21262d;
+  color: #b1bac4;
+}
+.dark .prose-loopat pre {
+  background: #161b22;
+  color: #b1bac4;
+}
+.dark .prose-loopat table th,
+.dark .prose-loopat table td {
+  border-color: #30363d;
+}
+.dark .prose-loopat table th {
+  background: #161b22;
+}
+.dark .prose-loopat hr {
+  border-top-color: #21262d;
+}
+
+/* ─── User message gradient fade (collapsed state) ─── */
+.user-msg-fade {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2rem;
+  background: linear-gradient(to top, #fff 0%, transparent 100%);
+  pointer-events: none;
+}
+.dark .user-msg-fade {
+  background: linear-gradient(to top, #161b22 0%, transparent 100%);
+}
+
+/* ─── Milkdown editor dark mode ─── */
+.dark .milkdown-editor .ProseMirror {
+  color: #b1bac4;
+}
+.dark .milkdown-editor .ProseMirror h1,
+.dark .milkdown-editor .ProseMirror h2,
+.dark .milkdown-editor .ProseMirror h3 {
+  color: #e6edf3;
+}
+.dark .milkdown-editor .ProseMirror code {
+  background: #21262d;
+  color: #b1bac4;
+}
+.dark .milkdown-editor .ProseMirror pre {
+  background: #0d1117;
+  color: #b1bac4;
+}
+.dark .milkdown-editor .ProseMirror blockquote {
+  border-left-color: #30363d;
+  color: #8b949e;
+}
+.dark .milkdown-editor .ProseMirror hr {
+  border-top-color: #21262d;
+}
+.dark .milkdown-editor .ProseMirror a {
+  color: #58a6ff;
+}
+.dark .milkdown-editor .ProseMirror th,
+.dark .milkdown-editor .ProseMirror td {
+  border-color: #30363d;
+}
+.dark .milkdown-editor .ProseMirror th {
+  background: #161b22;
+}
+
+/* ─── CodeMirror dark mode overrides ─── */
+.dark .cm-gutters {
+  border-right-color: #21262d !important;
+  color: #484f58 !important;
+}
+.dark .cm-activeLine {
+  background-color: #161b22 !important;
+}
+.dark .cm-cursor {
+  border-left-color: #e6edf3 !important;
+}
+.dark .cm-selectionBackground,
+.dark ::selection {
+  background-color: #1a3360 !important;
+}
+
+/* ─── Kanban progress bar background ─── */
+.dark .kanban-progress-bg {
+  background-color: #21262d;
+}
+
+/* ─── TokenUsagePage chart grid lines ─── */
+.dark .token-chart-grid line {
+  stroke: #21262d;
+}
+
+/* Chat dot animations */
 @keyframes blink-green {
   0%, 100% { background-color: #22c55e; }
   50% { background-color: #bbf7d0; }
 }
 
-/* ─── ClaudeStatus morphing icon ─── */
+/* ClaudeStatus morphing icon */
 @keyframes morph {
   0%, 100% {
     border-radius: 50% 50% 60% 40%;
@@ -91,17 +313,6 @@ html, body {
 @keyframes glow {
   0%, 100% { opacity: 0.3; transform: scale(1); }
   50% { opacity: 0.6; transform: scale(1.8); }
-}
-
-/* ─── User message gradient fade (collapsed state) ─── */
-.user-msg-fade {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 2rem;
-  background: linear-gradient(to top, #fff 0%, transparent 100%);
-  pointer-events: none;
 }
 
 @layer base {

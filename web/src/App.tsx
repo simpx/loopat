@@ -5,7 +5,7 @@
  * LOOPAT_HOME, server-side).
  */
 import { useEffect, useState } from "react"
-import { MessageCircle, RefreshCw, X } from "lucide-react"
+import { MessageCircle, RefreshCw, X, Sun, Moon } from "lucide-react"
 import { BrowserRouter, Routes, Route, Navigate, NavLink, Outlet, useNavigate, useMatch, useLocation } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useWorkspaceState, type WorkspaceState } from "./state"
@@ -26,6 +26,7 @@ import { WelcomeCard } from "./components/WelcomeCard"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
+import { ThemeProvider, useTheme } from "./theme"
 
 const TABS = [
   { id: "loop", label: "Loop", icon: "⑂" },
@@ -53,6 +54,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false)
   const [newVersionCommit, setNewVersionCommit] = useState("")
   const [newVersionTime, setNewVersionTime] = useState("")
+  const { theme, toggle: toggleTheme } = useTheme()
   const me = ws.currentUser?.id ?? ""
   const isAdmin = ws.currentUser?.role === "admin"
   const loggedIn = !!ws.currentUser
@@ -171,6 +173,14 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         >
           <span className="text-base leading-none">+</span>
           <span className="hidden md:inline">New Loop</span>
+        </button>
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
         <div className="relative">
           <button
@@ -393,29 +403,31 @@ function LoopEmpty({ loggedIn, onNew }: { loggedIn: boolean; onNew: () => void }
 
 export function App() {
   return (
-    <TooltipProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Navigate to="/loop" replace />} />
-            <Route path="/loop" element={<LoopRedirect />} />
-            {/* Dual-mode: logged-in → full LoopPage with chrome; anonymous →
-                read-only share view (server gates by meta.public). Shell
-                drops the chrome when anonymous. */}
-            <Route path="/loop/:id" element={<LoopPage />} />
-            <Route path="/topic/:name" element={<TopicView />} />
-            <Route path="/kanban" element={<Navigate to="/kanban/default" replace />} />
-            <Route path="/kanban/:board" element={<KanbanPage />} />
-            <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
-            <Route path="/context/:sub" element={<ContextPage />} />
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/chat/:convId" element={<ChatPage />} />
-            <Route path="/settings" element={<Navigate to="/settings/personal-repo" replace />} />
-            <Route path="/settings/:tab" element={<SettingsPage />} />
-            <Route path="/admin/system" element={<AdminSystemPage />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<Navigate to="/loop" replace />} />
+              <Route path="/loop" element={<LoopRedirect />} />
+              {/* Dual-mode: logged-in → full LoopPage with chrome; anonymous →
+                  read-only share view (server gates by meta.public). Shell
+                  drops the chrome when anonymous. */}
+              <Route path="/loop/:id" element={<LoopPage />} />
+              <Route path="/topic/:name" element={<TopicView />} />
+              <Route path="/kanban" element={<Navigate to="/kanban/default" replace />} />
+              <Route path="/kanban/:board" element={<KanbanPage />} />
+              <Route path="/context" element={<Navigate to="/context/knowledge" replace />} />
+              <Route path="/context/:sub" element={<ContextPage />} />
+              <Route path="/chat" element={<ChatPage />} />
+              <Route path="/chat/:convId" element={<ChatPage />} />
+              <Route path="/settings" element={<Navigate to="/settings/personal-repo" replace />} />
+              <Route path="/settings/:tab" element={<SettingsPage />} />
+              <Route path="/admin/system" element={<AdminSystemPage />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   )
 }
