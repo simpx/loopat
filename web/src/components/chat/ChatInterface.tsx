@@ -56,7 +56,7 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void } = {}) {
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive, pickedFile, editorSelection }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void; pickedFile?: string | null; editorSelection?: { from: number; to: number } | null } = {}) {
   const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
   const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
@@ -495,7 +495,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
             )}
           </div>
         ) : readOnly ? null : (
-          <Composer />
+          <Composer pickedFile={pickedFile} editorSelection={editorSelection} />
         )}
         </div>
       </div>

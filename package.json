@@ -12,7 +12,7 @@
     "dev:server": "bun --cwd server run dev",
     "dev:web": "bun --cwd web run dev",
     "dev:serve": "bun --cwd server run serve",
-    "build": "bun install && bun --cwd web run build",
+    "build": "bun install && (cd web && bun run build)",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

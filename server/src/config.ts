@@ -5,6 +5,7 @@ import {
   personalLoopatConfigPath,
   personalLoopatDir,
   personalTokenUsagePath,
+  personalVaultDir,
   personalVaultEnvPath,
   personalVaultEnvsDir,
   workspaceDir,
@@ -203,20 +204,11 @@ export function parseDefault(raw: string): { providerName: string; modelId?: str
  *  Claude Agent SDK which speaks the Anthropic Messages API — only providers
  *  that expose an Anthropic-compatible endpoint work directly.
  *  Each provider is disabled by default; the user supplies an API key. */
-const PRESET_PROVIDERS: Array<{ name: string; baseUrl: string; models: string[] }> = [
-  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
-    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
-  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
-  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
-    models: ["kimi-k2.6"] },
-  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
-    models: ["MiniMax-M2.7"] },
-]
+import { PROVIDER_PRESETS } from "./presets"
 
 function buildPresetProviders(): Record<string, ProviderConfig> {
   return Object.fromEntries(
-    PRESET_PROVIDERS.map(p => [
+    PROVIDER_PRESETS.map(p => [
       p.name,
       {
         models: p.models.map(id => ({ id, enabled: true })),
@@ -238,7 +230,7 @@ const WORKSPACE_TEMPLATE: WorkspaceConfig = {
 }
 
 const PERSONAL_TEMPLATE: PersonalConfig = {
-  default: PRESET_PROVIDERS[0] ? `${PRESET_PROVIDERS[0].name}/${PRESET_PROVIDERS[0].models[0]}` : "",
+  default: PROVIDER_PRESETS[0] ? `${PROVIDER_PRESETS[0].name}/${PROVIDER_PRESETS[0].models[0]}` : "",
   providers: buildPresetProviders(),
   vaultEnvs: {},
 }
@@ -248,9 +240,9 @@ const PERSONAL_TEMPLATE: PersonalConfig = {
 const PERSONAL_DISK_TEMPLATE: PersonalConfigDisk = {
   providers: (() => {
     const providers: Record<string, ProviderConfigDisk | string> = {
-      default: PRESET_PROVIDERS[0] ? `${PRESET_PROVIDERS[0].name}/${PRESET_PROVIDERS[0].models[0]}` : "",
+      default: PROVIDER_PRESETS[0] ? `${PROVIDER_PRESETS[0].name}/${PROVIDER_PRESETS[0].models[0]}` : "",
     }
-    for (const p of PRESET_PROVIDERS) {
+    for (const p of PROVIDER_PRESETS) {
       providers[p.name] = {
         models: p.models.map(id => ({ id, enabled: true })),
         baseUrl: p.baseUrl,
@@ -382,7 +374,14 @@ export async function loadPersonalConfig(
 
   const providers: Record<string, ProviderConfig> = {}
   for (const [name, p] of providerEntries) {
-    const apiKey = typeof p.apiKey === "string" ? expandVars(p.apiKey, vaultEnvs) : ""
+    let apiKey = ""
+    if (typeof p.apiKey === "string") {
+      apiKey = expandVars(p.apiKey, vaultEnvs)
+    } else if (p.apiKey && typeof (p.apiKey as any).vault === "string") {
+      // Resolve { vault: "provider-keys/DeepSeek" } format
+      const vaultPath = join(personalVaultDir(user, vault), (p.apiKey as any).vault as string)
+      try { apiKey = (await readFile(vaultPath, "utf8")).trim() } catch {}
+    }
     // Normalize legacy single-model to canonical models[] format.
     const models: ModelEntry[] = p.models && p.models.length > 0
       ? p.models.map(m => ({ id: m.id, enabled: m.enabled !== false }))
@@ -485,6 +484,14 @@ export function describeApiKeyRef(
   user: string,
   vault: string = DEFAULT_VAULT,
 ): { kind: "literal" | "var" | "mixed" | "empty"; varName?: string; path?: string; exists: boolean } {
+  // Handle { vault: "..." } object format
+  if (typeof apiKey !== "string") {
+    if (apiKey && typeof (apiKey as any).vault === "string") {
+      const vaultPath = join(personalVaultDir(user, vault), (apiKey as any).vault as string)
+      return { kind: "var", varName: (apiKey as any).vault, path: vaultPath, exists: existsSync(vaultPath) }
+    }
+    return { kind: "empty", exists: false }
+  }
   if (!apiKey) return { kind: "empty", exists: false }
   const matches = [...apiKey.matchAll(VAR_REF_RE)]
   if (matches.length === 0) return { kind: "literal", exists: true }
@@ -525,8 +532,8 @@ export async function savePersonalDisk(
       if (typeof p.baseUrl !== "string") {
         return { ok: false, error: `provider "${name}" missing baseUrl` }
       }
-      if (p.apiKey !== undefined && typeof p.apiKey !== "string") {
-        return { ok: false, error: `provider "${name}" apiKey must be a string` }
+      if (p.apiKey !== undefined && typeof p.apiKey !== "string" && !(typeof p.apiKey === "object" && typeof (p.apiKey as any).vault === "string")) {
+        return { ok: false, error: `provider "${name}" apiKey must be a string or { vault }` }
       }
     }
     const defName = patch.providers.default
@@ -540,7 +547,7 @@ export async function savePersonalDisk(
       if (name === "default" || !val || typeof val !== "object") continue
       const p = val as ProviderConfigDisk
       if (p.enabled !== false) {
-        const hasNewKey = typeof p.apiKey === "string" && p.apiKey.length > 0
+        const hasNewKey = (typeof p.apiKey === "string" && p.apiKey.length > 0) || (p.apiKey && typeof (p.apiKey as any).vault === "string")
         const existingEntry = disk.providers[name]
         const existingKey = (existingEntry && typeof existingEntry === "object") ? (existingEntry as ProviderConfigDisk).apiKey : undefined
         if (!hasNewKey && !existingKey) {

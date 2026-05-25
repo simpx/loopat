@@ -413,6 +413,8 @@ export interface LoopRuntimeExtra {
   cumulativeTokens: number
   /** Open a file in the editor panel (loop page only). */
   openFile?: (path: string) => void
+  /** File blocks sent with the last user message (for UserMessage rendering). */
+  lastSentFiles?: { path: string; content: string }[]
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -747,6 +749,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   const enqueueMessage = useCallback((text: string, images?: ImageInput[]) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
+    if (!running) {
+      setRunning(true)
+      setTurnGeneration((v) => v + 1)
+      const now = Date.now()
+      setTurnStartedAt(now)
+      try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
+    }
     const payload: Record<string, unknown> = {
       type: "user",
       text,
@@ -754,7 +763,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     }
     if (images && images.length > 0) payload.images = images
     ws.send(JSON.stringify(payload))
-  }, [])
+  }, [running, TURN_START_KEY])
 
   const toggleShowHistory = useCallback(() => {
     setShowHistory((v) => !v)
@@ -1023,14 +1032,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
           return
         }
 
-        if (m?.type === "user" && m.message) {
-          // upsert by uuid: dedup against history-replay + StrictMode double-mount
+        if (m?.type === "user") {
           const uuid: string = m.uuid || freshId("u")
           const parentId: string | null = m.parent_tool_use_id ?? null
+          const content = m.message ? m.message.content : (m.text || "")
           try {
             setRaw((prev) => {
               if (prev.some((x) => x.id === uuid)) return prev
-              return [...prev, { id: uuid, role: "user", content: asContentArray(m.message.content), parent_tool_use_id: parentId }]
+              return [...prev, { id: uuid, role: "user", content: asContentArray(content), parent_tool_use_id: parentId }]
             })
           } catch {}
         } else if (m?.type === "assistant" && m.message?.content) {
@@ -1287,6 +1296,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       }
     }
     text = text.trim()
+    // Prepend file context set by Composer handleSubmit
+    try {
+      const ctx = sessionStorage.getItem("loopat:pendingFileContext")
+      if (ctx) { text = ctx + "\n" + text; sessionStorage.removeItem("loopat:pendingFileContext") }
+    } catch {}
     if (!text) return
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
