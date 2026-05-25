@@ -266,8 +266,11 @@ make_plugin() {
   cat > "$d/.claude-plugin/plugin.json" <<EOF
 { "name": "$name", "version": "1.0.0", "description": "$desc", "author": { "name": "Acme Platform" } }
 EOF
+  # Plugin-shipped MCP servers go in the plugin's settings.json mcpServers
+  # field. loopat's compose merges these as low-priority defaults — team /
+  # profile / personal mcpServers with the same key win.
   if [[ -n "$mcp_env" ]]; then
-    cat > "$d/.mcp.json" <<EOF
+    cat > "$d/settings.json" <<EOF
 { "mcpServers": { "$name": { "command": "node", "args": ["\${CLAUDE_PLUGIN_ROOT}/server.js"], "env": $mcp_env } } }
 EOF
   fi

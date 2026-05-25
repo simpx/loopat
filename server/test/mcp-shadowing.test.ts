@@ -1,12 +1,14 @@
 /**
  * L2+L3: MCP server tier shadowing — when team + personal define the same
- * server name, what reaches the spawned binary?
+ * server name, what reaches the spawned binary, and what does the API
+ * report?
  *
- * The composition is last-wins: personal mcpServers shadow team. UI flags
- * the shadow via `shadowsWorkspace: true` on the personal entry. Plugins are
- * a separate tier that CC auto-loads at runtime; same-named plugin/team can
- * coexist (plugin doesn't "shadow" workspace because plugin-tier MCPs come
- * from the .mcp.json shipped with each plugin).
+ * Merge semantics: server-key-granularity whole-object replacement. Personal
+ * entry shadows team's same-named entry completely (URLs, headers, all).
+ *
+ * Surface check: /api/mcp-servers reads the loop's merged settings.json
+ * (single source) and returns a flat `servers` list. No tier breakdown,
+ * because tokens are vault envs — the popover doesn't need provenance.
  */
 import { test, expect, describe, beforeAll, afterAll } from "bun:test"
 import { mkdir, rm, writeFile, readFile } from "node:fs/promises"
@@ -48,7 +50,7 @@ beforeAll(async () => {
   await mkdir(workspaceTeamClaudeDir(), { recursive: true })
   await writeFile(workspaceTeamSettingsPath(), JSON.stringify({
     mcpServers: {
-      github: { type: "http", url: "https://team.github/mcp", headers: { Authorization: "Bearer ${MCP_GITHUB_TOKEN}" } },
+      github: { type: "http", url: "https://team.github/mcp", headers: { Authorization: "Bearer ${GH_TOKEN}" } },
       linear: { type: "http", url: "https://team.linear/mcp" },
     },
   }))
@@ -63,100 +65,86 @@ beforeAll(async () => {
 
 afterAll(async () => { await rm(HOME, { recursive: true, force: true }) })
 
-describe("MCP tier shadowing — UI surface via /api/mcp-servers", () => {
-  test("team tier surfaces all team-defined servers", async () => {
-    const r = await app.request("/api/mcp-servers", { headers: await authed() })
-    const j = await r.json() as any
-    const team = j.tiers.find((t: any) => t.id === "team")
-    expect(team.servers.map((s: any) => s.name).sort()).toEqual(["github", "linear"])
-  })
+async function setupLoop(loopId: string): Promise<void> {
+  await mkdir(loopWorkdir(loopId), { recursive: true })
+  await mkdir(loopClaudeDir(loopId), { recursive: true })
+  await mkdir(loopContextKnowledge(loopId), { recursive: true })
+  await mkdir(loopContextNotes(loopId), { recursive: true })
+  await composeFromPlan(loopId, {
+    user: USER,
+    claudeSources: [
+      { source: "team", dir: workspaceTeamClaudeDir() },
+      { source: `personal:${USER}`, dir: personalDir(USER) },
+    ],
+  } as any)
+}
 
-  test("personal tier carries shadowsWorkspace=true for same-named entries", async () => {
-    const r = await app.request("/api/mcp-servers", { headers: await authed() })
-    const j = await r.json() as any
-    const personal = j.tiers.find((t: any) => t.id === "personal")
-    const github = personal.servers.find((s: any) => s.name === "github")
-    const privateOnly = personal.servers.find((s: any) => s.name === "private-only")
-    expect(github.shadowsWorkspace).toBe(true)
-    expect(privateOnly.shadowsWorkspace).toBe(false)
-  })
-
-  test("personal-only servers (no team counterpart) are reachable from the personal tier", async () => {
-    const r = await app.request("/api/mcp-servers", { headers: await authed() })
-    const j = await r.json() as any
-    const personal = j.tiers.find((t: any) => t.id === "personal")
-    expect(personal.servers.some((s: any) => s.name === "private-only")).toBe(true)
-  })
-
-  test("team URL and personal URL for same name differ (independent entries)", async () => {
-    const r = await app.request("/api/mcp-servers", { headers: await authed() })
-    const j = await r.json() as any
-    const teamGh = j.tiers.find((t: any) => t.id === "team").servers.find((s: any) => s.name === "github")
-    const persGh = j.tiers.find((t: any) => t.id === "personal").servers.find((s: any) => s.name === "github")
-    expect(teamGh.url).toBe("https://team.github/mcp")
-    expect(persGh.url).toBe("https://my-fork.github/mcp")
-  })
-})
-
-describe("MCP tier shadowing — composed settings.json (what spawned binary actually sees)", () => {
-  test("personal entry wins over team in merged loops/<id>/.claude/settings.json", async () => {
+describe("MCP merge semantics — composed loop settings.json", () => {
+  test("personal entry wins over team (last-wins at server-key granularity)", async () => {
     const loopId = "shadowsh-0000-0000-0000-000000000001"
-    await mkdir(loopWorkdir(loopId), { recursive: true })
-    await mkdir(loopClaudeDir(loopId), { recursive: true })
-    await mkdir(loopContextKnowledge(loopId), { recursive: true })
-    await mkdir(loopContextNotes(loopId), { recursive: true })
-    const plan = {
-      user: USER,
-      claudeSources: [
-        { source: "team", dir: workspaceTeamClaudeDir() },
-        { source: `personal:${USER}`, dir: personalDir(USER) },
-      ],
-    }
-    await composeFromPlan(loopId, plan as any)
+    await setupLoop(loopId)
     const merged = JSON.parse(await readFile(join(loopClaudeDir(loopId), "settings.json"), "utf8"))
-    // github URL must be the PERSONAL one — personal layered last, last-wins
     expect(merged.mcpServers.github.url).toBe("https://my-fork.github/mcp")
-    // The team-only server (linear) is still there — no shadow needed
     expect(merged.mcpServers.linear.url).toBe("https://team.linear/mcp")
-    // The personal-only server is also there
     expect(merged.mcpServers["private-only"]).toBeDefined()
   })
 
-  test("personal entry without headers DROPS the team's headers (full object replacement)", async () => {
-    // Important semantic: composing replaces the whole server object, not
-    // shallow-merges fields. The personal "github" entry has no headers, so
-    // the spawned binary sees a github server with NO Authorization template.
+  test("personal entry without headers DROPS the team's headers (whole-object replace)", async () => {
+    // Important semantic: personal `github` has no headers, so the merged
+    // entry has no Authorization template — the OAuth flow would refuse this
+    // server. The team's headers do NOT leak through.
     const loopId = "shadowsh-0000-0000-0000-000000000002"
-    await mkdir(loopWorkdir(loopId), { recursive: true })
-    await mkdir(loopClaudeDir(loopId), { recursive: true })
-    await mkdir(loopContextKnowledge(loopId), { recursive: true })
-    await mkdir(loopContextNotes(loopId), { recursive: true })
-    await composeFromPlan(loopId, {
-      user: USER,
-      claudeSources: [
-        { source: "team", dir: workspaceTeamClaudeDir() },
-        { source: `personal:${USER}`, dir: personalDir(USER) },
-      ],
-    } as any)
+    await setupLoop(loopId)
     const merged = JSON.parse(await readFile(join(loopClaudeDir(loopId), "settings.json"), "utf8"))
     expect(merged.mcpServers.github.headers).toBeUndefined()
   })
 
-  test("when only team defines a server, team's full object survives", async () => {
-    // linear is only in team — should keep team's headers/url intact.
+  test("team-only server (no personal counterpart) keeps its full object", async () => {
     const loopId = "shadowsh-0000-0000-0000-000000000003"
-    await mkdir(loopWorkdir(loopId), { recursive: true })
-    await mkdir(loopClaudeDir(loopId), { recursive: true })
-    await mkdir(loopContextKnowledge(loopId), { recursive: true })
-    await mkdir(loopContextNotes(loopId), { recursive: true })
-    await composeFromPlan(loopId, {
-      user: USER,
-      claudeSources: [
-        { source: "team", dir: workspaceTeamClaudeDir() },
-        { source: `personal:${USER}`, dir: personalDir(USER) },
-      ],
-    } as any)
+    await setupLoop(loopId)
     const merged = JSON.parse(await readFile(join(loopClaudeDir(loopId), "settings.json"), "utf8"))
     expect(merged.mcpServers.linear).toEqual({ type: "http", url: "https://team.linear/mcp" })
+  })
+})
+
+describe("MCP inventory — /api/mcp-servers reads the loop's merged settings.json", () => {
+  test("without loopId, returns empty list", async () => {
+    const r = await app.request("/api/mcp-servers", { headers: await authed() })
+    const j = await r.json() as any
+    expect(j.servers).toEqual([])
+  })
+
+  test("with loopId, returns flat list reflecting merged settings.json", async () => {
+    const loopId = "shadowsh-0000-0000-0000-000000000010"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authed() })
+    const j = await r.json() as any
+    const names = j.servers.map((s: any) => s.name).sort()
+    expect(names).toEqual(["github", "linear", "private-only"])
+    const github = j.servers.find((s: any) => s.name === "github")
+    expect(github.url).toBe("https://my-fork.github/mcp") // personal-shadowed URL
+  })
+
+  test("server with Bearer template exposes authTokenEnv", async () => {
+    // Use a fresh loop where team's github has the Bearer template AND no
+    // personal shadow drops the headers.
+    await writeFile(personalSettingsPath(USER), JSON.stringify({ mcpServers: {} }))
+    const loopId = "shadowsh-0000-0000-0000-000000000011"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authed() })
+    const j = await r.json() as any
+    const github = j.servers.find((s: any) => s.name === "github")
+    expect(github.authTokenEnv).toBe("GH_TOKEN")
+    expect(github.authed).toBe(false) // no env file written
+  })
+
+  test("server without Bearer template has authTokenEnv=null", async () => {
+    const loopId = "shadowsh-0000-0000-0000-000000000012"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authed() })
+    const j = await r.json() as any
+    const linear = j.servers.find((s: any) => s.name === "linear")
+    expect(linear.authTokenEnv).toBeNull()
+    expect(linear.authed).toBe(false)
   })
 })

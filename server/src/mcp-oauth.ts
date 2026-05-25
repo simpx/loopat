@@ -2,9 +2,11 @@
  * MCP OAuth 2.0 client — loopat owns the OAuth dance, not the sandboxed CC.
  *
  * Flow (high-level):
- *   1. POST /api/mcp-auth/start { serverName }
+ *   1. POST /api/mcp-auth/start { serverName, loopId }
  *      ↓
- *      lookup workspace mcpServers[serverName].url
+ *      read merged settings.json for the loop (loopClaudeDir/settings.json),
+ *      look up mcpServers[serverName]; parse `Authorization: Bearer ${VAR}`
+ *      from its headers — VAR is the env file we'll write the token to
  *      ↓
  *      discover OAuth metadata:
  *        - RFC 9728 (protected-resource metadata) → list of auth servers
@@ -15,7 +17,7 @@
  *      ↓
  *      generate PKCE verifier + challenge, generate state
  *      ↓
- *      stash flow context (user, vault, server, verifier, client creds, ...)
+ *      stash flow context (user, server, envName, verifier, client creds, ...)
  *      keyed by state in an in-memory map with TTL
  *      ↓
  *      return { authorizationUrl } to the frontend; frontend navigates browser
@@ -24,7 +26,8 @@
  *      back to GET /api/mcp-auth/callback?code=…&state=…
  *      ↓
  *      look up state in map (verify CSRF), exchange code+verifier for
- *      access_token at token_endpoint, persist into the user's vault
+ *      access_token at token_endpoint, write to the user's personal default
+ *      vault as env `<envName>`
  *      ↓
  *      redirect browser back to /settings/mcp-auth?status=ok&server=…
  *
@@ -35,30 +38,53 @@
 import { createHash, randomBytes } from "node:crypto"
 
 import { type McpServerConfig, writeVaultEnv } from "./config"
+import { DEFAULT_VAULT } from "./vaults"
 
 /**
- * Map an MCP server name to the env var name loopat writes the access token
- * to. Spaces / dots / hyphens are normalized to underscores, name is upper-
- * cased, prefixed with `MCP_` and suffixed with `_TOKEN`. Workspace
- * `.mcp.json` references the same name via `${MCP_<NAME>_TOKEN}` substitution.
+ * Extract the env var name from a server's `Authorization: Bearer ${VAR}`
+ * header. Returns null if the server has no parseable Bearer-template header
+ * (in which case loopat-managed OAuth doesn't apply — the server is either
+ * static-keyed, uses a non-Bearer auth scheme, or isn't HTTP).
  *
- * Examples:
- *   github       → MCP_GITHUB_TOKEN
- *   Google Drive → MCP_GOOGLE_DRIVE_TOKEN
- *   linear-mcp   → MCP_LINEAR_MCP_TOKEN
+ * Strict matching by design:
+ *  - header key matched case-insensitively
+ *  - value must be exactly `Bearer ${VARNAME}` (case-insensitive `Bearer`,
+ *    single env ref, no other characters)
+ *  - `VARNAME` must be a valid env var identifier `[A-Z_][A-Z0-9_]*`
+ *
+ * Half-static templates like `Bearer ${PREFIX}_suffix` are rejected — we'd
+ * not know which env to write the OAuth result to.
  */
-export function mcpServerEnvVarName(serverName: string): string {
-  const sanitized = serverName.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase()
-  return `MCP_${sanitized || "SERVER"}_TOKEN`
+// Split into two parts so that `bearer` is case-insensitive (HTTP scheme
+// matching) while the env name capture is strictly uppercase + underscore +
+// digits — matches POSIX-style convention loopat enforces for vault env files.
+const BEARER_PREFIX_RE = /^bearer\s+/i
+const ENV_REF_RE = /^\$\{([A-Z_][A-Z0-9_]*)\}$/
+
+export function parseBearerEnvName(server: McpServerConfig | undefined | null): string | null {
+  if (!server) return null
+  const headers = (server as any).headers as Record<string, string> | undefined
+  if (!headers || typeof headers !== "object") return null
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() !== "authorization") continue
+    if (typeof v !== "string") return null
+    const trimmed = v.trim()
+    const prefix = trimmed.match(BEARER_PREFIX_RE)
+    if (!prefix) return null
+    const remainder = trimmed.slice(prefix[0].length)
+    const m = remainder.match(ENV_REF_RE)
+    return m ? m[1] : null
+  }
+  return null
 }
 
 const STATE_TTL_MS = 10 * 60 * 1000 // 10 minutes — generous; OAuth flows are slow
 
 type FlowState = {
   user: string
-  vault: string
   serverName: string
   serverUrl: string
+  envName: string
   redirectUri: string
   codeVerifier: string
   clientId: string
@@ -305,67 +331,64 @@ export type StartResult =
   | { ok: false; error: string }
 
 /**
- * Begin an OAuth flow for (user, vault, serverName). The browser-side caller
- * navigates to `authorizationUrl` next.
+ * Look up a server in the loop's merged settings.json. Returns null when
+ * either the merged file is missing (loop never composed) or the server name
+ * isn't declared.
+ */
+async function lookupServerInMergedSettings(
+  loopId: string,
+  serverName: string,
+): Promise<McpServerConfig | null> {
+  if (!loopId) return null
+  const { existsSync } = await import("node:fs")
+  const { readFile } = await import("node:fs/promises")
+  const { join } = await import("node:path")
+  const { loopClaudeDir } = await import("./paths")
+  const settingsPath = join(loopClaudeDir(loopId), "settings.json")
+  if (!existsSync(settingsPath)) return null
+  try {
+    const j = JSON.parse(await readFile(settingsPath, "utf8")) as {
+      mcpServers?: Record<string, McpServerConfig>
+    }
+    return j.mcpServers?.[serverName] ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Begin an OAuth flow for (user, serverName) in the context of `loopId`. The
+ * browser-side caller navigates to `authorizationUrl` next. The OAuth token,
+ * once obtained, lands in the user's personal default vault under the env
+ * name parsed from the server's `Authorization: Bearer ${VAR}` header.
  */
 export async function startMcpAuth(opts: {
   user: string
-  vault: string
   serverName: string
-  /** Loop the auth request originates from — determines which profiles to
-   *  look up. Empty string = no profile context (e.g. Settings page). */
-  loopId?: string
+  /** Loop the auth request originates from — used to resolve the server in
+   *  the loop's merged settings.json. */
+  loopId: string
   publicBaseUrl: string
 }): Promise<StartResult> {
-  const { user, vault, serverName, loopId, publicBaseUrl } = opts
+  const { user, serverName, loopId, publicBaseUrl } = opts
 
-  // Walk plugin-bundled .mcp.json files (from the loop's enabled plugins).
-  // Reads the loop's merged settings.json for enabledPlugins, then resolves
-  // each spec to its host path via lookupPluginInstallPath. Needs the loop
-  // to have been spawned at least once (so compose has materialized
-  // settings.json). Returns [] if no loopId (settings page case).
-  let srv: McpServerConfig | undefined
-  const { existsSync } = await import("node:fs")
-  const { readFile: rf } = await import("node:fs/promises")
-  const { join: pjoin } = await import("node:path")
-  const resolved: Array<{ path: string }> = []
-  if (loopId) {
-    const { lookupPluginInstallPath } = await import("./plugin-installer")
-    const { loopClaudeDir } = await import("./paths")
-    const settingsPath = pjoin(loopClaudeDir(loopId), "settings.json")
-    if (existsSync(settingsPath)) {
-      try {
-        const settings = JSON.parse(await rf(settingsPath, "utf8")) as {
-          enabledPlugins?: Record<string, boolean>
-        }
-        const enabled = Object.entries(settings.enabledPlugins ?? {})
-          .filter(([_, v]) => v)
-          .map(([k]) => k)
-        for (const spec of enabled) {
-          const p = await lookupPluginInstallPath(spec)
-          if (p) resolved.push({ path: p })
-        }
-      } catch {}
-    }
+  const srv = await lookupServerInMergedSettings(loopId, serverName)
+  if (!srv) {
+    return { ok: false, error: `server "${serverName}" not found in loop's merged settings.json` }
   }
-  for (const p of resolved) {
-    const mcpPath = pjoin(p.path, ".mcp.json")
-    if (!existsSync(mcpPath)) continue
-    try {
-      const j = JSON.parse(await rf(mcpPath, "utf8"))
-      const candidate = (j?.mcpServers ?? {})[serverName] as McpServerConfig | undefined
-      if (candidate) {
-        srv = candidate
-        break
-      }
-    } catch {}
-  }
-  if (!srv) return { ok: false, error: `server "${serverName}" not found in any plugin for this loop's profiles` }
   if (srv.type !== "http" && srv.type !== "sse") {
     return { ok: false, error: `server "${serverName}" is type "${srv.type}"; only http/sse support OAuth` }
   }
   const serverUrl = (srv as any).url as string
   if (!serverUrl) return { ok: false, error: `server "${serverName}" missing url` }
+
+  const envName = parseBearerEnvName(srv)
+  if (!envName) {
+    return {
+      ok: false,
+      error: `server "${serverName}" does not declare \`Authorization: Bearer \${VAR}\` in headers — loopat-managed OAuth requires that template`,
+    }
+  }
 
   // 1) discover protected-resource → list of authorization servers
   const prm = await discoverProtectedResource(serverUrl)
@@ -402,9 +425,9 @@ export async function startMcpAuth(opts: {
 
   flowStates.put(state, {
     user,
-    vault,
     serverName,
     serverUrl,
+    envName,
     redirectUri,
     codeVerifier: verifier,
     clientId: reg.client_id,
@@ -437,7 +460,8 @@ export type CallbackResult =
 
 /**
  * Process the OAuth redirect coming back from the MCP server. Exchanges
- * code+verifier for an access_token and persists into the user's vault.
+ * code+verifier for an access_token and writes it to the user's personal
+ * default vault under the env name captured at flow start.
  */
 export async function completeMcpAuth(opts: {
   state: string
@@ -477,13 +501,11 @@ export async function completeMcpAuth(opts: {
   const tok = await resp.json().catch(() => null)
   if (!tok?.access_token) return { ok: false, error: `token response missing access_token` }
 
-  // Persist only the access token as a vault env. Refresh/revoke aren't
-  // implemented yet, so the OAuth metadata (refresh_token, clientId, token
-  // endpoint, etc.) would be dead-on-disk noise — drop it. If/when refresh
-  // lands, the natural home is additional env files named like
-  // MCP_<NAME>_REFRESH_TOKEN / MCP_<NAME>_CLIENT_ID.
-  const envName = mcpServerEnvVarName(flow.serverName)
-  await writeVaultEnv(flow.user, flow.vault, envName, tok.access_token)
+  // Persist as a plain vault env in the user's personal default vault.
+  // Refresh/revoke aren't implemented yet; refresh_token (if present) is
+  // dropped intentionally — re-running the flow ("Re-authorize" in /mcp)
+  // is the only refresh path today.
+  await writeVaultEnv(flow.user, DEFAULT_VAULT, flow.envName, tok.access_token)
 
   // Token is persisted, but **already-running** LoopSessions still hold the
   // old `query()` options. We intentionally do NOT auto-restart them here:
