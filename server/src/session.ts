@@ -203,6 +203,8 @@ const IDLE_TIMEOUT_MS = Number(process.env.LOOPAT_SESSION_IDLE_MS) || 5 * 60 * 1
 
 type QueuedMessage = { text: string; permissionMode?: SdkPermissionMode }
 
+export type LoopSessionMessageListener = (msg: any) => void
+
 class LoopSession {
   id: string
   private q: Query | null = null
@@ -212,6 +214,7 @@ class LoopSession {
   private historyLoaded: Promise<void>
   private pendingQuestions = new Map<string, AskQuestionPending>()
   private pendingPermissions = new Map<string, PermissionPending>()
+  private messageListeners = new Set<LoopSessionMessageListener>()
   private providerOverride: string | null = null
   private currentPermissionMode: SdkPermissionMode = "bypassPermissions"
   private currentGoal: string | null = null
@@ -786,6 +789,9 @@ class LoopSession {
   }
 
   private broadcast(msg: any) {
+    for (const listener of this.messageListeners) {
+      try { listener(msg) } catch {}
+    }
     const data = JSON.stringify(msg)
     for (const [ws, state] of this.subscribers) {
       if (state.pending !== null) {
@@ -1101,6 +1107,17 @@ class LoopSession {
       return
     }
     await this._pushUserMessage(text, permissionMode)
+  }
+
+  isBusy(): boolean {
+    return this.generating || this.messageQueue.length > 0 || this.queueProcessing
+  }
+
+  onMessage(listener: LoopSessionMessageListener): () => void {
+    this.messageListeners.add(listener)
+    return () => {
+      this.messageListeners.delete(listener)
+    }
   }
 
   private async _pushUserMessage(text: string, permissionMode?: SdkPermissionMode) {

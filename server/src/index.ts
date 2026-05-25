@@ -73,6 +73,7 @@ import {
   deleteUser,
 } from "./auth"
 import { getCookie } from "hono/cookie"
+import { isChimpGatewayAuthorized, streamChimpTurn, type ChimpTurnRequest } from "./chimp-gateway"
 
 const execFileP = promisify(execFile)
 
@@ -107,6 +108,17 @@ app.get("/api/version", (c) => {
   try { branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim() } catch {}
   try { commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim() } catch {}
   return c.json({ branch, commit })
+})
+
+app.post("/api/chimp/v1/turn/stream", async (c) => {
+  if (!isChimpGatewayAuthorized(c.req.header("authorization") ?? null)) {
+    return c.json({ error: "unauthorized" }, 401)
+  }
+  const body = await c.req.json().catch(() => null) as ChimpTurnRequest | null
+  if (!body || typeof body !== "object") {
+    return c.json({ error: "invalid json body" }, 400)
+  }
+  return await streamChimpTurn(body)
 })
 
 // ── workspace serve config ──
@@ -2890,9 +2902,11 @@ console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
 console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
 
-export default {
+const server = Bun.serve({
   port,
   hostname,
   fetch: app.fetch,
   websocket,
-}
+})
+
+export { server }
