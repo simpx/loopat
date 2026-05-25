@@ -14,6 +14,7 @@ import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
 import { updateLoopStatus } from "./loop-status"
+import { maybeAutoName } from "./auto-name"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
@@ -676,6 +677,14 @@ class LoopSession {
           this.queueProcessing = false
           this.q = null
           this.processNextInQueue()
+          // Fire-and-forget: try to auto-name the loop if title is still
+          // "untitled". maybeAutoName() is fully idempotent + best-effort
+          // (no-ops if title is already set or user has opted out).
+          maybeAutoName(this.id).then(async (didName) => {
+            if (!didName) return
+            const fresh = await getLoop(this.id)
+            if (fresh) this.broadcast({ type: "meta_updated", meta: fresh })
+          }).catch(() => {})
         } else if (
           // Inject queued messages at tool-result boundaries — matching
           // real Claude Code's per-step queue consumption.

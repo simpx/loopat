@@ -41,6 +41,14 @@ const execFileP = promisify(execFile)
 export type LoopMeta = {
   id: string
   title: string
+  /**
+   * Set true on the auto-name path; cleared (set false) the moment a user
+   * renames the loop themselves. `maybeAutoName()` will only ever overwrite
+   * a title when it sees `titleAuto !== false` AND `title === "untitled"`.
+   * Three-state semantics: undefined = never auto-named; true = auto-named
+   * (still rewritable if user hasn't touched it); false = user owns the title.
+   */
+  titleAuto?: boolean
   createdAt: string
   createdBy: string
   /**

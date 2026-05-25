@@ -259,7 +259,7 @@ export function NewLoopDialog({
             )}
           </DialogField>
 
-          <DialogField label="Name" hint="Optional — defaults to 'untitled'.">
+          <DialogField label="Name" hint="Optional — leave empty and the loop will auto-name itself after the first turn.">
             <input
               ref={inputRef}
               type="text"
