@@ -10,7 +10,10 @@
  *   Responses (stdout): { type: "response", command: "prompt", success: true }
  */
 
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, execSync, type ChildProcess } from "node:child_process"
+import { existsSync, realpathSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { randomUUID } from "node:crypto"
 import type { BackendAdapter, BackendStartOptions, BackendType } from "./backend"
 import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
@@ -18,12 +21,38 @@ import type { SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk"
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_PI
 
 /**
- * Resolve the `pi` binary path. Checks:
+ * Resolve the `pi` binary to a real .js file path. Checks:
  * 1. PI_BINARY env var (explicit override)
- * 2. `pi` on PATH (global install via npm/bun)
+ * 2. ~/.bun/bin/pi (global bun install)
+ * 3. `which pi` (search PATH)
+ * 4. `pi` on PATH (fallback)
+ *
+ * Symlinks are resolved via realpathSync so the shebang-resolved node
+ * binary can be found on the inherited PATH.
  */
 function resolvePiBinary(): string {
-  return process.env.PI_BINARY || "pi"
+  let path: string | null = null
+
+  if (process.env.PI_BINARY) {
+    path = process.env.PI_BINARY
+  } else {
+    const bunBin = join(homedir(), ".bun", "bin", "pi")
+    if (existsSync(bunBin)) {
+      path = bunBin
+    } else {
+      try {
+        path = execSync("which pi", { encoding: "utf8" }).trim() || null
+      } catch {}
+    }
+  }
+
+  if (!path) return "pi"
+
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
 /**
@@ -80,15 +109,13 @@ function createMessageStream() {
 }
 
 /**
- * Translate a pi RPC event (AgentSessionEvent) into loopat's SDKMessage format.
+ * Translate a pi RPC event into loopat's SDKMessage format.
  *
- * pi's event types we care about:
- * - message_start → SDKMessage type=assistant start
- * - message_delta → SDKMessage type=assistant content_block_delta
- * - message_end → SDKMessage type=assistant with final content
- * - tool_execution_start → SDKMessage type=tool_use
- * - tool_execution_end → SDKMessage type=tool_result
- * - agent_end → SDKMessage type=result
+ * pi's RPC protocol (from docs/rpc.md):
+ *   - message_start / message_end: message lifecycle (user echo + assistant)
+ *   - message_update: streaming deltas via `assistantMessageEvent` field
+ *   - tool_execution_start / tool_execution_end: tool lifecycle
+ *   - agent_start / agent_end: agent run lifecycle
  */
 function translatePiEvent(event: any): SDKMessage | null {
   if (!event || !event.type) return null
@@ -96,11 +123,12 @@ function translatePiEvent(event: any): SDKMessage | null {
   const tag = "[pi→sdk]"
 
   switch (event.type) {
-    // ── Assistant message lifecycle ──
+    // ── Message lifecycle ──
+    // pi echoes the user prompt as message_start/message_end with role="user".
+    // Only forward assistant messages; user echoes are internal bookkeeping.
     case "message_start": {
-      // pi emits { type: "message_start", message: { role: "assistant", content: [...] } }
       const msg = event.message
-      if (!msg) return null
+      if (!msg || msg.role !== "assistant") return null
       return {
         type: "assistant",
         subtype: "start",
@@ -111,22 +139,9 @@ function translatePiEvent(event: any): SDKMessage | null {
       } as any
     }
 
-    case "message_delta": {
-      // pi emits { type: "message_delta", delta: { type: "text", text: "..." } }
-      // or { type: "message_delta", delta: { type: "tool_use", ... } }
-      return {
-        type: "stream_event",
-        event: {
-          type: "content_block_delta",
-          delta: event.delta || { type: "text_delta", text: "" },
-        },
-      } as any
-    }
-
     case "message_end": {
-      // pi emits { type: "message_end", message: { role: "assistant", content: [...] } }
       const msg = event.message
-      if (!msg) return null
+      if (!msg || msg.role !== "assistant") return null
       return {
         type: "assistant",
         message: {
@@ -136,49 +151,104 @@ function translatePiEvent(event: any): SDKMessage | null {
       } as any
     }
 
-    // ── Tool calls ──
+    // ── Streaming deltas (message_update) ──
+    // pi streams via message_update with an assistantMessageEvent sub-object.
+    // Delta types: text_start, text_delta, text_end, thinking_start,
+    // thinking_delta, thinking_end, toolcall_start, toolcall_delta, toolcall_end.
+    case "message_update": {
+      const ame = event.assistantMessageEvent
+      if (!ame) return null
+      switch (ame.type) {
+        case "text_delta":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: ame.delta || "" },
+            },
+          } as any
+        case "thinking_delta":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              delta: { type: "thinking_delta", thinking: ame.delta || "" },
+            },
+          } as any
+        case "text_start":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_start",
+              content_block: { type: "text", text: "" },
+            },
+          } as any
+        case "thinking_start":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_start",
+              content_block: { type: "thinking", thinking: "" },
+            },
+          } as any
+        case "toolcall_start":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_start",
+              content_block: {
+                type: "tool_use",
+                id: ame.toolCall?.id || ame.partial?.id || randomUUID(),
+                name: ame.toolCall?.name || ame.partial?.name || "",
+                input: {},
+              },
+            },
+          } as any
+        case "toolcall_delta":
+          return {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              delta: { type: "input_json_delta", partial_json: ame.delta || "" },
+            },
+          } as any
+        default:
+          return null
+      }
+    }
+
+    // ── Tool execution ──
     case "tool_execution_start": {
-      // pi emits { type: "tool_execution_start", toolCall: { name, args, id } }
-      const tc = event.toolCall
-      if (!tc) return null
+      // pi emits { type: "tool_execution_start", toolCallId, toolName, args }
       return {
         type: "assistant",
         message: {
           role: "assistant",
           content: [{
             type: "tool_use",
-            id: tc.id || randomUUID(),
-            name: tc.name,
-            input: tc.args || {},
+            id: event.toolCallId || randomUUID(),
+            name: event.toolName,
+            input: event.args || {},
           }],
         },
       } as any
     }
 
     case "tool_execution_end": {
-      // pi emits { type: "tool_execution_end", toolCall: { id, name }, result: { ... } }
-      const tc = event.toolCall
-      if (!tc) return null
+      // pi emits { type: "tool_execution_end", toolCallId, toolName, result, isError }
+      const resultContent = event.result?.content
+      const text = Array.isArray(resultContent)
+        ? resultContent.map((b: any) => b.text || "").join("\n")
+        : String(resultContent ?? "")
       return {
         type: "user",
         message: {
           role: "user",
           content: [{
             type: "tool_result",
-            tool_use_id: tc.id,
-            content: event.result?.output || event.result?.error || "",
+            tool_use_id: event.toolCallId,
+            content: text,
           }],
-        },
-      } as any
-    }
-
-    // ── Streaming text deltas ──
-    case "text_delta": {
-      return {
-        type: "stream_event",
-        event: {
-          type: "content_block_delta",
-          delta: { type: "text_delta", text: event.text || "" },
         },
       } as any
     }
@@ -195,31 +265,8 @@ function translatePiEvent(event: any): SDKMessage | null {
       } as any
     }
 
-    // ── Thinking / reasoning ──
-    case "thinking_start": {
-      return {
-        type: "stream_event",
-        event: {
-          type: "content_block_start",
-          content_block: { type: "thinking", thinking: "" },
-        },
-      } as any
-    }
-
-    case "thinking_delta": {
-      return {
-        type: "stream_event",
-        event: {
-          type: "content_block_delta",
-          delta: { type: "thinking_delta", thinking: event.text || "" },
-        },
-      } as any
-    }
-
-    // ── Other events: pass through as stream_event ──
+    // ── Unrecognized events ──
     default: {
-      // For unrecognized events, emit as a stream_event so the UI can
-      // handle them if needed, but don't error out.
       if (DEBUG) console.log(`${tag} unhandled event type: ${event.type}`)
       return null
     }
@@ -240,43 +287,56 @@ export class PiRpcAdapter implements BackendAdapter {
     const tag = `[pi:${opts.loopId.slice(0, 8)}]`
 
     // Build pi CLI args for RPC mode
+    const piProvider = opts.backendConfig?.provider || "anthropic"
     const args = [
       "--mode", "rpc",
-      "--cwd", opts.cwd,
+      "--provider", piProvider,
     ]
+
+    // Session management
+    if (opts.continue) {
+      args.push("--continue")
+    }
+
+    // System prompt append (loopat-specific instructions)
+    if (opts.systemPromptAppend) {
+      args.push("--append-system-prompt", opts.systemPromptAppend)
+    }
 
     // Model override
     if (opts.model) {
       args.push("--model", opts.model)
     }
 
-    // pi uses its own config dir; we can set it to be per-loop
-    // via PI_CODING_AGENT_DIR env or --config-dir flag
-    if (opts.backendConfig?.configDir) {
-      args.push("--config-dir", opts.backendConfig.configDir)
-    }
-
-    // Build env: merge process.env + opts.env + pi-specific vars
+    // Build env: merge process.env + opts.env + pi-specific vars.
+    // Ensure ~/.bun/bin is on PATH so that `node` (via fnm or bun's shim)
+    // can be found when the kernel resolves the #!/usr/bin/env node shebang.
+    const homeBin = join(homedir(), ".bun", "bin")
     const env: Record<string, string> = {
       ...process.env as Record<string, string>,
+      PATH: [homeBin, process.env.PATH].filter(Boolean).join(":"),
       ...opts.env,
       PI_CODING_AGENT: "true",
+      PI_CODING_AGENT_SESSION_DIR: opts.cwd,
     }
 
-    // If backendConfig specifies API keys, inject them
-    if (opts.backendConfig?.apiKey) {
-      env.PI_API_KEY = opts.backendConfig.apiKey
-    }
-    if (opts.backendConfig?.anthropicApiKey) {
-      env.ANTHROPIC_API_KEY = opts.backendConfig.anthropicApiKey
-    }
-    if (opts.backendConfig?.openaiApiKey) {
-      env.OPENAI_API_KEY = opts.backendConfig.openaiApiKey
+    // Re-resolve opts-env PATH if present (prepend homeBin again so it stays first)
+    if (opts.env?.PATH) {
+      env.PATH = [homeBin, opts.env.PATH].filter(Boolean).join(":")
     }
 
-    if (DEBUG) {
-      console.error(`${tag} spawning: ${piBinary} ${args.join(" ")}`)
+    // ── API key / base URL (provider-specific) ──
+    // session.ts already sets the correct env var in opts.env based on
+    // the mapped provider. backendConfig carries the raw values as backup.
+    if (opts.backendConfig?.apiKey && !env.ANTHROPIC_API_KEY && !env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) {
+      env.ANTHROPIC_API_KEY = opts.backendConfig.apiKey
+      if (opts.backendConfig.baseUrl) {
+        env.ANTHROPIC_BASE_URL = opts.backendConfig.baseUrl
+      }
     }
+
+    console.error(`${tag} spawning: ${piBinary} ${args.join(" ")}`)
+    console.error(`${tag} cwd: ${opts.cwd}`)
 
     this.stream = createMessageStream()
 
@@ -303,6 +363,7 @@ export class PiRpcAdapter implements BackendAdapter {
       this.lineBuf = lines.pop() || "" // keep incomplete line
       for (const line of lines) {
         if (!line.trim()) continue
+        console.error(`${tag} stdout: ${line.slice(0, 300)}`)
         try {
           const event = JSON.parse(line)
           if (DEBUG) {
@@ -325,6 +386,9 @@ export class PiRpcAdapter implements BackendAdapter {
 
           // Translate pi event to SDKMessage
           const sdkMsg = translatePiEvent(event)
+          if (sdkMsg) {
+            console.error(`${tag} → sdk: ${sdkMsg.type}${(sdkMsg as any).subtype ? "/" + (sdkMsg as any).subtype : ""}`)
+          }
           if (sdkMsg && this.stream) {
             // Track generating state
             if (event.type === "agent_end" || event.type === "message_end") {
@@ -347,9 +411,7 @@ export class PiRpcAdapter implements BackendAdapter {
     proc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8")
       this.stderrBuf += text
-      for (const line of text.split("\n")) {
-        if (line.trim()) console.error(`${tag}:stderr ${line}`)
-      }
+      console.error(`${tag}:stderr ${text.trim()}`)
     })
 
     // Handle exit
@@ -397,9 +459,7 @@ export class PiRpcAdapter implements BackendAdapter {
       message: text,
     }
 
-    if (DEBUG) {
-      console.error(`[pi] sending prompt: ${text.slice(0, 100)}`)
-    }
+    console.error(`[pi:${this.proc?.pid ?? "?"}] sending prompt: ${text.slice(0, 100)}`)
 
     this.proc.stdin.write(JSON.stringify(cmd) + "\n")
     this.generating = true

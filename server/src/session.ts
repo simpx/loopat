@@ -4,7 +4,7 @@ import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/pro
 import { createWriteStream, mkdirSync, existsSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
-import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
+import { loopClaudeDir, loopDir, loopHistoryPath, loopWorkdir, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
 import { resolveClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
@@ -19,6 +19,16 @@ import { PiRpcAdapter } from "./pi-session"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
+
+/** Map a loopat provider name to pi's provider name. */
+function mapProviderToPi(loopatName: string): string {
+  const n = loopatName.toLowerCase()
+  if (n.includes("anthropic") || n.includes("claude")) return "anthropic"
+  if (n.includes("deepseek")) return "deepseek"
+  if (n.includes("openai")) return "openai"
+  if (n.includes("google") || n.includes("gemini")) return "google"
+  return "anthropic" // default for Anthropic-compatible APIs
+}
 
 function parseSkillDescription(content: string): string | undefined {
   const fm = content.match(/^---\s*\n([\s\S]*?)\n---/)
@@ -387,22 +397,42 @@ class LoopSession {
       const piAdapter = new PiRpcAdapter()
       this.backendAdapter = piAdapter
 
-      // Build env for pi process
+      // Map loopat provider name to pi provider name
+      const piProvider = mapProviderToPi(providerName, provider)
       const piEnv: Record<string, string> = {
         ...personalCfg.vaultEnvs,
-        ANTHROPIC_API_KEY: provider.apiKey,
-        ANTHROPIC_BASE_URL: provider.baseUrl,
+      }
+      // Set the correct env var for pi based on provider type
+      switch (piProvider) {
+        case "anthropic":
+          piEnv.ANTHROPIC_API_KEY = provider.apiKey
+          piEnv.ANTHROPIC_BASE_URL = provider.baseUrl
+          break
+        case "deepseek":
+          piEnv.DEEPSEEK_API_KEY = provider.apiKey
+          piEnv.DEEPSEEK_BASE_URL = provider.baseUrl
+          break
+        case "openai":
+          piEnv.OPENAI_API_KEY = provider.apiKey
+          piEnv.OPENAI_BASE_URL = provider.baseUrl
+          break
+        default:
+          // Fallback: set generic env vars
+          piEnv.ANTHROPIC_API_KEY = provider.apiKey
+          piEnv.ANTHROPIC_BASE_URL = provider.baseUrl
       }
 
       const messageIter = await piAdapter.start({
         loopId: this.id,
-        cwd: V_LOOP_WORKDIR(this.id),
+        cwd: loopWorkdir(this.id),
         env: piEnv,
         systemPromptAppend: loopatAppend,
         continue: shouldContinue,
         model: meta.config?.default_model_id || provider.models.find(m => m.enabled !== false)?.id || provider.models[0]?.id,
         backendConfig: {
-          anthropicApiKey: provider.apiKey,
+          provider: piProvider,
+          apiKey: provider.apiKey,
+          baseUrl: provider.baseUrl,
         },
       })
 
@@ -826,10 +856,8 @@ class LoopSession {
     const tag = this.id.slice(0, 8)
     try {
       for await (const msg of iter) {
-        if (DEBUG) {
-          const subtype = (msg as any).subtype ? `/${(msg as any).subtype}` : ""
-          console.error(`[pi:${tag}] msg ${msg.type}${subtype}`)
-        }
+        const subtype = (msg as any).subtype ? `/${(msg as any).subtype}` : ""
+        console.error(`[consume:${tag}] msg ${msg.type}${subtype}`)
         // Track generating state
         if (msg.type === "system" && (msg as any).subtype === "init") {
           this.generating = true
