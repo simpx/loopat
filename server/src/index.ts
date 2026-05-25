@@ -28,7 +28,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot } from "./session"
-import { listDir, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
+import { listDir, listDirRecursive, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
 // sandboxes module removed — no /api/sandboxes/* routes in the profile model.
 // Use /api/profiles + /api/personal/default-profiles instead.
@@ -1684,6 +1684,15 @@ app.get("/api/loops/:id/files", requireAuth, async (c) => {
   if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
   const path = c.req.query("path") ?? ""
   return c.json({ entries: await listDir(id, path) })
+})
+
+// Recursive file tree — single call returns all files under a path.
+// The frontend FilePicker uses this instead of recursively calling /files.
+app.get("/api/loops/:id/files/tree", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  if (!(await loopExists(id))) return c.json({ error: "not found" }, 404)
+  const path = c.req.query("path") ?? ""
+  return c.json({ entries: await listDirRecursive(id, path) })
 })
 
 app.get("/api/loops/:id/file", requireAuth, async (c) => {

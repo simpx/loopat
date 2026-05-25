@@ -1,26 +1,13 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { FileText, FolderOpen, ChevronRight, ChevronDown, Search, CornerDownLeft, ArrowUp, ArrowDown } from "lucide-react"
-import { listFiles, type FileEntry } from "@/api"
+import { listFiles, listFilesTree, type FileEntry } from "@/api"
 import { cn } from "@/lib/utils"
 
 interface FilePickerProps {
   loopId: string
   onPick: (path: string) => void
   onClose: () => void
-}
-
-async function fetchAllFiles(loopId: string, dir: string): Promise<FileEntry[]> {
-  const entries = await listFiles(loopId, dir).catch(() => [] as FileEntry[])
-  const result: FileEntry[] = []
-  for (const e of entries) {
-    result.push(e)
-    if (e.type === "dir") {
-      const children = await fetchAllFiles(loopId, e.path)
-      result.push(...children)
-    }
-  }
-  return result
 }
 
 type VisibleEntry = { entry: FileEntry; depth: number }
@@ -40,12 +27,11 @@ export function FilePicker({ loopId, onPick, onClose }: FilePickerProps) {
     setLoading(true)
     Promise.all([
       listFiles(loopId, "workdir").catch(() => [] as FileEntry[]),
-      listFiles(loopId, "context").catch(() => [] as FileEntry[]),
-      fetchAllFiles(loopId, "workdir").catch(() => [] as FileEntry[]),
-      fetchAllFiles(loopId, "context").catch(() => [] as FileEntry[]),
-    ]).then(([wd, ctx, allWd, allCtx]) => {
-      setRoots([...wd, ...ctx])
-      setAllFiles([...allWd, ...allCtx])
+      listFilesTree(loopId, "workdir").catch(() => [] as FileEntry[]),
+    ]).then(([wd, tree]) => {
+      setRoots(wd)
+      // tree already includes the shallow entries plus all descendants
+      setAllFiles(tree)
       setLoading(false)
     })
   }, [loopId])

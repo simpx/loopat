@@ -435,6 +435,13 @@ export async function listFiles(loopId: string, path = ""): Promise<FileEntry[]>
   return (j.entries ?? []) as FileEntry[]
 }
 
+/** Recursively list all files under a path in one call. */
+export async function listFilesTree(loopId: string, path = ""): Promise<FileEntry[]> {
+  const r = await apiFetch(`/api/loops/${loopId}/files/tree?path=${encodeURIComponent(path)}`)
+  const j = await r.json()
+  return (j.entries ?? []) as FileEntry[]
+}
+
 export async function readFile(loopId: string, path: string): Promise<{ content: string; truncated: boolean; size: number } | null> {
   const r = await apiFetch(`/api/loops/${loopId}/file?path=${encodeURIComponent(path)}`)
   if (!r.ok) return null

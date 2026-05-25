@@ -111,3 +111,63 @@ export async function createWorkdirFolder(loopId: string, relPath: string): Prom
     return false
   }
 }
+
+const MAX_RECURSIVE_ENTRIES = 5000
+const MAX_RECURSIVE_DEPTH = 20
+
+/**
+ * Recursively list all files and directories under a root path within a loop.
+ * Returns a flat array sorted dirs-first then alpha. One HTTP call replaces
+ * the frontend's recursive fetchAllFiles waterfall.
+ */
+export async function listDirRecursive(
+  loopId: string,
+  relPath: string,
+): Promise<FileEntry[]> {
+  const root = loopDir(loopId)
+  const abs = safeJoin(root, relPath)
+  if (!abs) return []
+
+  const result: FileEntry[] = []
+  const skip = new Set(SKIP_DIRS)
+  skip.add(".git").add(".DS_Store")
+
+  async function walk(absPath: string, prefix: string, depth: number) {
+    if (result.length >= MAX_RECURSIVE_ENTRIES) return
+    if (depth > MAX_RECURSIVE_DEPTH) return
+
+    let names: string[]
+    try {
+      names = await readdir(absPath)
+    } catch {
+      return
+    }
+
+    const entries: Array<{ name: string; isDir: boolean }> = []
+    for (const name of names) {
+      if (skip.has(name)) continue
+      try {
+        const s = await stat(join(absPath, name))
+        entries.push({ name, isDir: s.isDirectory() })
+      } catch {
+        continue
+      }
+    }
+    entries.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+
+    for (const { name, isDir } of entries) {
+      if (result.length >= MAX_RECURSIVE_ENTRIES) break
+      const childRel = prefix ? `${prefix}/${name}` : name
+      result.push({ name, path: childRel, type: isDir ? "dir" : "file" })
+      if (isDir) {
+        await walk(join(absPath, name), childRel, depth + 1)
+      }
+    }
+  }
+
+  await walk(abs, relPath, 0)
+  return result
+}
