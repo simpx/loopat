@@ -888,6 +888,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
           return
         }
 
+        if (m?.type === "meta_updated" && m.meta) {
+          // Currently fires from server-side auto-name. Forward into a
+          // window event so workspace state can patch its loops array.
+          // Loose coupling: per-loop runtime doesn't know workspace context.
+          window.dispatchEvent(new CustomEvent("loopat:meta-updated", {
+            detail: { id: loopId, meta: m.meta },
+          }))
+          return
+        }
+
         if (m?.type === "permission_mode" && typeof m.mode === "string") {
           const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
           if (validModes.includes(m.mode)) {
