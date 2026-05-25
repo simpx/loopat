@@ -51,16 +51,36 @@ async function buildRuntimeBlock(loop: LoopMeta): Promise<string> {
     detectTrunkBranch(workspaceNotesDir()),
     detectTrunkBranch(workspaceKnowledgeDir()),
   ])
-  return `## Runtime context (this loop)
-
-- title: ${loop.title}
-- id: ${loop.id}
-- driver: ${effectiveDriver(loop)}
-- workdir: /loopat/loop/${loop.id}/workdir
-- repo: ${repoLine}
-- context worktrees: notes on branch \`loop/${loop.id}\` (trunk \`${notesTrunk}\`), knowledge on branch \`loop/${loop.id}\` (trunk \`${knowledgeTrunk}\`)
-- created: ${loop.createdAt}
-`.trim()
+  const lines = [
+    `## Runtime context (this loop)`,
+    ``,
+    `- title: ${loop.title}`,
+    `- id: ${loop.id}`,
+    `- driver: ${effectiveDriver(loop)}`,
+    `- workdir: /loopat/loop/${loop.id}/workdir`,
+    `- repo: ${repoLine}`,
+    `- context worktrees: notes on branch \`loop/${loop.id}\` (trunk \`${notesTrunk}\`), knowledge on branch \`loop/${loop.id}\` (trunk \`${knowledgeTrunk}\`)`,
+    `- created: ${loop.createdAt}`,
+  ]
+  if (loop.config?.goal) {
+    const status = (loop.config as any).goalStatus === "completed" ? "completed" : "active"
+    const statusNote = status === "completed"
+      ? `(marked complete)`
+      : `(active — work persistently; when done, tell the user so they can mark it complete)`
+    lines.push(``)
+    lines.push(`## Goal ${statusNote}`)
+    lines.push(``)
+    lines.push(loop.config.goal)
+    lines.push(``)
+    if (status === "active") {
+      lines.push(`This is your top priority. Every action you take should move this goal forward.`)
+      lines.push(`Break it into concrete steps, execute them, and verify the results.`)
+      lines.push(`When you believe the goal is fully accomplished, explicitly tell the user what you did and ask them to confirm completion.`)
+    } else {
+      lines.push(`This goal has been marked complete. The user may set a new goal with /goal.`)
+    }
+  }
+  return lines.join("\n").trim()
 }
 
 export async function buildLoopatAppend(loop: LoopMeta): Promise<string> {

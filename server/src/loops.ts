@@ -124,6 +124,10 @@ export type LoopMeta = {
      * driver of this loop. Don't ship a UI that lets non-admins flip it.
      */
     mount_all_loops?: boolean
+    /** Session-scoped goal set via /goal. Displayed in UI and injected into the system prompt. */
+    goal?: string
+    goalSetAt?: string
+    goalStatus?: "active" | "completed"
   }
   /**
    * Archive = "hide + read-only". Hidden from default list, all writes

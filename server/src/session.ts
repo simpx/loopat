@@ -1,4 +1,4 @@
-import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode } from "@anthropic-ai/claude-agent-sdk"
+import { query, type Query, type SDKMessage, type SDKUserMessage, type PermissionMode as SdkPermissionMode, type StopHookInput } from "@anthropic-ai/claude-agent-sdk"
 import type { WSContext } from "hono/ws"
 import { appendFile, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises"
 import { createWriteStream, mkdirSync, existsSync } from "node:fs"
@@ -214,6 +214,11 @@ class LoopSession {
   private pendingPermissions = new Map<string, PermissionPending>()
   private providerOverride: string | null = null
   private currentPermissionMode: SdkPermissionMode = "bypassPermissions"
+  private currentGoal: string | null = null
+  private goalSetAt: string | null = null
+  private goalStatus: "active" | "completed" | null = null
+  /** Set of CC task_ids spawned while this goal was active. Used to gauge progress. */
+  private goalTaskIds = new Set<string>()
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private consuming = false
   private generating = false
@@ -273,6 +278,44 @@ class LoopSession {
     this.providerOverride = name
     this.restartOnNextMessage()
     return true
+  }
+
+  /** Set the active goal. Broadcasts to all subscribers and restarts the
+   *  query so the next system prompt includes the goal. Pass null to clear. */
+  setGoal(goal: string | null, setAt?: string, status?: "active" | "completed") {
+    this.currentGoal = goal
+    this.goalSetAt = setAt ?? (goal ? new Date().toISOString() : null)
+    this.goalStatus = goal ? (status ?? "active") : null
+    if (goal) {
+      this.goalTaskIds = new Set()
+    }
+    this.broadcast({
+      type: "goal",
+      goal,
+      setAt: this.goalSetAt,
+      status: this.goalStatus,
+    })
+    if (this.q) {
+      // Re-compose: the next ensureStarted picks up the goal via buildLoopatAppend.
+      this.restartOnNextMessage()
+    }
+  }
+
+  /** Mark the current goal as completed. Called by the user or by detecting
+   *  an AI self-report. */
+  completeGoal() {
+    if (!this.currentGoal || this.goalStatus !== "active") return
+    this.goalStatus = "completed"
+    this.broadcast({
+      type: "goal",
+      goal: this.currentGoal,
+      setAt: this.goalSetAt,
+      status: "completed",
+    })
+  }
+
+  getGoal(): string | null {
+    return this.currentGoal
   }
 
   /**
@@ -555,6 +598,29 @@ class LoopSession {
         // agents/skills so users can drop per-checkout overrides without
         // committing them.
         settingSources: ["user", "project", "local"],
+        // Stop hook: when an active goal exists, prevent the session from
+        // ending if there is unfinished background work. Mirrors CC's /goal
+        // behavior — the hook fires on session-end and blocks the stop while
+        // goal-related tasks are still running.
+        hooks: {
+          Stop: [{
+            hooks: [async (input) => {
+              const si = input as StopHookInput
+              const hasGoal = !!this.currentGoal && this.goalStatus === "active"
+              if (!hasGoal) return { continue: true }
+              const busy = (si.background_tasks?.length ?? 0) > 0
+              if (busy) {
+                return {
+                  continue: false,
+                  stopReason: `goal "${this.currentGoal}" still in progress — background work is running`,
+                }
+              }
+              // Allow stop. The goal stays active; completion is confirmed by
+              // the user or an explicit AI self-report.
+              return { continue: true }
+            }],
+          }],
+        },
         // Inner SDK sandbox disabled — outer bwrap (single layer) wraps the
         // CLI process itself; bash subprocesses inherit the same namespace.
         // No nested sandbox needed.
@@ -949,6 +1015,12 @@ class LoopSession {
           type: "permission_mode",
           mode: this.currentPermissionMode,
         }))
+        // Send current goal so reconnecting clients see it
+        if (this.currentGoal) {
+          try {
+            ws.send(JSON.stringify({ type: "goal", goal: this.currentGoal, setAt: this.goalSetAt }))
+          } catch {}
+        }
       }
     } catch (e: any) {
       console.error(`[loop:${this.id.slice(0, 8)}] attach provider error:`, e?.message ?? e)

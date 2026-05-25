@@ -13,6 +13,8 @@ import {
   FileText,
   Plus,
   FilePlus,
+  Target,
+  CircleCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClaudeStatus from "./ClaudeStatus";
@@ -36,7 +38,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, getWaitingForResponse, suppressSlashRef } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, getWaitingForResponse, suppressSlashRef, goal, setGoal, goalStatus, completeGoal } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
@@ -294,6 +296,42 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
           {fileContextLoading && (
             <span className="text-[10px] text-gray-400">loading...</span>
           )}
+        </div>
+      )}
+
+      {/* Goal banner — shown when a /goal is active */}
+      {goal && (
+        <div className={`mb-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg border group ${
+          goalStatus === "completed"
+            ? "border-green-200 bg-green-50"
+            : "border-amber-200 bg-amber-50"
+        }`}>
+          {goalStatus === "completed" ? (
+            <CircleCheck className="h-3.5 w-3.5 text-green-600 shrink-0" />
+          ) : (
+            <Target className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+          )}
+          <span className={`text-xs font-medium truncate flex-1 min-w-0 ${
+            goalStatus === "completed"
+              ? "text-green-800 line-through"
+              : "text-amber-800"
+          }`}>{goal}</span>
+          {goalStatus === "active" && (
+            <button
+              onClick={() => completeGoal?.()}
+              className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-700 hover:bg-amber-200 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Mark goal as complete"
+            >
+              Done
+            </button>
+          )}
+          <button
+            onClick={() => setGoal?.(null)}
+            className="shrink-0 p-0.5 rounded hover:bg-amber-200/50 opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Clear goal"
+          >
+            <X className={`h-3 w-3 ${goalStatus === "completed" ? "text-green-500" : "text-amber-600"}`} />
+          </button>
         </div>
       )}
 

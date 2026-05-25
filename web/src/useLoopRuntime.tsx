@@ -386,6 +386,14 @@ export interface LoopRuntimeExtra {
   openFile?: (path: string) => void
   /** File blocks sent with the last user message (for UserMessage rendering). */
   lastSentFiles?: { path: string; content: string }[]
+  /** Active goal set via /goal (null = no active goal). */
+  goal: string | null
+  goalSetAt: string | null
+  goalStatus: "active" | "completed" | null
+  /** Set or clear the active goal (null to clear). */
+  setGoal: (goal: string | null) => void
+  /** Mark the current goal as completed. */
+  completeGoal: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -429,6 +437,11 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   getWaitingForResponse: () => true,
   contextTokens: 0,
   cumulativeTokens: 0,
+  goal: null,
+  goalSetAt: null,
+  goalStatus: null,
+  setGoal: () => {},
+  completeGoal: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -539,6 +552,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   const [thinkingOpen, setThinkingOpen] = useState(false)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("bypassPermissions")
   const permissionModeRef = useRef<PermissionMode>("bypassPermissions")
+  const [goal, setGoal] = useState<string | null>(null)
+  const [goalSetAt, setGoalSetAt] = useState<string | null>(null)
+  const [goalStatus, setGoalStatus] = useState<"active" | "completed" | null>(null)
   permissionModeRef.current = permissionMode
   const [queue, setQueue] = useState<string[]>([])
 
@@ -561,6 +577,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     ws.send(JSON.stringify({ type: "set_max_thinking_tokens", tokens }))
     setThinkingBudget(tokens)
+  }, [])
+
+  const setGoalFn = useCallback((goal: string | null) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    if (goal === null) {
+      ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+    } else {
+      ws.send(JSON.stringify({ type: "set_goal", goal: goal.trim() }))
+    }
+  }, [])
+
+  const completeGoal = useCallback(() => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({ type: "complete_goal" }))
   }, [])
 
   const getContextUsage = useCallback(() => {
@@ -727,7 +759,26 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setTurnStartedAt(now)
       try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
     }
-    ws.send(JSON.stringify({ type: "user", text, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+    // /goal: same frontend-side safeguard as in onNew.
+    const goalMatch = text.match(/^\/goal\s+(.+)/)
+    const bareGoal = text.match(/^\/goal$/)
+    if (goalMatch) {
+      const arg = goalMatch[1].trim()
+      if (arg === "done") {
+        ws.send(JSON.stringify({ type: "complete_goal" }))
+        return
+      }
+      if (arg === "clear") {
+        ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+        return
+      }
+      ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
+      ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+    } else if (bareGoal) {
+      ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+    } else {
+      ws.send(JSON.stringify({ type: "user", text, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+    }
   }, [running, TURN_START_KEY])
 
   const toggleShowHistory = useCallback(() => {
@@ -758,7 +809,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile }),
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal }),
     [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
   )
 
@@ -792,6 +843,9 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setContextTokensVersion((v) => v + 1)
       setQuestionsObj({})
       setPermissionPrompt(null)
+      setGoal(null)
+      setGoalSetAt(null)
+      setGoalStatus(null)
       setContextUsage(null)
       setThinkingBudget(null)
       setThinkingOpen(false)
@@ -857,6 +911,19 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
           const validModes = ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
           if (validModes.includes(m.mode)) {
             setPermissionMode(m.mode as PermissionMode)
+          }
+          return
+        }
+
+        if (m?.type === "goal") {
+          if (m.goal && typeof m.goal === "string") {
+            setGoal(m.goal)
+            setGoalSetAt(typeof m.setAt === "string" ? m.setAt : null)
+            setGoalStatus(typeof m.status === "string" && (m.status === "active" || m.status === "completed") ? m.status : "active")
+          } else if (m.goal === null) {
+            setGoal(null)
+            setGoalSetAt(null)
+            setGoalStatus(null)
           }
           return
         }
@@ -1280,7 +1347,31 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     const now = Date.now()
     setTurnStartedAt(now)
     try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
-    ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
+    // /goal: intercept before CC sees it so it doesn't reject an unavailable
+    // slash command. Supported forms:
+    //   /goal <text>     — set a new goal
+    //   /goal done       — mark current goal as complete
+    //   /goal clear      — clear current goal
+    //   /goal            — clear current goal (same as /goal clear)
+    const goalMatch = text.match(/^\/goal\s+(.+)/)
+    const bareGoal = text.match(/^\/goal$/)
+    if (goalMatch) {
+      const arg = goalMatch[1].trim()
+      if (arg === "done") {
+        ws.send(JSON.stringify({ type: "complete_goal" }))
+        return
+      }
+      if (arg === "clear") {
+        ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+        return
+      }
+      ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
+      ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, permissionMode: permissionModeRef.current }))
+    } else if (bareGoal) {
+      ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+    } else {
+      ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
+    }
   }, [TURN_START_KEY])
 
   const safeConvert = useCallback((raw: RawMsg) => {

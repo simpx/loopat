@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import { useComposerRuntime } from "@assistant-ui/react";
-import { Brain, Zap, Sparkles, Route, Eraser, BarChart3, Terminal, Puzzle, Network } from "lucide-react";
+import { Brain, Zap, Sparkles, Route, Eraser, BarChart3, Terminal, Puzzle, Network, Target } from "lucide-react";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 import { McpStatusPanel } from "../McpStatusPanel";
 import type { PermissionMode } from "./PlanModeToggle";
@@ -80,6 +80,15 @@ const COMMANDS: SlashCommand[] = [
     action: "toggle",
     prefix: "",
     toggleKey: "permissionMode",
+  },
+  {
+    id: "goal",
+    name: "Goal",
+    description: "Set goal (/goal <text>), mark done (/goal done), clear (/goal clear)",
+    icon: Target,
+    group: "quick",
+    action: "agent",
+    prefix: "",
   },
   {
     id: "usage",

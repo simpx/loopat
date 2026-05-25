@@ -2785,6 +2785,17 @@ app.get(
             const permissionMode = typeof pm === "string" && validModes.includes(pm)
               ? pm as "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
               : undefined
+            // /goal: extract goal, persist to meta, set on session.
+            // Rewrite the text so CC sees a natural-language message instead
+            // of an unrecognized slash command.
+            const goalMatch = msg.text.match(/^\/goal\s+(.+)/)
+            if (goalMatch) {
+              const goal = goalMatch[1].trim()
+              const setAt = new Date().toISOString()
+              session.setGoal(goal, setAt)
+              patchLoopMeta(id, { config: { ...(meta?.config ?? {}), goal, goalSetAt: setAt, goalStatus: "active" } }).catch(() => {})
+              msg.text = `My goal is: ${goal}`
+            }
             session.sendUserText(msg.text, permissionMode)
           } else if (msg?.type === "clear") {
             session.clear(userId ?? "anon")
@@ -2810,6 +2821,14 @@ app.get(
                 try { ws.send(JSON.stringify({ type: "context_usage", ...usage })) } catch {}
               }
             }).catch(() => {})
+          } else if (msg?.type === "set_goal") {
+            const goal = typeof msg.goal === "string" && msg.goal.trim() ? msg.goal.trim() : null
+            const setAt = goal ? new Date().toISOString() : undefined
+            session.setGoal(goal, setAt)
+            patchLoopMeta(id, { config: { ...(meta?.config ?? {}), goal: goal ?? undefined, goalSetAt: setAt ?? undefined, goalStatus: goal ? "active" : undefined } }).catch(() => {})
+          } else if (msg?.type === "complete_goal") {
+            session.completeGoal()
+            patchLoopMeta(id, { config: { ...(meta?.config ?? {}), goalStatus: "completed" } }).catch(() => {})
           } else if (msg?.type === "provider_select" && typeof msg.provider === "string") {
             const ok = session.setProvider(msg.provider)
             if (ok) {
