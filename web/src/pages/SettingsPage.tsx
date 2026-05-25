@@ -18,17 +18,21 @@ import {
   savePersonalDisk,
   writeVaultEnv,
   testProviderConnection,
+  listGatewayTokens,
+  createGatewayToken,
+  revokeGatewayToken,
   type PersonalConfigDisk,
   type ProviderDisk,
   type RefExistsMap,
   type ModelEntry,
+  type GatewayTokenEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2 } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -43,7 +47,7 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "token-usage" | "gateway-tokens" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
@@ -51,6 +55,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string; ico
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
+  { id: "gateway-tokens",label: "Gateway Tokens",         gated: false, description: "API tokens for external platforms (DingTalk, Slack, etc.) to call loopat under your identity.", icon: KeyRound },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
@@ -299,6 +304,9 @@ export function SettingsPage() {
                   )}
                   {active === "token-usage" && (
                     <TokenUsagePage />
+                  )}
+                  {active === "gateway-tokens" && (
+                    <GatewayTokensSection />
                   )}
                   {active === "admin-users" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><UsersPanel currentUserId={ws.currentUser?.id ?? ""} /></div>
@@ -961,3 +969,187 @@ function ShellSection({ disk, onChanged, disabled }: {
   )
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Gateway Tokens
+// ────────────────────────────────────────────────────────────────────────────
+
+function GatewayTokensSection() {
+  const [tokens, setTokens] = useState<GatewayTokenEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [label, setLabel] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [newToken, setNewToken] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const list = await listGatewayTokens()
+    setTokens(list)
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  const handleCreate = async () => {
+    if (creating) return
+    setCreating(true)
+    const result = await createGatewayToken(label.trim() || "default")
+    setCreating(false)
+    if (result) {
+      setNewToken(result.token)
+      setLabel("")
+      setCopied(false)
+      refresh()
+    }
+  }
+
+  const handleRevoke = async (tokenHint: string) => {
+    await revokeGatewayToken(tokenHint)
+    setDeleteConfirm(null)
+    refresh()
+  }
+
+  const handleCopy = () => {
+    if (!newToken) return
+    navigator.clipboard.writeText(newToken).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* new token reveal banner */}
+      {newToken && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Check size={14} className="text-emerald-600" />
+            <span className="text-[13px] font-medium text-emerald-900">Token created — copy it now, it won't be shown again</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-[12px] bg-white border border-emerald-200 rounded px-3 py-2 font-mono text-gray-800 select-all break-all">
+              {newToken}
+            </code>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="shrink-0 h-8 px-3 rounded text-xs border border-emerald-300 hover:bg-emerald-100 text-emerald-800 flex items-center gap-1.5"
+            >
+              {copied ? <Check size={12} /> : <Copy size={12} />}
+              {copied ? "copied" : "copy"}
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNewToken(null)}
+            className="mt-2 text-[11px] text-emerald-700 hover:text-emerald-900 underline"
+          >
+            dismiss
+          </button>
+        </div>
+      )}
+
+      {/* token list */}
+      <div className="rounded-lg border border-gray-200 bg-white">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h3 className="text-[13px] font-medium text-gray-900">Your tokens</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            External platforms use these tokens to call loopat under your identity — your providers, API keys, and vault.
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="px-4 py-8 text-center text-[12px] text-gray-400 italic">loading…</div>
+        ) : tokens.length === 0 ? (
+          <div className="px-4 py-8 text-center text-[12px] text-gray-400">
+            No gateway tokens yet. Create one below.
+          </div>
+        ) : (
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-gray-100 text-left text-[11px] text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-2 font-medium">Label</th>
+                <th className="px-4 py-2 font-medium">Token</th>
+                <th className="px-4 py-2 font-medium">Created</th>
+                <th className="px-4 py-2 font-medium w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tokens.map((t) => (
+                <tr key={t.tokenHint} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="px-4 py-2.5 text-gray-900">{t.label}</td>
+                  <td className="px-4 py-2.5 font-mono text-[12px] text-gray-500">{t.tokenHint}</td>
+                  <td className="px-4 py-2.5 text-gray-500 text-[12px]">{new Date(t.createdAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-2.5">
+                    {deleteConfirm === t.tokenHint ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleRevoke(t.tokenHint)}
+                          className="text-[11px] text-red-600 hover:text-red-800 font-medium"
+                        >
+                          confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirm(null)}
+                          className="text-[11px] text-gray-400 hover:text-gray-600"
+                        >
+                          cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(t.tokenHint)}
+                        className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        title="revoke token"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* create form */}
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <h3 className="text-[13px] font-medium text-gray-900 mb-2">Create new token</h3>
+        <div className="flex items-center gap-2">
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="label (e.g. dingtalk-bot)"
+            className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-[13px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={creating}
+            className="h-8 px-3 rounded text-xs bg-gray-900 hover:bg-gray-800 text-white flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <Plus size={12} />
+            {creating ? "creating…" : "create token"}
+          </button>
+        </div>
+      </div>
+
+      {/* usage hint */}
+      <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          <strong className="text-gray-700">Usage:</strong> pass the token as{" "}
+          <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">Authorization: Bearer &lt;token&gt;</code>{" "}
+          when calling{" "}
+          <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">POST /api/runtime/v1/turn/stream</code>.
+          The request will run under your identity with your configured providers and API keys.
+        </p>
+      </div>
+    </div>
+  )
+}

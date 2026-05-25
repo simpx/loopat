@@ -13,10 +13,8 @@ services:
       - LOOPAT_HOME=/home/loopat/.loopat
       - HOST=0.0.0.0
       - LOOPAT_SERVE_HOST=0.0.0.0
-      # External Runtime Gateway SSE. Set LOOPAT_GATEWAY_TOKEN in the deploy environment.
-      - LOOPAT_GATEWAY_TOKEN=${LOOPAT_GATEWAY_TOKEN:?set LOOPAT_GATEWAY_TOKEN}
-      - LOOPAT_GATEWAY_USER=${LOOPAT_GATEWAY_USER:-external}
-      - LOOPAT_GATEWAY_MOCK_ENABLED=false
+      # External Runtime Gateway SSE — tokens are managed per-user via
+      # Settings > Gateway Tokens in the loopat UI. No env vars needed.
     restart: unless-stopped
 
 volumes:
