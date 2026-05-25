@@ -808,15 +808,15 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setTurnStartedAt(now)
       try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
     }
-<<<<<<< HEAD
-    const payload: Record<string, unknown> = {
-      type: "user",
-      text,
-      permissionMode: permissionModeRef.current,
+    const sendUser = (payloadText: string) => {
+      const payload: Record<string, unknown> = {
+        type: "user",
+        text: payloadText,
+        permissionMode: permissionModeRef.current,
+      }
+      if (images && images.length > 0) payload.images = images
+      ws.send(JSON.stringify(payload))
     }
-    if (images && images.length > 0) payload.images = images
-    ws.send(JSON.stringify(payload))
-=======
     // /goal: same frontend-side safeguard as in onNew.
     const goalMatch = text.match(/^\/goal\s+(.+)/)
     const bareGoal = text.match(/^\/goal$/)
@@ -831,13 +831,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         return
       }
       ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
-      ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+      sendUser(`My goal is: ${arg}`)
     } else if (bareGoal) {
       ws.send(JSON.stringify({ type: "set_goal", goal: null }))
     } else {
-      ws.send(JSON.stringify({ type: "user", text, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+      sendUser(text)
     }
->>>>>>> upstream/main
   }, [running, TURN_START_KEY])
 
   const toggleShowHistory = useCallback(() => {
@@ -868,13 +867,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
   const extra = useMemo<LoopRuntimeExtra>(
-<<<<<<< HEAD
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, availableAgents, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile }),
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, availableAgents, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal }),
     [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, availableAgents, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
-=======
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
->>>>>>> upstream/main
   )
 
   useEffect(() => {
