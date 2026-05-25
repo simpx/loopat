@@ -9,9 +9,11 @@
  */
 import { Hono, type Context, type MiddlewareHandler } from "hono"
 import { streamSSE } from "hono/streaming"
+import { Scalar } from "@scalar/hono-api-reference"
 import { randomBytes } from "node:crypto"
 import { getRequestUserId } from "./auth"
 import { resolveApiToken, createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
+import { v1OpenApiSpec } from "./api-v1-openapi"
 import {
   createLoop as internalCreateLoop,
   getLoop,
@@ -313,6 +315,18 @@ type Variables = { userId: string }
 
 export function buildApiV1(): Hono<{ Variables: Variables }> {
   const v1 = new Hono<{ Variables: Variables }>()
+
+  // ── Docs ─────────────────────────────────────────────────────────────
+  // Machine-readable spec + interactive reference. No auth needed.
+  v1.get("/openapi.json", (c) => c.json(v1OpenApiSpec as any))
+  v1.get(
+    "/docs",
+    Scalar({
+      url: "/api/v1/openapi.json",
+      pageTitle: "Loopat Loop API v1",
+      theme: "default",
+    }),
+  )
 
   // ── Token management (cookie-only — bot frameworks cannot self-issue) ─
 

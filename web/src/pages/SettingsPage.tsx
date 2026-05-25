@@ -47,7 +47,7 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "token-usage" | "gateway-tokens" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "token-usage" | "api-tokens" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
@@ -55,7 +55,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string; ico
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
-  { id: "gateway-tokens",label: "Gateway Tokens",         gated: false, description: "API tokens for external platforms (DingTalk, Slack, etc.) to call loopat under your identity.", icon: KeyRound },
+  { id: "api-tokens",     label: "API Tokens",            gated: false, description: "Bearer tokens for external programs to drive your loops via the Loop API. See API docs below.", icon: KeyRound },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
@@ -305,8 +305,8 @@ export function SettingsPage() {
                   {active === "token-usage" && (
                     <TokenUsagePage />
                   )}
-                  {active === "gateway-tokens" && (
-                    <GatewayTokensSection />
+                  {active === "api-tokens" && (
+                    <ApiTokensSection />
                   )}
                   {active === "admin-users" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><UsersPanel currentUserId={ws.currentUser?.id ?? ""} /></div>
@@ -973,7 +973,7 @@ function ShellSection({ disk, onChanged, disabled }: {
 // Gateway Tokens
 // ────────────────────────────────────────────────────────────────────────────
 
-function GatewayTokensSection() {
+function ApiTokensSection() {
   const [tokens, setTokens] = useState<ApiTokenEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [label, setLabel] = useState("")
@@ -1050,12 +1050,30 @@ function GatewayTokensSection() {
         </div>
       )}
 
+      {/* docs link */}
+      <div className="rounded-lg border border-gray-200 bg-white px-4 py-3 flex items-center justify-between">
+        <div>
+          <h3 className="text-[13px] font-medium text-gray-900">Loop API documentation</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Interactive reference for the endpoints these tokens authenticate against.
+          </p>
+        </div>
+        <a
+          href="/api/v1/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded text-[12px] border border-gray-300 hover:bg-gray-50 text-gray-700"
+        >
+          Open docs →
+        </a>
+      </div>
+
       {/* token list */}
       <div className="rounded-lg border border-gray-200 bg-white">
         <div className="px-4 py-3 border-b border-gray-100">
           <h3 className="text-[13px] font-medium text-gray-900">Your tokens</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            External platforms use these tokens to call loopat under your identity — your providers, API keys, and vault.
+            External programs use these tokens to call loopat under your identity — your providers, API keys, and vault.
           </p>
         </div>
 
@@ -1063,7 +1081,7 @@ function GatewayTokensSection() {
           <div className="px-4 py-8 text-center text-[12px] text-gray-400 italic">loading…</div>
         ) : tokens.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] text-gray-400">
-            No gateway tokens yet. Create one below.
+            No API tokens yet. Create one below.
           </div>
         ) : (
           <table className="w-full text-[13px]">
