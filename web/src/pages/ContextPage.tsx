@@ -25,6 +25,9 @@ import {
   syncStatus,
   syncPull,
   syncPush,
+  getPersonalStatus,
+  pullPersonalVault,
+  pushPersonalVault,
   type VaultEntry,
   type VaultId,
   type RepoEntry,
@@ -32,6 +35,7 @@ import {
   type Backlink,
   type SyncResource,
   type RepoSyncStatus,
+  type PersonalStatus,
 } from "../api"
 import { useEffect, useState, useCallback, useRef, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
@@ -172,6 +176,74 @@ function SyncWidget({ resource, canPush = true }: { resource: SyncResource; canP
               {busy === "push" ? "pushing…" : "push"}
             </button>
           )}
+          {msg && (
+            <span className={"truncate flex-1 min-w-0 " + (msg.ok ? "text-emerald-700" : "text-red-600")} title={msg.text}>
+              {msg.text}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Sidebar-footer widget for the personal vault. Mirrors SyncWidget's look,
+// but calls /api/personal/{status,pull,push} — the personal vault has its own
+// git-crypt-aware sync flow and isn't exposed under /api/sync/*. Same backend
+// as the Settings → Personal panel, so behavior stays consistent across UIs.
+function PersonalSyncWidget() {
+  const [status, setStatus] = useState<PersonalStatus | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState<"pull" | "push" | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  useEffect(() => {
+    void getPersonalStatus().then((s) => {
+      setStatus(s)
+      setLoaded(true)
+    })
+  }, [])
+
+  const onPull = async () => {
+    setBusy("pull"); setMsg(null)
+    const r = await pullPersonalVault()
+    setBusy(null)
+    if (r.ok) setMsg({ ok: true, text: r.message ?? "pulled" })
+    else if (r.conflicts?.length) setMsg({ ok: false, text: "conflicts — resolve in Settings" })
+    else setMsg({ ok: false, text: r.error ?? "pull failed" })
+  }
+  const onPush = async () => {
+    setBusy("push"); setMsg(null)
+    const r = await pushPersonalVault()
+    setBusy(null)
+    if (r.ok) setMsg({ ok: true, text: r.message ?? "pushed" })
+    else if (r.needsPull) setMsg({ ok: false, text: "needs pull first" })
+    else setMsg({ ok: false, text: r.error ?? "push failed" })
+  }
+
+  if (!loaded) return null
+  const noRemote = !status?.imported || !status?.personalRepo
+
+  return (
+    <div className="px-3 py-1.5 border-t border-gray-200 flex flex-col gap-1 text-[11px]">
+      {noRemote ? (
+        <span className="text-gray-400">no remote</span>
+      ) : (
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onPull}
+            disabled={busy !== null}
+            className="px-1.5 h-5 rounded border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy === "pull" ? "pulling…" : "pull"}
+          </button>
+          <button
+            onClick={onPush}
+            disabled={busy !== null}
+            className="px-1.5 h-5 rounded border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {busy === "push" ? "pushing…" : "push"}
+          </button>
           {msg && (
             <span className={"truncate flex-1 min-w-0 " + (msg.ok ? "text-emerald-700" : "text-red-600")} title={msg.text}>
               {msg.text}
@@ -421,6 +493,7 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
       {(vault === "knowledge" || vault === "notes") && (
         <SyncWidget resource={vault} />
       )}
+      {vault === "personal" && <PersonalSyncWidget />}
     </aside>
   )
 
