@@ -175,30 +175,32 @@ function LoopsList({ currentId }: { currentId: string }) {
                   if (isMobile) setCollapsedPersist(true)
                 }}
                 className={
-                  "flex-1 min-w-0 px-3 py-2 flex items-center gap-2 text-left " +
+                  "flex-1 min-w-0 px-3 py-1.5 flex items-center gap-2 text-left " +
                   (archived ? "opacity-60" : "")
                 }
               >
                 <span className={
-                  "w-1.5 h-1.5 rounded-full shrink-0 " +
+                  "w-1.5 h-1.5 rounded-full shrink-0 mt-0.5 " +
                   (archived ? "bg-gray-400" : isRunning ? "bg-blue-500 animate-pulse" : isDone && !entry?.viewed ? "bg-yellow-500" : isDone ? "bg-emerald-500" : "bg-gray-300")
                 } />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px] text-gray-900 truncate flex items-center gap-1">
+                  <div className="text-[13px] text-gray-900 truncate flex items-center gap-1.5">
                     {archived && <Archive size={10} className="text-gray-400 shrink-0" />}
                     {loop.rfdRequestedAt && (
                       <span className="shrink-0 text-[9px] px-1 rounded bg-amber-100 text-amber-800 font-medium tracking-wide">RFD</span>
                     )}
                     <span className="truncate">{loop.title}</span>
+                    {entry && (
+                      <span className={"shrink-0 text-[10px] font-medium " +
+                        (isRunning ? "text-blue-500" : isDone ? "text-emerald-500" : "text-gray-400")}>
+                        {entry.status}
+                      </span>
+                    )}
                   </div>
-                  <div className="text-[10px] text-gray-500 truncate mt-0.5 h-[15px]">
-                    {entry?.status}
-                  </div>
-                  <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
-                    <span className="text-gray-400 font-mono text-[10px]">‹›</span>
+                  <div className="text-[11px] text-gray-500 truncate flex items-center gap-1 mt-0.5">
                     <span>{loop.driver ?? loop.createdBy}</span>
-                    <span>·</span>
-                    <span className="font-mono">{loop.id.slice(0, 6)}</span>
+                    <span className="text-gray-300">·</span>
+                    <span className="font-mono text-[10px] text-gray-400">{loop.id.slice(0, 6)}</span>
                   </div>
                 </div>
               </button>
