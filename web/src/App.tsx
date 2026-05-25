@@ -92,7 +92,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         if (dismissed.includes(commit)) return
       } catch {}
       setNewVersionCommit(commit)
-      setNewVersionTime(new Date().toLocaleString())
+      setNewVersionTime(new Date(getBuildInfo().time).toLocaleString())
       setShowUpdateBanner(true)
     }
     window.addEventListener("loopat:version-mismatch", handler)

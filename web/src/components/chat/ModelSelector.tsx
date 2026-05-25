@@ -144,7 +144,7 @@ export default function ModelSelector() {
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
+      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
         <div
           className="w-[480px] max-h-[60vh] bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
           onClick={(e) => e.stopPropagation()}

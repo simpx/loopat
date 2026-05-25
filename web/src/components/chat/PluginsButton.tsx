@@ -109,7 +109,7 @@ export default function PluginsButton({ onPick }: { onPick: (slashCommand: strin
   return (
     <>
       <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setOpen(false)} />
-      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
+      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
         <div
           className="w-[560px] max-h-[60vh] bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
           onClick={(e) => e.stopPropagation()}
