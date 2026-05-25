@@ -191,11 +191,9 @@ function LoopsList({ currentId }: { currentId: string }) {
                     )}
                     <span className="truncate">{loop.title}</span>
                   </div>
-                  {entry && (
-                    <div className="text-[10px] text-gray-500 truncate mt-0.5">
-                      {entry.status}
-                    </div>
-                  )}
+                  <div className="text-[10px] text-gray-500 truncate mt-0.5 h-[15px]">
+                    {entry?.status}
+                  </div>
                   <div className="text-[11px] text-gray-500 truncate flex items-center gap-1">
                     <span className="text-gray-400 font-mono text-[10px]">‹›</span>
                     <span>{loop.driver ?? loop.createdBy}</span>
@@ -643,10 +641,8 @@ function LoopHeader({
           </span>
         )}
         {/* Only surface WS state when something's wrong — green-when-fine is noise. */}
-        {!connected && (
-          <span className={"text-[11px] " + (reconnecting ? "text-amber-600" : "text-red-600")}>
-            {reconnecting ? "reconnecting…" : "disconnected"}
-          </span>
+        {!connected && reconnecting && (
+          <span className="text-[11px] text-amber-600">reconnecting…</span>
         )}
         {running && <span className="text-[11px] text-blue-600">running</span>}
         {viewers > 1 && (

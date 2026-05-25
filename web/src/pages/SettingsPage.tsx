@@ -177,7 +177,7 @@ export function SettingsPage() {
             {search.trim()
               ? filteredTabs.map((t) => {
                   const isActive = t.id === active
-                  const locked = t.gated && !statusReady
+                  const locked = t.gated && !loading && !statusReady
                   return (
                     <li key={t.id} className="shrink-0 sm:px-1">
                       <button
@@ -199,7 +199,7 @@ export function SettingsPage() {
                 <>
                   {regularTabs.map((t) => {
                     const isActive = t.id === active
-                    const locked = t.gated && !statusReady
+                    const locked = t.gated && !loading && !statusReady
                     return (
                       <li key={t.id} className="shrink-0 sm:px-1">
                         <button
