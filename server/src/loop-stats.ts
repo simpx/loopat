@@ -125,11 +125,13 @@ async function scanPlugin(pluginDir: string): Promise<{
   let hooks = 0
   let mcpServers: string[] = []
 
-  // Plugin .mcp.json gives mcpServers list
-  const mcpPath = join(pluginDir, ".mcp.json")
-  if (existsSync(mcpPath)) {
+  // Plugin-shipped mcpServers come from the plugin's settings.json mcpServers
+  // field (loopat doesn't read `.mcp.json` — that file format is deprecated
+  // here in favor of a single unified settings.json across all tiers).
+  const settingsPath = join(pluginDir, "settings.json")
+  if (existsSync(settingsPath)) {
     try {
-      const j = JSON.parse(await readFile(mcpPath, "utf8"))
+      const j = JSON.parse(await readFile(settingsPath, "utf8"))
       mcpServers = Object.keys(j?.mcpServers ?? {})
     } catch {}
   }

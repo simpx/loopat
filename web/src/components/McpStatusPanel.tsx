@@ -1,46 +1,35 @@
 /**
- * Shared MCP status display, used by:
- *   - Settings → MCP tab (full panel with Connect / Disconnect)
- *   - /mcp slash command popover (compact view)
+ * MCP servers popover, opened from the /mcp slash command.
  *
- * Shows all MCP servers grouped by tier (Workspace, Personal). Each tier
- * lists its config file path so users know where to add servers, even when
- * the tier is empty.
+ * Single source: the loop's merged settings.json (team + profile + personal
+ * + plugin defaults). Each row shows the `authed` badge (env file exists
+ * for this server's Bearer template) and a "Re-authorize" / "Forget" pair
+ * for OAuth-eligible HTTP/SSE servers. `authed` is existence-only, no
+ * validity check — click Re-authorize if the token is rejected at runtime.
+ *
+ * Settings page no longer surfaces MCP tokens separately: tokens are
+ * indistinguishable from other vault envs (per design).
  */
 import { useCallback, useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
-import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, ExternalLink, RotateCw } from "lucide-react"
+import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, RotateCw } from "lucide-react"
 import {
-  getMcpAuth,
   startMcpAuth,
-  deleteMcpAuth,
   listMcpServers,
+  deleteEnv,
   restartLoopSession,
-  mcpServerEnvVarName,
-  type McpAuthStatus,
-  type McpServerInventory,
+  type McpServerEntry,
 } from "@/api"
 
-type Variant = "settings" | "popover"
-
 export function McpStatusPanel({
-  variant,
-  vault: vaultProp,
   onClose,
   loopId,
 }: {
-  variant: Variant
-  vault?: string
   onClose?: () => void
-  /** Required for the popover variant — enables the "Reload" button that
-   *  restarts the current loop's SDK session so newly-connected MCPs take
-   *  effect without /clear. Ignored in settings variant. */
-  loopId?: string
+  /** Loop the popover is opened from. /mcp is loop-scoped — both the server
+   *  list and any OAuth flow originate here. */
+  loopId: string
 }) {
-  const navigate = useNavigate()
-  const [inventory, setInventory] = useState<McpServerInventory | null>(null)
-  const [status, setStatus] = useState<McpAuthStatus>({})
-  const [vault, setVault] = useState<string>(vaultProp ?? "default")
+  const [servers, setServers] = useState<McpServerEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [busyFor, setBusyFor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -48,11 +37,10 @@ export function McpStatusPanel({
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [inv, st] = await Promise.all([listMcpServers(loopId), getMcpAuth(vault)])
-    setInventory(inv)
-    setStatus(st)
+    const inv = await listMcpServers(loopId)
+    setServers(inv.servers)
     setLoading(false)
-  }, [vault, loopId])
+  }, [loopId])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -60,7 +48,7 @@ export function McpStatusPanel({
     if (busyFor) return
     setBusyFor(serverName)
     setError(null)
-    const r = await startMcpAuth(serverName, vault, loopId)
+    const r = await startMcpAuth(serverName, loopId)
     setBusyFor(null)
     if (r.error || !r.authorizationUrl) {
       setError(r.error ?? "start failed")
@@ -69,22 +57,15 @@ export function McpStatusPanel({
     window.location.href = r.authorizationUrl
   }
 
-  const disconnect = async (serverName: string) => {
+  const forget = async (envName: string) => {
     if (busyFor) return
-    if (variant === "settings" && !confirm(`Disconnect ${serverName}?`)) return
-    setBusyFor(serverName)
-    await deleteMcpAuth(serverName, vault)
+    setBusyFor(envName)
+    await deleteEnv(envName)
     setBusyFor(null)
     refresh()
   }
 
-  const goSettings = () => {
-    onClose?.()
-    navigate(`/settings/mcp`)
-  }
-
   const reloadSession = async () => {
-    if (!loopId) return
     setReloadFlash(null)
     const r = await restartLoopSession(loopId)
     if (r.error) {
@@ -100,238 +81,153 @@ export function McpStatusPanel({
 
   return (
     <div className="text-sm">
-      {/* Header (popover only) */}
-      {variant === "popover" && (
-        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
-          <div className="text-[13px] font-medium text-gray-700">MCP servers</div>
-          <div className="flex items-center gap-1">
-            <button onClick={refresh} className="p-1 text-gray-400 hover:text-gray-700 rounded" title="reload">
-              <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-            </button>
-            <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 rounded" title="close">
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Vault selector (settings only) */}
-      {variant === "settings" && (
-        <div className="mb-3 flex items-center gap-2">
-          <label className="text-[11px] font-medium text-gray-500">Vault:</label>
-          <input
-            type="text"
-            value={vault}
-            onChange={(e) => setVault(e.target.value)}
-            className="px-2 py-1 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 w-32"
-          />
-          <button
-            type="button"
-            onClick={refresh}
-            className="px-2 h-7 text-xs rounded text-gray-700 hover:bg-gray-100 flex items-center gap-1"
-            title="reload"
-          >
-            <RefreshCw size={12} /> refresh
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
+        <div className="text-[13px] font-medium text-gray-700">MCP servers</div>
+        <div className="flex items-center gap-1">
+          <button onClick={refresh} className="p-1 text-gray-400 hover:text-gray-700 rounded" title="reload">
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+          </button>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700 rounded" title="close">
+            <X size={14} />
           </button>
         </div>
-      )}
-
-      {variant === "settings" && (
-        <p className="text-[12px] text-gray-500 leading-relaxed mb-4">
-          loopat performs the OAuth flow on your behalf — sandboxed CC processes
-          receive pre-authenticated transports. Tokens are stored inside this
-          vault (encrypted with git-crypt), so they travel with your personal repo.
-        </p>
-      )}
+      </div>
 
       {error && (
-        <div className={`${variant === "settings" ? "mb-3" : "mx-3 mt-3"} rounded px-3 py-2 text-[12px] bg-red-50 text-red-800 border border-red-200`}>
+        <div className="mx-3 mt-3 rounded px-3 py-2 text-[12px] bg-red-50 text-red-800 border border-red-200">
           {error}
         </div>
       )}
 
       {reloadFlash && (
-        <div className={`${variant === "settings" ? "mb-3" : "mx-3 mt-3"} rounded px-3 py-2 text-[12px] bg-blue-50 text-blue-800 border border-blue-200`}>
+        <div className="mx-3 mt-3 rounded px-3 py-2 text-[12px] bg-blue-50 text-blue-800 border border-blue-200">
           {reloadFlash}
         </div>
       )}
 
-      {loading && !inventory ? (
-        <div className={`${variant === "settings" ? "" : "px-3 py-4"} text-[12px] text-gray-400`}>loading…</div>
-      ) : (
-        <div className={variant === "popover" ? "max-h-[60vh] overflow-y-auto" : ""}>
-          {inventory?.tiers.map((tier) => (
-            <div key={tier.id} className={variant === "popover" ? "py-2" : "mb-5"}>
-              {/* Tier header */}
-              <div className={`${variant === "popover" ? "px-3 py-1" : "mb-1.5"}`}>
-                <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
-                  {tier.label}
-                </div>
-                <div className="text-[11px] text-gray-400 font-mono mt-0.5 truncate">
-                  {tier.path}
-                </div>
-              </div>
-
-              {/* Empty state */}
-              {tier.servers.length === 0 ? (
-                <div className={`${variant === "popover" ? "px-3 py-1.5" : "py-2"} text-[12px] text-gray-400 italic`}>
-                  {tier.id === "plugin" ? (
-                    <>No plugin-provided MCP servers (none of the installed plugins carry <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">.mcp.json</code>).</>
-                  ) : (
-                    <>No servers yet. Add to <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">{tier.path}</code>.</>
-                  )}
-                </div>
-              ) : (
-                <ServerRows
-                  tier={tier.id}
-                  servers={tier.servers}
-                  status={status}
-                  variant={variant}
-                  busyFor={busyFor}
-                  onConnect={connect}
-                  onDisconnect={disconnect}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Popover footer */}
-      {variant === "popover" && (
-        <div className="border-t border-gray-200 px-3 py-2 flex items-center justify-between text-[11px]">
-          <span className="text-gray-400">vault: {vault}</span>
-          <div className="flex items-center gap-3">
-            {loopId && (
-              <button
-                onClick={reloadSession}
-                className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
-                title="Restart the SDK session so newly-connected MCPs take effect. Conversation history is preserved."
-              >
-                <RotateCw size={10} /> Reload session
-              </button>
-            )}
-            <button onClick={goSettings} className="text-gray-600 hover:text-gray-900 flex items-center gap-1">
-              Settings → MCP <ExternalLink size={10} />
-            </button>
+      <div className="max-h-[60vh] overflow-y-auto">
+        {loading && servers.length === 0 ? (
+          <div className="px-3 py-4 text-[12px] text-gray-400">loading…</div>
+        ) : servers.length === 0 ? (
+          <div className="px-3 py-4 text-[12px] text-gray-400 italic">
+            No MCP servers in this loop's merged settings.json. Add servers to
+            team/personal/profile <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">settings.json</code>'s
+            <code className="bg-gray-100 px-1 rounded font-mono text-[11px]">mcpServers</code>.
           </div>
-        </div>
-      )}
+        ) : (
+          servers.map((s) => (
+            <ServerRow
+              key={s.name}
+              server={s}
+              busy={busyFor === s.name || (s.authTokenEnv !== null && busyFor === s.authTokenEnv)}
+              onConnect={() => connect(s.name)}
+              onForget={s.authTokenEnv ? () => forget(s.authTokenEnv!) : undefined}
+            />
+          ))
+        )}
+      </div>
+
+      <div className="border-t border-gray-200 px-3 py-2 flex items-center justify-end text-[11px]">
+        <button
+          onClick={reloadSession}
+          className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
+          title="Restart the SDK session so newly-connected MCPs take effect. Conversation history is preserved."
+        >
+          <RotateCw size={10} /> Reload session
+        </button>
+      </div>
     </div>
   )
 }
 
-function ServerRows({
-  tier,
-  servers,
-  status,
-  variant,
-  busyFor,
+function ServerRow({
+  server,
+  busy,
   onConnect,
-  onDisconnect,
+  onForget,
 }: {
-  tier: "team" | "plugin" | "personal"
-  servers: import("@/api").McpServerEntry[]
-  status: McpAuthStatus
-  variant: Variant
-  busyFor: string | null
-  onConnect: (n: string) => void
-  onDisconnect: (n: string) => void
+  server: McpServerEntry
+  busy: boolean
+  onConnect: () => void
+  onForget?: () => void
 }) {
-  return (
-    <div className={variant === "settings" ? "border border-gray-200 rounded overflow-hidden" : ""}>
-      {servers.map((s, i) => {
-        // Plugin tier can have duplicate names (e.g. Slack from multiple
-        // plugins); composite key keeps each row distinct.
-        const rowKey = tier === "plugin" ? `${s.pluginSource ?? ""}::${s.name}` : s.name
-        // status is keyed by env var name (MCP_<NAME>_TOKEN); derive the key
-        // from the server name to look up.
-        const st = status[mcpServerEnvVarName(s.name)]
-        const isConnected = !!st?.connected
-        const isHttp = s.type === "http" || s.type === "sse"
-        const needsAuth = isHttp && !isConnected
-        const busy = busyFor === s.name
+  const isHttp = server.type === "http" || server.type === "sse"
+  // Connect is offered only when OAuth via DCR is feasible AND we know which
+  // env to write. Servers without a Bearer template don't get a button.
+  const connectable = isHttp && server.oauthSupport === "dcr" && !!server.authTokenEnv
 
-        return (
-          <div
-            key={rowKey}
-            className={
-              variant === "settings"
-                ? `flex items-center gap-3 px-3 py-2 ${i > 0 ? "border-t border-gray-100" : ""}`
-                : "flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50"
-            }
+  return (
+    <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50">
+      <span className="text-[14px] text-gray-300 leading-none">
+        {server.authed ? "●" : connectable ? "○" : "·"}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="font-medium text-gray-700 text-[13px]">{server.name}</span>
+          <span className="text-[10px] text-gray-400 uppercase">{server.type}</span>
+        </div>
+        {server.url && (
+          <div className="text-[11px] text-gray-400 font-mono truncate">{server.url}</div>
+        )}
+      </div>
+      <div className="shrink-0 flex items-center gap-1">
+        {server.authed && (
+          <span className="text-[11px] text-green-700 inline-flex items-center gap-1">
+            <Check size={11} /> authed
+          </span>
+        )}
+        {connectable && (
+          <button
+            onClick={onConnect}
+            disabled={busy}
+            className={`inline-flex items-center gap-1 text-[11px] px-2 h-6 rounded ${
+              server.authed
+                ? "text-gray-600 hover:bg-gray-100 border border-gray-200"
+                : "text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+            } disabled:opacity-50`}
+            title={server.authed ? "Re-run OAuth and overwrite the existing token" : "Run OAuth to obtain a token"}
           >
-            <span className="text-[14px] text-gray-300 leading-none">
-              {isConnected ? "●" : needsAuth ? "○" : "·"}
+            {server.authed ? <Link2 size={10} /> : <AlertTriangle size={10} />}
+            {busy ? "…" : server.authed ? "re-auth" : "auth"}
+          </button>
+        )}
+        {server.authed && onForget && (
+          <button
+            onClick={onForget}
+            disabled={busy}
+            className="inline-flex items-center gap-1 text-[11px] px-1.5 h-6 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100 disabled:opacity-50"
+            title="Delete the env file backing this server's token"
+          >
+            <Unlink size={10} /> forget
+          </button>
+        )}
+        {!connectable && !server.authed && isHttp && (
+          server.oauthSupport === "manual" ? (
+            <span
+              className="text-[11px] text-gray-500 italic"
+              title="This provider requires admin to register an OAuth app (no DCR). Loopat doesn't support manual client_id setup."
+            >
+              manual setup
             </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2">
-                <span className="font-medium text-gray-700 text-[13px]">{s.name}</span>
-                <span className="text-[10px] text-gray-400 uppercase">{s.type}</span>
-                {tier === "personal" && s.shadowsWorkspace && (
-                  <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded" title="shadows a same-named workspace entry">
-                    shadows ws
-                  </span>
-                )}
-                {tier === "plugin" && s.pluginSource && (
-                  <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1 rounded" title={`from plugin ${s.pluginSource}`}>
-                    {s.pluginSource.split("@")[0]}
-                  </span>
-                )}
-              </div>
-              {s.url && (
-                <div className="text-[11px] text-gray-400 font-mono truncate">{s.url}</div>
-              )}
-            </div>
-            <div className="shrink-0">
-              {isConnected ? (
-                <span className="text-[11px] text-green-700 inline-flex items-center gap-1">
-                  <Check size={11} /> connected
-                  {variant === "settings" && (
-                    <button
-                      onClick={() => onDisconnect(s.name)}
-                      disabled={busy}
-                      className="ml-2 px-1.5 h-6 text-[11px] rounded text-gray-500 hover:text-gray-900 hover:bg-gray-100 inline-flex items-center gap-1 disabled:opacity-50"
-                    >
-                      <Unlink size={10} />
-                    </button>
-                  )}
-                </span>
-              ) : !isHttp ? (
-                <span className="text-[11px] text-gray-400">stdio</span>
-              ) : s.oauthSupport === "manual" ? (
-                <span
-                  className="text-[11px] text-gray-500 italic"
-                  title="This provider requires admin to register an OAuth app (no DCR). Loopat doesn't support manual client_id setup; use local Claude Code for these MCPs."
-                >
-                  external setup required
-                </span>
-              ) : s.oauthSupport === "none" ? (
-                <span className="text-[11px] text-gray-400" title="No OAuth metadata — server is public or uses non-OAuth auth (e.g. API key in plugin config).">
-                  no oauth
-                </span>
-              ) : s.oauthSupport === "unreachable" ? (
-                <span className="text-[11px] text-red-500" title="Probe failed — server unreachable or returned malformed metadata.">
-                  unreachable
-                </span>
-              ) : (
-                <button
-                  onClick={() => onConnect(s.name)}
-                  disabled={busy}
-                  className={`inline-flex items-center gap-1 text-[11px] ${
-                    variant === "settings"
-                      ? "px-2.5 h-7 rounded bg-gray-900 text-white hover:bg-gray-700"
-                      : "px-2 h-6 rounded text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
-                  } disabled:opacity-50`}
-                >
-                  <AlertTriangle size={10} />
-                  {busy ? "connecting…" : "needs auth"}
-                </button>
-              )}
-            </div>
-          </div>
-        )
-      })}
+          ) : server.oauthSupport === "none" ? (
+            <span className="text-[11px] text-gray-400" title="No OAuth metadata — server is public or uses non-OAuth auth (e.g. API key).">
+              no oauth
+            </span>
+          ) : server.oauthSupport === "unreachable" ? (
+            <span className="text-[11px] text-red-500" title="Probe failed — server unreachable or returned malformed metadata.">
+              unreachable
+            </span>
+          ) : server.authTokenEnv === null ? (
+            <span
+              className="text-[11px] text-gray-400 italic"
+              title="No Bearer ${VAR} template in Authorization header — loopat can't determine which env to write."
+            >
+              no bearer template
+            </span>
+          ) : null
+        )}
+        {!isHttp && <span className="text-[11px] text-gray-400">stdio</span>}
+      </div>
     </div>
   )
 }

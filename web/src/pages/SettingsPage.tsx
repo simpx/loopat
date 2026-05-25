@@ -24,16 +24,14 @@ import {
   type ModelEntry,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
-import { McpStatusPanel } from "../components/McpStatusPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Cable, Layers, BarChart3, Users, Globe, Share2 } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { useSearchParams } from "react-router-dom"
 
 const inputClass = "w-full px-2.5 py-1.5 border border-gray-300 rounded text-[13px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors disabled:bg-gray-50 disabled:text-gray-400"
 const inputClassSm = "w-full px-2 py-1 border border-gray-300 rounded text-[11px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors"
@@ -45,13 +43,12 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "mcp" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "token-usage" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
   { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default.",     icon: Cpu },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
-  { id: "mcp",           label: "MCP",                    gated: true,  description: "OAuth tokens for MCP servers. Per-vault.",         icon: Cable },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
@@ -296,9 +293,6 @@ export function SettingsPage() {
                   )}
                   {active === "shell" && (
                     <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
-                  )}
-                  {active === "mcp" && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-5"><McpSection disabled={isGatedAndLocked} /></div>
                   )}
                   {active === "claude-config" && (
                     <ClaudeConfigPanel disabled={isGatedAndLocked} />
@@ -967,54 +961,3 @@ function ShellSection({ disk, onChanged, disabled }: {
   )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// MCP section — thin wrapper over the shared McpStatusPanel. Adds the
-// "auth completed" flash for the OAuth redirect-back, since this is the
-// landing page after a successful /api/mcp-auth/callback round-trip.
-// ────────────────────────────────────────────────────────────────────────────
-
-function McpSection({ disabled }: { disabled: boolean }) {
-  const [searchParams, setSearchParams] = useSearchParams()
-  const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null)
-
-  useEffect(() => {
-    const s = searchParams.get("status")
-    if (!s) return
-    if (s === "ok") {
-      const server = searchParams.get("server") ?? ""
-      setFlash({ kind: "ok", text: `Connected to ${server} ✓` })
-    } else if (s === "error") {
-      const reason = searchParams.get("reason") ?? "unknown error"
-      setFlash({ kind: "error", text: `Auth failed: ${reason}` })
-    }
-    const next = new URLSearchParams(searchParams)
-    next.delete("status"); next.delete("server"); next.delete("reason")
-    setSearchParams(next, { replace: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  return (
-    <div className="relative">
-      {disabled && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-white/60 backdrop-blur-[1px] rounded-lg">
-          <Lock size={24} className="text-gray-300" />
-          <span className="text-[13px] text-gray-500 font-medium">Set up your personal repo first</span>
-        </div>
-      )}
-      <div className={disabled ? "opacity-30" : ""}>
-      {flash && (
-        <div
-          className={`mb-3 rounded px-3 py-2 text-[12px] ${
-            flash.kind === "ok"
-              ? "bg-green-50 text-green-800 border border-green-200"
-              : "bg-red-50 text-red-800 border border-red-200"
-          }`}
-        >
-          {flash.text}
-        </div>
-      )}
-      <McpStatusPanel variant="settings" />
-    </div>
-    </div>
-  )
-}

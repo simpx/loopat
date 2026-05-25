@@ -28,33 +28,53 @@ await writeFile(join(HOME, "config.json"), JSON.stringify({
 }))
 
 const { app } = await import("../src/index")
+const { composeFromPlan } = await import("../src/compose")
 const {
   personalDir,
   personalLoopatDir,
   personalLoopatConfigPath,
   personalVaultDir,
   personalVaultEnvPath,
+  personalClaudeDir,
+  personalSettingsPath,
   workspaceTeamSettingsPath,
   workspaceTeamClaudeDir,
+  loopWorkdir,
+  loopClaudeDir,
+  loopContextKnowledge,
+  loopContextNotes,
 } = await import("../src/paths")
 const { createUser, createSession, COOKIE_NAME } = await import("../src/auth")
 
 const USER = "tester"
 let SESSION_COOKIE = ""
 
-// Build an authed session cookie so requireAuth-protected endpoints pass.
 async function authedHeaders(): Promise<Record<string, string>> {
   return { Cookie: `${COOKIE_NAME}=${SESSION_COOKIE}` }
 }
 
+async function setupLoop(loopId: string): Promise<void> {
+  await mkdir(loopWorkdir(loopId), { recursive: true })
+  await mkdir(loopClaudeDir(loopId), { recursive: true })
+  await mkdir(loopContextKnowledge(loopId), { recursive: true })
+  await mkdir(loopContextNotes(loopId), { recursive: true })
+  await composeFromPlan(loopId, {
+    user: USER,
+    claudeSources: [
+      { source: "team", dir: workspaceTeamClaudeDir() },
+      { source: `personal:${USER}`, dir: personalDir(USER) },
+    ],
+  } as any)
+}
+
 async function setupUserAndTeam() {
-  // Create user + session (first user → admin/active automatically)
   try { await createUser({ id: USER, password: "pw" }) } catch {}
   SESSION_COOKIE = createSession(USER)
-  // Personal scaffolding
   await mkdir(personalLoopatDir(USER), { recursive: true })
   await mkdir(personalVaultDir(USER, "default"), { recursive: true })
   await mkdir(join(personalVaultDir(USER, "default"), "envs"), { recursive: true })
+  await mkdir(personalClaudeDir(USER), { recursive: true })
+  await writeFile(personalSettingsPath(USER), JSON.stringify({ mcpServers: {} }))
   await writeFile(personalLoopatConfigPath(USER), JSON.stringify({
     providers: {
       default: "anthropic",
@@ -65,16 +85,20 @@ async function setupUserAndTeam() {
       },
     },
   }))
-  // Team-tier mcpServers (knowledge/.loopat/.claude/settings.json)
   await mkdir(workspaceTeamClaudeDir(), { recursive: true })
   await writeFile(workspaceTeamSettingsPath(), JSON.stringify({
     mcpServers: {
       github: {
         type: "http",
         url: "https://api.githubcopilot.com/mcp",
-        headers: { Authorization: "Bearer ${MCP_GITHUB_TOKEN}" },
+        headers: { Authorization: "Bearer ${GITHUB_TOKEN}" },
       },
       "stdio-server": { type: "stdio", command: "echo", args: ["hi"] },
+      "no-bearer": {
+        type: "http",
+        url: "https://api.example/mcp",
+        headers: { "X-Api-Key": "${EXAMPLE_KEY}" },
+      },
     },
   }))
 }
@@ -82,94 +106,174 @@ async function setupUserAndTeam() {
 beforeAll(setupUserAndTeam)
 afterAll(async () => { await rm(HOME, { recursive: true, force: true }) })
 
-// Probe network calls would slow tests down; the team server's URL points to
-// a real host. We don't assert on oauthSupport — the endpoint may produce
-// "unreachable" depending on network. The shape and tier presence are what
-// we care about.
+// Note: we don't assert on oauthSupport — that field depends on network
+// reachability of the server's .well-known endpoints. Shape and authed-flag
+// derivation are what we care about.
 
-describe("GET /api/mcp-servers — tier shape", () => {
-  test("returns team / plugin / personal tiers in that order", async () => {
+describe("GET /api/mcp-servers — flat list from merged settings.json", () => {
+  test("without loopId, returns empty list", async () => {
     const r = await app.request("/api/mcp-servers", { headers: await authedHeaders() })
     expect(r.status).toBe(200)
     const j = await r.json() as any
-    expect(j.tiers).toBeArray()
-    const ids = j.tiers.map((t: any) => t.id)
-    expect(ids).toEqual(["team", "plugin", "personal"])
+    expect(j.servers).toEqual([])
   })
 
-  test("team tier surfaces workspace-defined servers", async () => {
-    const r = await app.request("/api/mcp-servers", { headers: await authedHeaders() })
+  test("with loopId, returns servers from the loop's composed settings.json", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000001"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
     const j = await r.json() as any
-    const team = j.tiers.find((t: any) => t.id === "team")
-    const names = team.servers.map((s: any) => s.name).sort()
-    expect(names).toEqual(["github", "stdio-server"])
-    const gh = team.servers.find((s: any) => s.name === "github")
-    expect(gh.type).toBe("http")
-    expect(gh.url).toBe("https://api.githubcopilot.com/mcp")
+    const names = j.servers.map((s: any) => s.name).sort()
+    expect(names).toEqual(["github", "no-bearer", "stdio-server"])
   })
 
-  test("personal tier carries shadowsWorkspace flag for same-named entries", async () => {
-    // Add a personal mcpServer with same name as a team one.
-    const { personalSettingsPath, personalClaudeDir } = await import("../src/paths")
-    await mkdir(personalClaudeDir(USER), { recursive: true })
-    await writeFile(personalSettingsPath(USER), JSON.stringify({
-      mcpServers: {
-        github: { type: "http", url: "https://my.personal.gh/mcp" },
-        "personal-only": { type: "stdio", command: "x" },
-      },
-    }))
-    const r = await app.request("/api/mcp-servers", { headers: await authedHeaders() })
+  test("Bearer-templated server exposes authTokenEnv", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000002"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
     const j = await r.json() as any
-    const personal = j.tiers.find((t: any) => t.id === "personal")
-    const gh = personal.servers.find((s: any) => s.name === "github")
-    const own = personal.servers.find((s: any) => s.name === "personal-only")
-    expect(gh.shadowsWorkspace).toBe(true)
-    expect(own.shadowsWorkspace).toBe(false)
+    const gh = j.servers.find((s: any) => s.name === "github")
+    expect(gh.authTokenEnv).toBe("GITHUB_TOKEN")
+  })
+
+  test("non-Bearer auth → authTokenEnv is null", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000003"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
+    const j = await r.json() as any
+    const nb = j.servers.find((s: any) => s.name === "no-bearer")
+    expect(nb.authTokenEnv).toBeNull()
+  })
+
+  test("stdio server → authTokenEnv is null", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000004"
+    await setupLoop(loopId)
+    const r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
+    const j = await r.json() as any
+    const stdio = j.servers.find((s: any) => s.name === "stdio-server")
+    expect(stdio.authTokenEnv).toBeNull()
+  })
+
+  test("authed flag reflects env file existence", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000005"
+    await setupLoop(loopId)
+    // Without env file: authed=false
+    let r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
+    let j = await r.json() as any
+    expect(j.servers.find((s: any) => s.name === "github").authed).toBe(false)
+    // Write the env file → authed=true
+    await writeFile(personalVaultEnvPath(USER, "default", "GITHUB_TOKEN"), "ghu_xxx")
+    r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
+    j = await r.json() as any
+    expect(j.servers.find((s: any) => s.name === "github").authed).toBe(true)
+    // Empty env file → authed=false (treated as unset)
+    await writeFile(personalVaultEnvPath(USER, "default", "GITHUB_TOKEN"), "")
+    r = await app.request(`/api/mcp-servers?loopId=${loopId}`, { headers: await authedHeaders() })
+    j = await r.json() as any
+    expect(j.servers.find((s: any) => s.name === "github").authed).toBe(false)
   })
 })
 
-describe("GET /api/mcp-auth — connection summary", () => {
-  test("returns map keyed by MCP_<NAME>_TOKEN with connected boolean", async () => {
-    // Seed two MCP_*_TOKEN env files, one empty, one with value.
-    await writeFile(personalVaultEnvPath(USER, "default", "MCP_GITHUB_TOKEN"), "ghu_secret_xxx")
-    await writeFile(personalVaultEnvPath(USER, "default", "MCP_LINEAR_TOKEN"), "")
-    const r = await app.request("/api/mcp-auth?vault=default", { headers: await authedHeaders() })
-    expect(r.status).toBe(200)
-    const j = await r.json() as any
-    expect(j.MCP_GITHUB_TOKEN).toEqual({ connected: true, varName: "MCP_GITHUB_TOKEN" })
-    expect(j.MCP_LINEAR_TOKEN).toEqual({ connected: false, varName: "MCP_LINEAR_TOKEN" })
-  })
-
-  test("only MCP_*_TOKEN env files appear in summary", async () => {
-    await writeFile(personalVaultEnvPath(USER, "default", "RANDOM_VAR"), "v")
-    const r = await app.request("/api/mcp-auth?vault=default", { headers: await authedHeaders() })
-    const j = await r.json() as any
-    expect(j.RANDOM_VAR).toBeUndefined()
-  })
-
-  test("rejects invalid vault name", async () => {
-    const r = await app.request("/api/mcp-auth?vault=../escape", { headers: await authedHeaders() })
+describe("POST /api/mcp-auth/start — input validation", () => {
+  test("rejects missing serverName", async () => {
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ loopId: "any" }),
+    })
     expect(r.status).toBe(400)
   })
+
+  test("rejects missing loopId", async () => {
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ serverName: "github" }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  test("rejects server with shell metas in name", async () => {
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ serverName: "foo;rm -rf", loopId: "any" }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  test("rejects server not present in merged settings", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000020"
+    await setupLoop(loopId)
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ serverName: "ghost", loopId }),
+    })
+    expect(r.status).toBe(400)
+    const j = await r.json() as any
+    expect(j.error).toMatch(/not found in loop's merged settings/)
+  })
+
+  test("rejects stdio server (OAuth only applies to http/sse)", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000021"
+    await setupLoop(loopId)
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ serverName: "stdio-server", loopId }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  test("rejects server without Bearer template", async () => {
+    const loopId = "api-mcp-0000-0000-0000-000000000022"
+    await setupLoop(loopId)
+    const r = await app.request("/api/mcp-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(await authedHeaders()) },
+      body: JSON.stringify({ serverName: "no-bearer", loopId }),
+    })
+    expect(r.status).toBe(400)
+    const j = await r.json() as any
+    expect(j.error).toMatch(/Authorization: Bearer/)
+  })
 })
 
-describe("DELETE /api/mcp-auth/:server — removes vault env", () => {
-  test("deletes the matching MCP_<NAME>_TOKEN file", async () => {
-    await writeFile(personalVaultEnvPath(USER, "default", "MCP_GITHUB_TOKEN"), "ghu_will_die")
-    const r = await app.request("/api/mcp-auth/github?vault=default", {
+describe("DELETE /api/envs/:name — removes vault env (= Forget MCP token)", () => {
+  test("deletes the named env file from personal default vault", async () => {
+    await writeFile(personalVaultEnvPath(USER, "default", "GITHUB_TOKEN"), "ghu_will_die")
+    const r = await app.request("/api/envs/GITHUB_TOKEN", {
       method: "DELETE",
       headers: await authedHeaders(),
     })
     expect(r.status).toBe(200)
-    expect(await Bun.file(personalVaultEnvPath(USER, "default", "MCP_GITHUB_TOKEN")).exists()).toBe(false)
+    expect(await Bun.file(personalVaultEnvPath(USER, "default", "GITHUB_TOKEN")).exists()).toBe(false)
   })
 
-  test("rejects invalid server name with shell metas", async () => {
-    // semicolon is not in SERVER_NAME_RE — backend rejects with 400.
-    const r = await app.request("/api/mcp-auth/foo%3Brm?vault=default", {
+  test("succeeds even when env file doesn't exist (idempotent)", async () => {
+    const r = await app.request("/api/envs/NEVER_EXISTED", {
       method: "DELETE",
       headers: await authedHeaders(),
     })
-    expect(r.status).toBe(400)
+    expect(r.status).toBe(200)
+  })
+
+  test("rejects invalid env name (lowercase / leading digit / shell metas)", async () => {
+    const r1 = await app.request("/api/envs/lowercase", {
+      method: "DELETE",
+      headers: await authedHeaders(),
+    })
+    expect(r1.status).toBe(400)
+    const r2 = await app.request("/api/envs/1STARTS", {
+      method: "DELETE",
+      headers: await authedHeaders(),
+    })
+    expect(r2.status).toBe(400)
+    const r3 = await app.request("/api/envs/foo%3Brm", {
+      method: "DELETE",
+      headers: await authedHeaders(),
+    })
+    expect(r3.status).toBe(400)
   })
 })
