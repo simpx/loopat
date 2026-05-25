@@ -178,7 +178,11 @@ Idempotency-Key: <client 生成>           # 强烈推荐
 Content-Type: application/json
 Accept: text/event-stream
 
-{ "content": "hello" }                   # string，≤ 1 MB
+{
+  "content": "hello",                    // string，≤ 1 MB
+  "permission_mode": "bypassPermissions" // 可选；本 turn 临时覆盖 loop 的当前权限模式
+                                         // 取值: default | acceptEdits | bypassPermissions | plan | dontAsk | auto
+}
 ```
 
 响应：`200`，`Content-Type: text/event-stream`。事件词表见 [SSE 事件参考](#sse-事件参考)。
@@ -258,6 +262,9 @@ POST /api/v1/loops/{id}/interrupt
 | `interrupted` | turn 被中断 | `{ "turn_id" }` | **是** |
 | `error` | 不可恢复 | `{ "code", "message", "turn_id"? }` | **是** |
 | `ping` | 心跳 | `{}` | 否，每 15s |
+| `sdk_message` | **内部用** —— 原始 SDK 消息直传 | 原 SDK 消息对象（shape 由 Anthropic SDK 决定，**不稳定**）| 否 |
+
+**`sdk_message` 是 loopat web 自己用的逃生口**：web 的 chat 视图需要完整 SDK 消息形态（content_block_delta、tool_use、thinking 等）才能渲染富 UI，与其重写整个 dispatch pipeline，直接把 SDK 消息原样转发给同一通道。Bot 框架**不应**依赖这个事件 —— 它的 shape 跟着 Anthropic SDK 变。稳定的对外契约仍是 `assistant_delta` / `tool_call` / `requires_choice` 等。
 
 **没有委托式 tool_call**：API 永远不要求调用方执行工具。`tool_call` / `tool_result` 是纯观察事件 —— 调用方没有"提交工具结果"的端点，因为这种端点不存在。所有工具都在 loop 沙箱里跑。
 

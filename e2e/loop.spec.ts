@@ -126,6 +126,50 @@ test.describe("/loop page", () => {
     await expect(page).toHaveURL(/\/loop\/[a-f0-9-]+/, { timeout: 10_000 });
   });
 
+  test("chat send + receive uses v1 API end-to-end", async ({ page }) => {
+    // Walks through the full chat chain on the v1 surface:
+    //   - GET  /api/v1/loops/:id/events   (live SSE subscription)
+    //   - POST /api/v1/loops/:id/messages (user input)
+    // We assert both fire; the actual model response isn't asserted because
+    // the test env has no provider configured (would error out).
+
+    // Capture the SSE subscription that useLoopRuntime opens on entry.
+    const eventsReq = page.waitForRequest(
+      (req) => /\/api\/v1\/loops\/loop_[a-f0-9-]+\/events/.test(req.url()),
+      { timeout: 15_000 },
+    );
+    const sendReq = page.waitForRequest(
+      (req) =>
+        /\/api\/v1\/loops\/loop_[a-f0-9-]+\/messages/.test(req.url()) &&
+        req.method() === "POST",
+      { timeout: 15_000 },
+    );
+
+    await page.goto("/loop");
+    const sidebar = page.locator("aside");
+    await expect(sidebar).toBeVisible({ timeout: 10_000 });
+
+    // Open one of the seeded loops.
+    await sidebar.getByText("测试任务：修复登录页bug").click();
+    await expect(page).toHaveURL(/\/loop\/[a-f0-9-]+/);
+
+    // /events should fire once the loop page mounts.
+    const eventsR = await eventsReq;
+    expect(eventsR.url()).toContain("/api/v1/loops/loop_");
+    expect(eventsR.url()).toContain("/events");
+
+    // Type into the chat composer (aria-label="Message input", Composer.tsx).
+    const composer = page.getByLabel("Message input");
+    await composer.fill("hello v1");
+    await page.getByLabel(/Send message|Enqueue message/).click();
+
+    const sendR = await sendReq;
+    const body = sendR.postDataJSON();
+    expect(body.content).toBe("hello v1");
+    // permission_mode is optional but we send the current selector value.
+    expect(typeof body.permission_mode === "string" || body.permission_mode === undefined).toBe(true);
+  });
+
   test("scope tabs filter loops", async ({ page }) => {
     await page.goto("/loop");
     const sidebar = page.locator("aside");

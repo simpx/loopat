@@ -133,6 +133,24 @@ function pendingChoiceFor(id: string): string | undefined { return loopRuntime.g
 
 type V1Event = { event: string; data: Record<string, unknown> }
 
+/**
+ * Pass-through event that emits the raw SDK / session-broadcast message
+ * verbatim. Loopat's own web UI consumes this to drive its rich chat view
+ * without forcing the team to rewrite its SDK-shaped dispatch pipeline.
+ *
+ * Bot frameworks should NOT depend on the shape — it's the underlying
+ * Anthropic SDK message format, which can change. The stable bot-facing
+ * events (assistant_delta, tool_call, etc.) are what's contractual.
+ */
+function sdkPassthrough(msg: any): V1Event | null {
+  if (!msg || typeof msg !== "object") return null
+  if (typeof msg.type !== "string") return null
+  // Skip our own synthetic control events — they don't represent a real
+  // session-broadcast message worth replaying.
+  if (msg.type === "choice_resolved" || msg.type === "interrupted") return null
+  return { event: "sdk_message", data: msg as Record<string, unknown> }
+}
+
 function mapSdkMessageToV1(msg: any, runtime: LoopRuntime): V1Event[] {
   const out: V1Event[] = []
   const type = msg?.type
@@ -422,6 +440,10 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
     const content = typeof body.content === "string" ? body.content : ""
     if (!content) return apiError(c, 400, "invalid_request_error", "missing_content", "content required")
     if (content.length > 1024 * 1024) return apiError(c, 400, "invalid_request_error", "content_too_large", "content exceeds 1 MB")
+    const VALID_MODES = new Set(["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"])
+    const permissionMode = typeof body.permission_mode === "string" && VALID_MODES.has(body.permission_mode)
+      ? body.permission_mode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
+      : undefined
 
     // Idempotency check.
     sweepIdempotency()
@@ -486,6 +508,8 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
 
       const unsubscribe = session.onMessage((msg) => {
         if (closed) return
+        const raw = sdkPassthrough(msg)
+        if (raw) emit(raw).catch(() => {})
         for (const ev of mapSdkMessageToV1(msg, runtime)) {
           emit(ev).catch(() => {})
           if (ev.event === "done" || ev.event === "interrupted" || ev.event === "error") {
@@ -499,7 +523,7 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
       }, 15_000)
 
       if (!isReplay) {
-        session.sendUserText(content).catch(async (e: any) => {
+        session.sendUserText(content, permissionMode).catch(async (e: any) => {
           await emit({ event: "error", data: { code: "send_failed", message: e?.message ?? String(e) } })
           finishStream()
         })
@@ -541,6 +565,8 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
       let closed = false
       const unsubscribe = session.onMessage((msg) => {
         if (closed) return
+        const raw = sdkPassthrough(msg)
+        if (raw) stream.writeSSE({ event: raw.event, data: JSON.stringify(raw.data) }).catch(() => {})
         for (const ev of mapSdkMessageToV1(msg, runtime)) {
           stream.writeSSE({ event: ev.event, data: JSON.stringify(ev.data) }).catch(() => {})
         }

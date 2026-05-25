@@ -486,6 +486,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   )
   const suppressSlashRef = useRef(false)
   const wsRef = useRef<WebSocket | null>(null)
+  // v1 SSE subscription for live SDK messages (parallel to WS). The WS keeps
+  // delivering history + initial state + operator-feature broadcasts; v1 SSE
+  // delivers the same live SDK events via `sdk_message` pass-through. Dedupe
+  // by uuid (see seenUuidsRef) so we don't double-dispatch.
+  const sseRef = useRef<EventSource | null>(null)
+  const seenUuidsRef = useRef<Set<string>>(new Set())
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
   const loadingHistoryRef = useRef(true)
@@ -563,11 +569,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   const [permissionPrompt, setPermissionPrompt] = useState<PermissionPrompt | null>(null)
 
   const answerPermission = useCallback((toolUseId: string, allow: boolean) => {
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "permission_answer", tool_use_id: toolUseId, allow }))
+    // v1: POST /loops/{id}/choices/{choice_id} { allow }
+    const choiceId = toolUseId.startsWith("choice_") ? toolUseId : `choice_${toolUseId}`
+    fetch(`/api/v1/loops/loop_${loopId}/choices/${choiceId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ allow }),
+    }).catch(() => {})
     setPermissionPrompt(null)
-  }, [])
+  }, [loopId])
 
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null)
   const [thinkingBudget, setThinkingBudget] = useState<number | null>(null)
@@ -603,9 +614,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
 
   const sendAnswers = useMemo(() => {
     const fn = (toolUseId: string, answers: Record<string, string>) => {
-      const ws = wsRef.current
-      if (!ws || ws.readyState !== WebSocket.OPEN) return
-      ws.send(JSON.stringify({ type: "answers", tool_use_id: toolUseId, answers }))
+      // v1: POST /loops/{id}/choices/{choice_id} { answers }
+      const choiceId = toolUseId.startsWith("choice_") ? toolUseId : `choice_${toolUseId}`
+      fetch(`/api/v1/loops/loop_${loopId}/choices/${choiceId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ answers }),
+      }).catch(() => {})
       setQuestionsObj((prev) => {
         if (!(toolUseId in prev)) return prev
         const next = { ...prev }
@@ -614,7 +630,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       })
     }
     return fn
-  }, [])
+  }, [loopId])
 
   // Expose as stable read-only Maps that re-render when version bumps
   const toolProgressMap = useMemo(() => {
@@ -731,11 +747,13 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [])
 
   const onCancel = useCallback(async () => {
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    ws.send(JSON.stringify({ type: "interrupt" }))
+    // v1: POST /loops/{id}/interrupt
+    fetch(`/api/v1/loops/loop_${loopId}/interrupt`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {})
     setRunning(false)
-  }, [])
+  }, [loopId])
 
   const onClearQueue = useCallback(() => {
     const ws = wsRef.current
@@ -751,7 +769,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
 
   const enqueueMessage = useCallback((text: string, files?: { path: string; content: string }[]) => {
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (!running) {
       setRunning(true)
       setTurnGeneration((v) => v + 1)
@@ -759,27 +776,48 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setTurnStartedAt(now)
       try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
     }
-    // /goal: same frontend-side safeguard as in onNew.
+
+    // v1: POST /loops/{id}/messages. files attachments still go via WS until
+    // v1 supports them (rare path: user pastes a screenshot or similar).
+    const postV1 = (content: string) => {
+      fetch(`/api/v1/loops/loop_${loopId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ content, permission_mode: permissionModeRef.current }),
+        // Don't consume the SSE response body — the parallel /events listener
+        // (or WS) already delivers all SDK messages from this turn.
+      }).catch(() => {})
+    }
+
+    // /goal: goal management stays on WS (operator-only feature).
     const goalMatch = text.match(/^\/goal\s+(.+)/)
     const bareGoal = text.match(/^\/goal$/)
     if (goalMatch) {
       const arg = goalMatch[1].trim()
       if (arg === "done") {
-        ws.send(JSON.stringify({ type: "complete_goal" }))
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "complete_goal" }))
         return
       }
       if (arg === "clear") {
-        ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: null }))
         return
       }
-      ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
-      ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
+      if (files?.length) {
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, files, permissionMode: permissionModeRef.current }))
+      } else {
+        postV1(`My goal is: ${arg}`)
+      }
     } else if (bareGoal) {
-      ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+    } else if (files?.length) {
+      // Files attachment: still WS (v1 doesn't support file blocks yet).
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "user", text, files, permissionMode: permissionModeRef.current }))
     } else {
-      ws.send(JSON.stringify({ type: "user", text, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+      postV1(text)
     }
-  }, [running, TURN_START_KEY])
+  }, [running, TURN_START_KEY, loopId])
 
   const toggleShowHistory = useCallback(() => {
     setShowHistory((v) => !v)
@@ -850,6 +888,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setThinkingBudget(null)
       setThinkingOpen(false)
       replayBufRef.current = []
+      seenUuidsRef.current = new Set()
       const ws = new WebSocket(url)
       wsRef.current = ws
 
@@ -888,6 +927,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       }
       ws.onerror = () => setConnected(false)
       const dispatchMsg = (m: any) => {
+        // Dedupe by uuid for SDK messages — both WS and v1 SSE deliver the
+        // same messages; whichever arrives first wins, the other is dropped.
+        // Non-uuid messages (queue_update, viewers, etc.) are idempotent
+        // state updates and safe to re-apply.
+        if (typeof m?.uuid === "string") {
+          if (seenUuidsRef.current.has(m.uuid)) return
+          seenUuidsRef.current.add(m.uuid)
+        }
         if (m?.type === "viewers") {
           setViewers(typeof m.count === "number" ? m.count : 0)
           return
@@ -1291,6 +1338,27 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         }
         dispatchMsg(m)
       }
+
+      // ── v1 SSE: parallel live channel ──
+      // EventSource auto-reconnects + uses cookie auth (no Bearer needed for
+      // the web origin). Live SDK messages come in via `sdk_message` events;
+      // dispatchMsg dedupes by uuid, so WS + SSE double-delivery is safe.
+      try {
+        if (sseRef.current) sseRef.current.close()
+        const sse = new EventSource(`/api/v1/loops/loop_${loopId}/events`)
+        sseRef.current = sse
+        sse.addEventListener("sdk_message", (ev) => {
+          try {
+            const m = JSON.parse((ev as MessageEvent).data)
+            dispatchMsg(m)
+          } catch {}
+        })
+        // Bot-facing v1 events (assistant_delta, requires_choice, done, ...)
+        // carry the same content the SDK pass-through delivers, so we ignore
+        // them on the web side to avoid double-counting.
+      } catch (e) {
+        console.warn("[useLoopRuntime] failed to open v1 SSE:", e)
+      }
     }
 
     connect()
@@ -1315,6 +1383,10 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         }
       }
       wsRef.current = null
+      if (sseRef.current) {
+        sseRef.current.close()
+        sseRef.current = null
+      }
       setReconnecting(false)
       attemptsRef.current = 0
     }
@@ -1335,7 +1407,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     } catch {}
     if (!text) return
     const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
     setRunning(true)
     // Reset per-turn output counter only on fresh user requests, not on
     // tool-use continuations (which trigger message_start within the same turn).
@@ -1347,32 +1418,37 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     const now = Date.now()
     setTurnStartedAt(now)
     try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
-    // /goal: intercept before CC sees it so it doesn't reject an unavailable
-    // slash command. Supported forms:
-    //   /goal <text>     — set a new goal
-    //   /goal done       — mark current goal as complete
-    //   /goal clear      — clear current goal
-    //   /goal            — clear current goal (same as /goal clear)
+
+    const postV1 = (content: string) => {
+      fetch(`/api/v1/loops/loop_${loopId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ content, permission_mode: permissionModeRef.current }),
+      }).catch(() => {})
+    }
+
+    // /goal: goal management stays on WS (operator-only feature).
     const goalMatch = text.match(/^\/goal\s+(.+)/)
     const bareGoal = text.match(/^\/goal$/)
     if (goalMatch) {
       const arg = goalMatch[1].trim()
       if (arg === "done") {
-        ws.send(JSON.stringify({ type: "complete_goal" }))
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "complete_goal" }))
         return
       }
       if (arg === "clear") {
-        ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: null }))
         return
       }
-      ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
-      ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, permissionMode: permissionModeRef.current }))
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
+      postV1(`My goal is: ${arg}`)
     } else if (bareGoal) {
-      ws.send(JSON.stringify({ type: "set_goal", goal: null }))
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: null }))
     } else {
-      ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
+      postV1(text)
     }
-  }, [TURN_START_KEY])
+  }, [TURN_START_KEY, loopId])
 
   const safeConvert = useCallback((raw: RawMsg) => {
     try {
