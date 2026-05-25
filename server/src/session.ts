@@ -35,6 +35,40 @@ async function readSkillDescription(skillsDir: string, skillName: string): Promi
 }
 
 /**
+ * Pick a provider from personal + workspace configs given a candidate list,
+ * applying the priority order:
+ *   1. explicit candidates (caller-supplied: WS override, loop.meta.config)
+ *   2. personal config's `default` field
+ *   3. workspace config's `default` field
+ *   4. enumeration (personal first, then workspace)
+ *
+ * `requireKey=true` skips providers with empty apiKey and keeps walking.
+ * Returns null when no match found. Pure function; tests use it directly.
+ */
+export function pickProvider(
+  pCfg: { default: string; providers: Record<string, ProviderConfig> },
+  wCfg: { default?: string; providers?: Record<string, ProviderConfig> },
+  candidateNames: (string | null | undefined)[],
+  requireKey: boolean,
+): { name: string; provider: ProviderConfig } | null {
+  const names = [
+    ...candidateNames,
+    pCfg.default ? parseDefault(pCfg.default).providerName : undefined,
+    wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
+    ...Object.keys(pCfg.providers),
+    ...Object.keys(wCfg.providers ?? {}),
+  ].filter(Boolean) as string[]
+  const seen = new Set<string>()
+  for (const name of names) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    const p = pCfg.providers[name] ?? wCfg.providers?.[name]
+    if (p && (!requireKey || p.apiKey)) return { name, provider: p }
+  }
+  return null
+}
+
+/**
  * Mirror cli's ff(): explicit override wins; otherwise [1m] tag → 1M;
  * any claude opus-4-7/4-6/sonnet-4/sonnet-4-6 → still defaults to 200K
  * unless tagged [1m] (1M is opt-in via beta on those). Fallback 200K.
@@ -212,33 +246,10 @@ class LoopSession {
     }, IDLE_TIMEOUT_MS)
   }
 
-  /** Walk personal + workspace configs, preferring candidateNames order, and
-   *  return the first matching provider. If requireKey is true, skip providers
-   *  with an empty apiKey and keep searching. Returns null if nothing matches.
-   *
-   *  Selection order:
-   *    1. explicit candidates (caller-supplied: WS override, loop.meta.config)
-   *    2. personal config's `default` field
-   *    3. workspace config's `default` field
-   *    4. enumeration of all providers (personal first, then workspace) */
   private async resolveProvider(meta: { createdBy: string; driver?: string; config?: { vault?: string } }, candidateNames: (string | null | undefined)[], requireKey: boolean): Promise<{ name: string; provider: ProviderConfig } | null> {
     const pCfg = await loadPersonalConfig(effectiveDriver(meta), meta.config?.vault)
     const wCfg = await loadConfig()
-    const names = [
-      ...candidateNames,
-      pCfg.default ? parseDefault(pCfg.default).providerName : undefined,
-      wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
-      ...Object.keys(pCfg.providers),
-      ...Object.keys(wCfg.providers ?? {}),
-    ].filter(Boolean) as string[]
-    const seen = new Set<string>()
-    for (const name of names) {
-      if (seen.has(name)) continue
-      seen.add(name)
-      const p = pCfg.providers[name] ?? wCfg.providers?.[name] as ProviderConfig | undefined
-      if (p && (!requireKey || p.apiKey)) return { name, provider: p }
-    }
-    return null
+    return pickProvider(pCfg, wCfg, candidateNames, requireKey)
   }
 
   /**
