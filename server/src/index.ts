@@ -2730,7 +2730,12 @@ app.get(
                 images.push({ mediaType: mediaType as any, data, ...(filename ? { filename } : {}) })
               }
             }
-            session.sendUserText(msg.text, permissionMode, images.length > 0 ? images : undefined)
+            // Fire-and-forget; .catch() keeps a provider misconfig (or any
+            // ensureStarted throw) from becoming an unhandled rejection.
+            session.sendUserText(msg.text, permissionMode, images.length > 0 ? images : undefined).catch((err) => {
+              console.error(`[loop:${id.slice(0, 8)}] sendUserText failed:`, err)
+              try { ws.send(JSON.stringify({ type: "error", message: err?.message ?? "failed to send message" })) } catch {}
+            })
           } else if (msg?.type === "clear") {
             session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
