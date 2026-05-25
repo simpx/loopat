@@ -183,7 +183,11 @@ app.get("/api/providers", requireAuth, async (c) => {
     const pCfg = await loadPersonalConfig(userId)
     for (const [name, p] of Object.entries(pCfg.providers)) {
       const hasKey = typeof p.apiKey === "string" && p.apiKey.length > 0
-      providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: hasKey ? p.enabled : false, hasKey }
+      // Only overlay if the user actually configured this provider (has a key).
+      // Template/preset providers without a key should not shadow workspace config.
+      if (hasKey) {
+        providers[name] = { models: p.models, baseUrl: p.baseUrl, source: "personal", enabled: p.enabled !== false, hasKey }
+      }
     }
     active = pCfg.default || active
   } catch {}

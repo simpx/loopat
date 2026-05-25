@@ -57,22 +57,14 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     ...addedFiles,
   ]
 
-  const toggleEditorFile = () => {
-    setIncludeEditorFile((v) => {
-      const next = !v
-      console.log(`%c[editor] %c${next ? "✓ included" : "✗ excluded"} %c${pickedFile}`, "color:#98c379", next ? "color:#61afef" : "color:#666", "color:#61afef")
-      return next
-    })
-  }
+  const toggleEditorFile = () => setIncludeEditorFile((v) => !v)
 
   const addFile = (path: string) => {
-    console.log(`%c[file-ref] %c+added %c${path}`, "color:#98c379", "color:#666", "color:#61afef")
     setAddedFiles((prev) => prev.includes(path) ? prev : [...prev, path])
     setPickerOpen(false)
   }
 
   const removeFile = (path: string) => {
-    console.log(`%c[file-ref] %c−removed %c${path}`, "color:#e06c75", "color:#666", "color:#61afef")
     setAddedFiles((prev) => prev.filter((p) => p !== path))
   }
 
@@ -81,8 +73,9 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     return idx >= 0 ? path.slice(idx + 1) : path
   }
 
-  // Pre-computed file context string, updated when file refs change
+  // Pre-computed file context, updated when file refs change
   const fileContextRef = useRef("")
+  const fileBlocksRef = useRef<{ path: string; content: string }[]>([])
   const [fileContextLoading, setFileContextLoading] = useState(false)
 
   useEffect(() => {
@@ -90,17 +83,18 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     async function build() {
       if (allFileRefs.length === 0) {
         fileContextRef.current = ""
+        fileBlocksRef.current = []
         return
       }
       setFileContextLoading(true)
       const parts: string[] = []
+      const blocks: { path: string; content: string }[] = []
       for (const path of allFileRefs) {
         if (cancelled) return
         try {
           const r = await readFile(loopId, path)
           if (r && r.content) {
             const ext = path.includes(".") ? path.split(".").pop() ?? "" : ""
-            // If this is the editor file and there's a selection, slice to selected lines
             const sel = (path === pickedFile) ? editorSelection : null
             let content = r.content
             let label = path
@@ -111,12 +105,16 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
               content = allLines.slice(fromIdx, toIdx).join("\n")
               label = `${path} (${sel.from}-${sel.to})`
             }
-            parts.push(`\n# File: ${label}\n\`\`\`${ext}\n${content}\n\`\`\`\n`)
+            // Escape ``` in content so the regex-based parser in UserMessage can reliably detect boundaries
+            const safe = content.replace(/```/g, "``​`")
+            parts.push(`\n# File: ${label}\n\`\`\`${ext}\n${safe}\n\`\`\`\n`)
+            blocks.push({ path: label, content })
           }
         } catch {}
       }
       if (!cancelled) {
         fileContextRef.current = parts.join("")
+        fileBlocksRef.current = blocks
         setFileContextLoading(false)
       }
     }
@@ -161,19 +159,20 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     const text = typeof composerText === "string" ? composerText.trim() : "";
     if (!text) return;
     saveToHistory(text);
+    if (fileContextRef.current) {
+      try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
+    }
     enqueueMessage(wrapWithContext(text));
     aui.composer().setText("");
   };
 
   const handleSubmit = () => {
-    // Both Enter and the send button go through handleEnqueue now.
-    // This is a safety fallback — shouldn't normally fire.
     const text = textRef.current.trim();
     if (!text) return;
     saveToHistory(text);
-    // Always send with context to be safe
-    enqueueMessage(wrapWithContext(text));
-    aui.composer().setText("");
+    if (fileContextRef.current) {
+      try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -203,7 +202,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
       suppressSlashRef.current = false;
     }
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && isRunning) {
       e.preventDefault();
       handleEnqueue();
       return;
@@ -374,21 +373,31 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
 
               {/* Send / Enqueue button */}
               {hasInput && (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="icon"
-                  onClick={handleEnqueue}
-                  className={`h-8 w-8 rounded-lg text-white ${
-                    isRunning
-                      ? "bg-amber-500 hover:bg-amber-600"
-                      : "bg-gray-800 hover:bg-gray-900"
-                  }`}
-                  aria-label={isRunning ? "Enqueue message" : "Send message"}
-                  title={isRunning ? "Enqueue message" : "Send message"}
-                >
-                  {isRunning ? <ListOrderedIcon className="h-4 w-4" /> : <ArrowUpIcon className="h-4 w-4" />}
-                </Button>
+                isRunning ? (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="icon"
+                    onClick={handleEnqueue}
+                    className="h-8 w-8 rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
+                    aria-label="Enqueue message"
+                    title="Enqueue message"
+                  >
+                    <ListOrderedIcon className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <ComposerPrimitive.Send asChild>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="icon"
+                      className="h-8 w-8 rounded-lg bg-gray-800 hover:bg-gray-900 text-white"
+                      aria-label="Send message"
+                    >
+                      <ArrowUpIcon className="h-4 w-4" />
+                    </Button>
+                  </ComposerPrimitive.Send>
+                )
               )}
 
               {/* Stop button: only visible when running */}

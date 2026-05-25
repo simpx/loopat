@@ -291,13 +291,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
-  const [editorSelection, setEditorSelectionRaw] = useState<{ from: number; to: number } | null>(null)
-  const setEditorSelection = (sel: { from: number; to: number } | null) => {
-    console.log(`%c[setEditorSelection] %c${sel ? `${sel.from}-${sel.to}` : "null"}`, "color:#98c379", "color:#e5c07b")
-    setEditorSelectionRaw(sel)
-  }
+  const [editorSelection, setEditorSelection] = useState<{ from: number; to: number } | null>(null)
   const openFile = (path: string) => {
-    console.log(`%c[openFile] %c${path}`, "color:#98c379", "color:#61afef")
     setPickedFile(path)
     setEditorSelection(null)
     setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
@@ -996,7 +991,7 @@ function RightPanel({
       )}
 
       <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading...</div>}>
-        {mode === "editor" && <Editor loopId={loopId} path={pickedFile} onSelectionChange={(sel) => { console.log(`%c[RightPanel→Editor] %csel: %c${sel ? `${sel.from}-${sel.to}` : "null"}`, "color:#98c379", "color:#666", "color:#e5c07b"); onEditorSelection?.(sel); }} />}
+        {mode === "editor" && <Editor loopId={loopId} path={pickedFile} onSelectionChange={onEditorSelection} />}
         {mode === "terminal" && (
           <div className="flex-1 min-h-0 bg-[#1a1c20] overflow-auto">
             <Terminal loopId={loopId} currentUserId={currentUserId} />

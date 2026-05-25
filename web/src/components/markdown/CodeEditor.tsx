@@ -180,7 +180,6 @@ export function CodeEditor({
             const fromLine = u.state.doc.lineAt(sel.from).number
             const toLine = u.state.doc.lineAt(sel.to).number
             const hasSelection = sel.from !== sel.to
-            if (u.selectionSet) console.log(`%c[CodeEditor] %csel: %cL${fromLine}-L${toLine} %chasSelection: ${hasSelection}`, "color:#98c379", "color:#666", "color:#e5c07b", "color:#666")
             onSelectionRef.current?.(hasSelection ? { from: fromLine, to: toLine } : null)
           }
         }),
