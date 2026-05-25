@@ -805,7 +805,7 @@ function DocView({
               <span className="text-amber-700">🔒</span>
               <span>new value · saved encrypted (whatever's currently stored will be replaced)</span>
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}>
                 <CodeEditor path={path} value={draft} onChange={setDraft} />
               </Suspense>
@@ -826,7 +826,7 @@ function DocView({
                   wysiwyg
                 </button>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 relative">
                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
               </div>
             </div>
@@ -884,7 +884,7 @@ function DocView({
                 </button>
               )}
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
             </div>
           </div>
