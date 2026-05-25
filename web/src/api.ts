@@ -329,6 +329,8 @@ export type LoopStats = {
   agents: number
   hooks: number
   mcpServers: number
+  /** Toolchain tools (mise.toml [tools] entries) deduped across all tiers. */
+  toolchain: number
 }
 /** Preview of what a loop with the given profile selection will contain.
  *  Team layer is always implicit. */
@@ -1529,6 +1531,8 @@ export type TierInfo = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this tier's mise.toml. */
+  toolchainCount: number
   overrides: Record<string, { overrides: string; value: any }>
 }
 
@@ -1623,6 +1627,8 @@ export type ProfileDetail = {
   hookCount: number
   skillCount: number
   agentCount: number
+  /** Toolchain tools declared in this profile's mise.toml. */
+  toolchainCount: number
 }
 
 export async function listProfilesRich(): Promise<ProfileDetail[]> {

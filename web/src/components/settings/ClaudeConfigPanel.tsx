@@ -320,6 +320,7 @@ function TierDetail({
           <StatChip label="MCP" value={tier.mcpServerCount} />
           {tier.skillCount > 0 && <StatChip label="Skills" value={tier.skillCount} />}
           {tier.agentCount > 0 && <StatChip label="Agents" value={tier.agentCount} />}
+          {tier.toolchainCount > 0 && <StatChip label="Toolchain" value={tier.toolchainCount} />}
           {overrideCount > 0 && (
             <span className="text-[10px] text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full font-medium">
               {overrideCount} override{overrideCount > 1 ? "s" : ""}

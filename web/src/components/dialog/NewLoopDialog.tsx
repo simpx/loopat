@@ -226,6 +226,8 @@ export function NewLoopDialog({
                   <span className={stats.hooks > 0 ? "" : "text-gray-400"}>{stats.hooks} hooks</span>
                   <span className="mx-1 text-gray-300">·</span>
                   <span className={stats.mcpServers > 0 ? "" : "text-gray-400"}>{stats.mcpServers} MCP servers</span>
+                  <span className="mx-1 text-gray-300">·</span>
+                  <span className={stats.toolchain > 0 ? "" : "text-gray-400"} title="mise.toml [tools] entries, deduped across team + selected profiles">{stats.toolchain} toolchain</span>
                   {statsLoading && <span className="ml-1.5 text-gray-400">·</span>}
                   {statsLoading && <span className="ml-1 text-gray-400">updating…</span>}
                 </span>
