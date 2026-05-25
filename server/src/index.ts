@@ -94,7 +94,7 @@ function kanbanNotify() {
 }
 
 type Variables = { userId: string }
-const app = new Hono<{ Variables: Variables }>()
+export const app = new Hono<{ Variables: Variables }>()
 
 app.use("/api/*", cors({ origin: (o) => o ?? "*", credentials: true }))
 

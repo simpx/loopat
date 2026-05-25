@@ -308,7 +308,7 @@ const personalCache = new Map<string, {
   envsDirMtimeMs: number
 }>()
 
-function clearPersonalCache(user: string): void {
+export function clearPersonalCache(user: string): void {
   for (const k of personalCache.keys()) {
     if (k === user || k.startsWith(`${user}|`)) personalCache.delete(k)
   }
