@@ -113,8 +113,8 @@ export default function ModelSelector() {
     }
   };
 
-  if (!open) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -132,19 +132,17 @@ export default function ModelSelector() {
         )}
         <ChevronDown className="h-2.5 w-2.5 text-gray-400" />
       </button>
-    );
-  }
 
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-50 bg-black/20"
-        onClick={() => setOpen(false)}
-      />
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-50 bg-black/20"
+            onClick={() => setOpen(false)}
+          />
 
-      {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
+          {/* Dialog */}
+          <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
         <div
           className="w-[480px] max-h-[60vh] bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
           onClick={(e) => e.stopPropagation()}
@@ -246,6 +244,8 @@ export default function ModelSelector() {
           </div>
         </div>
       </div>
+        </>
+      )}
     </>
   );
 }

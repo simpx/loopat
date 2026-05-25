@@ -91,8 +91,8 @@ export default function PluginsButton({ onPick }: { onPick: (slashCommand: strin
     }
   }
 
-  if (!open) {
-    return (
+  return (
+    <>
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -103,13 +103,11 @@ export default function PluginsButton({ onPick }: { onPick: (slashCommand: strin
         <span className="text-sm leading-none" aria-hidden="true">🧩</span>
         <span className="font-medium text-gray-700">{total}</span>
       </button>
-    )
-  }
 
-  return (
-    <>
-      <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setOpen(false)} />
-      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/20" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={() => setOpen(false)}>
         <div
           className="w-[560px] max-h-[60vh] bg-white rounded-xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
           onClick={(e) => e.stopPropagation()}
@@ -203,6 +201,8 @@ export default function PluginsButton({ onPick }: { onPick: (slashCommand: strin
           </div>
         </div>
       </div>
+        </>
+      )}
     </>
   )
 }
