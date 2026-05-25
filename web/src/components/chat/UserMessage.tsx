@@ -70,8 +70,20 @@ export default function UserMessage() {
         <div ref={measureRef} className="whitespace-pre-wrap break-words text-gray-800">
           <MessagePrimitive.Parts
             components={{
-<<<<<<< HEAD
-              Text: () => <MarkdownBlock />,
+              Text: (props) => {
+                const raw = (props as any).text ?? ""
+                const blocks = parseFileBlocks(raw)
+                const cleaned = stripFileBlocks(raw)
+                if (blocks.length === 0) return <MarkdownBlock />
+                return (
+                  <>
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {blocks.map((b, i) => <FileCard key={i} filePath={b.path} content={b.content} />)}
+                    </div>
+                    {cleaned ? <span>{cleaned}</span> : <span className="text-red-500">[empty after strip]</span>}
+                  </>
+                )
+              },
               Image: ({ image }) => (
                 <a
                   href={image}
@@ -87,22 +99,6 @@ export default function UserMessage() {
                   />
                 </a>
               ),
-=======
-              Text: (props) => {
-                const raw = (props as any).text ?? ""
-                const blocks = parseFileBlocks(raw)
-                const cleaned = stripFileBlocks(raw)
-                if (blocks.length === 0) return <MarkdownBlock />
-                return (
-                  <>
-                    <div className="flex flex-wrap gap-1 mb-1.5">
-                      {blocks.map((b, i) => <FileCard key={i} filePath={b.path} content={b.content} />)}
-                    </div>
-                    {cleaned ? <span>{cleaned}</span> : <span className="text-red-500">[empty after strip]</span>}
-                  </>
-                )
-              },
->>>>>>> upstream/main
             }}
           />
         </div>

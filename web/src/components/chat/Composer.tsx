@@ -22,14 +22,9 @@ import ModelSelector from "./ModelSelector";
 import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
-<<<<<<< HEAD
-import { useLoopRuntimeExtra, type ImageInput } from "@/useLoopRuntime";
-import { getChatHistory, appendChatHistory } from "@/api";
-=======
 import { FilePicker } from "./FilePicker";
-import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { useLoopRuntimeExtra, type ImageInput } from "@/useLoopRuntime";
 import { getChatHistory, appendChatHistory, readFile } from "@/api";
->>>>>>> upstream/main
 
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
@@ -80,7 +75,6 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
 
   const aui = useAui();
 
-<<<<<<< HEAD
   // ── pending pasted images ──
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -158,7 +152,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     }
     if (next.length > 0) setPendingImages((prev) => [...prev, ...next]);
   };
-=======
+
   // ── File references ──
   const [includeEditorFile, setIncludeEditorFile] = useState(false)
   const [addedFiles, setAddedFiles] = useState<string[]>([])
@@ -243,7 +237,6 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     const ctx = fileContextRef.current
     return ctx ? `${ctx}\n${text}` : text
   }
->>>>>>> upstream/main
 
   // ── chat history ──
   const [history, setHistory] = useState<string[]>([]);
@@ -278,19 +271,13 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
    *  goes onto the queue, otherwise it kicks off a new run. */
   const handleSend = () => {
     const text = typeof composerText === "string" ? composerText.trim() : "";
-<<<<<<< HEAD
     const images = consumePendingImages();
     if (!text && images.length === 0) return;
     if (text) saveToHistory(text);
-    enqueueMessage(text, images.length > 0 ? images : undefined);
-=======
-    if (!text) return;
-    saveToHistory(text);
     if (fileContextRef.current) {
       try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
     }
-    enqueueMessage(wrapWithContext(text));
->>>>>>> upstream/main
+    enqueueMessage(wrapWithContext(text), images.length > 0 ? images : undefined);
     aui.composer().setText("");
     setPasteError(null);
   };

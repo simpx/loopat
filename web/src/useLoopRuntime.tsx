@@ -746,20 +746,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     ws.send(JSON.stringify({ type: "queue_remove", index }))
   }, [])
 
-<<<<<<< HEAD
   const enqueueMessage = useCallback((text: string, images?: ImageInput[]) => {
-    const ws = wsRef.current
-    if (!ws || ws.readyState !== WebSocket.OPEN) return
-    const payload: Record<string, unknown> = {
-      type: "user",
-      text,
-      permissionMode: permissionModeRef.current,
-    }
-    if (images && images.length > 0) payload.images = images
-    ws.send(JSON.stringify(payload))
-  }, [])
-=======
-  const enqueueMessage = useCallback((text: string, files?: { path: string; content: string }[]) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
     if (!running) {
@@ -769,9 +756,14 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       setTurnStartedAt(now)
       try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
     }
-    ws.send(JSON.stringify({ type: "user", text, files: files?.length ? files : undefined, permissionMode: permissionModeRef.current }))
+    const payload: Record<string, unknown> = {
+      type: "user",
+      text,
+      permissionMode: permissionModeRef.current,
+    }
+    if (images && images.length > 0) payload.images = images
+    ws.send(JSON.stringify(payload))
   }, [running, TURN_START_KEY])
->>>>>>> upstream/main
 
   const toggleShowHistory = useCallback(() => {
     setShowHistory((v) => !v)
