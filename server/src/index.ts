@@ -73,7 +73,7 @@ import {
   deleteUser,
 } from "./auth"
 import { getCookie } from "hono/cookie"
-import { isChimpGatewayAuthorized, streamChimpTurn, type ChimpTurnRequest } from "./chimp-gateway"
+import { isExternalGatewayAuthorized, streamExternalTurn, type ExternalTurnRequest } from "./external-gateway"
 
 const execFileP = promisify(execFile)
 
@@ -110,15 +110,15 @@ app.get("/api/version", (c) => {
   return c.json({ branch, commit })
 })
 
-app.post("/api/chimp/v1/turn/stream", async (c) => {
-  if (!isChimpGatewayAuthorized(c.req.header("authorization") ?? null)) {
+app.post("/api/runtime/v1/turn/stream", async (c) => {
+  if (!isExternalGatewayAuthorized(c.req.header("authorization") ?? null)) {
     return c.json({ error: "unauthorized" }, 401)
   }
-  const body = await c.req.json().catch(() => null) as ChimpTurnRequest | null
+  const body = await c.req.json().catch(() => null) as ExternalTurnRequest | null
   if (!body || typeof body !== "object") {
     return c.json({ error: "invalid json body" }, 400)
   }
-  return await streamChimpTurn(body)
+  return await streamExternalTurn(body)
 })
 
 // ── workspace serve config ──
