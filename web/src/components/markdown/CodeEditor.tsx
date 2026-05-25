@@ -44,41 +44,41 @@ const extMap: Record<string, () => any> = {
   jsx: () => javascript(),
   mjs: () => javascript(),
   cjs: () => javascript(),
-  css: () => L(css),
-  scss: () => L(sass),
-  sass: () => L(sass),
-  less: () => L(sass),
-  xml: () => L(xml),
-  svg: () => L(xml),
-  html: () => L(xml),
-  htm: () => L(xml),
-  sql: () => L(sql),
-  rs: rust,
-  yaml: () => L(yaml),
-  yml: () => L(yaml),
-  sh: () => L(shell),
-  bash: () => L(shell),
-  zsh: () => L(shell),
-  fish: () => L(shell),
-  rb: () => L(ruby),
-  go: () => L(go),
-  swift: () => L(swift),
-  proto: () => L(protobuf),
-  env: () => L(shell),
-  gitignore: () => L(shell),
-  editorconfig: () => L(toml),
-  c: () => L(c),
-  h: () => L(c),
-  cpp: () => L(c),
-  hpp: () => L(c),
-  cc: () => L(c),
-  cs: () => L(c),
-  java: () => L(c),
-  scala: () => L(c),
-  kt: () => L(c),
-  kts: () => L(c),
-  nginx: () => L(shell),
-  conf: () => L(shell),
+  css: () => L(css as any),
+  scss: () => L(sass as any),
+  sass: () => L(sass as any),
+  less: () => L(sass as any),
+  xml: () => L(xml as any),
+  svg: () => L(xml as any),
+  html: () => L(xml as any),
+  htm: () => L(xml as any),
+  sql: () => L(sql as any),
+  rs: () => L(rust as any),
+  yaml: () => L(yaml as any),
+  yml: () => L(yaml as any),
+  sh: () => L(shell as any),
+  bash: () => L(shell as any),
+  zsh: () => L(shell as any),
+  fish: () => L(shell as any),
+  rb: () => L(ruby as any),
+  go: () => L(go as any),
+  swift: () => L(swift as any),
+  proto: () => L(protobuf as any),
+  env: () => L(shell as any),
+  gitignore: () => L(shell as any),
+  editorconfig: () => L(toml as any),
+  c: () => L(c as any),
+  h: () => L(c as any),
+  cpp: () => L(c as any),
+  hpp: () => L(c as any),
+  cc: () => L(c as any),
+  cs: () => L(c as any),
+  java: () => L(c as any),
+  scala: () => L(c as any),
+  kt: () => L(c as any),
+  kts: () => L(c as any),
+  nginx: () => L(shell as any),
+  conf: () => L(shell as any),
 }
 
 const langExt = (path: string) => {
@@ -145,11 +145,13 @@ export function CodeEditor({
   value,
   onChange,
   wordWrap = true,
+  onSelectionChange,
 }: {
   path: string
   value: string
   onChange: (v: string) => void
   wordWrap?: boolean
+  onSelectionChange?: (sel: { from: number; to: number } | null) => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -157,6 +159,8 @@ export function CodeEditor({
   const wrapCompartment = useRef(new Compartment())
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+  const onSelectionRef = useRef(onSelectionChange)
+  onSelectionRef.current = onSelectionChange
 
   useEffect(() => {
     if (!hostRef.current) return
@@ -170,6 +174,15 @@ export function CodeEditor({
         langCompartment.current.of(langExt(path)),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current(u.state.doc.toString())
+          // Report selection changes
+          if (u.selectionSet || u.docChanged) {
+            const sel = u.state.selection.main
+            const fromLine = u.state.doc.lineAt(sel.from).number
+            const toLine = u.state.doc.lineAt(sel.to).number
+            const hasSelection = sel.from !== sel.to
+            if (u.selectionSet) console.log(`%c[CodeEditor] %csel: %cL${fromLine}-L${toLine} %chasSelection: ${hasSelection}`, "color:#98c379", "color:#666", "color:#e5c07b", "color:#666")
+            onSelectionRef.current?.(hasSelection ? { from: fromLine, to: toLine } : null)
+          }
         }),
       ],
     })

@@ -718,8 +718,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   const enqueueMessage = useCallback((text: string) => {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
+    // Seed turn timer when sending first message (AI not yet running)
+    if (!running) {
+      setRunning(true)
+      setTurnGeneration((v) => v + 1)
+      const now = Date.now()
+      setTurnStartedAt(now)
+      try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
+    }
     ws.send(JSON.stringify({ type: "user", text, permissionMode: permissionModeRef.current }))
-  }, [])
+  }, [running, TURN_START_KEY])
 
   const toggleShowHistory = useCallback(() => {
     setShowHistory((v) => !v)

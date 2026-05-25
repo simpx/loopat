@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import {
   ComposerPrimitive,
   AuiIf,
@@ -10,6 +10,9 @@ import {
   SquareIcon,
   ListOrderedIcon,
   X,
+  FileText,
+  Plus,
+  FilePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ClaudeStatus from "./ClaudeStatus";
@@ -19,13 +22,14 @@ import ModelSelector from "./ModelSelector";
 import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
+import { FilePicker } from "./FilePicker";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
-import { getChatHistory, appendChatHistory } from "@/api";
+import { getChatHistory, appendChatHistory, readFile } from "@/api";
 
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
 
-export default function Composer() {
+export default function Composer({ pickedFile, editorSelection }: { pickedFile?: string | null; editorSelection?: { from: number; to: number } | null }) {
   const isRunning = useAuiState((s) => s.thread.isRunning);
   const hasInput = useAuiState(
     (s) => typeof s.composer.text === "string" && s.composer.text.trim().length > 0,
@@ -36,6 +40,94 @@ export default function Composer() {
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
+
+  // ── File references ──
+  const [includeEditorFile, setIncludeEditorFile] = useState(false)
+  const [addedFiles, setAddedFiles] = useState<string[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const addFileBtnRef = useRef<HTMLButtonElement>(null)
+
+  // Debug: log pickedFile changes
+  useEffect(() => {
+    console.log(`%c[Composer] %cpickedFile: %c${pickedFile || "(none)"} %csel: %c${editorSelection ? `${editorSelection.from}-${editorSelection.to}` : "none"}`, "color:#98c379", "color:#666", "color:#61afef", "color:#666", "color:#e5c07b")
+  }, [pickedFile, editorSelection?.from, editorSelection?.to])
+
+  const allFileRefs = [
+    ...(includeEditorFile && pickedFile ? [pickedFile] : []),
+    ...addedFiles,
+  ]
+
+  const toggleEditorFile = () => {
+    setIncludeEditorFile((v) => {
+      const next = !v
+      console.log(`%c[editor] %c${next ? "✓ included" : "✗ excluded"} %c${pickedFile}`, "color:#98c379", next ? "color:#61afef" : "color:#666", "color:#61afef")
+      return next
+    })
+  }
+
+  const addFile = (path: string) => {
+    console.log(`%c[file-ref] %c+added %c${path}`, "color:#98c379", "color:#666", "color:#61afef")
+    setAddedFiles((prev) => prev.includes(path) ? prev : [...prev, path])
+    setPickerOpen(false)
+  }
+
+  const removeFile = (path: string) => {
+    console.log(`%c[file-ref] %c−removed %c${path}`, "color:#e06c75", "color:#666", "color:#61afef")
+    setAddedFiles((prev) => prev.filter((p) => p !== path))
+  }
+
+  const shortFileName = (path: string) => {
+    const idx = path.lastIndexOf("/")
+    return idx >= 0 ? path.slice(idx + 1) : path
+  }
+
+  // Pre-computed file context string, updated when file refs change
+  const fileContextRef = useRef("")
+  const [fileContextLoading, setFileContextLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    async function build() {
+      if (allFileRefs.length === 0) {
+        fileContextRef.current = ""
+        return
+      }
+      setFileContextLoading(true)
+      const parts: string[] = []
+      for (const path of allFileRefs) {
+        if (cancelled) return
+        try {
+          const r = await readFile(loopId, path)
+          if (r && r.content) {
+            const ext = path.includes(".") ? path.split(".").pop() ?? "" : ""
+            // If this is the editor file and there's a selection, slice to selected lines
+            const sel = (path === pickedFile) ? editorSelection : null
+            let content = r.content
+            let label = path
+            if (sel) {
+              const allLines = r.content.split("\n")
+              const fromIdx = Math.max(0, sel.from - 1)
+              const toIdx = Math.min(allLines.length, sel.to)
+              content = allLines.slice(fromIdx, toIdx).join("\n")
+              label = `${path} (${sel.from}-${sel.to})`
+            }
+            parts.push(`\n# File: ${label}\n\`\`\`${ext}\n${content}\n\`\`\`\n`)
+          }
+        } catch {}
+      }
+      if (!cancelled) {
+        fileContextRef.current = parts.join("")
+        setFileContextLoading(false)
+      }
+    }
+    build()
+    return () => { cancelled = true }
+  }, [allFileRefs.join(","), loopId, pickedFile, editorSelection?.from, editorSelection?.to])
+
+  const wrapWithContext = (text: string) => {
+    const ctx = fileContextRef.current
+    return ctx ? `${ctx}\n${text}` : text
+  }
 
   // ── chat history ──
   const [history, setHistory] = useState<string[]>([]);
@@ -69,13 +161,19 @@ export default function Composer() {
     const text = typeof composerText === "string" ? composerText.trim() : "";
     if (!text) return;
     saveToHistory(text);
-    enqueueMessage(text);
+    enqueueMessage(wrapWithContext(text));
     aui.composer().setText("");
   };
 
   const handleSubmit = () => {
+    // Both Enter and the send button go through handleEnqueue now.
+    // This is a safety fallback — shouldn't normally fire.
     const text = textRef.current.trim();
-    if (text) saveToHistory(text);
+    if (!text) return;
+    saveToHistory(text);
+    // Always send with context to be safe
+    enqueueMessage(wrapWithContext(text));
+    aui.composer().setText("");
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -105,7 +203,7 @@ export default function Composer() {
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
       suppressSlashRef.current = false;
     }
-    if (e.key === "Enter" && !e.shiftKey && isRunning) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleEnqueue();
       return;
@@ -170,6 +268,37 @@ export default function Composer() {
         </div>
       )}
 
+      {/* File references chips */}
+      {allFileRefs.length > 0 && (
+        <div className="flex items-center gap-1.5 px-1 mb-1 flex-wrap">
+          {allFileRefs.map((path) => (
+            <span
+              key={path}
+              className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700"
+            >
+              <FileText size={11} className="shrink-0" />
+              <span className="truncate max-w-[160px]">{shortFileName(path)}</span>
+              {path !== pickedFile && (
+                <button
+                  onClick={() => removeFile(path)}
+                  className="ml-0.5 hover:text-blue-900"
+                >
+                  <X size={11} />
+                </button>
+              )}
+              {path === pickedFile && includeEditorFile && (
+                <span className="text-[9px] text-blue-400 ml-0.5">
+                  {editorSelection ? `(${editorSelection.from}-${editorSelection.to})` : "editor"}
+                </span>
+              )}
+            </span>
+          ))}
+          {fileContextLoading && (
+            <span className="text-[10px] text-gray-400">loading...</span>
+          )}
+        </div>
+      )}
+
       <div
         data-slot="composer-shell"
         className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
@@ -197,7 +326,6 @@ export default function Composer() {
 
               <PluginsButton
                 onPick={(slashCommand) => {
-                  // Insert at end + a trailing space so user can keep typing args.
                   const current = textRef.current
                   const next = current.length === 0 || current.endsWith(" ")
                     ? `${current}${slashCommand}`
@@ -205,6 +333,37 @@ export default function Composer() {
                   aui.composer().setText(next)
                 }}
               />
+
+              {/* File reference buttons */}
+              {pickedFile && (
+                <button
+                  type="button"
+                  onClick={toggleEditorFile}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                    includeEditorFile
+                      ? "bg-blue-50 text-blue-600 border border-blue-200"
+                      : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                  }`}
+                  title={includeEditorFile ? "Remove editor file from context" : "Include editor file in context"}
+                >
+                  <FileText size={12} />
+                  {shortFileName(pickedFile)}
+                </button>
+              )}
+              <div className="relative">
+                <button
+                  ref={addFileBtnRef}
+                  type="button"
+                  onClick={() => setPickerOpen((v) => !v)}
+                  className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-gray-50 w-[21px] h-[21px] mt-px text-gray-500 hover:bg-gray-100 transition-colors"
+                  title="Add file to context"
+                >
+                  <FilePlus size={12} />
+                </button>
+                {pickerOpen && (
+                  <FilePicker loopId={loopId} onPick={addFile} onClose={() => setPickerOpen(false)} anchorRect={addFileBtnRef.current?.getBoundingClientRect()} />
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -215,31 +374,21 @@ export default function Composer() {
 
               {/* Send / Enqueue button */}
               {hasInput && (
-                isRunning ? (
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="icon"
-                    onClick={handleEnqueue}
-                    className="h-8 w-8 rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
-                    aria-label="Enqueue message"
-                    title="Enqueue message"
-                  >
-                    <ListOrderedIcon className="h-4 w-4" />
-                  </Button>
-                ) : (
-                  <ComposerPrimitive.Send asChild>
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="icon"
-                      className="h-8 w-8 rounded-lg bg-gray-800 hover:bg-gray-900 text-white"
-                      aria-label="Send message"
-                    >
-                      <ArrowUpIcon className="h-4 w-4" />
-                    </Button>
-                  </ComposerPrimitive.Send>
-                )
+                <Button
+                  type="button"
+                  variant="default"
+                  size="icon"
+                  onClick={handleEnqueue}
+                  className={`h-8 w-8 rounded-lg text-white ${
+                    isRunning
+                      ? "bg-amber-500 hover:bg-amber-600"
+                      : "bg-gray-800 hover:bg-gray-900"
+                  }`}
+                  aria-label={isRunning ? "Enqueue message" : "Send message"}
+                  title={isRunning ? "Enqueue message" : "Send message"}
+                >
+                  {isRunning ? <ListOrderedIcon className="h-4 w-4" /> : <ArrowUpIcon className="h-4 w-4" />}
+                </Button>
               )}
 
               {/* Stop button: only visible when running */}
