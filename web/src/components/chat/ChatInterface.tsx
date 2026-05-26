@@ -9,6 +9,7 @@ import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import Composer from "./Composer";
 import AskUserQuestionRenderer from "./AskUserQuestionRenderer";
+import MessageOutline from "./MessageOutline";
 
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
 import ErrorBoundary from "./ErrorBoundary";
@@ -56,8 +57,8 @@ function setDraft(loopId: string, text: string): void {
 
 /* ─── Chat Interface ─── */
 
-export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive, pickedFile, editorSelection }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void; pickedFile?: string | null; editorSelection?: { from: number; to: number } | null } = {}) {
-  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
+export default function ChatInterface({ archived = false, onUnarchive, readOnly = false, repo, branch, title, driver, driverHistory, rfdRequestedAt, rfdRequestedBy, onTakeDrive, pickedFile, editorSelection, outlineOpen = false, onCloseOutline }: { archived?: boolean; onUnarchive?: () => void; readOnly?: boolean; repo?: string; branch?: string; title?: string; driver?: string; driverHistory?: Array<{ driver: string; since: string }>; rfdRequestedAt?: string; rfdRequestedBy?: string; onTakeDrive?: () => void; pickedFile?: string | null; editorSelection?: { from: number; to: number } | null; outlineOpen?: boolean; onCloseOutline?: () => void } = {}) {
+  const { questions, sendAnswers, loadingHistory, loopId, hasHistory, showHistory, toggleShowHistory, hasOlderMessages, loadMoreMessages, renderCount, userMessages, expandToMessage, thinkingBudget, setMaxThinkingTokens } = useLoopRuntimeExtra();
   const [thinkingNullMode, setThinkingNullMode] = useState<"normal" | "ultra">("normal")
   const isEmpty = useAuiState((s) => s.thread.isEmpty && !s.thread.isRunning) && !loadingHistory;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -116,6 +117,90 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
   loadingMoreRef.current = loadingMore;
+
+  // Compensation runs in the ResizeObserver callback below (not here) — the
+  // height-grew signal is more reliable than React's render commit, because
+  // assistant-ui propagates the messages array into its internal store via
+  // its own subscription path, so the new DOM may not be in place when this
+  // component's render commits.
+
+  // Outline: track topmost visible user message via IntersectionObserver on
+  // [data-role="user"][data-message-id] elements inside the viewport.
+  const [currentVisibleId, setCurrentVisibleId] = useState<string | null>(null);
+  useEffect(() => {
+    const vp = vpRef.current;
+    const inner = containerRef.current;
+    if (!vp || !inner) return;
+    const visible = new Set<string>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          const id = (e.target as HTMLElement).dataset.messageId;
+          if (!id) continue;
+          if (e.isIntersecting) visible.add(id);
+          else visible.delete(id);
+        }
+        // Pick topmost user message currently in viewport.
+        const els = inner.querySelectorAll<HTMLElement>('[data-role="user"][data-message-id]');
+        let topId: string | null = null;
+        for (const el of Array.from(els)) {
+          const id = el.dataset.messageId;
+          if (id && visible.has(id)) { topId = id; break; }
+        }
+        if (topId) setCurrentVisibleId(topId);
+      },
+      { root: vp, rootMargin: "0px", threshold: 0 },
+    );
+    let mo: MutationObserver | null = null;
+    const observeAll = () => {
+      io.disconnect();
+      visible.clear();
+      const els = inner.querySelectorAll<HTMLElement>('[data-role="user"][data-message-id]');
+      els.forEach((el) => io.observe(el));
+    };
+    observeAll();
+    mo = new MutationObserver(() => observeAll());
+    mo.observe(inner, { childList: true, subtree: true });
+    return () => {
+      io.disconnect();
+      mo?.disconnect();
+    };
+  }, []);
+
+  // Imperative scroll-to-message for outline navigation. On click we ask
+  // the runtime to expand the render window to include the target in one
+  // shot (avoids walking through many loadMore batches one-by-one). Then we
+  // poll each animation frame for the target DOM element to appear — needed
+  // because assistant-ui propagates the new messages array through its own
+  // store asynchronously, so the DOM nodes may not exist on the very next
+  // commit. Poll for up to ~2s then give up.
+  const [scrollTarget, setScrollTarget] = useState<string | null>(null);
+  const scrollToMessage = useCallback((id: string) => {
+    expandToMessage(id);
+    setScrollTarget(id);
+    onCloseOutline?.();
+  }, [expandToMessage, onCloseOutline]);
+  useEffect(() => {
+    if (!scrollTarget) return;
+    let cancelled = false;
+    let frames = 0;
+    const tick = () => {
+      if (cancelled) return;
+      const el = containerRef.current?.querySelector(`[data-message-id="${scrollTarget}"]`) as HTMLElement | null;
+      if (el) {
+        el.scrollIntoView({ block: "start", behavior: "smooth" });
+        setScrollTarget(null);
+        return;
+      }
+      if (++frames > 120) {
+        setScrollTarget(null);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return () => { cancelled = true; };
+  }, [scrollTarget]);
 
   // Persist composer text across loop switches and page refresh.
   const composer = useComposerRuntime();
@@ -236,7 +321,34 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
       });
     };
     scroll();
+    // Scroll-anchor compensation: when an anchor is active (set by
+    // handleLoadMore / handleShowHistory), the next time the container's
+    // height changes we pin scrollTop = oldScrollTop + (newHeight - oldHeight).
+    // ResizeObserver fires whenever the actual DOM size changes (not when
+    // React commits), so it catches the prepend even if assistant-ui
+    // propagates the new messages asynchronously after our commit.
+    const compensate = () => {
+      const anchor = loadMoreAnchorRef.current.active
+        ? loadMoreAnchorRef.current
+        : scrollAnchorRef.current.active
+          ? scrollAnchorRef.current
+          : null;
+      if (!anchor) return false;
+      const newHeight = vp.scrollHeight;
+      const delta = newHeight - anchor.oldScrollHeight;
+      if (delta <= 0) return false;
+      const target = anchor.oldScrollTop + delta;
+      const prevBehavior = vp.style.scrollBehavior;
+      vp.style.scrollBehavior = "auto";
+      vp.scrollTop = target;
+      vp.style.scrollBehavior = prevBehavior;
+      anchor.active = false;
+      // Keep userScrolledUp true so the bottom-snap doesn't yank.
+      userScrolledUp = true;
+      return true;
+    };
     const ro = new ResizeObserver(() => {
+      if (compensate()) return;
       if (timer) return;
       if (loadingHistoryRef.current) return;
       if (suppressScroll) return;
@@ -499,6 +611,16 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
         )}
         </div>
       </div>
+
+      {/* Message outline popover — opened from header button */}
+      {outlineOpen && (
+        <MessageOutline
+          messages={userMessages}
+          currentVisibleId={currentVisibleId}
+          onSelect={scrollToMessage}
+          onClose={() => onCloseOutline?.()}
+        />
+      )}
 
       {/* Scroll-to-bottom button — bottom-right, outside viewport so it isn't clipped */}
       {showScrollToBottom && (

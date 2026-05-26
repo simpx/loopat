@@ -64,7 +64,7 @@ export default function UserMessage() {
   };
 
   return (
-    <MessagePrimitive.Root data-role="user" className="group relative">
+    <MessagePrimitive.Root data-role="user" data-message-id={messageId} className="group relative">
 
       <div className={cn("relative overflow-hidden rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm shadow-sm transition-all", !expanded && needsTruncation && "max-h-[4.5rem]")}>
         <div ref={measureRef} className="whitespace-pre-wrap break-words text-gray-800">

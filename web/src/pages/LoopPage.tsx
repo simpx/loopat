@@ -151,6 +151,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   const [openPanels, setOpenPanels] = useState<RightMode[]>([])
   const [fullscreenPanel, setFullscreenPanel] = useState<RightMode | null>(null)
   const [pickedFile, setPickedFile] = useState<string | null>(null)
+  const [outlineOpen, setOutlineOpen] = useState(false)
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
@@ -289,6 +290,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           openPanels={openPanels}
           toggleMode={toggleMode}
           onShareWork={() => setShareOpen(true)}
+          outlineOpen={outlineOpen}
+          onToggleOutline={() => setOutlineOpen((v) => !v)}
           showShareButton={!serveCfg || serveCfg.serveEnabled || serveCfg.serveDynamicEnabled || serveCfg.serveEphemeralEnabled}
         />
       )}
@@ -322,6 +325,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 onTakeDrive={() => ws.takeDrive(meta.id)}
                 pickedFile={pickedFile}
                 editorSelection={editorSelection}
+                outlineOpen={outlineOpen}
+                onCloseOutline={() => setOutlineOpen(false)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -348,6 +353,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                   onTakeDrive={() => ws.takeDrive(meta.id)}
                   pickedFile={pickedFile}
                   editorSelection={editorSelection}
+                  outlineOpen={outlineOpen}
+                  onCloseOutline={() => setOutlineOpen(false)}
                 />
               </AssistantRuntimeProvider>
             </LoopRuntimeProvider>
@@ -422,6 +429,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
                 onTakeDrive={() => ws.takeDrive(meta.id)}
                 pickedFile={pickedFile}
                 editorSelection={editorSelection}
+                outlineOpen={outlineOpen}
+                onCloseOutline={() => setOutlineOpen(false)}
               />
             </AssistantRuntimeProvider>
           </LoopRuntimeProvider>
@@ -472,6 +481,8 @@ function LoopHeader({
   openPanels,
   toggleMode,
   onShareWork,
+  outlineOpen,
+  onToggleOutline,
   showShareButton,
 }: {
   meta: LoopMeta
@@ -484,6 +495,8 @@ function LoopHeader({
   openPanels: RightMode[]
   toggleMode: (m: RightMode) => void
   onShareWork: () => void
+  outlineOpen: boolean
+  onToggleOutline: () => void
   showShareButton?: boolean
 }) {
   const isMobile = useIsMobile()
@@ -631,6 +644,17 @@ function LoopHeader({
           {modeBtn("▤ workdir", "workdir")}
           {modeBtn("✎ editor", "editor")}
           {modeBtn("▷ terminal", "terminal")}
+          <button
+            className={
+              outlineOpen
+                ? "px-2 py-0.5 rounded bg-gray-100 text-gray-900"
+                : "px-2 py-0.5 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-50"
+            }
+            onClick={onToggleOutline}
+            title="Jump to one of your earlier messages"
+          >
+            ☰ outline
+          </button>
           <button
             className={
               openPanels.includes("git")

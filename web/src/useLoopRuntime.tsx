@@ -415,6 +415,18 @@ export interface LoopRuntimeExtra {
   hasOlderMessages: boolean
   /** Load and render the next batch of older messages. */
   loadMoreMessages: () => void
+  /** Current render window size. Outline retry uses it as a dep to know
+   *  when more messages have actually been rendered after loadMore. */
+  renderCount: number
+  /** User-message summaries for the outline drawer. Built from the full
+   *  aggregated list so the outline shows every message regardless of the
+   *  current render window. */
+  userMessages: { id: string; index: number; time: string; preview: string }[]
+  /** Expand the render window so the message with this id is included.
+   *  Returns true if the message was already in-window (no expansion
+   *  needed), false if the window grew. Used by outline jump to avoid
+   *  walking through many loadMore batches one at a time. */
+  expandToMessage: (messageId: string) => boolean
   /** Increments on each new overall turn / reconnect. ClaudeStatus uses it
    *  to force-restart the elapsed timer (as a useEffect dep). */
   turnGeneration: number
@@ -490,6 +502,9 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   suppressSlashRef: { current: false },
   hasOlderMessages: false,
   loadMoreMessages: () => {},
+  renderCount: 0,
+  userMessages: [],
+  expandToMessage: () => true,
   turnGeneration: 0,
   turnStartedAt: null,
   getStreamingTokenCount: () => 0,
@@ -822,6 +837,50 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     setRenderCount(prev => prev + RENDER_WINDOW_BATCH)
   }, [])
 
+  // Summaries of every user message in the loop — feeds the outline drawer.
+  // Built from the full aggregated list, not visibleMessages, so the outline
+  // covers history that hasn't been rendered yet. Cost is O(aggregated.length)
+  // on each new message, which is fine even for very long conversations.
+  const userMessages = useMemo(() => {
+    const out: { id: string; index: number; time: string; preview: string }[] = []
+    let i = 0
+    for (const m of aggregated) {
+      if ((m as any).role !== "user") continue
+      const id = (m as any).id as string
+      const parts = (m as any).content as any[] | undefined
+      let text = ""
+      if (Array.isArray(parts)) {
+        for (const p of parts) {
+          if (p?.type === "text") text += p.text ?? ""
+        }
+      }
+      const preview = text.replace(/(?:\n|^)# File: .+?\n```\w*\n[\s\S]*?```\n/g, "").trim().slice(0, 100)
+      const tsMatch = typeof id === "string" ? id.match(/(\d{13})/) : null
+      const time = tsMatch ? new Date(parseInt(tsMatch[1], 10)).toLocaleTimeString() : ""
+      out.push({ id, index: ++i, time, preview })
+    }
+    return out
+  }, [aggregated])
+
+  // Expand the render window so a specific message is included. Returns true
+  // if the message was already in-window; false if the window had to grow.
+  // Outline jump uses this to skip ahead in one bump instead of N loadMore
+  // cascades (each of which would trigger scroll-anchor compensation).
+  const aggregatedRef = useRef(aggregated)
+  aggregatedRef.current = aggregated
+  const renderCountRef = useRef(renderCount)
+  renderCountRef.current = renderCount
+  const expandToMessage = useCallback((messageId: string) => {
+    const agg = aggregatedRef.current
+    const idx = agg.findIndex(m => (m as any).id === messageId)
+    if (idx < 0) return true // unknown id — nothing to do
+    const neededFromEnd = agg.length - idx
+    if (neededFromEnd <= renderCountRef.current) return true
+    const next = Math.ceil(neededFromEnd / RENDER_WINDOW_BATCH) * RENDER_WINDOW_BATCH
+    setRenderCount(prev => Math.max(prev, next))
+    return false
+  }, [])
+
   const onCancel = useCallback(async () => {
     // v1: POST /loops/{id}/interrupt
     fetch(`/api/v1/loops/loop_${loopId}/interrupt`, {
@@ -999,8 +1058,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser, backgroundTasks, turnStatsByMessageId }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser, backgroundTasks, turnStatsByMessageId],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, renderCount, userMessages, expandToMessage, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser, backgroundTasks, turnStatsByMessageId }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, renderCount, userMessages, expandToMessage, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser, backgroundTasks, turnStatsByMessageId],
   )
 
   useEffect(() => {
