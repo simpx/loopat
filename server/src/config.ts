@@ -45,6 +45,24 @@ export type ModelEntry = {
   maxContextTokens?: number
 }
 
+export type ProviderPreset = {
+  name: string
+  baseUrl: string
+  models: string[]
+}
+
+export type MiseToolPreset = {
+  name: string
+  suggestedVersion: string
+  description?: string
+  backend?: string
+}
+
+export type PresetsData = {
+  providerPresets: ProviderPreset[]
+  miseToolPresets: MiseToolPreset[]
+}
+
 /**
  * On-disk shape of a provider. `apiKey` is a plain string that may contain
  * `${VAR}` references resolved against vault envs at load time. Empty / unset
@@ -126,6 +144,8 @@ export type WorkspaceConfig = {
   serveHttps?: boolean
   /** Custom port to show in share URL (does not affect actual server listen port). */
   serveDisplayPort?: number
+  /** Admin-managed presets for quick-add in provider/mise tool configs. */
+  presets?: PresetsData
 }
 
 /**
@@ -727,6 +747,7 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   if (cfg.serveWithPort !== undefined) merged.serveWithPort = cfg.serveWithPort
   if (cfg.serveHttps !== undefined) merged.serveHttps = cfg.serveHttps
   if (cfg.serveDisplayPort !== undefined) merged.serveDisplayPort = cfg.serveDisplayPort
+  if (cfg.presets !== undefined) merged.presets = cfg.presets
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
 }

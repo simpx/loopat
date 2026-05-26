@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { useWorkspace } from "@/ctx"
-import { getTiers, getTierMiseConfig, saveTierMiseConfig, createProfile, deleteProfile, type TierInfo, type TiersResponse } from "@/api"
+import { getTiers, getTierMiseConfig, saveTierMiseConfig, createProfile, deleteProfile, getAdminPresets, type TierInfo, type TiersResponse, type MiseToolPreset } from "@/api"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml"
 import {
@@ -811,6 +811,13 @@ function ToolsEditor({ tools, readonly, onChange }: {
   const [newName, setNewName] = useState("")
   const [newVersion, setNewVersion] = useState("")
   const [newBackend, setNewBackend] = useState("")
+  const [suggestions, setSuggestions] = useState<MiseToolPreset[]>([])
+
+  useEffect(() => { getAdminPresets().then(d => setSuggestions(d.miseToolPresets)).catch(() => {}) }, [])
+
+  const quickAdd = (s: MiseToolPreset) => {
+    onChange({ ...tools, [s.name]: { version: s.suggestedVersion, backend: s.backend } })
+  }
 
   const add = () => {
     const n = newName.trim(); if (!n) return
@@ -901,6 +908,25 @@ function ToolsEditor({ tools, readonly, onChange }: {
             <button onClick={() => setAdding(true)} className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 transition-colors">
               <Plus size={11} /> add tool
             </button>
+          )}
+
+          {/* Suggested tool presets */}
+          {suggestions.filter(s => !tools[s.name]).length > 0 && (
+            <div className="border-t border-gray-100 pt-3 mt-2">
+              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Suggested tools</span>
+              <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                {suggestions.filter(s => !tools[s.name]).map(s => (
+                  <button
+                    key={s.name}
+                    onClick={() => quickAdd(s)}
+                    className="px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] text-gray-500 hover:text-gray-900 hover:border-gray-400 transition-colors"
+                    title={s.description}
+                  >
+                    + {s.name} {s.suggestedVersion}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </>
       )}

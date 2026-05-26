@@ -1233,6 +1233,41 @@ export async function getLoopTokenUsage(): Promise<LoopTokenUsage[]> {
   return (await r.json()) as LoopTokenUsage[]
 }
 
+// ── admin presets ──
+
+export type ProviderPreset = {
+  name: string
+  baseUrl: string
+  models: string[]
+}
+
+export type MiseToolPreset = {
+  name: string
+  suggestedVersion: string
+  description?: string
+  backend?: string
+}
+
+export type PresetsData = {
+  providerPresets: ProviderPreset[]
+  miseToolPresets: MiseToolPreset[]
+}
+
+export async function getAdminPresets(): Promise<PresetsData> {
+  const r = await apiFetch("/api/admin/presets")
+  if (!r.ok) return { providerPresets: [], miseToolPresets: [] }
+  return (await r.json()) as PresetsData
+}
+
+export async function updateAdminPresets(presets: PresetsData): Promise<boolean> {
+  const r = await apiFetch("/api/admin/presets", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(presets),
+  })
+  return r.ok
+}
+
 // ── admin ──
 
 export async function listAdminUsers(): Promise<AdminUser[]> {

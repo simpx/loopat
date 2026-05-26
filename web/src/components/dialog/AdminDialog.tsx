@@ -16,9 +16,11 @@ import {
   getServeDomain,
   setServeDomain,
   testProviderConnection,
+  getAdminPresets,
   type AdminUser,
   type WorkspaceSettings,
   type ModelEntry,
+  type ProviderPreset,
 } from "@/api"
 
 type Tab = "users" | "workspace" | "serve"
@@ -237,18 +239,6 @@ function StatusBadge({ status }: { status: "active" | "pending" }) {
 
 // ── Workspace settings panel — matches the personal ProvidersSection UI ──
 
-/** Preset providers — kept in sync with server/src/config.ts PRESET_PROVIDERS. */
-const WS_PRESETS: Array<{ name: string; baseUrl: string; models: string[] }> = [
-  { name: "Anthropic", baseUrl: "https://api.anthropic.com",
-    models: ["claude-sonnet-4-20250514", "claude-opus-4-7-20251101"] },
-  { name: "DeepSeek",  baseUrl: "https://api.deepseek.com/anthropic",
-    models: ["deepseek-v4-pro", "deepseek-v4-flash"] },
-  { name: "Kimi",      baseUrl: "https://api.moonshot.cn/anthropic",
-    models: ["kimi-k2.6"] },
-  { name: "MiniMax",   baseUrl: "https://api.minimaxi.com/anthropic",
-    models: ["MiniMax-M2.7"] },
-]
-
 type WorkspaceDraft = {
   default: string
   providers: Record<string, {
@@ -277,6 +267,9 @@ export function WorkspacePanel() {
   const [newModelIdValue, setNewModelIdValue] = useState("")
   const [testingModel, setTestingModel] = useState<Record<string, string>>({})
   const [testError, setTestError] = useState<Record<string, string>>({})
+  const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([])
+
+  useEffect(() => { getAdminPresets().then(d => setProviderPresets(d.providerPresets)).catch(() => {}) }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -704,7 +697,7 @@ export function WorkspacePanel() {
 
       {/* Preset provider shortcuts */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {WS_PRESETS.filter((p) => !draft.providers[p.name]).map((p) => (
+        {providerPresets.filter((p) => !draft.providers[p.name]).map((p) => (
           <button
             key={p.name}
             type="button"

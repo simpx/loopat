@@ -35,9 +35,11 @@ import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
 import { ClaudeConfigPanel } from "../components/settings/ClaudeConfigPanel"
 import { MiseConfigPanel } from "../components/settings/MiseConfigPanel"
+import { PresetsPanel } from "../components/settings/PresetsPanel"
+import { getAdminPresets, type ProviderPreset } from "../api"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -52,7 +54,7 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "accounts" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "accounts" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-presets"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
@@ -66,6 +68,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string; ico
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
+  { id: "admin-presets",  label: "Presets",                gated: false, description: "Manage preset defaults — AI providers and Mise tool suggestions.", icon: Bookmark },
 ]
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -330,6 +333,9 @@ export function SettingsPage() {
                   {active === "admin-serve" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><ServePanel /></div>
                   )}
+                  {active === "admin-presets" && (
+                    <PresetsPanel />
+                  )}
                 </div>
                 </div>
               </>
@@ -344,11 +350,6 @@ export function SettingsPage() {
 // ────────────────────────────────────────────────────────────────────────────
 // Providers
 // ────────────────────────────────────────────────────────────────────────────
-
-/** Preset providers with Anthropic-compatible endpoints.
- *  loopat uses the Claude Agent SDK which speaks the Anthropic Messages API.
- *  Only providers that expose an Anthropic-compatible endpoint work directly. */
-import { PROVIDER_PRESETS as PRESETS } from "../../../server/src/presets"
 
 type ProvidersDraft = {
   default: string
@@ -381,6 +382,9 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const [newModelIdValue, setNewModelIdValue] = useState("")
   const [testingModel, setTestingModel] = useState<Record<string, string>>({})
   const [testError, setTestError] = useState<Record<string, string>>({})
+  const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([])
+
+  useEffect(() => { getAdminPresets().then(d => setProviderPresets(d.providerPresets)).catch(() => {}) }, [])
 
   useEffect(() => {
     if (!disk) { setDraft(null); return }
@@ -808,7 +812,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
 
       {/* Preset provider shortcuts */}
       <div className="flex flex-wrap items-center gap-1.5">
-        {PRESETS.filter((p) => !draft.providers[p.name]).map((p) => (
+        {providerPresets.filter((p) => !draft.providers[p.name]).map((p) => (
           <button
             key={p.name}
             type="button"

@@ -403,6 +403,35 @@ app.delete("/api/admin/profiles/:name", requireAdmin, async (c) => {
   return c.json({ ok: true })
 })
 
+// ── admin presets ──
+
+import { DEFAULT_PROVIDER_PRESETS, DEFAULT_MISE_TOOL_PRESETS } from "./presets"
+
+app.get("/api/admin/presets", requireAdmin, async (c) => {
+  const cfg = await loadConfig()
+  const presets = cfg.presets ?? {
+    providerPresets: DEFAULT_PROVIDER_PRESETS,
+    miseToolPresets: DEFAULT_MISE_TOOL_PRESETS,
+  }
+  return c.json(presets)
+})
+
+app.put("/api/admin/presets", requireAdmin, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  if (body.providerPresets !== undefined && !Array.isArray(body.providerPresets)) {
+    return c.json({ error: "providerPresets must be an array" }, 400)
+  }
+  if (body.miseToolPresets !== undefined && !Array.isArray(body.miseToolPresets)) {
+    return c.json({ error: "miseToolPresets must be an array" }, 400)
+  }
+  try {
+    await saveWorkspaceConfig({ presets: body })
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "save failed" }, 500)
+  }
+})
+
 // ── admin platform (system info + git pull) ──
 
 /**
