@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { MessageCircle, X, ArrowLeft, Plus, ExternalLink } from "lucide-react"
 import { useNavigate } from "react-router-dom"
+import { UserAvatar } from "./UserAvatar"
 import {
   listChatConversations,
   listChatMessages,
@@ -342,9 +343,7 @@ export function FloatingDm({ me }: { me: string }) {
                         onClick={() => setActiveConvId(c.id)}
                         className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
                       >
-                        <span className="w-7 h-7 rounded bg-gray-200 text-gray-900 text-[11px] font-medium flex items-center justify-center shrink-0">
-                          {(c.peerUserId ?? "?").slice(0, 1).toUpperCase()}
-                        </span>
+                        <UserAvatar userId={c.peerUserId ?? "?"} size="lg" />
                         <span className="flex-1 min-w-0 text-[13px] text-gray-900 truncate">
                           @{c.peerUserId ?? "(unknown)"}
                         </span>
@@ -380,16 +379,7 @@ export function FloatingDm({ me }: { me: string }) {
 function MiniMessage({ message, isMe }: { message: ChatMessage; isMe: boolean }) {
   return (
     <div className={"flex gap-1.5 " + (isMe ? "flex-row-reverse" : "")}>
-      <div
-        className={
-          isMe
-            ? "w-6 h-6 rounded shrink-0 flex items-center justify-center text-[10px] font-medium bg-gray-900 text-white"
-            : "w-6 h-6 rounded shrink-0 flex items-center justify-center text-[10px] font-medium bg-gray-200 text-gray-900"
-        }
-        title={message.author}
-      >
-        {message.author.slice(0, 1).toUpperCase()}
-      </div>
+      <UserAvatar userId={message.author} size="default" />
       <div className="min-w-0 max-w-[80%]">
         <div className={"text-[10px] text-gray-400 " + (isMe ? "text-right" : "")}>
           {formatTime(message.ts)}
@@ -439,9 +429,7 @@ function DmPicker({
               onClick={() => onPick(u.id)}
               className="text-left px-2 py-1.5 text-sm rounded hover:bg-gray-100 flex items-center gap-2"
             >
-              <span className="w-6 h-6 rounded bg-gray-200 text-gray-900 text-[11px] flex items-center justify-center">
-                {u.id.slice(0, 1).toUpperCase()}
-              </span>
+              <UserAvatar userId={u.id} size="default" />
               <span>{u.id}</span>
             </button>
           ))}

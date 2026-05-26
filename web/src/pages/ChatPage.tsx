@@ -31,6 +31,7 @@ import {
 } from "../api"
 import { useChatWebSocket, type ChatWsEvent } from "../useChatWebSocket"
 import { useWorkspace } from "../ctx"
+import { UserAvatar } from "../components/UserAvatar"
 
 /**
  * Outbox entry for a send that hasn't been confirmed by the DB. We render it
@@ -864,16 +865,7 @@ function MessageRow(props: {
         (props.active ? "bg-amber-50/60" : "hover:bg-gray-50")
       }
     >
-      <div
-        className={
-          isMe
-            ? "w-7 h-7 rounded shrink-0 flex items-center justify-center text-[11px] font-medium bg-gray-900 text-white"
-            : "w-7 h-7 rounded shrink-0 flex items-center justify-center text-[11px] font-medium bg-gray-200 text-gray-900"
-        }
-        title={m.author}
-      >
-        {m.author.slice(0, 1).toUpperCase()}
-      </div>
+      <UserAvatar userId={m.author} size="default" className="mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className={`flex items-center gap-2 ${isMe ? "justify-end" : ""}`}>
           {isMe ? (
@@ -944,9 +936,7 @@ function PendingRow(props: {
         (isFailed ? "ring-1 ring-red-200 bg-red-50/40" : "")
       }
     >
-      <div className="w-7 h-7 rounded shrink-0 flex items-center justify-center text-[11px] font-medium bg-gray-900 text-white" title={props.author}>
-        {props.author.slice(0, 1).toUpperCase()}
-      </div>
+      <UserAvatar userId={props.author} size="default" className="mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 justify-end">
           <span className="text-[11px] text-gray-500">{formatTime(p.ts)}</span>
@@ -1052,9 +1042,7 @@ function DmPickerDialog(props: {
               onClick={() => props.onPick(u.id)}
               className="text-left px-2 py-1.5 text-sm rounded hover:bg-gray-100 flex items-center gap-2"
             >
-              <span className="w-6 h-6 rounded bg-gray-200 text-gray-900 text-[11px] flex items-center justify-center">
-                {u.id.slice(0, 1).toUpperCase()}
-              </span>
+              <UserAvatar userId={u.id} size="default" />
               <span>{u.id}</span>
               {u.role === "admin" && (
                 <span className="text-[10px] text-gray-400 ml-auto">admin</span>

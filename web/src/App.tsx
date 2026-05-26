@@ -23,6 +23,7 @@ import { AdminSystemPage } from "./pages/AdminSystemPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { WelcomeCard } from "./components/WelcomeCard"
+import { UserAvatar } from "./components/UserAvatar"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
@@ -189,9 +190,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
             className="flex items-center gap-1 md:gap-2 px-1 md:px-2 h-8 rounded hover:bg-gray-100"
             title="account"
           >
-            <span className="w-6 h-6 rounded-full bg-gray-900 text-white text-xs flex items-center justify-center">
-              {me[0]?.toUpperCase() ?? "?"}
-            </span>
+            <UserAvatar userId={me} size="default" />
             <span className="hidden md:inline text-sm text-gray-700">{me}</span>
             <span className="text-gray-400 text-xs">▾</span>
           </button>

@@ -136,6 +136,38 @@ export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   return (await r.json()) as PersonalStatus
 }
 
+// ── avatar ──
+
+/** URL that serves a user's avatar image. `user` is the user to fetch
+ *  (defaults to the authenticated user when empty at the server).
+ *  `bust` cache-busts to force reload after upload. */
+export function avatarUrl(user: string, bust?: number): string {
+  const params = new URLSearchParams()
+  if (user) params.set("user", user)
+  if (bust) params.set("t", String(bust))
+  const qs = params.toString()
+  return `/api/personal/avatar${qs ? `?${qs}` : ""}`
+}
+
+/** Upload a pre-processed avatar image (base64 data URL). The server saves it
+ *  as avatar.png in the personal repo root. */
+
+export async function uploadAvatar(image: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch("/api/personal/avatar", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ image }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `upload failed (${r.status})` }
+  return { ok: true }
+}
+
+export async function deleteAvatar(): Promise<boolean> {
+  const r = await apiFetch("/api/personal/avatar", { method: "DELETE" })
+  return r.ok
+}
+
 export async function exportPersonalCryptKey(
   password: string,
 ): Promise<

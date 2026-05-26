@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { updateKanbanCard, type KanbanCard } from "../../api"
 import { TopicChip } from "../TopicChip"
+import { UserAvatar } from "../UserAvatar"
 import { useNavigate } from "react-router-dom"
 
 function InlineMarkdown({ text }: { text: string }) {
@@ -60,7 +61,7 @@ export function KanbanCardStatic({ card }: { card: KanbanCard }) {
       </div>
       {(assignees.length > 0 || card.due) && (
         <div className="mt-1.5 flex items-center gap-2 text-[10px]">
-          {assignees.map((a, i) => <span key={i} className="w-5 h-5 rounded-full bg-gray-200 text-gray-600 text-[9px] flex items-center justify-center font-medium" title={a}>{a.slice(0, 2).toUpperCase()}</span>)}
+          {assignees.map((a, i) => <UserAvatar key={i} userId={a} size="sm" />)}
           {card.due && <span className="text-gray-400 ml-auto">{card.due}</span>}
         </div>
       )}
@@ -131,7 +132,7 @@ export function KanbanCardView({
         </div>
         {(assignees.length > 0 || card.due) && (
           <div className="mt-1.5 flex items-center gap-2 text-[10px]">
-            <div className="flex items-center gap-0.5">{assignees.map((a, i) => <span key={i} className="w-5 h-5 rounded-full bg-gray-200 text-gray-600 text-[9px] flex items-center justify-center font-medium" title={a}>{a.slice(0, 2).toUpperCase()}</span>)}</div>
+            <div className="flex items-center gap-0.5">{assignees.map((a, i) => <UserAvatar key={i} userId={a} size="sm" />)}</div>
             {card.due && <span className="text-gray-400 ml-auto">{card.due}</span>}
           </div>
         )}

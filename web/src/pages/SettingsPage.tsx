@@ -39,7 +39,8 @@ import { PresetsPanel } from "../components/settings/PresetsPanel"
 import { getAdminPresets, type ProviderPreset } from "../api"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Camera, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
+import { AvatarSection } from "../components/settings/AvatarSection"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -54,10 +55,11 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "accounts" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-presets"
+type TabId = "avatar" | "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "accounts" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-presets"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
+  { id: "avatar",        label: "Avatar",                 gated: false, description: "Set your profile picture — upload and crop a square avatar.", icon: Camera },
   { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default.",     icon: Cpu },
   { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
@@ -302,6 +304,9 @@ export function SettingsPage() {
                   <div className={isGatedAndLocked ? "opacity-30" : ""}>
                   {active === "personal-repo" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><PersonalRepoPanel onDone={refresh} /></div>
+                  )}
+                  {active === "avatar" && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-5"><AvatarSection disabled={isGatedAndLocked} /></div>
                   )}
                   {active === "providers" && (
                     <ProvidersSection disk={disk} refExists={refExists} onChanged={refresh} disabled={isGatedAndLocked} />

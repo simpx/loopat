@@ -49,6 +49,7 @@ import {
   workspaceNotesDir,
   workspaceRepoDir,
   workspaceReposDir,
+  personalDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
@@ -1201,6 +1202,74 @@ app.post("/api/personal/import", requireAuth, async (c) => {
   // On auto-init, `cryptKey` is returned exactly once for the user to back
   // up. Subsequent /api/personal/status calls do NOT expose it.
   return c.json({ ok: true, autoInitialized: !!r.autoInitialized, cryptKey: r.cryptKey ?? null })
+})
+
+// Avatar — GET serves the current avatar image; POST uploads a new one.
+// Saved at personal/<user>/avatar.png (always PNG, max 640x640).
+// The user can upload other formats (jpeg, gif, webp) but the server
+// receives a pre-processed PNG data URL from the crop dialog.
+
+const AVATAR_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp"] as const
+function findAvatarPath(userId: string): string | null {
+  const dir = personalDir(userId)
+  for (const ext of AVATAR_EXTENSIONS) {
+    const p = pathJoin(dir, `avatar.${ext}`)
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
+app.get("/api/personal/avatar", requireAuth, async (c) => {
+  const target = c.req.query("user") || (c.get("userId") as string)
+  const p = findAvatarPath(target)
+  if (!p) return c.json({ ok: false, reason: "no avatar" }, 404)
+  const file = Bun.file(p)
+  const mime = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+    gif: "image/gif", webp: "image/webp",
+  }[p.split(".").pop()?.toLowerCase() ?? "png"] ?? "image/png"
+  const buf = await file.bytes()
+  return new Response(buf, {
+    headers: {
+      "Content-Type": mime,
+      "Content-Length": String(buf.byteLength),
+      "Cache-Control": "no-cache",
+    },
+  })
+})
+
+app.post("/api/personal/avatar", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const image = typeof body.image === "string" && body.image ? body.image : ""
+  if (!image) return c.json({ ok: false, error: "missing image data" }, 400)
+  // Accept data URLs only: "data:image/png;base64,..."
+  const match = image.match(/^data:image\/(png|jpeg|jpg|gif|webp);base64,(.+)$/i)
+  if (!match) return c.json({ ok: false, error: "invalid image format — expected data URL" }, 400)
+  try {
+    const buf = Buffer.from(match[2], "base64")
+    // Remove any existing avatar (clean up old extensions)
+    const dir = personalDir(userId)
+    await mkdir(dir, { recursive: true })
+    for (const ext of AVATAR_EXTENSIONS) {
+      const old = pathJoin(dir, `avatar.${ext}`)
+      try { await import("node:fs/promises").then(m => m.rm(old, { force: true })) } catch {}
+    }
+    const dest = pathJoin(dir, "avatar.png")
+    await Bun.write(dest, buf)
+    return c.json({ ok: true })
+  } catch (e: any) {
+    return c.json({ ok: false, error: `write failed: ${e?.message ?? e}` }, 500)
+  }
+})
+
+app.delete("/api/personal/avatar", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const p = findAvatarPath(userId)
+  if (p) {
+    try { await import("node:fs/promises").then(m => m.rm(p, { force: true })) } catch {}
+  }
+  return c.json({ ok: true })
 })
 
 // Destroy personal/<user>/ AND the saved git-crypt key. Two-step from the
