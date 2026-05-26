@@ -640,6 +640,14 @@ class LoopSession {
           // SDK has already injected the resolved plugins via its `plugins`
           // option → `--plugin-dir <path>` flags in `args`. We just wrap +
           // spawn here.
+          //
+          // `interactive: true` is CRITICAL — without `-i` on `podman exec`,
+          // stdin from the host (which the SDK uses to push user messages
+          // as stream-json) is NOT forwarded to the claude binary inside
+          // the container, so claude reads EOF and exits immediately with
+          // code 0 producing no output ("chat sends but never responds").
+          // NO `tty: true` though — SDK speaks line-delimited stream-json
+          // over pipes, not via PTY.
           const spawnBinary = process.env.LOOPAT_PODMAN_BIN || "podman"
           const fullArgs = buildPodmanExecArgs({
             loopId,
@@ -647,6 +655,7 @@ class LoopSession {
             args,
             env: extraEnv,
             workdir: V_LOOP_WORKDIR(loopId),
+            interactive: true,
           })
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal

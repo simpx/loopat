@@ -115,6 +115,30 @@ describe.skipIf(!podmanAvailable)("podman E2E lifecycle", () => {
     expect(await containerRunning(LOOP_ID)).toBe(true)
   })
 
+  test("podman exec -i forwards stdin into the container (regression: chat-sends-but-never-responds bug)", async () => {
+    // SDK pumps user messages as line-delimited stream-json on the claude
+    // binary's stdin. Without `-i` on `podman exec`, that stdin is NOT
+    // forwarded to the inner process — claude reads EOF, exits clean with
+    // code 0, no output, and the chat appears frozen.
+    await ensureContainer({ loopId: LOOP_ID, createdBy: USER })
+    const args = buildPodmanExecArgs({
+      loopId: LOOP_ID,
+      command: "/bin/bash",
+      args: ["-c", "read line && echo got=$line"],
+      interactive: true,
+    })
+    const child = (await import("node:child_process")).spawn(podmanBin, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    child.stdin.write("hello-stdin\n")
+    child.stdin.end()
+    let out = ""
+    child.stdout.on("data", (b) => (out += b.toString()))
+    const code = await new Promise<number>((res) => child.on("exit", (c) => res(c ?? -1)))
+    expect(code).toBe(0)
+    expect(out.trim()).toBe("got=hello-stdin")
+  }, 15_000)
+
   test("podman exec into the running container yields the right uid+host fs view", async () => {
     await ensureContainer({ loopId: LOOP_ID, createdBy: USER })
     const args = buildPodmanExecArgs({
