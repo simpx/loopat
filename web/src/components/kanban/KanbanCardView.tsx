@@ -116,7 +116,7 @@ export function KanbanCardView({
           </span>
           {editingTitle ? (
             <input type="text" value={titleText} onChange={(e) => setTitleText(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveTitle() }; if (e.key === "Escape") { setEditingTitle(false); setTitleText(card.text) } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); saveTitle() }; if (e.key === "Escape") { setEditingTitle(false); setTitleText(card.text) } }}
               onBlur={saveTitle}
               onPointerDown={(e) => e.stopPropagation()}
               className="flex-1 min-w-0 text-[13px] font-medium border border-gray-300 rounded px-1 py-0.5 outline-none focus:border-gray-500" />

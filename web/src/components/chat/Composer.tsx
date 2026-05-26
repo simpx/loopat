@@ -203,7 +203,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
       suppressSlashRef.current = false;
     }
-    if (e.key === "Enter" && !e.shiftKey && isRunning) {
+    if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey && isRunning) {
       e.preventDefault();
       handleEnqueue();
       return;

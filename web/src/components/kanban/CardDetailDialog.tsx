@@ -141,7 +141,7 @@ export function CardDetailDialog({
               {addingTag ? (
                 <span className="inline-flex items-center gap-1">
                   <input type="text" value={newTopic} onChange={(e) => setNewTopic(e.target.value)} autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTopic(); setAddingTag(false) }; if (e.key === "Escape") { setAddingTag(false); setNewTopic("") } }}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); addTopic(); setAddingTag(false) }; if (e.key === "Escape") { setAddingTag(false); setNewTopic("") } }}
                     onBlur={() => { setAddingTag(false); setNewTopic("") }}
                     className="w-20 text-[11px] border border-gray-300 rounded px-1.5 py-0.5 outline-none focus:border-gray-400" placeholder="tag" />
                   <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { addTopic(); setAddingTag(false) }}

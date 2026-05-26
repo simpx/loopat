@@ -502,7 +502,7 @@ function CreateProfileButton({ onCreated }: { onCreated: (name: string) => void 
   return (
     <div className="px-3 py-1.5 space-y-1.5">
       <input autoFocus value={name} onChange={(e) => { setName(e.target.value); setErr(null) }}
-        onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") { setAdding(false); setName("") } }}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); if (e.key === "Escape") { setAdding(false); setName("") } }}
         placeholder="profile name" className={inputClass} />
       {err && <div className="text-[11px] text-red-600">{err}</div>}
       <div className="flex items-center gap-2">
@@ -895,9 +895,9 @@ function ToolsEditor({ tools, readonly, onChange }: {
           {adding ? (
             <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="tool name" className={inputClassSm} />
-                <input value={newVersion} onChange={(e) => setNewVersion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="version (e.g. 3.12)" className={inputClassSm} />
-                <input value={newBackend} onChange={(e) => setNewBackend(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="backend (optional)" className={inputClassSm} />
+                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="tool name" className={inputClassSm} />
+                <input value={newVersion} onChange={(e) => setNewVersion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="version (e.g. 3.12)" className={inputClassSm} />
+                <input value={newBackend} onChange={(e) => setNewBackend(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="backend (optional)" className={inputClassSm} />
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
@@ -1023,8 +1023,8 @@ function EnvEditor({ env, envFile, envPath, readonly, onChange }: {
         )}
         {!readonly && adding && (
           <div className="flex items-center gap-2 mt-2">
-            <input autoFocus value={newKey} onChange={(e) => setNewKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="VAR_NAME" className={inputClassSm + " flex-1"} />
-            <input value={newVal} onChange={(e) => setNewVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="value" className={inputClassSm + " flex-1"} />
+            <input autoFocus value={newKey} onChange={(e) => setNewKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="VAR_NAME" className={inputClassSm + " flex-1"} />
+            <input value={newVal} onChange={(e) => setNewVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="value" className={inputClassSm + " flex-1"} />
             <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
             <button onClick={() => setAdding(false)} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
           </div>
@@ -1162,7 +1162,7 @@ function TasksEditor({ tasks, readonly, onChange }: {
         <>
           {adding ? (
             <div className="flex items-center gap-2">
-              <input autoFocus value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="task name" className={inputClassSm + " flex-1"} />
+              <input autoFocus value={newTaskName} onChange={(e) => setNewTaskName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="task name" className={inputClassSm + " flex-1"} />
               <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
               <button onClick={() => setAdding(false)} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
             </div>
@@ -1233,9 +1233,9 @@ function AliasEditor({ alias, readonly, onChange }: {
           {showAdd ? (
             <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
               <div className="grid grid-cols-3 gap-2">
-                <input autoFocus value={addingTool} onChange={(e) => setAddingTool(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setShowAdd(false) }} placeholder="tool (e.g. node)" className={inputClassSm} />
-                <input value={addingAlias} onChange={(e) => setAddingAlias(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="alias (e.g. myapp)" className={inputClassSm} />
-                <input value={addingVersion} onChange={(e) => setAddingVersion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="version" className={inputClassSm} />
+                <input autoFocus value={addingTool} onChange={(e) => setAddingTool(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setShowAdd(false) }} placeholder="tool (e.g. node)" className={inputClassSm} />
+                <input value={addingAlias} onChange={(e) => setAddingAlias(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="alias (e.g. myapp)" className={inputClassSm} />
+                <input value={addingVersion} onChange={(e) => setAddingVersion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="version" className={inputClassSm} />
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
@@ -1358,8 +1358,8 @@ function AddCustomSetting({ onAdd }: { onAdd: (key: string, val: string) => void
   if (!adding) return <button onClick={() => setAdding(true)} className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1"><Plus size={11} /> add custom setting</button>
   return (
     <div className="flex items-center gap-2 mt-2">
-      <input autoFocus value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="setting key" className={inputClassSm + " flex-1"} />
-      <input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="value" className={inputClassSm + " flex-1"} />
+      <input autoFocus value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="setting key" className={inputClassSm + " flex-1"} />
+      <input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="value" className={inputClassSm + " flex-1"} />
       <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
       <button onClick={() => setAdding(false)} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
     </div>
@@ -1425,8 +1425,8 @@ function PluginsEditor({ plugins, readonly, onChange }: {
           {adding ? (
             <div className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50/50">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="plugin name (e.g. rust)" className={inputClassSm} />
-                <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="git URL (or leave empty for default)" className={inputClassSm} />
+                <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="plugin name (e.g. rust)" className={inputClassSm} />
+                <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="git URL (or leave empty for default)" className={inputClassSm} />
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
@@ -1499,8 +1499,8 @@ function AddCustomHook({ onAdd }: { onAdd: (key: string, val: string) => void })
   if (!adding) return <button onClick={() => setAdding(true)} className="text-[11px] text-gray-500 hover:text-gray-900 inline-flex items-center gap-1 mt-1"><Plus size={11} /> add custom hook</button>
   return (
     <div className="flex items-center gap-2 mt-1">
-      <input autoFocus value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }} placeholder="hook event" className={inputClassSm + " w-32"} />
-      <input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add() }} placeholder="command" className={inputClassSm + " flex-1"} />
+      <input autoFocus value={key} onChange={(e) => setKey(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }} placeholder="hook event" className={inputClassSm + " w-32"} />
+      <input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }} placeholder="command" className={inputClassSm + " flex-1"} />
       <button onClick={add} className="px-3 h-7 rounded bg-gray-900 text-white text-[11px] font-medium hover:bg-gray-800">Add</button>
       <button onClick={() => setAdding(false)} className="text-[11px] text-gray-400 hover:text-gray-600">Cancel</button>
     </div>

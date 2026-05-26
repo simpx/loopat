@@ -479,7 +479,7 @@ export function WorkspacePanel() {
                     onChange={(e) => setProvRenameValue(e.target.value)}
                     onBlur={() => renameProvider(name)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") renameProvider(name)
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing) renameProvider(name)
                       if (e.key === "Escape") setEditingProvName(null)
                     }}
                     className={cn(inputClass, "text-[13px] font-semibold flex-1 min-w-0")}
@@ -559,7 +559,7 @@ export function WorkspacePanel() {
                       autoFocus
                       value={newModelName[name] ?? ""}
                       onChange={(e) => setNewModelName((a) => ({ ...a, [name]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) addModel(name); if (e.key === "Escape") setAddingModel((a) => ({ ...a, [name]: false })) }}
                       placeholder="model ID (e.g. claude-sonnet-4-20250514)"
                       className={cn(inputClass, "flex-1 text-[11px]")}
                     />
@@ -605,7 +605,7 @@ export function WorkspacePanel() {
                             onChange={(e) => setNewModelIdValue(e.target.value)}
                             onBlur={() => renameModel(name, m.id)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") renameModel(name, m.id)
+                              if (e.key === "Enter" && !e.nativeEvent.isComposing) renameModel(name, m.id)
                               if (e.key === "Escape") setEditingModelKey(null)
                             }}
                             className={cn(inputClass, "text-[11px] flex-1 min-w-0")}
@@ -734,7 +734,7 @@ export function WorkspacePanel() {
             autoFocus
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addProvider(); if (e.key === "Escape") setAdding(false) }}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) addProvider(); if (e.key === "Escape") setAdding(false) }}
             placeholder="provider name"
             className={cn(inputClass, "flex-1")}
           />

@@ -199,14 +199,14 @@ function ProviderPresetsEditor({
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }}
               placeholder="Provider name"
               className={inputClassSm}
             />
             <input
               value={newBaseUrl}
               onChange={(e) => setNewBaseUrl(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") add() }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }}
               placeholder="Base URL"
               className={inputClassSm}
             />
@@ -351,14 +351,14 @@ function MiseToolPresetsEditor({
               autoFocus
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false) }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") setAdding(false) }}
               placeholder="Tool name (e.g. python)"
               className={inputClassSm}
             />
             <input
               value={newVersion}
               onChange={(e) => setNewVersion(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") add() }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add() }}
               placeholder="Suggested version (e.g. 3.12)"
               className={inputClassSm}
             />

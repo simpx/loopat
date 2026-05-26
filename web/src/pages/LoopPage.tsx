@@ -621,7 +621,7 @@ function LoopHeader({
             autoFocus
             onChange={(e) => setTitleDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); saveTitle() }
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); saveTitle() }
               else if (e.key === "Escape") { e.preventDefault(); setEditingTitle(false); setTitleDraft(meta.title) }
             }}
             onBlur={saveTitle}
