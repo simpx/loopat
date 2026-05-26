@@ -155,23 +155,6 @@ export async function revokeApiToken(userId: string, tokenId: string): Promise<b
   })
 }
 
-/** Revoke every token belonging to a user. Returns count revoked. Used by
- *  cascade on account deletion. */
-export async function revokeAllApiTokens(userId: string): Promise<number> {
-  return withWriteLock(async () => {
-    const file = await readTokensFile()
-    let revoked = 0
-    for (const hash of Object.keys(file.tokens)) {
-      if (file.tokens[hash].userId === userId) {
-        delete file.tokens[hash]
-        revoked++
-      }
-    }
-    if (revoked > 0) await writeTokensFile(file)
-    return revoked
-  })
-}
-
 /** For tests only — drops the in-memory cache. */
 export function _resetCache(): void {
   cached = null

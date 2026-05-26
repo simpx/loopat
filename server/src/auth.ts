@@ -37,7 +37,6 @@ export type UserStatus = "active" | "pending"
 
 export type User = {
   id: string
-  /** scrypt salt + hash. Empty strings for token-only accounts (no password). */
   salt: string
   hash: string
   role: UserRole
@@ -45,17 +44,6 @@ export type User = {
   personalRepo?: string
   createdAt: string
   activatedAt?: string
-  /**
-   * Account ownership. `null` (or missing) means this is a personal account —
-   * the human who owns it logs in via password. A non-null value points at
-   * another user.id who manages this account. Owned accounts can only be
-   * accessed via API token (no password login), cannot own further accounts
-   * (no nesting), and cannot issue tokens (only their owner can).
-   *
-   * Naming convention: shares the flat global namespace with personal users.
-   * Whoever registers a name first owns it.
-   */
-  ownerId?: string | null
 }
 
 export type PublicUser = {
@@ -65,7 +53,6 @@ export type PublicUser = {
   personalRepo?: string
   createdAt: string
   activatedAt?: string
-  ownerId?: string | null
 }
 
 function toPublic(u: User): PublicUser {
@@ -76,7 +63,6 @@ function toPublic(u: User): PublicUser {
     personalRepo: u.personalRepo,
     createdAt: u.createdAt,
     activatedAt: u.activatedAt,
-    ownerId: u.ownerId ?? null,
   }
 }
 
@@ -141,42 +127,25 @@ export function isValidUsername(id: string): boolean {
  */
 export async function createUser(input: {
   id: string
-  /** Password for personal accounts. Omit for owned (token-only) accounts. */
-  password?: string
+  password: string
   personalRepo?: string
-  /** If set, this account is owned by another user (a "public account").
-   *  No password is stored; access is API-token only. */
-  ownerId?: string | null
 }): Promise<User> {
   if (!isValidUsername(input.id)) throw new Error("invalid username (lowercase a-z0-9_- , 1-32 chars, leading alnum)")
+  if (!input.password || input.password.length < 1) throw new Error("password required")
   const f = await readUsersFile()
   if (f.users.some((u) => u.id === input.id)) throw new Error("username taken")
-  const isOwned = !!input.ownerId
-  if (isOwned) {
-    const owner = f.users.find((u) => u.id === input.ownerId)
-    if (!owner) throw new Error(`owner not found: ${input.ownerId}`)
-    if (owner.ownerId) throw new Error("cannot own from a non-personal account (no nesting)")
-    if (input.password) throw new Error("owned accounts cannot have a password")
-  } else {
-    if (!input.password || input.password.length < 1) throw new Error("password required")
-  }
-  const { salt, hash } = isOwned
-    ? { salt: "", hash: "" }
-    : await hashPassword(input.password!)
+  const { salt, hash } = await hashPassword(input.password)
   const isFirst = f.users.length === 0
   const now = new Date().toISOString()
   const user: User = {
     id: input.id,
     salt,
     hash,
-    // Owned accounts: always member, never first-admin special-cased.
-    role: isOwned ? "member" : (isFirst ? "admin" : "member"),
-    // Owned accounts: active immediately (their owner is the real human, already vetted).
-    status: isOwned ? "active" : (isFirst ? "active" : "pending"),
+    role: isFirst ? "admin" : "member",
+    status: isFirst ? "active" : "pending",
     personalRepo: input.personalRepo?.trim() || undefined,
     createdAt: now,
-    activatedAt: (isOwned || isFirst) ? now : undefined,
-    ownerId: input.ownerId ?? undefined,
+    activatedAt: isFirst ? now : undefined,
   }
   await writeUsersFile({ users: [...f.users, user] })
   return user

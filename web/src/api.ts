@@ -1780,59 +1780,6 @@ export async function saveDefaultProfiles(profiles: string[]): Promise<{ ok: boo
   return { ok: true }
 }
 
-// ── Public accounts (v1 /me/accounts) ──
-// "Public account" = ownerId != null. See docs/account-model.md.
-
-export type PublicAccount = {
-  id: string
-  role: "admin" | "member"
-  status: "active" | "pending"
-  ownerId?: string | null
-  createdAt: string
-  activatedAt?: string
-  personalRepo?: string | null
-}
-
-export async function listMyAccounts(): Promise<PublicAccount[]> {
-  const r = await apiFetch("/api/v1/me/accounts")
-  if (!r.ok) return []
-  const j = await r.json().catch(() => ({ accounts: [] }))
-  return j.accounts ?? []
-}
-
-export async function createMyAccount(id: string): Promise<{ account?: PublicAccount; error?: string }> {
-  const r = await apiFetch("/api/v1/me/accounts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { error: j?.error?.message ?? `create failed (${r.status})` }
-  return { account: j as PublicAccount }
-}
-
-export async function deleteMyAccount(id: string): Promise<{ ok: boolean; error?: string }> {
-  const r = await apiFetch(`/api/v1/me/accounts/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  })
-  if (r.ok) return { ok: true }
-  const j = await r.json().catch(() => ({}))
-  return { ok: false, error: j?.error?.message ?? `delete failed (${r.status})` }
-}
-
-/** Set the personalRepo URL on an account I own. MVP — only stores the URL.
- *  Cloning / import / pull / push for owned accounts is not implemented yet. */
-export async function setAccountPersonalRepo(id: string, personalRepo: string): Promise<{ ok: boolean; account?: PublicAccount; error?: string }> {
-  const r = await apiFetch(`/api/v1/me/accounts/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ personalRepo }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j?.error?.message ?? `update failed (${r.status})` }
-  return { ok: true, account: j as PublicAccount }
-}
-
 // ── API tokens (v1 /me/tokens) ──
 
 export type ApiTokenEntry = {
@@ -1842,25 +1789,18 @@ export type ApiTokenEntry = {
   lastUsedAt?: string
 }
 
-/** List tokens for the caller, or for a public account they own. */
-export async function listApiTokens(forAccount?: string): Promise<ApiTokenEntry[]> {
-  const url = forAccount
-    ? `/api/v1/me/tokens?forAccount=${encodeURIComponent(forAccount)}`
-    : "/api/v1/me/tokens"
-  const r = await apiFetch(url)
+export async function listApiTokens(): Promise<ApiTokenEntry[]> {
+  const r = await apiFetch("/api/v1/me/tokens")
   if (!r.ok) return []
   const j = await r.json().catch(() => ({ tokens: [] }))
   return j.tokens ?? []
 }
 
-/** Create a token. `forAccount` (optional) issues for a public account caller owns. */
-export async function createApiToken(label: string, forAccount?: string): Promise<{ tokenId: string; token: string; label: string; createdAt: string; forAccount?: string } | null> {
-  const body: Record<string, unknown> = { label }
-  if (forAccount) body.forAccount = forAccount
+export async function createApiToken(label: string): Promise<{ tokenId: string; token: string; label: string; createdAt: string } | null> {
   const r = await apiFetch("/api/v1/me/tokens", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ label }),
   })
   if (!r.ok) return null
   return await r.json().catch(() => null)

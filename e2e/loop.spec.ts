@@ -170,57 +170,6 @@ test.describe("/loop page", () => {
     expect(typeof body.permission_mode === "string" || body.permission_mode === undefined).toBe(true);
   });
 
-  test("Settings → Accounts: create account, expand, issue token, set repo URL", async ({ page }) => {
-    // 1. Create an account via the UI form.
-    const createReq = page.waitForRequest(
-      (req) => req.url().includes("/api/v1/me/accounts") && req.method() === "POST",
-      { timeout: 15_000 },
-    );
-    await page.goto("/settings/accounts");
-    await expect(page.getByText("Your accounts")).toBeVisible({ timeout: 10_000 });
-
-    await page.getByPlaceholder("e.g. my-coderev-bot").fill("e2e-account");
-    await page.getByRole("button", { name: /^Create$/ }).click();
-    const createR = await createReq;
-    expect(createR.postDataJSON()).toEqual({ id: "e2e-account" });
-
-    // Wait for the new account row to appear.
-    const accountRow = page.locator("span.font-mono", { hasText: "e2e-account" }).first();
-    await expect(accountRow).toBeVisible({ timeout: 5_000 });
-
-    // 2. Expand the row and issue a token for this account.
-    const tokenReq = page.waitForRequest(
-      (req) => req.url().includes("/api/v1/me/tokens") && req.method() === "POST",
-      { timeout: 15_000 },
-    );
-    await accountRow.click();
-    await expect(page.getByText("Tokens").first()).toBeVisible({ timeout: 5_000 });
-
-    await page.getByPlaceholder("token label (e.g. slack-bot)").fill("e2e-tok");
-    await page.getByRole("button", { name: /^New token$/ }).click();
-    const tokenR = await tokenReq;
-    const tokenBody = tokenR.postDataJSON();
-    expect(tokenBody.label).toBe("e2e-tok");
-    expect(tokenBody.forAccount).toBe("e2e-account");
-
-    // Token-just-created banner shows the plaintext token.
-    await expect(page.locator("code", { hasText: /^la_[0-9a-f]+$/ })).toBeVisible({ timeout: 5_000 });
-
-    // 3. Save a personal repo URL.
-    const patchReq = page.waitForRequest(
-      (req) =>
-        req.url().includes("/api/v1/me/accounts/e2e-account") &&
-        req.method() === "PATCH",
-      { timeout: 15_000 },
-    );
-    await page.getByPlaceholder("git@github.com:you/this-account.git").fill("git@example.com:bot/e2e-account.git");
-    await page.getByRole("button", { name: /^Save$/ }).click();
-    const patchR = await patchReq;
-    expect(patchR.postDataJSON()).toEqual({
-      personalRepo: "git@example.com:bot/e2e-account.git",
-    });
-  });
-
   test("scope tabs filter loops", async ({ page }) => {
     await page.goto("/loop");
     const sidebar = page.locator("aside");

@@ -1,8 +1,10 @@
 ---
 title: Account Model
 tags: [loopat, account, agent, identity]
-status: living doc
+status: design doc — NOT IMPLEMENTED (reverted 2026-05-27)
 ---
+
+> **状态：仅设计文档，未实现。** 这一版多账号实现做完后回滚了 —— 想多个身份就直接注册多个 user 即可，先不引入 ownership 模型。本文留作未来重新启用时的参考。
 
 # Account Model
 
