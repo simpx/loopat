@@ -1820,6 +1820,19 @@ export async function deleteMyAccount(id: string): Promise<{ ok: boolean; error?
   return { ok: false, error: j?.error?.message ?? `delete failed (${r.status})` }
 }
 
+/** Set the personalRepo URL on an account I own. MVP — only stores the URL.
+ *  Cloning / import / pull / push for owned accounts is not implemented yet. */
+export async function setAccountPersonalRepo(id: string, personalRepo: string): Promise<{ ok: boolean; account?: PublicAccount; error?: string }> {
+  const r = await apiFetch(`/api/v1/me/accounts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ personalRepo }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j?.error?.message ?? `update failed (${r.status})` }
+  return { ok: true, account: j as PublicAccount }
+}
+
 // ── API tokens (v1 /me/tokens) ──
 
 export type ApiTokenEntry = {

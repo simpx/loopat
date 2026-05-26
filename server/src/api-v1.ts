@@ -453,6 +453,36 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
     return c.body(null, 204)
   })
 
+  // Update minimal account fields. MVP: only personalRepo URL — UI entry
+  // point so owners can record a remote. Cloning / import / pull / push of
+  // an owned account's personal repo is **not implemented yet** — this just
+  // stores the URL string on the account record.
+  v1.patch("/me/accounts/:id", async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
+    const target = await findUser(c.req.param("id") ?? "")
+    if (!target) return apiError(c, 404, "not_found_error", "account_not_found", "account not found")
+    if (target.ownerId !== userId) {
+      return apiError(c, 403, "permission_error", "not_account_owner",
+        "you can only update public accounts you own")
+    }
+    const body = await c.req.json().catch(() => ({}))
+    if (typeof body.personalRepo === "string") {
+      const url = body.personalRepo.trim()
+      const { setPersonalRepo } = await import("./auth")
+      // setPersonalRepo handles "" → unset.
+      const updated = await setPersonalRepo(target.id, url)
+      if (!updated) return apiError(c, 404, "not_found_error", "account_not_found", "account not found")
+      return c.json({
+        id: updated.id,
+        ownerId: updated.ownerId ?? null,
+        personalRepo: updated.personalRepo ?? null,
+      })
+    }
+    return apiError(c, 400, "invalid_request_error", "no_updatable_fields",
+      "no recognized fields in body (supported: personalRepo)")
+  })
+
   // ── Loop CRUD ───────────────────────────────────────────────────────
 
   v1.post("/loops", requireApiAuth, async (c) => {

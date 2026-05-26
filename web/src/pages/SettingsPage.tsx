@@ -24,6 +24,7 @@ import {
   listMyAccounts,
   createMyAccount,
   deleteMyAccount,
+  setAccountPersonalRepo,
   type PersonalConfigDisk,
   type ProviderDisk,
   type RefExistsMap,
@@ -39,7 +40,7 @@ import { PresetsPanel } from "../components/settings/PresetsPanel"
 import { getAdminPresets, type ProviderPreset } from "../api"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark, ChevronDown, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -1282,12 +1283,12 @@ function AccountsSection() {
         </div>
       )}
 
-      {/* Account list */}
+      {/* Account list with expandable rows */}
       <div className="rounded-lg border border-gray-200 bg-white">
         <div className="px-4 py-3 border-b border-gray-100">
           <h3 className="text-[13px] font-medium text-gray-900">Your accounts</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            API-only accounts you own. Each one is a separate identity with its own resources.
+            API-only accounts you own. Click a row to manage its tokens and personal repo.
           </p>
         </div>
 
@@ -1298,52 +1299,19 @@ function AccountsSection() {
             No accounts yet. Create one below.
           </div>
         ) : (
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-gray-100 text-left text-[11px] text-gray-500 uppercase tracking-wider">
-                <th className="px-4 py-2 font-medium">ID</th>
-                <th className="px-4 py-2 font-medium">Created</th>
-                <th className="px-4 py-2 font-medium w-32"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="px-4 py-2.5 font-mono text-gray-900">{a.id}</td>
-                  <td className="px-4 py-2.5 text-gray-500 text-[12px]">{new Date(a.createdAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-2.5">
-                    {deleteConfirm === a.id ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(a.id)}
-                          className="text-[11px] text-red-600 hover:text-red-800 font-medium"
-                        >
-                          confirm
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirm(null)}
-                          className="text-[11px] text-gray-400 hover:text-gray-600"
-                        >
-                          cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirm(a.id)}
-                        className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        title="delete account"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="divide-y divide-gray-100">
+            {accounts.map((a) => (
+              <AccountRow
+                key={a.id}
+                account={a}
+                onChanged={refresh}
+                deleteConfirm={deleteConfirm === a.id}
+                onAskDelete={() => setDeleteConfirm(a.id)}
+                onCancelDelete={() => setDeleteConfirm(null)}
+                onConfirmDelete={() => handleDelete(a.id)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
@@ -1379,6 +1347,293 @@ function AccountsSection() {
           ID rules: lowercase a-z 0-9 _ - , 1-32 chars, must start with alphanumeric. Shares the global namespace with personal accounts — pick a name no one else has taken.
         </p>
       </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Single account row — collapsed shows id + actions; expanded shows tokens
+// and personal repo URL input.
+// ────────────────────────────────────────────────────────────────────────────
+
+function AccountRow({
+  account,
+  onChanged,
+  deleteConfirm,
+  onAskDelete,
+  onCancelDelete,
+  onConfirmDelete,
+}: {
+  account: PublicAccount
+  onChanged: () => void
+  deleteConfirm: boolean
+  onAskDelete: () => void
+  onCancelDelete: () => void
+  onConfirmDelete: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div>
+      <div
+        className={`px-4 py-2.5 flex items-center gap-3 hover:bg-gray-50 cursor-pointer ${expanded ? "bg-gray-50" : ""}`}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="shrink-0 text-gray-400">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+        <span className="font-mono text-[13px] text-gray-900 flex-1">{account.id}</span>
+        {account.personalRepo && (
+          <span className="text-[11px] text-gray-400 truncate max-w-[260px]" title={account.personalRepo}>
+            {account.personalRepo}
+          </span>
+        )}
+        <span className="text-[12px] text-gray-500 shrink-0">
+          {new Date(account.createdAt).toLocaleDateString()}
+        </span>
+        <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+          {deleteConfirm ? (
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={onConfirmDelete} className="text-[11px] text-red-600 hover:text-red-800 font-medium">confirm</button>
+              <button type="button" onClick={onCancelDelete} className="text-[11px] text-gray-400 hover:text-gray-600">cancel</button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onAskDelete}
+              className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+              title="delete account"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-6 pb-5 pt-1 bg-gray-50 space-y-4">
+          <AccountTokensSubsection accountId={account.id} />
+          <AccountPersonalRepoSubsection account={account} onChanged={onChanged} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AccountTokensSubsection({ accountId }: { accountId: string }) {
+  const [tokens, setTokens] = useState<ApiTokenEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [label, setLabel] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [newToken, setNewToken] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const list = await listApiTokens(accountId)
+    setTokens(list)
+    setLoading(false)
+  }, [accountId])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  const handleCreate = async () => {
+    if (creating) return
+    setCreating(true)
+    const result = await createApiToken(label.trim() || "default", accountId)
+    setCreating(false)
+    if (result) {
+      setNewToken(result.token)
+      setLabel("")
+      setCopied(false)
+      refresh()
+    }
+  }
+
+  const handleCopy = () => {
+    if (!newToken) return
+    navigator.clipboard.writeText(newToken).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  const handleRevoke = async (tokenId: string) => {
+    await revokeApiToken(tokenId)
+    setDeleteConfirm(null)
+    refresh()
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="px-4 py-2.5 border-b border-gray-100">
+        <h4 className="text-[12px] font-medium text-gray-900">Tokens</h4>
+        <p className="text-[11px] text-gray-500 mt-0.5">Bearer tokens that authenticate as this account.</p>
+      </div>
+
+      {newToken && (
+        <div className="px-4 py-3 border-b border-emerald-100 bg-emerald-50">
+          <div className="flex items-center gap-2 mb-1">
+            <Check size={12} className="text-emerald-600" />
+            <span className="text-[11px] font-medium text-emerald-900">Copy now — won't be shown again</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-[11px] bg-white border border-emerald-200 rounded px-2 py-1.5 font-mono text-gray-800 select-all break-all">
+              {newToken}
+            </code>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="shrink-0 h-7 px-2 rounded text-[11px] border border-emerald-300 hover:bg-emerald-100 text-emerald-800 flex items-center gap-1"
+            >
+              {copied ? <Check size={11} /> : <Copy size={11} />}
+              {copied ? "copied" : "copy"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setNewToken(null)}
+              className="shrink-0 text-[11px] text-emerald-700 hover:text-emerald-900 underline"
+            >
+              dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="px-4 py-2.5">
+        {loading ? (
+          <div className="text-center text-[12px] text-gray-400 italic py-3">loading…</div>
+        ) : tokens.length === 0 ? (
+          <div className="text-center text-[12px] text-gray-400 py-3">No tokens yet.</div>
+        ) : (
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[10px] text-gray-500 uppercase tracking-wider">
+                <th className="py-1.5 font-medium">Label</th>
+                <th className="py-1.5 font-medium">Token ID</th>
+                <th className="py-1.5 font-medium">Created</th>
+                <th className="py-1.5 font-medium w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {tokens.map((t) => (
+                <tr key={t.tokenId} className="border-t border-gray-100">
+                  <td className="py-1.5 text-gray-900">{t.label}</td>
+                  <td className="py-1.5 font-mono text-[11px] text-gray-500">{t.tokenId}</td>
+                  <td className="py-1.5 text-gray-500 text-[11px]">{new Date(t.createdAt).toLocaleDateString()}</td>
+                  <td className="py-1.5">
+                    {deleteConfirm === t.tokenId ? (
+                      <div className="flex items-center gap-1">
+                        <button type="button" onClick={() => handleRevoke(t.tokenId)} className="text-[11px] text-red-600 hover:text-red-800 font-medium">confirm</button>
+                        <button type="button" onClick={() => setDeleteConfirm(null)} className="text-[11px] text-gray-400 hover:text-gray-600">cancel</button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(t.tokenId)}
+                        className="w-6 h-6 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        title="revoke token"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <div className="flex gap-2 mt-2">
+          <input
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="token label (e.g. slack-bot)"
+            className={inputClassSm}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate() }}
+            disabled={creating}
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={creating}
+            className="shrink-0 h-7 px-3 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {creating ? "creating…" : "New token"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccountPersonalRepoSubsection({
+  account,
+  onChanged,
+}: {
+  account: PublicAccount
+  onChanged: () => void
+}) {
+  const [url, setUrl] = useState(account.personalRepo ?? "")
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Reset to current value when account prop changes (after refresh).
+  useEffect(() => {
+    setUrl(account.personalRepo ?? "")
+  }, [account.personalRepo])
+
+  const dirty = (url.trim() || "") !== (account.personalRepo ?? "")
+
+  const handleSave = async () => {
+    if (saving) return
+    setSaving(true)
+    setError(null)
+    const result = await setAccountPersonalRepo(account.id, url.trim())
+    setSaving(false)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2000)
+    onChanged()
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="px-4 py-2.5 border-b border-gray-100">
+        <h4 className="text-[12px] font-medium text-gray-900">Personal repo</h4>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          Git URL to bind to this account. <span className="text-amber-700">Note: only records the URL — clone / import / pull / push for owned accounts is not implemented yet.</span>
+        </p>
+      </div>
+      <div className="px-4 py-3 flex gap-2 items-start">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => { setUrl(e.target.value); setError(null) }}
+          placeholder="git@github.com:you/this-account.git"
+          className={inputClass}
+          disabled={saving}
+        />
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!dirty || saving}
+          className="shrink-0 h-9 px-3 rounded text-[12px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? "saving…" : saved ? "saved" : "Save"}
+        </button>
+      </div>
+      {error && (
+        <div className="px-4 pb-3 text-[11px] text-red-600 flex items-center gap-1">
+          <AlertCircle size={11} /> {error}
+        </div>
+      )}
     </div>
   )
 }
