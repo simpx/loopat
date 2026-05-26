@@ -907,37 +907,34 @@ export async function pullPersonalFromRemote(
     uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
   } catch {}
 
+  if (force) {
+    // Force pull: discard ALL local state and reset to origin/<branch>.
+    // Runs regardless of uncommitted count — works around broken git state
+    // (stuck merge, corrupted index, hook failures) that normal pull can't fix.
+    try {
+      const silentEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
+      // Abort any in-progress merge (ignore errors — there may not be one)
+      try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv }) } catch {}
+      await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"], { env: silentEnv })
+      await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+      await execFileP("git", ["-C", dir, "fetch", "origin"], {
+        env: { ...silentEnv, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+        timeout: 30_000,
+      })
+      await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silentEnv })
+      await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+      return { ok: true, message: "force pulled — reset to origin/" + branch }
+    } catch (e: any) {
+      return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
+    }
+  }
+
   if (uncommitted > 0) {
-    if (force) {
-      // Force pull: discard ALL local state and reset to origin/<branch>.
-      // Skip git merge entirely — it can fail due to hooks, stash conflicts,
-      // or interactive prompts. Instead go nuclear: abort any in-progress
-      // merge, reset hard to HEAD, clean untracked files, fetch, then
-      // reset hard to origin/<branch>. This is a destructive operation.
-      try {
-        // Suppress interactive prompts (e.g. git-crypt, credential helpers)
-        const silentEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
-        // Abort any in-progress merge (ignore errors — there may not be one)
-        try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv }) } catch {}
-        await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"], { env: silentEnv })
-        await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
-        await execFileP("git", ["-C", dir, "fetch", "origin"], {
-          env: { ...silentEnv, GIT_SSH_COMMAND: sshCommandForUser(userId) },
-          timeout: 30_000,
-        })
-        await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silentEnv })
-        await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
-        return { ok: true, message: "force pulled — reset to origin/" + branch }
-      } catch (e: any) {
-        return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
-      }
-    } else {
-      // Stash changes before pull
-      try {
-        await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
-      } catch (e: any) {
-        return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
-      }
+    // Stash changes before pull
+    try {
+      await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
+    } catch (e: any) {
+      return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
     }
   }
 
@@ -951,20 +948,25 @@ export async function pullPersonalFromRemote(
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
   }
 
-  // Merge
+  // Merge — abort any stuck merge state first (e.g. leftover from a previous
+  // failure, or a git-crypt hook that bailed mid-way).
+  try { await execFileP("git", ["-C", dir, "merge", "--abort"]) } catch {}
+
   try {
-    await execFileP("git", ["-C", dir, "merge", `origin/${branch}`])
+    await execFileP("git", ["-C", dir, "merge", `origin/${branch}`], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString()
+    // Always abort after a failed merge to leave the repo clean
+    try { await execFileP("git", ["-C", dir, "merge", "--abort"]) } catch {}
     if (stderr.includes("CONFLICT")) {
-      // Extract conflicted files
       const conflicts: string[] = []
       const lines = stderr.split("\n")
       for (const line of lines) {
         const match = line.match(/CONFLICT\s*\(.*?\):\s*Merge conflict in\s*(.+)/)
         if (match) conflicts.push(match[1].trim())
       }
-      // Also check git status for conflicts
       try {
         const { stdout } = await execFileP("git", ["-C", dir, "diff", "--name-only", "--diff-filter=U"])
         const statusConflicts = stdout.split("\n").filter((l) => l.trim())
