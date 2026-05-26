@@ -1250,9 +1250,12 @@ app.post("/api/personal/delete", requireAuth, async (c) => {
 })
 
 // Pull from remote. Stashes local changes, fetches, merges, then pops stash.
+// If `force: true` is passed in the body, discards all local changes instead
+// of stashing (for recovering from stash failures).
 app.post("/api/personal/pull", requireAuth, async (c) => {
   const userId = c.get("userId") as string
-  const r = await pullPersonalFromRemote(userId)
+  const body = await c.req.json().catch(() => ({}))
+  const r = await pullPersonalFromRemote(userId, { force: !!body.force })
   if (!r.ok) {
     const status: Record<string, unknown> = { error: r.error }
     if (r.conflicts) status.conflicts = r.conflicts

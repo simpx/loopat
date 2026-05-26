@@ -875,7 +875,9 @@ export type PersonalPullResult =
 
 export async function pullPersonalFromRemote(
   userId: string,
+  opts?: { force?: boolean },
 ): Promise<PersonalPullResult> {
+  const force = opts?.force ?? false
   const dir = personalDir(userId)
   if (!existsSyncBase(join(dir, ".git"))) {
     return { ok: false, error: "personal/ is not a git repo" }
@@ -906,11 +908,21 @@ export async function pullPersonalFromRemote(
   } catch {}
 
   if (uncommitted > 0) {
-    // Stash changes before pull
-    try {
-      await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
-    } catch (e: any) {
-      return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
+    if (force) {
+      // Discard all local changes — reset to HEAD and remove untracked files
+      try {
+        await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"])
+        await execFileP("git", ["-C", dir, "clean", "-fd"])
+      } catch (e: any) {
+        return { ok: false, error: `discard failed: ${e?.stderr ?? e?.message ?? e}` }
+      }
+    } else {
+      // Stash changes before pull
+      try {
+        await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
+      } catch (e: any) {
+        return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
+      }
     }
   }
 

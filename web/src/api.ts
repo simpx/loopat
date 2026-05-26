@@ -192,14 +192,18 @@ export async function deletePersonalVault(
   return { ok: true, synced: j.synced, dataLost: j.dataLost }
 }
 
-export async function pullPersonalVault(): Promise<{
+export async function pullPersonalVault(opts?: { force?: boolean }): Promise<{
   ok: boolean
   error?: string
   conflicts?: string[]
   needsStash?: boolean
   message?: string
 }> {
-  const r = await apiFetch("/api/personal/pull", { method: "POST" })
+  const r = await apiFetch("/api/personal/pull", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ force: opts?.force ?? false }),
+  })
   const j = await r.json().catch(() => ({}))
   if (!r.ok) {
     return {
