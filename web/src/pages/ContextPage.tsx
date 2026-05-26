@@ -40,7 +40,7 @@ import { lazy, Suspense } from "react"
 const CodeEditor = lazy(() => import("../components/markdown/CodeEditor").then(m => ({ default: m.CodeEditor })))
 const Markdown = lazy(() => import("../components/markdown/Markdown").then(m => ({ default: m.Markdown })))
 const MilkdownEditor = lazy(() => import("../components/markdown/MilkdownEditor").then(m => ({ default: m.MilkdownEditor })))
-import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload, RefreshCw } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Trash2, File, Eye, FilePlus, FolderPlus, Upload, RefreshCw, Maximize2, Minimize2 } from "lucide-react"
 import { Tree, type TreeNodeData, type TreeContextAction } from "../components/Tree"
 
 type SubId = VaultId
@@ -626,6 +626,7 @@ function DocView({
   const [lastCommit, setLastCommit] = useState<string | null>(null)
   const [showBacklinks, setShowBacklinks] = useState(false)
   const [milkdown, setMilkdown] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
   // Server flags secret files; the response never carries plaintext, so
   // `original` stays empty and the only way to mutate is to type a new value.
   const [secretFromServer, setSecretFromServer] = useState(false)
@@ -641,6 +642,7 @@ function DocView({
     }
     setMilkdown(false)
     setLastCommit(null)
+    setFullscreen(false)
     setSecretFromServer(false)
     vaultRead(vault, path).then((r) => {
       const c = r?.content ?? ""
@@ -800,12 +802,20 @@ function DocView({
         isSecret ? (
           // edit mode for a secret: single full-width editor starting empty;
           // save sends the typed value as a full replacement.
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          <div className={fullscreen ? "fixed inset-0 z-50 bg-white flex flex-col" : "flex-1 min-h-0 min-w-0 flex flex-col"}>
             <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
               <span className="text-amber-700">🔒</span>
-              <span>new value · saved encrypted (whatever's currently stored will be replaced)</span>
+              <span>new value · saved encrypted</span>
+              <div className="flex-1" />
+              <button
+                onClick={() => setFullscreen(!fullscreen)}
+                className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
+                title={fullscreen ? "restore" : "maximize"}
+              >
+                {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}>
                 <CodeEditor path={path} value={draft} onChange={setDraft} />
               </Suspense>
@@ -813,20 +823,28 @@ function DocView({
           </div>
         ) : isMd && !milkdown ? (
           // edit mode for markdown: split source / preview
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col md:flex-row">
+          <div className={fullscreen ? "fixed inset-0 z-50 bg-white flex flex-col md:flex-row" : "flex-1 min-h-0 min-w-0 flex flex-col md:flex-row"}>
             <div className="flex-1 min-w-0 min-h-0 border-r border-gray-200 flex flex-col">
               <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
                 <span>source · markdown</span>
                 <button
                   type="button"
                   onClick={() => setMilkdown(true)}
-                  className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                  className="px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
                   title="Switch to WYSIWYG editor"
                 >
                   wysiwyg
                 </button>
+                <div className="flex-1" />
+                <button
+                  onClick={() => setFullscreen(!fullscreen)}
+                  className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
+                  title={fullscreen ? "restore" : "maximize"}
+                >
+                  {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                </button>
               </div>
-              <div className="flex-1 min-h-0">
+              <div className="flex-1 min-h-0 relative">
                 <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
               </div>
             </div>
@@ -843,19 +861,27 @@ function DocView({
           </div>
         ) : isMd ? (
           // edit mode for markdown: WYSIWYG (Milkdown), no preview needed
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          <div className={fullscreen ? "fixed inset-0 z-50 bg-white flex flex-col" : "flex-1 min-h-0 min-w-0 flex flex-col"}>
             <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
               <span>wysiwyg · milkdown</span>
               <button
                 type="button"
                 onClick={() => setMilkdown(false)}
-                className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                className="px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
                 title="Switch to source editor"
               >
                 source
               </button>
+              <div className="flex-1" />
+              <button
+                onClick={() => setFullscreen(!fullscreen)}
+                className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
+                title={fullscreen ? "restore" : "maximize"}
+              >
+                {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}>
                 <MilkdownEditor value={draft} onChange={setDraft} />
               </Suspense>
@@ -863,7 +889,7 @@ function DocView({
           </div>
         ) : (
           // edit mode for non-markdown: full-width editor
-          <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+          <div className={fullscreen ? "fixed inset-0 z-50 bg-white flex flex-col" : "flex-1 min-h-0 min-w-0 flex flex-col"}>
             <div className="px-3 h-7 shrink-0 border-b border-gray-200 flex items-center gap-2 text-[11px] text-gray-500">
               <span>source · {path.includes(".") ? path.split(".").pop() : "text"}</span>
               {path.endsWith(".json") && (
@@ -877,14 +903,22 @@ function DocView({
                       alert("Invalid JSON: " + (e?.message ?? "parse error"))
                     }
                   }}
-                  className="ml-auto px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
+                  className="px-2 h-5 rounded text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600"
                   title="Format JSON"
                 >
                   format
                 </button>
               )}
+              <div className="flex-1" />
+              <button
+                onClick={() => setFullscreen(!fullscreen)}
+                className="text-gray-400 hover:text-gray-700 px-1 rounded hover:bg-gray-100"
+                title={fullscreen ? "restore" : "maximize"}
+              >
+                {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
             </div>
-            <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 relative">
               <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading editor...</div>}><CodeEditor path={path} value={draft} onChange={setDraft} /></Suspense>
             </div>
           </div>

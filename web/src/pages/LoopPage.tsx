@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo, Fragment } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
-import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand, FlaskConical } from "lucide-react"
+import { PanelLeftClose, PanelLeftOpen, Archive, ArchiveRestore, GitBranch, Globe, Lock, Copy, Check, ChevronDown, Hand, FlaskConical, Maximize2, Minimize2 } from "lucide-react"
 import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
@@ -962,7 +962,7 @@ function RightPanel({
           onClick={onToggleFullscreen}
           title={isFullscreen ? "restore" : "maximize"}
         >
-          {isFullscreen ? "⤓" : "⤢"}
+          {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
       )}
       <button
