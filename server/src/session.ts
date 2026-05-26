@@ -731,6 +731,12 @@ class LoopSession {
   private async consume(q: Query) {
     this.consuming = true
     const tag = this.id.slice(0, 8)
+    // Set after we receive a `result` message — at that point the turn is
+    // semantically complete. If the SDK subsequently throws (e.g. the SIGKILL
+    // dance against an idle claude binary that podman exec can't forward
+    // SIGTERM into), the error is cleanup noise, not a real failure — we
+    // suppress it from the user-visible history / broadcast.
+    let resultReceived = false
     try {
       for await (const msg of q) {
         if (DEBUG) {
@@ -746,6 +752,7 @@ class LoopSession {
           this.queueProcessing = false
           this.q = null
           this.processNextInQueue()
+          resultReceived = true
         } else if (
           // Inject queued messages at tool-result boundaries — matching
           // real Claude Code's per-step queue consumption.
@@ -773,12 +780,22 @@ class LoopSession {
         this.updateStatus(msg)
       }
     } catch (e: any) {
-      console.error(`[sdk:${tag}] consume error:`, e?.message ?? e)
-      if (DEBUG && e?.stack) console.error(e.stack)
-      const err = { type: "error", message: e?.message ?? String(e) }
-      this.history.push(err as any)
-      this.persist(err)
-      this.broadcast(err)
+      const msg = e?.message ?? String(e)
+      // Post-result cleanup noise: the SDK kills the idle claude child after
+      // ~7s (SIGTERM → 5s grace → SIGKILL). With our podman-exec wrapper, the
+      // host-side SIGTERM doesn't propagate to claude inside the container,
+      // so the SIGKILL fires and podman reports exit 137. The turn already
+      // succeeded — don't pollute history or alarm the frontend.
+      if (resultReceived && /exited with code|aborted by user|terminated by signal/.test(msg)) {
+        console.warn(`[sdk:${tag}] post-result cleanup noise (suppressed): ${msg}`)
+      } else {
+        console.error(`[sdk:${tag}] consume error:`, msg)
+        if (DEBUG && e?.stack) console.error(e.stack)
+        const err = { type: "error", message: msg }
+        this.history.push(err as any)
+        this.persist(err)
+        this.broadcast(err)
+      }
     } finally {
       // If a new Query was started by processNextInQueue() above, skip cleanup —
       // the new consume owns the lifecycle from here on.
