@@ -21,11 +21,15 @@ import {
   listApiTokens,
   createApiToken,
   revokeApiToken,
+  listMyAccounts,
+  createMyAccount,
+  deleteMyAccount,
   type PersonalConfigDisk,
   type ProviderDisk,
   type RefExistsMap,
   type ModelEntry,
   type ApiTokenEntry,
+  type PublicAccount,
 } from "../api"
 import { PersonalRepoPanel } from "../components/dialog/PersonalRepoPanel"
 import { UsersPanel, WorkspacePanel as AdminWorkspacePanel, ServePanel } from "../components/dialog/AdminDialog"
@@ -48,7 +52,7 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "agents" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
@@ -58,6 +62,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string; ico
   { id: "mise-config",   label: "Mise Config",            gated: true,  description: "Configure mise toolchain tools per tier — mise.toml for each tier.", icon: Wrench },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
   { id: "api-tokens",     label: "API Tokens",            gated: false, description: "Bearer tokens for external programs to drive your loops via the Loop API. See API docs below.", icon: KeyRound },
+  { id: "agents",         label: "Agents",                gated: false, description: "API-only accounts you own. Each agent has its own vault, .claude config, and loops — operated by external programs via tokens.", icon: User },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
@@ -312,6 +317,9 @@ export function SettingsPage() {
                   )}
                   {active === "api-tokens" && (
                     <ApiTokensSection />
+                  )}
+                  {active === "agents" && (
+                    <AgentsSection />
                   )}
                   {active === "admin-users" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><UsersPanel currentUserId={ws.currentUser?.id ?? ""} /></div>
@@ -1171,6 +1179,171 @@ function ApiTokensSection() {
           when calling{" "}
           <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">POST /api/runtime/v1/turn/stream</code>.
           The request will run under your identity with your configured providers and API keys.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Agents (public accounts you own)
+// ────────────────────────────────────────────────────────────────────────────
+
+function AgentsSection() {
+  const [accounts, setAccounts] = useState<PublicAccount[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newId, setNewId] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [justCreated, setJustCreated] = useState<string | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const list = await listMyAccounts()
+    setAccounts(list)
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  const handleCreate = async () => {
+    if (creating) return
+    const id = newId.trim().toLowerCase()
+    if (!id) return
+    setCreating(true)
+    setCreateError(null)
+    const result = await createMyAccount(id)
+    setCreating(false)
+    if (result.error) {
+      setCreateError(result.error)
+      return
+    }
+    if (result.account) {
+      setNewId("")
+      setJustCreated(result.account.id)
+      setTimeout(() => setJustCreated(null), 4000)
+      refresh()
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    const r = await deleteMyAccount(id)
+    setDeleteConfirm(null)
+    if (r.ok) refresh()
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* What this is */}
+      <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-[12px] text-blue-900">
+        <strong className="font-medium">What is an agent?</strong> An API-only account you own. It has its own vault, its own .claude config, and its own loops — operated by external programs (Slack bots, CI hooks, etc.) via Bearer tokens. The agent cannot log in via password; only you (via this UI) can manage it.
+        See <a className="underline" href="/api/v1/docs" target="_blank" rel="noopener noreferrer">API docs</a>.
+      </div>
+
+      {/* Just-created confirmation */}
+      {justCreated && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] text-emerald-900 flex items-center gap-2">
+          <Check size={14} />
+          <span>Created agent <code className="bg-white border border-emerald-200 rounded px-1.5 py-0.5 font-mono text-[11px]">{justCreated}</code>. Next: go to <strong>API Tokens</strong> to issue a token for it.</span>
+        </div>
+      )}
+
+      {/* Account list */}
+      <div className="rounded-lg border border-gray-200 bg-white">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h3 className="text-[13px] font-medium text-gray-900">Your agents</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            API-only accounts you own. Each one is a separate identity with its own resources.
+          </p>
+        </div>
+
+        {loading ? (
+          <div className="px-4 py-8 text-center text-[12px] text-gray-400 italic">loading…</div>
+        ) : accounts.length === 0 ? (
+          <div className="px-4 py-8 text-center text-[12px] text-gray-400">
+            No agents yet. Create one below.
+          </div>
+        ) : (
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-gray-100 text-left text-[11px] text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-2 font-medium">ID</th>
+                <th className="px-4 py-2 font-medium">Created</th>
+                <th className="px-4 py-2 font-medium w-32"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((a) => (
+                <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="px-4 py-2.5 font-mono text-gray-900">{a.id}</td>
+                  <td className="px-4 py-2.5 text-gray-500 text-[12px]">{new Date(a.createdAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-2.5">
+                    {deleteConfirm === a.id ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(a.id)}
+                          className="text-[11px] text-red-600 hover:text-red-800 font-medium"
+                        >
+                          confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirm(null)}
+                          className="text-[11px] text-gray-400 hover:text-gray-600"
+                        >
+                          cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(a.id)}
+                        className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                        title="delete agent"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Create form */}
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <h3 className="text-[13px] font-medium text-gray-900 mb-2">Create new agent</h3>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={newId}
+            onChange={(e) => { setNewId(e.target.value); setCreateError(null) }}
+            placeholder="e.g. my-coderev-bot"
+            className={inputClass}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate() }}
+            disabled={creating}
+          />
+          <button
+            type="button"
+            onClick={handleCreate}
+            disabled={!newId.trim() || creating}
+            className="shrink-0 h-9 px-4 rounded text-[13px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {creating ? "creating…" : "Create"}
+          </button>
+        </div>
+        {createError && (
+          <p className="mt-2 text-[12px] text-red-600 flex items-center gap-1.5">
+            <AlertCircle size={12} />
+            {createError}
+          </p>
+        )}
+        <p className="mt-2 text-[11px] text-gray-500">
+          ID rules: lowercase a-z 0-9 _ - , 1-32 chars, must start with alphanumeric. Shares the global namespace with personal accounts — pick a name no one else has taken.
         </p>
       </div>
     </div>

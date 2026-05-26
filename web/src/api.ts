@@ -1741,6 +1741,46 @@ export async function saveDefaultProfiles(profiles: string[]): Promise<{ ok: boo
   return { ok: true }
 }
 
+// ── Public accounts (v1 /me/accounts) ──
+// "Public account" = ownerId != null. See docs/account-model.md.
+
+export type PublicAccount = {
+  id: string
+  role: "admin" | "member"
+  status: "active" | "pending"
+  ownerId?: string | null
+  createdAt: string
+  activatedAt?: string
+  personalRepo?: string | null
+}
+
+export async function listMyAccounts(): Promise<PublicAccount[]> {
+  const r = await apiFetch("/api/v1/me/accounts")
+  if (!r.ok) return []
+  const j = await r.json().catch(() => ({ accounts: [] }))
+  return j.accounts ?? []
+}
+
+export async function createMyAccount(id: string): Promise<{ account?: PublicAccount; error?: string }> {
+  const r = await apiFetch("/api/v1/me/accounts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: j?.error?.message ?? `create failed (${r.status})` }
+  return { account: j as PublicAccount }
+}
+
+export async function deleteMyAccount(id: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/v1/me/accounts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  })
+  if (r.ok) return { ok: true }
+  const j = await r.json().catch(() => ({}))
+  return { ok: false, error: j?.error?.message ?? `delete failed (${r.status})` }
+}
+
 // ── API tokens (v1 /me/tokens) ──
 
 export type ApiTokenEntry = {
@@ -1750,18 +1790,25 @@ export type ApiTokenEntry = {
   lastUsedAt?: string
 }
 
-export async function listApiTokens(): Promise<ApiTokenEntry[]> {
-  const r = await apiFetch("/api/v1/me/tokens")
+/** List tokens for the caller, or for a public account they own. */
+export async function listApiTokens(forAccount?: string): Promise<ApiTokenEntry[]> {
+  const url = forAccount
+    ? `/api/v1/me/tokens?forAccount=${encodeURIComponent(forAccount)}`
+    : "/api/v1/me/tokens"
+  const r = await apiFetch(url)
   if (!r.ok) return []
   const j = await r.json().catch(() => ({ tokens: [] }))
   return j.tokens ?? []
 }
 
-export async function createApiToken(label: string): Promise<{ tokenId: string; token: string; label: string; createdAt: string } | null> {
+/** Create a token. `forAccount` (optional) issues for a public account caller owns. */
+export async function createApiToken(label: string, forAccount?: string): Promise<{ tokenId: string; token: string; label: string; createdAt: string; forAccount?: string } | null> {
+  const body: Record<string, unknown> = { label }
+  if (forAccount) body.forAccount = forAccount
   const r = await apiFetch("/api/v1/me/tokens", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify(body),
   })
   if (!r.ok) return null
   return await r.json().catch(() => null)
