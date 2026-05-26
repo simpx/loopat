@@ -1255,6 +1255,7 @@ app.post("/api/personal/delete", requireAuth, async (c) => {
 app.post("/api/personal/pull", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
+  console.log("[personal/pull] userId=%s body=%j", userId, body)
   const r = await pullPersonalFromRemote(userId, { force: !!body.force })
   if (!r.ok) {
     const status: Record<string, unknown> = { error: r.error }

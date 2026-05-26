@@ -879,7 +879,9 @@ export async function pullPersonalFromRemote(
 ): Promise<PersonalPullResult> {
   const force = opts?.force ?? false
   const dir = personalDir(userId)
+  console.log("[pullPersonal] START userId=%s dir=%s force=%s", userId, dir, force)
   if (!existsSyncBase(join(dir, ".git"))) {
+    console.log("[pullPersonal] not a git repo")
     return { ok: false, error: "personal/ is not a git repo" }
   }
 
@@ -889,6 +891,7 @@ export async function pullPersonalFromRemote(
     hasOrigin = true
   } catch {}
   if (!hasOrigin) {
+    console.log("[pullPersonal] no remote configured")
     return { ok: false, error: "no remote configured" }
   }
 
@@ -899,6 +902,7 @@ export async function pullPersonalFromRemote(
     const v = stdout.trim()
     if (v) branch = v
   } catch {}
+  console.log("[pullPersonal] branch=%s", branch)
 
   // Check for uncommitted changes
   let uncommitted = 0
@@ -906,65 +910,78 @@ export async function pullPersonalFromRemote(
     const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
     uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
   } catch {}
+  console.log("[pullPersonal] uncommitted=%d", uncommitted)
 
   if (uncommitted > 0) {
     if (force) {
+      console.log("[pullPersonal] force path — discarding all local changes")
       // Force pull: discard ALL local state and reset to origin/<branch>.
-      // Skip git merge entirely — it can fail due to hooks, stash conflicts,
-      // or interactive prompts. Instead go nuclear: abort any in-progress
-      // merge, reset hard to HEAD, clean untracked files, fetch, then
-      // reset hard to origin/<branch>. This is a destructive operation.
       try {
-        // Suppress interactive prompts (e.g. git-crypt, credential helpers)
         const silentEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
-        // Abort any in-progress merge (ignore errors — there may not be one)
-        try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv }) } catch {}
+        try {
+          console.log("[pullPersonal] git merge --abort")
+          await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv })
+        } catch (e: any) {
+          console.log("[pullPersonal] merge --abort (ignored): %s", e?.stderr ?? e?.message ?? e)
+        }
+        console.log("[pullPersonal] git reset --hard HEAD")
         await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"], { env: silentEnv })
+        console.log("[pullPersonal] git clean -fd")
         await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+        console.log("[pullPersonal] git fetch origin")
         await execFileP("git", ["-C", dir, "fetch", "origin"], {
           env: { ...silentEnv, GIT_SSH_COMMAND: sshCommandForUser(userId) },
           timeout: 30_000,
         })
+        console.log("[pullPersonal] git reset --hard origin/%s", branch)
         await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silentEnv })
+        console.log("[pullPersonal] git clean -fd (final)")
         await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+        console.log("[pullPersonal] force pull OK")
         return { ok: true, message: "force pulled — reset to origin/" + branch }
       } catch (e: any) {
+        console.log("[pullPersonal] force pull FAILED: %s", e?.stderr ?? e?.message ?? e)
         return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
       }
     } else {
       // Stash changes before pull
       try {
+        console.log("[pullPersonal] git stash push")
         await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
+        console.log("[pullPersonal] stash OK")
       } catch (e: any) {
+        console.log("[pullPersonal] stash FAILED: %s", e?.stderr ?? e?.message ?? e)
         return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
       }
     }
   }
 
   // Fetch
+  console.log("[pullPersonal] git fetch origin (normal path)")
   try {
     await execFileP("git", ["-C", dir, "fetch", "origin"], {
       env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
       timeout: 30_000,
     })
   } catch (e: any) {
+    console.log("[pullPersonal] fetch FAILED: %s", e?.stderr ?? e?.message ?? e)
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
   }
 
   // Merge
+  console.log("[pullPersonal] git merge origin/%s", branch)
   try {
     await execFileP("git", ["-C", dir, "merge", `origin/${branch}`])
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString()
+    console.log("[pullPersonal] merge FAILED: %s", stderr || e?.message || e)
     if (stderr.includes("CONFLICT")) {
-      // Extract conflicted files
       const conflicts: string[] = []
       const lines = stderr.split("\n")
       for (const line of lines) {
         const match = line.match(/CONFLICT\s*\(.*?\):\s*Merge conflict in\s*(.+)/)
         if (match) conflicts.push(match[1].trim())
       }
-      // Also check git status for conflicts
       try {
         const { stdout } = await execFileP("git", ["-C", dir, "diff", "--name-only", "--diff-filter=U"])
         const statusConflicts = stdout.split("\n").filter((l) => l.trim())
