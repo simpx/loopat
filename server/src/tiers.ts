@@ -313,6 +313,16 @@ async function readMdOrNull(path: string): Promise<string | null> {
 
 // ── per-tier settings read/write ──
 
+function resolveTierClaudeDir(tierId: string, user: string): string | null {
+  if (tierId === "team") return workspaceTeamClaudeDir()
+  if (tierId === "personal") return personalClaudeDir(user)
+  if (tierId.startsWith("profile:")) {
+    const name = tierId.slice("profile:".length)
+    return workspaceProfileClaudeDir(name)
+  }
+  return null
+}
+
 function resolveTierPath(tierId: string, user: string): { settingsPath: string; exists: boolean } | null {
   if (tierId === "team") {
     const p = workspaceTeamSettingsPath()
@@ -350,6 +360,41 @@ export async function saveTierSettings(
   try {
     await mkdir(join(res.settingsPath, ".."), { recursive: true })
     await writeFile(res.settingsPath, JSON.stringify(settings, null, 2) + "\n")
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "write failed" }
+  }
+}
+
+// ── mise.toml config per tier ──
+
+export async function getTierMiseConfig(
+  tierId: string,
+  user: string,
+): Promise<{ content: string; exists: boolean; error?: string }> {
+  const claudeDir = resolveTierClaudeDir(tierId, user)
+  if (!claudeDir) return { content: "", exists: false, error: `unknown tier: ${tierId}` }
+  const misePath = join(claudeDir, "mise.toml")
+  if (!existsSync(misePath)) return { content: "", exists: false }
+  try {
+    const content = await readFile(misePath, "utf8")
+    return { content, exists: true }
+  } catch (e: any) {
+    return { content: "", exists: false, error: e?.message ?? "read failed" }
+  }
+}
+
+export async function saveTierMiseConfig(
+  tierId: string,
+  content: string,
+  user: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const claudeDir = resolveTierClaudeDir(tierId, user)
+  if (!claudeDir) return { ok: false, error: `unknown tier: ${tierId}` }
+  try {
+    await mkdir(claudeDir, { recursive: true })
+    const misePath = join(claudeDir, "mise.toml")
+    await writeFile(misePath, content)
     return { ok: true }
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "write failed" }

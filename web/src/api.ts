@@ -1595,6 +1595,31 @@ export async function saveTierSettings(tierId: string, settings: Record<string, 
   return { ok: true }
 }
 
+// ── mise.toml config per tier ──
+
+export type MiseConfigResponse = {
+  content: string
+  exists: boolean
+  error?: string
+}
+
+export async function getTierMiseConfig(tierId: string): Promise<MiseConfigResponse> {
+  const r = await apiFetch(`/api/tiers/${encodeURIComponent(tierId)}/mise-config`)
+  if (!r.ok) return { content: "", exists: false, error: `fetch failed (${r.status})` }
+  return (await r.json()) as MiseConfigResponse
+}
+
+export async function saveTierMiseConfig(tierId: string, content: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await apiFetch(`/api/tiers/${encodeURIComponent(tierId)}/mise-config`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ content }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `save failed (${r.status})` }
+  return { ok: true }
+}
+
 // ── plugin inventory ──
 
 export type PluginEntry = {

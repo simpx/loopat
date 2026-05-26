@@ -805,6 +805,29 @@ app.put("/api/tiers/:tier/settings", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
+app.get("/api/tiers/:tier/mise-config", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const tierId = c.req.param("tier") ?? ""
+  const { getTierMiseConfig } = await import("./tiers")
+  return c.json(await getTierMiseConfig(tierId, userId))
+})
+
+app.put("/api/tiers/:tier/mise-config", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const tierId = c.req.param("tier") ?? ""
+  const me = await findUser(userId)
+  const isAdmin = me?.role === "admin"
+  if ((tierId === "team" || tierId.startsWith("profile:")) && !isAdmin) {
+    return c.json({ error: "admin required for team/profile tiers" }, 403)
+  }
+  const body = await c.req.json().catch(() => ({}))
+  const content = typeof body.content === "string" ? body.content : ""
+  const { saveTierMiseConfig } = await import("./tiers")
+  const r = await saveTierMiseConfig(tierId, content, userId)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json({ ok: true })
+})
+
 app.get("/api/plugins/available", requireAuth, async (c) => {
   const { listAvailablePlugins } = await import("./tiers")
   return c.json({ plugins: await listAvailablePlugins() })
