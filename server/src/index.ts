@@ -292,6 +292,9 @@ app.post("/api/auth/login", async (c) => {
   if (!username || !password) return c.json({ error: "username + password required" }, 400)
   const user = await findUser(username)
   if (!user) return c.json({ error: "invalid credentials" }, 401)
+  // Owned (公共账号 / token-only) accounts cannot password-login. Reject with
+  // the same generic message — don't leak the account's existence.
+  if (user.ownerId) return c.json({ error: "invalid credentials" }, 401)
   const ok = await verifyPassword(password, user.salt, user.hash)
   if (!ok) return c.json({ error: "invalid credentials" }, 401)
   if (user.status !== "active") {

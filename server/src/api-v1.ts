@@ -11,8 +11,9 @@ import { Hono, type Context, type MiddlewareHandler } from "hono"
 import { streamSSE } from "hono/streaming"
 import { Scalar } from "@scalar/hono-api-reference"
 import { randomBytes } from "node:crypto"
-import { getRequestUserId } from "./auth"
-import { resolveApiToken, createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
+import { getRequestUserId, findUser, createUser, listUsers } from "./auth"
+import { resolveApiToken, createApiToken, listApiTokens, revokeApiToken, revokeAllApiTokens } from "./api-tokens"
+import { deleteUser } from "./auth"
 import { v1OpenApiSpec } from "./api-v1-openapi"
 import {
   createLoop as internalCreateLoop,
@@ -335,22 +336,120 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
     if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
     const body = await c.req.json().catch(() => ({}))
     const label = typeof body.label === "string" ? body.label : ""
-    const t = await createApiToken(userId, label)
-    return c.json({ tokenId: t.tokenId, token: t.token, label: t.label, createdAt: t.createdAt }, 201)
+    // `forAccount` lets a human issue a token for a public account they own.
+    // Default = issue for self.
+    const forAccount = typeof body.forAccount === "string" ? body.forAccount.trim() : userId
+    if (forAccount !== userId) {
+      const target = await findUser(forAccount)
+      if (!target) return apiError(c, 404, "not_found_error", "account_not_found", `account ${forAccount} not found`)
+      if (target.ownerId !== userId) {
+        return apiError(c, 403, "permission_error", "not_account_owner",
+          `you are not the owner of ${forAccount}`)
+      }
+    }
+    const t = await createApiToken(forAccount, label)
+    return c.json({
+      tokenId: t.tokenId,
+      token: t.token,
+      label: t.label,
+      createdAt: t.createdAt,
+      forAccount,
+    }, 201)
   })
 
   v1.get("/me/tokens", async (c) => {
     const userId = getRequestUserId(c)
     if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
-    const tokens = await listApiTokens(userId)
+    // Default: tokens for self. ?forAccount=<id> lists tokens issued to a
+    // public account this caller owns.
+    const forAccountQ = c.req.query("forAccount")
+    const targetId = forAccountQ ?? userId
+    if (targetId !== userId) {
+      const target = await findUser(targetId)
+      if (!target || target.ownerId !== userId) {
+        return apiError(c, 403, "permission_error", "not_account_owner",
+          `you are not the owner of ${targetId}`)
+      }
+    }
+    const tokens = await listApiTokens(targetId)
     return c.json({ tokens })
   })
 
   v1.delete("/me/tokens/:tokenId", async (c) => {
     const userId = getRequestUserId(c)
     if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
-    const ok = await revokeApiToken(userId, c.req.param("tokenId") ?? "")
-    if (!ok) return apiError(c, 404, "not_found_error", "token_not_found", "no such token")
+    // Try self first; if not found, search across owned public accounts.
+    if (await revokeApiToken(userId, c.req.param("tokenId") ?? "")) {
+      return c.body(null, 204)
+    }
+    const owned = (await listUsers()).filter((u) => u.ownerId === userId)
+    for (const acct of owned) {
+      if (await revokeApiToken(acct.id, c.req.param("tokenId") ?? "")) {
+        return c.body(null, 204)
+      }
+    }
+    return apiError(c, 404, "not_found_error", "token_not_found", "no such token")
+  })
+
+  // ── Account management: public accounts (公共账号) ──────────────────
+  // Cookie-only — only humans can create / manage owned accounts. See
+  // docs/account-model.md for the model.
+
+  v1.post("/me/accounts", async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
+    const caller = await findUser(userId)
+    if (!caller) return apiError(c, 401, "authentication_error", "invalid_session", "session user not found")
+    if (caller.ownerId) {
+      return apiError(c, 403, "permission_error", "not_personal_account",
+        "only personal accounts can create owned accounts")
+    }
+    const body = await c.req.json().catch(() => ({}))
+    const id = typeof body.id === "string" ? body.id.trim().toLowerCase() : ""
+    if (!id) return apiError(c, 400, "invalid_request_error", "missing_id", "id required")
+    try {
+      const created = await createUser({ id, ownerId: userId })
+      return c.json({
+        id: created.id,
+        role: created.role,
+        status: created.status,
+        ownerId: created.ownerId ?? null,
+        createdAt: created.createdAt,
+      }, 201)
+    } catch (e: any) {
+      const msg = String(e?.message ?? e)
+      if (msg.includes("username taken")) {
+        return apiError(c, 409, "conflict_error", "id_taken", "id already in use")
+      }
+      if (msg.includes("invalid username")) {
+        return apiError(c, 400, "invalid_request_error", "invalid_id", msg)
+      }
+      return apiError(c, 500, "internal_error", "create_failed", msg)
+    }
+  })
+
+  v1.get("/me/accounts", async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
+    const all = await listUsers()
+    const mine = all.filter((u) => u.ownerId === userId)
+    return c.json({ accounts: mine })
+  })
+
+  v1.delete("/me/accounts/:id", async (c) => {
+    const userId = getRequestUserId(c)
+    if (!userId) return apiError(c, 401, "authentication_error", "missing_credentials", "session required")
+    const target = await findUser(c.req.param("id") ?? "")
+    if (!target) return apiError(c, 404, "not_found_error", "account_not_found", "account not found")
+    if (target.ownerId !== userId) {
+      return apiError(c, 403, "permission_error", "not_account_owner",
+        "you can only delete public accounts you own")
+    }
+    // Hard delete: revoke all tokens + remove from users.json. Loop files and
+    // the account's personal/ tree are left on disk (recoverable by admin) —
+    // their createdBy references become orphan but data isn't lost.
+    await revokeAllApiTokens(target.id)
+    await deleteUser(target.id)
     return c.body(null, 204)
   })
 

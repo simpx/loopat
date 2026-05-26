@@ -130,14 +130,30 @@ POST /api/v1/loops
 这三个端点的 path 在 `/api/v1` 下，但**只接受 session cookie**，不接受 Bearer token。这是有意的安全边界：bot 拿到 token 不能自己增殖出更多 token。
 
 ```
-POST   /api/v1/me/tokens     { label }       → 201 { tokenId, token, label, createdAt }
-GET    /api/v1/me/tokens                     → 200 { tokens: [{ tokenId, label, createdAt, lastUsedAt? }] }
-DELETE /api/v1/me/tokens/{tokenId}           → 204
+POST   /api/v1/me/tokens     { label, forAccount? }   → 201 { tokenId, token, label, createdAt, forAccount }
+GET    /api/v1/me/tokens     [?forAccount=...]        → 200 { tokens: [{ tokenId, label, createdAt, lastUsedAt? }] }
+DELETE /api/v1/me/tokens/{tokenId}                    → 204
 ```
 
 - `token` 形如 `la_<48 hex>`，**只在创建响应里返回一次**，server 不留明文（SHA-256 哈希存储）。
 - `tokenId` 形如 `tok_<12 hex>`，稳定不变，列出 + 撤销用它。
+- `forAccount`（可选）：把 token 颁发给一个**你拥有的公共账号**。默认 = 自己。token 解析后下游 endpoint 看到的就是该公共账号身份。非你拥有的 account → `403 not_account_owner`。
 - 用 Bearer auth 调这三个端点 → `401`。
+
+### `/me/accounts` — 公共账号管理（cookie-only）
+
+公共账号 = ownerId 非空的 account（详见 [account model](./account-model.md)）。这一套端点让人类创建、列出、删除自己拥有的公共账号。
+
+```
+POST   /api/v1/me/accounts        { id }          → 201 { id, role, status, ownerId, createdAt }
+GET    /api/v1/me/accounts                        → 200 { accounts: [...] }
+DELETE /api/v1/me/accounts/{id}                   → 204
+```
+
+- 创建：caller 必须是个人账号（自己的 ownerId 为 null）。创建成功后这个 id 由 caller 拥有。
+- 公共账号**没有 password**，不能 web 登录；只能由 owner 颁发 token 后通过 Bearer 访问。
+- 删除：hard delete + 级联撤销其所有 token。Loop 文件残留在磁盘（admin 可恢复 / 清理），但 createdBy 指向已删除 id 后业务上不可访问。
+- ID 命名规则跟人类账号同套：`[a-z0-9_-]{1,32}`，flat namespace，先到先得。
 
 ### 列出 loops
 

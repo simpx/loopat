@@ -396,3 +396,194 @@ describe("choices + interrupt validation", () => {
     expect(r.status).toBe(403)
   })
 })
+
+// ─── 公共账号 (owned accounts / "agents") ────────────────────────────────
+
+describe("/me/accounts (public account management)", () => {
+  test("POST creates an owned account; appears in GET", async () => {
+    const r = await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ id: "alice-coderev" }),
+    })
+    expect(r.status).toBe(201)
+    const j = await r.json()
+    expect(j.id).toBe("alice-coderev")
+    expect(j.ownerId).toBe(USER_A)
+    expect(j.role).toBe("member")
+    expect(j.status).toBe("active")
+
+    const list = await app.request("/api/v1/me/accounts", { headers: cookieHeader(SESSION_A) })
+    const lj = await list.json()
+    expect(lj.accounts.find((a: any) => a.id === "alice-coderev")).toBeDefined()
+  })
+
+  test("GET returns only caller's owned accounts", async () => {
+    await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ id: "alice-slack" }),
+    })
+    await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_B) },
+      body: JSON.stringify({ id: "bob-bot" }),
+    })
+    const aList = await (await app.request("/api/v1/me/accounts", { headers: cookieHeader(SESSION_A) })).json()
+    expect(aList.accounts.every((a: any) => a.ownerId === USER_A)).toBe(true)
+    expect(aList.accounts.find((a: any) => a.id === "bob-bot")).toBeUndefined()
+    const bList = await (await app.request("/api/v1/me/accounts", { headers: cookieHeader(SESSION_B) })).json()
+    expect(bList.accounts.find((a: any) => a.id === "bob-bot")).toBeDefined()
+  })
+
+  test("duplicate id → 409", async () => {
+    const r = await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ id: "alice-coderev" }),
+    })
+    expect(r.status).toBe(409)
+    expect((await r.json()).error.code).toBe("id_taken")
+  })
+
+  test("invalid id format → 400", async () => {
+    const r = await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ id: "Has Spaces!" }),
+    })
+    expect(r.status).toBe(400)
+    expect((await r.json()).error.code).toBe("invalid_id")
+  })
+
+  test("missing id → 400", async () => {
+    const r = await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: "{}",
+    })
+    expect(r.status).toBe(400)
+    expect((await r.json()).error.code).toBe("missing_id")
+  })
+
+  test("DELETE owner can delete their public account", async () => {
+    // Create a fresh one to delete
+    await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ id: "alice-temp" }),
+    })
+    const del = await app.request("/api/v1/me/accounts/alice-temp", {
+      method: "DELETE",
+      headers: cookieHeader(SESSION_A),
+    })
+    expect(del.status).toBe(204)
+    const list = await (await app.request("/api/v1/me/accounts", { headers: cookieHeader(SESSION_A) })).json()
+    expect(list.accounts.find((a: any) => a.id === "alice-temp")).toBeUndefined()
+  })
+
+  test("DELETE non-owner → 403", async () => {
+    const r = await app.request("/api/v1/me/accounts/alice-coderev", {
+      method: "DELETE",
+      headers: cookieHeader(SESSION_B),
+    })
+    expect(r.status).toBe(403)
+  })
+
+  test("DELETE unknown → 404", async () => {
+    const r = await app.request("/api/v1/me/accounts/nope-xyz", {
+      method: "DELETE",
+      headers: cookieHeader(SESSION_A),
+    })
+    expect(r.status).toBe(404)
+  })
+
+  test("public account cannot create another public account (no nesting)", async () => {
+    // Use the owned account's session (simulating: somehow logged in as it).
+    // We don't actually support password login for owned accounts, but
+    // createSession bypasses that — this tests the API-layer guard.
+    const subSession = createSession("alice-coderev")
+    const r = await app.request("/api/v1/me/accounts", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(subSession) },
+      body: JSON.stringify({ id: "alice-coderev-child" }),
+    })
+    expect(r.status).toBe(403)
+    expect((await r.json()).error.code).toBe("not_personal_account")
+  })
+})
+
+describe("/me/tokens forAccount", () => {
+  test("issue token for an owned public account", async () => {
+    const r = await app.request("/api/v1/me/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ label: "ci-coderev", forAccount: "alice-coderev" }),
+    })
+    expect(r.status).toBe(201)
+    const j = await r.json()
+    expect(j.forAccount).toBe("alice-coderev")
+    expect(j.token).toMatch(/^la_[0-9a-f]+$/)
+  })
+
+  test("issue token for non-owned account → 403", async () => {
+    const r = await app.request("/api/v1/me/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ label: "x", forAccount: "bob-bot" }),
+    })
+    expect(r.status).toBe(403)
+    expect((await r.json()).error.code).toBe("not_account_owner")
+  })
+
+  test("issue token for non-existent account → 404", async () => {
+    const r = await app.request("/api/v1/me/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ label: "x", forAccount: "ghost-account-xyz" }),
+    })
+    expect(r.status).toBe(404)
+  })
+
+  test("GET tokens ?forAccount lists tokens for that account", async () => {
+    const r = await app.request("/api/v1/me/tokens?forAccount=alice-coderev", {
+      headers: cookieHeader(SESSION_A),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.tokens.length).toBeGreaterThan(0)
+    expect(j.tokens[0].label).toBe("ci-coderev")
+  })
+
+  test("token issued for owned account resolves to that account, not the owner", async () => {
+    // Create a fresh owned-account token + use it to call /loops.
+    const create = await (await app.request("/api/v1/me/tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...cookieHeader(SESSION_A) },
+      body: JSON.stringify({ label: "resolve-test", forAccount: "alice-coderev" }),
+    })).json()
+    const loopCreate = await app.request("/api/v1/loops", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${create.token}`,
+      },
+      body: JSON.stringify({ title: "by-public-account" }),
+    })
+    expect(loopCreate.status).toBe(201)
+    const loop = await loopCreate.json()
+    // Loop should be owned by the public account, not by alice.
+    expect(loop.created_by).toBe("alice-coderev")
+  })
+})
+
+describe("login rejects owned accounts", () => {
+  test("password login for an owned account returns 401", async () => {
+    const r = await app.request("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "alice-coderev", password: "anything" }),
+    })
+    expect(r.status).toBe(401)
+  })
+})

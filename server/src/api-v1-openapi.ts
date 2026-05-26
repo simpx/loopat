@@ -107,6 +107,23 @@ export const v1OpenApiSpec = {
           },
           label: { type: "string" },
           createdAt: { type: "string", format: "date-time" },
+          forAccount: {
+            type: "string",
+            description: "Account this token authenticates as. Defaults to the caller.",
+          },
+        },
+      },
+      Account: {
+        type: "object",
+        required: ["id", "role", "status", "createdAt"],
+        properties: {
+          id: { type: "string", example: "alice-coderev" },
+          role: { type: "string", enum: ["admin", "member"] },
+          status: { type: "string", enum: ["active", "pending"] },
+          ownerId: { type: "string", nullable: true, description: "null = personal account; non-null = public (owned) account." },
+          createdAt: { type: "string", format: "date-time" },
+          activatedAt: { type: "string", format: "date-time" },
+          personalRepo: { type: "string", nullable: true },
         },
       },
       Error: {
@@ -142,7 +159,7 @@ export const v1OpenApiSpec = {
     "/me/tokens": {
       post: {
         summary: "Create an API token",
-        description: "Cookie-only (web Settings UI). Bots cannot self-issue tokens.",
+        description: "Cookie-only (web Settings UI). Bots cannot self-issue tokens. `forAccount` lets a human issue a token for a public account they own.",
         security: [{ CookieAuth: [] }],
         requestBody: {
           required: false,
@@ -150,7 +167,13 @@ export const v1OpenApiSpec = {
             "application/json": {
               schema: {
                 type: "object",
-                properties: { label: { type: "string", default: "default" } },
+                properties: {
+                  label: { type: "string", default: "default" },
+                  forAccount: {
+                    type: "string",
+                    description: "ID of a public account the caller owns. Default = self.",
+                  },
+                },
               },
             },
           },
@@ -163,11 +186,16 @@ export const v1OpenApiSpec = {
             },
           },
           "401": { description: "Session required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "403": { description: "Caller does not own `forAccount`" },
+          "404": { description: "`forAccount` does not exist" },
         },
       },
       get: {
         summary: "List my API tokens",
         security: [{ CookieAuth: [] }],
+        parameters: [
+          { name: "forAccount", in: "query", schema: { type: "string" }, description: "List tokens for a public account caller owns. Omit = own tokens." },
+        ],
         responses: {
           "200": {
             description: "Token list (plaintext omitted)",
@@ -180,6 +208,63 @@ export const v1OpenApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    "/me/accounts": {
+      post: {
+        summary: "Create a public account (公共账号 / agent)",
+        description: "Cookie-only. Creates a new account owned by the caller. The new account has no password — only accessible via Bearer tokens issued by the owner. ID shares the global flat namespace with personal accounts.",
+        security: [{ CookieAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["id"],
+                properties: {
+                  id: { type: "string", pattern: "^[a-z0-9][a-z0-9_-]{0,31}$", example: "alice-coderev" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Account created", content: { "application/json": { schema: { $ref: "#/components/schemas/Account" } } } },
+          "400": { description: "Invalid or missing id" },
+          "403": { description: "Caller is not a personal account (nesting forbidden)" },
+          "409": { description: "ID already in use" },
+        },
+      },
+      get: {
+        summary: "List public accounts I own",
+        security: [{ CookieAuth: [] }],
+        responses: {
+          "200": {
+            description: "List",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { accounts: { type: "array", items: { $ref: "#/components/schemas/Account" } } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/me/accounts/{id}": {
+      delete: {
+        summary: "Delete a public account I own",
+        description: "Hard delete + cascade revoke all of the account's tokens. Loop files on disk are retained.",
+        security: [{ CookieAuth: [] }],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "204": { description: "Deleted" },
+          "403": { description: "Not the owner" },
+          "404": { description: "Not found" },
         },
       },
     },
