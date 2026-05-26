@@ -2,7 +2,7 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported } from "./bwrap"
+import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR } from "./podman"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
 
@@ -31,30 +31,29 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
   const tag = loopId.slice(0, 8)
   const p = (async () => {
-    // Outer bwrap argv (same shape as Claude CLI's outer sandbox — virtual
-    // /loopat/loop/<id>/, /loopat/context/*). Wrap inner shell with `script`
-    // so it gets a fresh controlling tty (without this, the bash-in-bash
-    // chain strips tty control).
+    // The PTY is a `podman exec -it` into the same per-loop container the
+    // SDK driver uses (session.ts). Both `ensureContainer` calls are
+    // idempotent — first caller creates the container, second sees it
+    // already running. That's how SDK and PTY end up sharing the same
+    // PID / Mount / Net namespace.
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const driver = effectiveDriver(meta)
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
+
     // Shell resolution (highest precedence first):
     //   1. personal config `shell` — user's per-user override
-    //   2. /bin/bash — POSIX-guaranteed fallback (always present via /bin bind)
-    //   (sandbox-tier shell selection is gone in the profile model — loops
-    //   no longer have mise sandbox metadata.)
+    //   2. /bin/bash — POSIX-guaranteed fallback
     let innerShell = personalCfg.shell
     if (!innerShell) innerShell = "/bin/bash"
+    // `script -qfc "<shell> -i" /dev/null` gives the inner shell a fresh
+    // controlling tty so prompt + job control work cleanly.
     const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
 
-    // Fish (and other interactive shells) want to write to XDG_DATA_HOME
-    // (history) and XDG_RUNTIME_DIR (notifier pipe). Both default to paths
-    // (~/.local/share, /run/user/$UID) that are ro-bound in our sandbox.
-    // Point them at /tmp/loopat-fish-<id>/ — /tmp is bind-rw and shared with
-    // the host, so the dir we mkdir here is visible to the sandbox at the
-    // same path. Per-loop dir avoids cross-loop history mixing and keeps
-    // XDG_RUNTIME_DIR's mode-0700 requirement easy to satisfy.
+    // Fish (and other interactive shells) want XDG_DATA_HOME / XDG_RUNTIME_DIR
+    // to be writable. /tmp is bound shared with host inside the container at
+    // the same path, so we can safely mkdir paths here that the container
+    // will see at the same location.
     const fishHome = `/tmp/loopat-fish-${loopId}`
     const fishData = join(fishHome, "data")
     const fishRuntime = join(fishHome, "runtime")
@@ -62,29 +61,39 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     await mkdir(fishRuntime, { recursive: true })
     await chmod(fishRuntime, 0o700).catch(() => {})
 
-    const useOverlay = await isHomeOverlaySupported()
-    const bwrapArgs = await buildBwrapArgs(loopId, driver, {
-      // Vault envs go first so platform-managed vars below can't be clobbered
-      // by a stray vault entry named TERM / XDG_*.
-      ...personalCfg.vaultEnvs,
-      TERM: "xterm-256color",
-      XDG_DATA_HOME: fishData,
-      XDG_RUNTIME_DIR: fishRuntime,
-    }, meta.config?.vault, meta.config?.knowledge_rw, useOverlay, meta.config?.mount_all_loops)
-    // Overlay path: unshare -Umr + overlayfs $HOME + bwrap nested-userns uid
-    // drop. Tmpfs path: bwrap directly (older bwrap / restricted envs).
-    let binary: string
-    let fullArgs: string[]
-    if (useOverlay) {
-      const overlay = await prepareSandboxOverlay(loopId)
-      binary = "unshare"
-      fullArgs = buildSandboxSpawnArgv(overlay, bwrapArgs, "/bin/bash", ["-c", innerCmd])
-    } else {
-      binary = "bwrap"
-      fullArgs = [...bwrapArgs, "--", "/bin/bash", "-c", innerCmd]
-    }
-    console.error(`[term:${tag}] spawn ${binary} argc=${fullArgs.length} profiles=${meta.config?.profiles?.join(",") ?? "<none>"} overlay=${useOverlay}`)
-    const proc = spawn(binary, fullArgs, {
+    // Ensure the per-loop container is up. If the SDK side already brought it
+    // up, this is a no-op (idempotent).
+    await ensureContainer({
+      loopId,
+      createdBy: driver,
+      vaultName: meta.config?.vault,
+      knowledgeRw: meta.config?.knowledge_rw,
+      mountAllLoops: meta.config?.mount_all_loops,
+      extraEnv: personalCfg.vaultEnvs,
+    })
+    // Tell the container lifecycle scheduler that PTY is an active source.
+    // Released in killTerm / detachTerm's last-subscriber branch below.
+    markActive(loopId, "pty")
+
+    const podmanArgs = buildPodmanExecArgs({
+      loopId,
+      command: "/bin/bash",
+      args: ["-c", innerCmd],
+      // Vault envs go first; platform-managed vars (TERM, XDG_*) override.
+      env: {
+        ...personalCfg.vaultEnvs,
+        TERM: "xterm-256color",
+        XDG_DATA_HOME: fishData,
+        XDG_RUNTIME_DIR: fishRuntime,
+      },
+      tty: true,
+      interactive: true,
+      workdir: V_LOOP_WORKDIR(loopId),
+    })
+
+    const binary = process.env.LOOPAT_PODMAN_BIN || "podman"
+    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length} profiles=${meta.config?.profiles?.join(",") ?? "<none>"}`)
+    const proc = spawn(binary, podmanArgs, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
@@ -107,12 +116,12 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       }
     })
     proc.onExit(({ exitCode }) => {
-      // bwrap nonzero exit usually means: argv malformed, bind src missing,
-      // inner cmd failed. Surface it in server log + scrollback so the user
-      // can debug without grepping. Zero exit = normal shell quit, silent.
+      // podman exec nonzero exit usually means: container died, exec command
+      // failed, signal received. Surface in server log + scrollback so the
+      // user can debug without grepping. Zero exit = normal shell quit.
       if (exitCode !== 0) {
         const trailing = t.scrollback.join("").slice(-400)
-        console.error(`[term:${tag}] bwrap exit=${exitCode}; last 400 bytes of pty output:\n${trailing}`)
+        console.error(`[term:${tag}] podman exit=${exitCode}; last 400 bytes of pty output:\n${trailing}`)
       }
       for (const ws of t.subscribers) {
         try {
@@ -158,6 +167,9 @@ export function detachTerm(loopId: string, ws: WSContext) {
       t.proc.kill()
     } catch {}
     terms.delete(loopId)
+    // Release the PTY source — the container will be idle-stopped after the
+    // configured window unless something else keeps it active.
+    markInactive(loopId, "pty")
   }
 }
 
@@ -201,4 +213,5 @@ export function killTerm(loopId: string) {
   }
   t.subscribers.clear()
   try { t.proc.kill() } catch {}
+  markInactive(loopId, "pty")
 }

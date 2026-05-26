@@ -12,7 +12,6 @@ import { mkdir, rm, writeFile, symlink } from "node:fs/promises"
 import { join } from "node:path"
 
 process.env.LOOPAT_HOME ??= `/tmp/loopat-multi-vault-${process.pid}`
-process.env.LOOPAT_NO_HOME_OVERLAY = "1"
 
 const {
   loadVaultEnvs,
@@ -22,7 +21,7 @@ const {
   walkVaultFiles,
   isValidVaultName,
 } = await import("../src/vaults")
-const { buildBwrapArgs } = await import("../src/bwrap")
+const { buildPodmanCreateArgs } = await import("../src/podman")
 const {
   LOOPAT_HOME,
   loopWorkdir,
@@ -101,23 +100,28 @@ describe("per-loop vault selection — same user, different sandbox env", () => 
     expect(prod.DEV_ONLY).toBeUndefined()
   })
 
-  test("bwrap argv reflects vault selection — dev spawn carries dev envs", async () => {
+  test("podman argv reflects vault selection — dev spawn carries dev envs", async () => {
     const loopId = "vvvvvvvv-dddd-0000-0000-000000000001"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
     await mkdir(loopContextKnowledge(loopId), { recursive: true })
     await mkdir(loopContextNotes(loopId), { recursive: true })
     const cfg = await loadVaultEnvs(USER, "dev")
-    const argv = await buildBwrapArgs(loopId, USER, cfg, "dev")
-    // DEV_ONLY must be in setenv; PROD_ONLY must not
-    const hasSet = (k: string) => {
-      for (let i = 0; i < argv.length - 2; i++) {
-        if (argv[i] === "--setenv" && argv[i + 1] === k) return true
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: USER,
+      vaultName: "dev",
+      extraEnv: cfg,
+    })
+    // DEV_ONLY must appear as `--env DEV_ONLY=...`; PROD_ONLY must not
+    const hasEnvKey = (k: string) => {
+      for (let i = 0; i < argv.length - 1; i++) {
+        if (argv[i] === "--env" && argv[i + 1].startsWith(`${k}=`)) return true
       }
       return false
     }
-    expect(hasSet("DEV_ONLY")).toBe(true)
-    expect(hasSet("PROD_ONLY")).toBe(false)
+    expect(hasEnvKey("DEV_ONLY")).toBe(true)
+    expect(hasEnvKey("PROD_ONLY")).toBe(false)
   })
 
   test("the SAME loop respawned with a different vault gets different envs", async () => {
@@ -129,12 +133,28 @@ describe("per-loop vault selection — same user, different sandbox env", () => 
 
     const devEnvs = await loadVaultEnvs(USER, "dev")
     const prodEnvs = await loadVaultEnvs(USER, "prod")
-    const argvDev = await buildBwrapArgs(loopId, USER, devEnvs, "dev")
-    const argvProd = await buildBwrapArgs(loopId, USER, prodEnvs, "prod")
-    expect(argvDev.includes("DEV_ONLY")).toBe(true)
-    expect(argvDev.includes("PROD_ONLY")).toBe(false)
-    expect(argvProd.includes("PROD_ONLY")).toBe(true)
-    expect(argvProd.includes("DEV_ONLY")).toBe(false)
+    const argvDev = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: USER,
+      vaultName: "dev",
+      extraEnv: devEnvs,
+    })
+    const argvProd = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: USER,
+      vaultName: "prod",
+      extraEnv: prodEnvs,
+    })
+    const hasEnvKey = (argv: string[], k: string) => {
+      for (let i = 0; i < argv.length - 1; i++) {
+        if (argv[i] === "--env" && argv[i + 1].startsWith(`${k}=`)) return true
+      }
+      return false
+    }
+    expect(hasEnvKey(argvDev, "DEV_ONLY")).toBe(true)
+    expect(hasEnvKey(argvDev, "PROD_ONLY")).toBe(false)
+    expect(hasEnvKey(argvProd, "PROD_ONLY")).toBe(true)
+    expect(hasEnvKey(argvProd, "DEV_ONLY")).toBe(false)
   })
 
   test("vault-specific mounts/home/* land only when that vault is active", async () => {

@@ -1,5 +1,5 @@
 /**
- * Boot-time pre-flight: verify the host has what loopat needs (bwrap, claude
+ * Boot-time pre-flight: verify the host has what loopat needs (podman, claude
  * binary, apiKey) and print a checklist. Doesn't exit on failure — UI still
  * works, just chat won't function until the user fills in what's missing.
  */
@@ -21,15 +21,15 @@ import { listUsers } from "./auth"
 
 type Check = { ok: boolean; label: string; hint?: string }
 
-function checkBwrap(): Check {
+function checkPodman(): Check {
   try {
-    execFileSync("bwrap", ["--version"], { stdio: "pipe" })
-    return { ok: true, label: "bwrap (sandbox)" }
+    const out = execFileSync("podman", ["--version"], { stdio: "pipe" }).toString().trim()
+    return { ok: true, label: `podman (sandbox): ${out}` }
   } catch {
     return {
       ok: false,
-      label: "bwrap (sandbox)",
-      hint: "install with: sudo apt install bubblewrap   (Linux only)",
+      label: "podman (sandbox)",
+      hint: "install with: sudo apt install podman uidmap fuse-overlayfs   (Linux only)",
     }
   }
 }
@@ -90,7 +90,7 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
     describeRepos(cfg),
     await checkUsers(),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
-    checkBwrap(),
+    checkPodman(),
     checkClaudeBinary(),
   ]
 
