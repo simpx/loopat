@@ -957,7 +957,7 @@ export async function pullPersonalFromRemote(
       } catch {}
       return { ok: false, error: "merge conflicts", conflicts: [...new Set(conflicts)] }
     }
-    return { ok: false, error: `merge failed: ${stderr || e?.message || e}` }
+    return { ok: false, error: `merge failed: ${stderr || e?.message || e}`, needsStash: true }
   }
 
   // Pop stash if we stashed earlier
