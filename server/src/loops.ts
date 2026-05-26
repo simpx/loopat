@@ -909,12 +909,27 @@ export async function pullPersonalFromRemote(
 
   if (uncommitted > 0) {
     if (force) {
-      // Discard all local changes — reset to HEAD and remove untracked files
+      // Force pull: discard ALL local state and reset to origin/<branch>.
+      // Skip git merge entirely — it can fail due to hooks, stash conflicts,
+      // or interactive prompts. Instead go nuclear: abort any in-progress
+      // merge, reset hard to HEAD, clean untracked files, fetch, then
+      // reset hard to origin/<branch>. This is a destructive operation.
       try {
-        await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"])
-        await execFileP("git", ["-C", dir, "clean", "-fd"])
+        // Suppress interactive prompts (e.g. git-crypt, credential helpers)
+        const silentEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
+        // Abort any in-progress merge (ignore errors — there may not be one)
+        try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv }) } catch {}
+        await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"], { env: silentEnv })
+        await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+        await execFileP("git", ["-C", dir, "fetch", "origin"], {
+          env: { ...silentEnv, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+          timeout: 30_000,
+        })
+        await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silentEnv })
+        await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+        return { ok: true, message: "force pulled — reset to origin/" + branch }
       } catch (e: any) {
-        return { ok: false, error: `discard failed: ${e?.stderr ?? e?.message ?? e}` }
+        return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
       }
     } else {
       // Stash changes before pull
