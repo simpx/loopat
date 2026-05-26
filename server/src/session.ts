@@ -619,8 +619,12 @@ class LoopSession {
                   stopReason: `goal "${this.currentGoal}" still in progress — background work is running`,
                 }
               }
-              // Allow stop. The goal stays active; completion is confirmed by
-              // the user or an explicit AI self-report.
+              // No background work and model is stopping naturally (first
+              // invocation). Auto-complete the goal — matches CC's /goal
+              // behavior where finishing the task marks the goal done.
+              if (!si.stop_hook_active) {
+                this.completeGoal()
+              }
               return { continue: true }
             }],
           }],
