@@ -571,9 +571,9 @@ function PullPushResultFlow({
         </>
       )}
 
-      {result.needsStash && !result.error?.startsWith("stash failed:") && (
+      {result.needsStash && result.error?.startsWith("pull succeeded") && (
         <div className="text-xs text-red-800 leading-relaxed">
-          Your local changes were stashed but couldn't be auto-applied after the pull.
+          Pull succeeded but local changes couldn't be auto-applied.
           Run <code className="bg-white/60 px-1 rounded">git stash pop</code> manually to resolve.
         </div>
       )}
@@ -584,14 +584,14 @@ function PullPushResultFlow({
         </div>
       )}
 
-      {!hasConflicts && !needsPull && (
+      {!hasConflicts && !needsPull && !(result.needsStash && result.error?.startsWith("pull succeeded")) && (
         <div className="text-xs text-red-800 leading-relaxed">
           {result.error}
         </div>
       )}
 
       <div className="flex gap-2 mt-1">
-        {result.needsStash && result.error?.startsWith("stash failed:") ? (
+        {result.needsStash ? (
           <ForcePullButton onRetry={onRetry} />
         ) : hasConflicts || needsPull ? (
           <button
