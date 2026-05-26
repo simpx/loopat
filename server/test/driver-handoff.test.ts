@@ -16,11 +16,10 @@ import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 process.env.LOOPAT_HOME ??= `/tmp/loopat-driver-${process.pid}`
-process.env.LOOPAT_NO_HOME_OVERLAY = "1"
 
 const { effectiveDriver, isDriver } = await import("../src/loops")
 const { loadPersonalConfig, clearPersonalCache } = await import("../src/config")
-const { buildBwrapArgs } = await import("../src/bwrap")
+const { buildPodmanCreateArgs } = await import("../src/podman")
 const {
   LOOPAT_HOME,
   loopWorkdir,
@@ -90,27 +89,31 @@ describe("after handoff — spawn uses driver's vault, not createdBy's", () => {
     expect(creatorCfg.providers.anthropic.apiKey).toBe("sk-alice-handoff")
   })
 
-  test("bwrap argv binds driver's personal dir, not createdBy's", async () => {
+  test("podman argv binds driver's personal dir, not createdBy's", async () => {
     const loopId = "11111111-2222-3333-4444-111111111111"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
     await mkdir(loopContextKnowledge(loopId), { recursive: true })
     await mkdir(loopContextNotes(loopId), { recursive: true })
 
-    // session.ts would call buildBwrapArgs(loopId, effectiveDriver(meta), ...)
+    // session.ts would call buildPodmanCreateArgs(loopId, effectiveDriver(meta), ...)
     // — simulate post-handoff (driver=bob, createdBy=alice).
-    const argv = await buildBwrapArgs(loopId, /* driver */ "bob", {}, "default")
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: "bob",
+      vaultName: "default",
+    })
     const personalBinds: string[] = []
     for (let i = 0; i < argv.length; i++) {
-      if ((argv[i] === "--bind" || argv[i] === "--bind-try") && argv[i + 1].includes("/personal/")) {
-        personalBinds.push(argv[i + 1])
+      if (argv[i] === "--volume" && argv[i + 1].includes("/personal/")) {
+        personalBinds.push(argv[i + 1].split(":")[0])
       }
     }
     expect(personalBinds.every(p => p.includes("/personal/bob"))).toBe(true)
     expect(personalBinds.some(p => p.includes("/personal/alice"))).toBe(false)
   })
 
-  test("driver's vault envs reach sandbox setenv after handoff", async () => {
+  test("driver's vault envs reach sandbox --env after handoff", async () => {
     const loopId = "11111111-2222-3333-4444-222222222222"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
@@ -118,18 +121,26 @@ describe("after handoff — spawn uses driver's vault, not createdBy's", () => {
     await mkdir(loopContextNotes(loopId), { recursive: true })
 
     const bobCfg = await loadPersonalConfig("bob", "default")
-    const argv = await buildBwrapArgs(loopId, "bob", bobCfg.vaultEnvs, "default")
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: "bob",
+      vaultName: "default",
+      extraEnv: { ...bobCfg.vaultEnvs, ANTHROPIC_API_KEY: bobCfg.providers.anthropic.apiKey },
+    })
 
-    const findSetenv = (k: string) => {
-      for (let i = 0; i < argv.length - 2; i++) {
-        if (argv[i] === "--setenv" && argv[i + 1] === k) return argv[i + 2]
+    const findEnv = (k: string) => {
+      const prefix = `${k}=`
+      for (let i = 0; i < argv.length - 1; i++) {
+        if (argv[i] === "--env" && argv[i + 1].startsWith(prefix)) {
+          return argv[i + 1].slice(prefix.length)
+        }
       }
       return undefined
     }
-    expect(findSetenv("ANTHROPIC_API_KEY")).toBe("sk-bob-handoff")
-    // alice's key must not leak
+    expect(findEnv("ANTHROPIC_API_KEY")).toBe("sk-bob-handoff")
+    // alice's key must not leak — search both env values and any other arg
     for (let i = 0; i < argv.length; i++) {
-      expect(argv[i] === "sk-alice-handoff").toBe(false)
+      expect(argv[i].includes("sk-alice-handoff")).toBe(false)
     }
   })
 })

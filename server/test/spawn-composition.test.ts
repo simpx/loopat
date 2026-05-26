@@ -4,8 +4,8 @@
  * Asserts the chain session.ts executes at every spawn:
  *
  *   vault/envs/* + provider.apiKey (${VAR}) + merged settings.json mcpServers
- *      ↓ (loadPersonalConfig + buildBwrapArgs)
- *   bwrap argv with --setenv X Y entries and the mcpServers JSON ready to
+ *      ↓ (loadPersonalConfig + buildPodmanCreateArgs)
+ *   podman argv with --env K=V entries and the mcpServers JSON ready to
  *   be passed through to the spawned claude binary verbatim.
  *
  * This is the integration that the vault refactor's behavior depends on.
@@ -17,9 +17,8 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 
 process.env.LOOPAT_HOME ??= `/tmp/loopat-spawn-comp-${process.pid}`
-process.env.LOOPAT_NO_HOME_OVERLAY = "1"
 
-const { buildBwrapArgs, V_LOOP_CLAUDE } = await import("../src/bwrap")
+const { buildPodmanCreateArgs, V_LOOP_CLAUDE, V_HOME } = await import("../src/podman")
 const { loadPersonalConfig, clearPersonalCache } = await import("../src/config")
 const {
   LOOPAT_HOME,
@@ -84,14 +83,17 @@ async function setup() {
 beforeAll(setup)
 afterAll(() => rm(TEST_HOME, { recursive: true, force: true }))
 
-function findSetenv(argv: string[], key: string): string | undefined {
-  for (let i = 0; i < argv.length - 2; i++) {
-    if (argv[i] === "--setenv" && argv[i + 1] === key) return argv[i + 2]
+function findEnv(argv: string[], key: string): string | undefined {
+  const prefix = `${key}=`
+  for (let i = 0; i < argv.length - 1; i++) {
+    if (argv[i] === "--env" && argv[i + 1].startsWith(prefix)) {
+      return argv[i + 1].slice(prefix.length)
+    }
   }
   return undefined
 }
 
-describe("spawn-time composition — vault envs reach sandbox via bwrap --setenv", () => {
+describe("spawn-time composition — vault envs reach sandbox via podman --env", () => {
   test("loadPersonalConfig resolves provider apiKey from vault envs", async () => {
     const cfg = await loadPersonalConfig(USER, "default")
     expect(cfg.providers.idealab.apiKey).toBe("sk-idealab-test")
@@ -106,7 +108,7 @@ describe("spawn-time composition — vault envs reach sandbox via bwrap --setenv
     })
   })
 
-  test("bwrap argv carries every vault env as --setenv (the actual session.ts pattern)", async () => {
+  test("podman argv carries every vault env as --env (the actual session.ts pattern)", async () => {
     const cfg = await loadPersonalConfig(USER, "default")
     const extraEnv = {
       ...cfg.vaultEnvs,
@@ -114,13 +116,18 @@ describe("spawn-time composition — vault envs reach sandbox via bwrap --setenv
       ANTHROPIC_BASE_URL: cfg.providers.idealab.baseUrl,
       CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(LOOP_ID),
     }
-    const argv = await buildBwrapArgs(LOOP_ID, USER, extraEnv, "default")
-    expect(findSetenv(argv, "IDEALAB_API_KEY")).toBe("sk-idealab-test")
-    expect(findSetenv(argv, "MCP_COOP_TOKEN")).toBe("mcpa_coop_xxx")
-    expect(findSetenv(argv, "GENERIC_VAR")).toBe("generic-value")
+    const argv = await buildPodmanCreateArgs({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      vaultName: "default",
+      extraEnv,
+    })
+    expect(findEnv(argv, "IDEALAB_API_KEY")).toBe("sk-idealab-test")
+    expect(findEnv(argv, "MCP_COOP_TOKEN")).toBe("mcpa_coop_xxx")
+    expect(findEnv(argv, "GENERIC_VAR")).toBe("generic-value")
     // ANTHROPIC_API_KEY is the alias that the claude SDK reads
-    expect(findSetenv(argv, "ANTHROPIC_API_KEY")).toBe("sk-idealab-test")
-    expect(findSetenv(argv, "ANTHROPIC_BASE_URL")).toBe("https://idealab.example.com/api/anthropic")
+    expect(findEnv(argv, "ANTHROPIC_API_KEY")).toBe("sk-idealab-test")
+    expect(findEnv(argv, "ANTHROPIC_BASE_URL")).toBe("https://idealab.example.com/api/anthropic")
   })
 
   test("merged settings.json mcpServers headers preserve ${VAR} (substituted by spawned binary)", async () => {
@@ -147,7 +154,7 @@ describe("spawn-time composition — vault envs reach sandbox via bwrap --setenv
   })
 })
 
-describe("spawn-time composition — mounts/home/ → $HOME via bwrap binds", () => {
+describe("spawn-time composition — mounts/home/ → $HOME via podman --volume", () => {
   test("vault mounts/home/<entry> reaches sandbox $HOME alongside vault envs", async () => {
     // Add a mount alongside the envs
     const mh = personalVaultMountsHomeDir(USER, "default")
@@ -156,16 +163,20 @@ describe("spawn-time composition — mounts/home/ → $HOME via bwrap binds", ()
     await writeFile(join(mh, ".gitconfig"), "[user]\nname = test\n")
 
     const cfg = await loadPersonalConfig(USER, "default")
-    const argv = await buildBwrapArgs(LOOP_ID, USER, cfg.vaultEnvs, "default")
+    const argv = await buildPodmanCreateArgs({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      vaultName: "default",
+      extraEnv: cfg.vaultEnvs,
+    })
 
-    // Each top-level entry under mounts/home/ → --bind-try at $HOME/<rel>
-    const { homedir } = await import("node:os")
-    const HOME = homedir()
-    const binds: Array<[string, string]> = []
+    // Each top-level entry under mounts/home/ → --volume at sandbox $HOME/<rel>
+    const SANDBOX_HOME = V_HOME(USER)
+    const volumes: string[] = []
     for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === "--bind-try") binds.push([argv[i + 1], argv[i + 2]])
+      if (argv[i] === "--volume") volumes.push(argv[i + 1])
     }
-    expect(binds.some(([s, d]) => s === join(mh, ".ssh") && d === join(HOME, ".ssh"))).toBe(true)
-    expect(binds.some(([s, d]) => s === join(mh, ".gitconfig") && d === join(HOME, ".gitconfig"))).toBe(true)
+    expect(volumes).toContain(`${join(mh, ".ssh")}:${join(SANDBOX_HOME, ".ssh")}`)
+    expect(volumes).toContain(`${join(mh, ".gitconfig")}:${join(SANDBOX_HOME, ".gitconfig")}`)
   })
 })

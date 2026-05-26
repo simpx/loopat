@@ -1,0 +1,38 @@
+# loopat sandbox base image.
+#
+# Built once at first launch (or manually via scripts/build-sandbox-image.sh)
+# and tagged `loopat-sandbox:latest` in podman's local store. Every loop's
+# container is `podman create`'d from this image.
+#
+# Philosophy: keep the image small + boring. The image provides the bare
+# shell + system utilities needed for an interactive session to function:
+# bash, coreutils, util-linux, procps. EVERYTHING ELSE — claude binary,
+# node, mise, host caches — is bound in from the host at container create
+# time via --volume.
+#
+# Base: ubuntu:24.04 so glibc matches the host (we use Ubuntu 24.04 dev
+# machines; binding host's claude binary into the container Just Works).
+FROM ubuntu:24.04
+
+# Avoid debconf prompts during install.
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        bash \
+        coreutils \
+        findutils \
+        grep \
+        sed \
+        less \
+        util-linux \
+        procps \
+        bsdmainutils \
+        ca-certificates \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+# The container's main process is just a long-lived sleeper that holds the
+# namespaces open. Both the SDK driver and the PTY shell will `podman exec`
+# in as siblings of this process.
+CMD ["/bin/sleep", "infinity"]

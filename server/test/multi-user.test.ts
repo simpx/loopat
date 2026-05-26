@@ -12,12 +12,11 @@ import { mkdir, rm, writeFile, readFile } from "node:fs/promises"
 import { join } from "node:path"
 
 process.env.LOOPAT_HOME ??= `/tmp/loopat-multi-user-${process.pid}`
-process.env.LOOPAT_NO_HOME_OVERLAY = "1"
 
 const { loadVaultEnvs } = await import("../src/vaults")
 const { loadPersonalConfig, clearPersonalCache } = await import("../src/config")
 const { composeFromPlan } = await import("../src/compose")
-const { buildBwrapArgs } = await import("../src/bwrap")
+const { buildPodmanCreateArgs } = await import("../src/podman")
 const {
   LOOPAT_HOME,
   loopWorkdir,
@@ -160,54 +159,70 @@ describe("multi-user — composed CLAUDE.md doctrine", () => {
   })
 })
 
-describe("multi-user — bwrap binds correct user's personal dir", () => {
-  function getPersonalBinds(argv: string[]): string[] {
+describe("multi-user — podman binds correct user's personal dir", () => {
+  function getPersonalVolumes(argv: string[]): string[] {
     const out: string[] = []
     for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === "--bind" || argv[i] === "--bind-try") {
-        const src = argv[i + 1]
-        if (src.includes("/personal/")) out.push(src)
+      if (argv[i] === "--volume") {
+        const spec = argv[i + 1]
+        if (spec.includes("/personal/")) out.push(spec.split(":")[0])
       }
     }
     return out
   }
 
-  test("alice's spawn ro-binds /personal/alice, not /personal/bob", async () => {
+  test("alice's spawn binds /personal/alice, not /personal/bob", async () => {
     const loopId = "a0000000-0000-0000-0000-000000000002"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
     await mkdir(loopContextKnowledge(loopId), { recursive: true })
     await mkdir(loopContextNotes(loopId), { recursive: true })
-    const argv = await buildBwrapArgs(loopId, "alice", {}, "default")
-    const personalBinds = getPersonalBinds(argv)
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: "alice",
+      vaultName: "default",
+    })
+    const personalBinds = getPersonalVolumes(argv)
     expect(personalBinds.every(p => p.includes("/personal/alice"))).toBe(true)
     expect(personalBinds.some(p => p.includes("/personal/bob"))).toBe(false)
   })
 
-  test("bob's spawn ro-binds /personal/bob, not /personal/alice", async () => {
+  test("bob's spawn binds /personal/bob, not /personal/alice", async () => {
     const loopId = "b0000000-0000-0000-0000-000000000002"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
     await mkdir(loopContextKnowledge(loopId), { recursive: true })
     await mkdir(loopContextNotes(loopId), { recursive: true })
-    const argv = await buildBwrapArgs(loopId, "bob", {}, "default")
-    const personalBinds = getPersonalBinds(argv)
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: "bob",
+      vaultName: "default",
+    })
+    const personalBinds = getPersonalVolumes(argv)
     expect(personalBinds.every(p => p.includes("/personal/bob"))).toBe(true)
     expect(personalBinds.some(p => p.includes("/personal/alice"))).toBe(false)
   })
 
-  test("alice's vault envs do NOT appear in bob's bwrap setenv", async () => {
+  test("alice's vault envs do NOT appear in bob's podman --env", async () => {
     const loopId = "b0000000-0000-0000-0000-000000000003"
     await mkdir(loopWorkdir(loopId), { recursive: true })
     await mkdir(loopClaudeDir(loopId), { recursive: true })
     await mkdir(loopContextKnowledge(loopId), { recursive: true })
     await mkdir(loopContextNotes(loopId), { recursive: true })
     const bobCfg = await loadPersonalConfig("bob", "default")
-    const argv = await buildBwrapArgs(loopId, "bob", bobCfg.vaultEnvs, "default")
+    const argv = await buildPodmanCreateArgs({
+      loopId,
+      createdBy: "bob",
+      vaultName: "default",
+      extraEnv: bobCfg.vaultEnvs,
+    })
+    const envs = argv
+      .map((a, i) => (a === "--env" ? argv[i + 1] : null))
+      .filter((s): s is string => s !== null)
     // ALICE_KEY belongs to alice; must not leak into bob's spawn
-    expect(argv.includes("ALICE_KEY")).toBe(false)
-    expect(argv.includes("sk-alice")).toBe(false)
+    expect(envs.some((e) => e.startsWith("ALICE_KEY="))).toBe(false)
+    expect(envs.some((e) => e.includes("sk-alice"))).toBe(false)
     // BOB_KEY is bob's own
-    expect(argv.includes("BOB_KEY")).toBe(true)
+    expect(envs.some((e) => e.startsWith("BOB_KEY="))).toBe(true)
   })
 })

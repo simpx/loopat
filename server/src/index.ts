@@ -2938,11 +2938,28 @@ import "./serve"
 const serveHost = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
 const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
 
-// Probe $HOME overlay support up front so the first user-facing spawn
-// doesn't pay for it (and the warning lands in boot logs, not mid-session).
-import { isHomeOverlaySupported } from "./bwrap"
-const overlayOk = await isHomeOverlaySupported()
-console.log(`[loopat] sandbox $HOME overlay: ${overlayOk ? "enabled" : "disabled (tmpfs fallback)"}`)
+// Probe podman availability up front so misconfigured hosts fail loudly on
+// boot rather than mid-session.
+import { probePodman, stopAllWorkspaceContainers } from "./podman"
+const podmanProbe = await probePodman()
+if (podmanProbe.ok) {
+  console.log(`[loopat] sandbox runtime: ${podmanProbe.version}`)
+} else {
+  console.warn(`[loopat] sandbox runtime: NOT AVAILABLE — ${podmanProbe.hint}`)
+  console.warn(`[loopat] chat / terminal will fail until podman is installed.`)
+}
+
+// On graceful shutdown, stop every loopat-managed container so the host
+// isn't left with orphaned sandbox processes after the server dies.
+const stopAllOnExit = async () => {
+  try {
+    await stopAllWorkspaceContainers()
+  } catch (e: any) {
+    console.warn(`[loopat] stop-all on exit failed: ${e?.message ?? e}`)
+  }
+}
+process.on("SIGINT", () => { void stopAllOnExit().finally(() => process.exit(0)) })
+process.on("SIGTERM", () => { void stopAllOnExit().finally(() => process.exit(0)) })
 
 // Plugin caching is delegated to CC itself — admin uses `claude plugin
 // install` inside each sandbox's .claude/ dir. No loopat-side prewarm.

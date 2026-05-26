@@ -12,7 +12,7 @@ import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { buildBwrapArgs, prepareSandboxOverlay, buildSandboxSpawnArgv, isHomeOverlaySupported, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./bwrap"
+import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus } from "./loop-status"
 
 const CLAUDE_BINARY = resolveClaudeBinary()
@@ -458,25 +458,27 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
-    const useOverlay = await isHomeOverlaySupported()
-    const bwrapBase = await buildBwrapArgs(
+    // Ensure the per-loop podman container exists and is running. Idempotent:
+    // if the container is already up with the same config-hash, no-op. Both
+    // this SDK driver AND the PTY (term.ts) call ensureContainer with the
+    // same options, so they end up sharing one container (same PID / Mount /
+    // IPC namespace) — that's the whole point of the podman refactor.
+    await ensureContainer({
       loopId,
-      driver,
+      createdBy: driver,
+      vaultName: meta.config?.vault,
+      knowledgeRw: meta.config?.knowledge_rw,
+      mountAllLoops: meta.config?.mount_all_loops,
       extraEnv,
-      meta.config?.vault,
-      meta.config?.knowledge_rw,
-      useOverlay,
-      meta.config?.mount_all_loops,
-    )
-    // Overlay dirs for the per-loop $HOME container layer. Mkdir here so the
-    // sync spawnClaudeCodeProcess callback below has the paths ready.
-    // (Skipped when overlay isn't supported — we fall through to --tmpfs $HOME.)
-    const sandboxOverlay = useOverlay ? await prepareSandboxOverlay(loopId) : null
+    })
+    // Tell the container lifecycle scheduler that this loop has an active
+    // SDK source. Released in destroy() via markInactive(loopId, "sdk").
+    markActive(loopId, "sdk")
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${activeModel?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
-      console.error(`[sdk:${tag}] config: bwrap-argc=${bwrapBase.length} binary=${CLAUDE_BINARY}`)
+      console.error(`[sdk:${tag}] config: binary=${CLAUDE_BINARY}`)
     }
 
     this.q = query({
@@ -629,22 +631,23 @@ class LoopSession {
             }],
           }],
         },
-        // Inner SDK sandbox disabled — outer bwrap (single layer) wraps the
-        // CLI process itself; bash subprocesses inherit the same namespace.
-        // No nested sandbox needed.
+        // Inner SDK sandbox disabled — outer podman container wraps everything;
+        // bash subprocesses from the Bash tool inherit the same namespace via
+        // exec-in-container. No nested sandbox needed.
         sandbox: { enabled: false },
-        // Wrap CLI spawn in outer bwrap. Synchronous: argv is prebuilt above.
+        // Spawn CLI inside the per-loop podman container via `podman exec`.
         spawnClaudeCodeProcess: ({ command, args, signal }) => {
           // SDK has already injected the resolved plugins via its `plugins`
           // option → `--plugin-dir <path>` flags in `args`. We just wrap +
           // spawn here.
-          // Overlay path: unshare wrapper mounts overlayfs at $HOME, bwrap drops
-          // uid via nested userns. Tmpfs path: bwrap directly (when host bwrap
-          // can't do the nested-userns uid drop, see isHomeOverlaySupported).
-          const spawnBinary = sandboxOverlay ? "unshare" : "bwrap"
-          const fullArgs = sandboxOverlay
-            ? buildSandboxSpawnArgv(sandboxOverlay, bwrapBase, command, args)
-            : [...bwrapBase, "--", command, ...args]
+          const spawnBinary = process.env.LOOPAT_PODMAN_BIN || "podman"
+          const fullArgs = buildPodmanExecArgs({
+            loopId,
+            command,
+            args,
+            env: extraEnv,
+            workdir: V_LOOP_WORKDIR(loopId),
+          })
           const tag = loopId.slice(0, 8)
           // Always tee stderr to a per-loop file so it survives terminal
           // truncation (bun --filter, tools that elide). Path also printed
@@ -1258,6 +1261,10 @@ class LoopSession {
     this.queueProcessing = false
     this.messageQueue = []
     sessions.delete(this.id)
+    // Release the SDK side of the container activity registry; the container
+    // will be `podman stop`'d after CONTAINER_IDLE_MS unless something else
+    // (e.g. PTY subscribers) keeps it active.
+    markInactive(this.id, "sdk")
     if (this.q) {
       try { await this.q.interrupt() } catch {}
       this.q = null
