@@ -170,29 +170,29 @@ test.describe("/loop page", () => {
     expect(typeof body.permission_mode === "string" || body.permission_mode === undefined).toBe(true);
   });
 
-  test("Settings → Agents tab creates a public account via v1", async ({ page }) => {
+  test("Settings → Accounts tab creates an account via v1", async ({ page }) => {
     // Watch for the POST that fires on create.
     const accountReq = page.waitForRequest(
       (req) => req.url().includes("/api/v1/me/accounts") && req.method() === "POST",
       { timeout: 15_000 },
     );
 
-    await page.goto("/settings/agents");
+    await page.goto("/settings/accounts");
 
-    // The tab header / description should be visible.
-    await expect(page.getByText("Your agents")).toBeVisible({ timeout: 10_000 });
+    // The tab header should be visible.
+    await expect(page.getByText("Your accounts")).toBeVisible({ timeout: 10_000 });
 
-    // Type a new agent id and create.
+    // Type a new account id and create.
     const input = page.getByPlaceholder("e.g. my-coderev-bot");
-    await input.fill("e2e-agent");
+    await input.fill("e2e-account");
     await page.getByRole("button", { name: /^Create$/ }).click();
 
     const r = await accountReq;
     expect(r.url()).toContain("/api/v1/me/accounts");
-    expect(r.postDataJSON()).toEqual({ id: "e2e-agent" });
+    expect(r.postDataJSON()).toEqual({ id: "e2e-account" });
 
-    // After creation the agent appears in the list.
-    await expect(page.locator("code", { hasText: "e2e-agent" }).first()).toBeVisible({ timeout: 5_000 });
+    // After creation the new account appears in the list.
+    await expect(page.locator("code", { hasText: "e2e-account" }).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("scope tabs filter loops", async ({ page }) => {

@@ -52,7 +52,7 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "agents" | "admin-users" | "admin-workspace" | "admin-serve"
+type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "accounts" | "admin-users" | "admin-workspace" | "admin-serve"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
@@ -62,7 +62,7 @@ const TABS: { id: TabId; label: string; gated: boolean; description: string; ico
   { id: "mise-config",   label: "Mise Config",            gated: true,  description: "Configure mise toolchain tools per tier — mise.toml for each tier.", icon: Wrench },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
   { id: "api-tokens",     label: "API Tokens",            gated: false, description: "Bearer tokens for external programs to drive your loops via the Loop API. See API docs below.", icon: KeyRound },
-  { id: "agents",         label: "Agents",                gated: false, description: "API-only accounts you own. Each agent has its own vault, .claude config, and loops — operated by external programs via tokens.", icon: User },
+  { id: "accounts",       label: "Accounts",              gated: false, description: "Additional accounts you own (API-only — no password login). Each one has its own vault, .claude config, loops, and tokens.", icon: User },
   { id: "admin-users",    label: "Users",                 gated: false, description: "Manage workspace members — activate, promote, remove.", icon: Users },
   { id: "admin-workspace",label: "Workspace AI Providers", gated: false, description: "Shared workspace provider configuration.", icon: Globe },
   { id: "admin-serve",    label: "Share Artifact Serve",   gated: false, description: "Public share domain and HTTPS settings.",   icon: Share2 },
@@ -318,8 +318,8 @@ export function SettingsPage() {
                   {active === "api-tokens" && (
                     <ApiTokensSection />
                   )}
-                  {active === "agents" && (
-                    <AgentsSection />
+                  {active === "accounts" && (
+                    <AccountsSection />
                   )}
                   {active === "admin-users" && (
                     <div className="rounded-lg border border-gray-200 bg-white p-5"><UsersPanel currentUserId={ws.currentUser?.id ?? ""} /></div>
@@ -1186,10 +1186,11 @@ function ApiTokensSection() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Agents (public accounts you own)
+// Accounts — additional accounts (API-only, no password login) owned by the
+// current account. See docs/account-model.md.
 // ────────────────────────────────────────────────────────────────────────────
 
-function AgentsSection() {
+function AccountsSection() {
   const [accounts, setAccounts] = useState<PublicAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [newId, setNewId] = useState("")
@@ -1237,7 +1238,7 @@ function AgentsSection() {
     <div className="space-y-4">
       {/* What this is */}
       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-[12px] text-blue-900">
-        <strong className="font-medium">What is an agent?</strong> An API-only account you own. It has its own vault, its own .claude config, and its own loops — operated by external programs (Slack bots, CI hooks, etc.) via Bearer tokens. The agent cannot log in via password; only you (via this UI) can manage it.
+        <strong className="font-medium">What is this?</strong> Additional accounts you own. They cannot log in via password — only you, via this UI, can manage them. Each account has its own vault, .claude config, loops, and tokens. External programs (bots, CI hooks, etc.) drive them via Bearer tokens issued from <strong>API Tokens</strong>.
         See <a className="underline" href="/api/v1/docs" target="_blank" rel="noopener noreferrer">API docs</a>.
       </div>
 
@@ -1245,14 +1246,14 @@ function AgentsSection() {
       {justCreated && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] text-emerald-900 flex items-center gap-2">
           <Check size={14} />
-          <span>Created agent <code className="bg-white border border-emerald-200 rounded px-1.5 py-0.5 font-mono text-[11px]">{justCreated}</code>. Next: go to <strong>API Tokens</strong> to issue a token for it.</span>
+          <span>Created account <code className="bg-white border border-emerald-200 rounded px-1.5 py-0.5 font-mono text-[11px]">{justCreated}</code>. Next: go to <strong>API Tokens</strong> to issue a token for it.</span>
         </div>
       )}
 
       {/* Account list */}
       <div className="rounded-lg border border-gray-200 bg-white">
         <div className="px-4 py-3 border-b border-gray-100">
-          <h3 className="text-[13px] font-medium text-gray-900">Your agents</h3>
+          <h3 className="text-[13px] font-medium text-gray-900">Your accounts</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
             API-only accounts you own. Each one is a separate identity with its own resources.
           </p>
@@ -1262,7 +1263,7 @@ function AgentsSection() {
           <div className="px-4 py-8 text-center text-[12px] text-gray-400 italic">loading…</div>
         ) : accounts.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] text-gray-400">
-            No agents yet. Create one below.
+            No accounts yet. Create one below.
           </div>
         ) : (
           <table className="w-full text-[13px]">
@@ -1301,7 +1302,7 @@ function AgentsSection() {
                         type="button"
                         onClick={() => setDeleteConfirm(a.id)}
                         className="w-7 h-7 flex items-center justify-center rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
-                        title="delete agent"
+                        title="delete account"
                       >
                         <Trash2 size={13} />
                       </button>
@@ -1316,7 +1317,7 @@ function AgentsSection() {
 
       {/* Create form */}
       <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <h3 className="text-[13px] font-medium text-gray-900 mb-2">Create new agent</h3>
+        <h3 className="text-[13px] font-medium text-gray-900 mb-2">Create new account</h3>
         <div className="flex gap-2">
           <input
             type="text"
