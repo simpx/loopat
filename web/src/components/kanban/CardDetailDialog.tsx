@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useWorkspace } from "../../ctx"
+import { RefreshCw } from "lucide-react"
 import {
   toggleKanbanCard,
   updateKanbanCardBlock,
@@ -69,6 +70,7 @@ export function CardDetailDialog({
     await updateKanbanCardBlock(board, colFilename, card.cid, block)
     setSaving(false)
     onSaved()
+    onClose()
   }
 
   async function handleToggleDone() {
@@ -192,11 +194,11 @@ export function CardDetailDialog({
 
         {/* actions */}
         <div className="flex items-center gap-2 px-4 py-3 border-t border-gray-100">
-          {loggedIn && <button type="button" disabled={assigning} onClick={handleAssignDriver} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-50">{assigning ? "…" : "Assign Driver"}</button>}
+          {loggedIn && <button type="button" disabled={assigning} onClick={handleAssignDriver} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700 disabled:opacity-50">{assigning ? <RefreshCw size={12} className="animate-spin" /> : "Assign Driver"}</button>}
           {loggedIn && <button type="button" onClick={handleCreateLoop} className="px-2.5 h-7 rounded text-[11px] border border-gray-200 hover:bg-gray-100 text-gray-700">Create Loop</button>}
           <div className="flex-1" />
-          {loggedIn && <button type="button" disabled={saving} onClick={handleSave} className="px-3 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>}
-          {loggedIn && <button type="button" disabled={deleting} onClick={handleDelete} className="px-2.5 h-7 rounded text-[11px] text-red-600 hover:bg-red-50 disabled:opacity-50">{deleting ? "…" : "Delete"}</button>}
+          {loggedIn && <button type="button" disabled={saving} onClick={handleSave} className="px-3 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50">{saving ? <RefreshCw size={12} className="animate-spin" /> : "Save"}</button>}
+          {loggedIn && <button type="button" disabled={deleting} onClick={handleDelete} className="px-2.5 h-7 rounded text-[11px] text-red-600 hover:bg-red-50 disabled:opacity-50">{deleting ? <RefreshCw size={12} className="animate-spin" /> : "Delete"}</button>}
         </div>
       </div>
     </div>
