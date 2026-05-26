@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react"
+import { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle } from "react"
 import {
   DndContext,
   DragOverlay,
@@ -17,17 +17,19 @@ import { KanbanColumn as KanbanColumnView } from "./KanbanColumn"
 import { KanbanCardStatic } from "./KanbanCardView"
 import { useKanbanWebSocket } from "../../useKanbanWebSocket"
 
-export function KanbanBoard({
-  board,
-  onCardClick,
-  onCardArchive,
-  showArchived,
-}: {
+export type KanbanBoardHandle = { refresh: () => void }
+
+export const KanbanBoard = forwardRef<KanbanBoardHandle, {
   board: string
   onCardClick: (card: KanbanCard, filename: string) => void
   onCardArchive: (card: KanbanCard, colFilename: string) => void
   showArchived: boolean
-}) {
+}>(function KanbanBoard({
+  board,
+  onCardClick,
+  onCardArchive,
+  showArchived,
+}, ref) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 5 } })
@@ -60,6 +62,8 @@ export function KanbanBoard({
       setLoading(false)
     })
   }, [board])
+
+  useImperativeHandle(ref, () => ({ refresh }), [refresh])
 
   const connected = useKanbanWebSocket(refresh)
 
@@ -343,4 +347,4 @@ export function KanbanBoard({
       </DragOverlay>
     </DndContext>
   )
-}
+})

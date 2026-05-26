@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { KanbanBoard } from "../components/kanban/KanbanBoard"
+import { KanbanBoard, type KanbanBoardHandle } from "../components/kanban/KanbanBoard"
 import { CardDetailDialog } from "../components/kanban/CardDetailDialog"
 import { moveKanbanCard, createKanbanColumn, listBoards, createBoard, renameBoard, type KanbanCard } from "../api"
 
@@ -13,15 +13,15 @@ export function KanbanPage() {
   const [selected, setSelected] = useState<{ card: KanbanCard; filename: string } | null>(null)
   const [undo, setUndo] = useState<UndoState>(null)
   const [showArchived, setShowArchived] = useState(false)
-  const [refreshKey, setRefreshKey] = useState(0)
   const [boards, setBoards] = useState<string[]>([])
   const [showNewBoard, setShowNewBoard] = useState(false)
   const [newBoardName, setNewBoardName] = useState("")
   const [renamingBoard, setRenamingBoard] = useState("")
   const [renameValue, setRenameValue] = useState("")
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const boardRef = useRef<KanbanBoardHandle>(null)
 
-  const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+  const refresh = useCallback(() => boardRef.current?.refresh(), [])
 
   useEffect(() => {
     listBoards().then(setBoards)
@@ -115,6 +115,11 @@ export function KanbanPage() {
           >+</button>
         )}
         <div className="flex-1" />
+        <button onClick={refresh}
+          className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+          title="Refresh board">
+          ↻
+        </button>
         <button onClick={() => setShowArchived((v) => !v)}
           className={`text-[11px] px-2 py-0.5 rounded border transition-colors shrink-0 ${showArchived ? "border-gray-400 bg-gray-200 text-gray-700" : "border-gray-200 text-gray-500 hover:text-gray-700"}`}>
           {showArchived ? "Hide archived" : "Archived"}
@@ -156,8 +161,9 @@ export function KanbanPage() {
         </div>
       )}
 
-      <main className="flex-1 min-h-0 overflow-hidden relative" key={refreshKey + board}>
+      <main className="flex-1 min-h-0 overflow-hidden relative" key={board}>
         <KanbanBoard
+          ref={boardRef}
           board={board}
           onCardClick={(card, filename) => setSelected({ card, filename })}
           onCardArchive={handleArchive}
