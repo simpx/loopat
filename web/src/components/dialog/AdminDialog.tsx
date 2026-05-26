@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
-import { Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2, Check } from "lucide-react"
 
 const inputClass = "w-full px-2.5 py-1.5 border border-gray-300 rounded text-[13px] outline-none bg-white focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors disabled:bg-gray-50 disabled:text-gray-400"
 import {
@@ -256,6 +256,7 @@ export function WorkspacePanel() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
   const [draft, setDraft] = useState<WorkspaceDraft | null>(null)
   const [newName, setNewName] = useState("")
   const [adding, setAdding] = useState(false)
@@ -436,6 +437,8 @@ export function WorkspacePanel() {
       }
       const ok = await updateWorkspaceSettings({ providers: out, default: draft.default })
       if (!ok) { setErr("save failed"); return }
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
       setDraft((d) => {
         if (!d) return d
         const next = { ...d, providers: { ...d.providers } }
@@ -752,6 +755,7 @@ export function WorkspacePanel() {
 
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
         {err && <span className="text-xs text-red-600">{err}</span>}
+        {saved && !err && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
         <Button size="sm" onClick={save} disabled={saving}>
           {saving ? "saving…" : "save providers"}
         </Button>
@@ -780,6 +784,7 @@ export function ServePanel() {
   const [displayPort, setServeDisplayPort] = useState(7788)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     getServeDomain().then((d) => {
@@ -804,6 +809,8 @@ export function ServePanel() {
         displayPort,
       })
       if (!ok) { setError("save failed"); return }
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
       const d = await getServeDomain()
       setDomainState(d.domain)
       setServeIp(d.ip)
@@ -866,6 +873,7 @@ export function ServePanel() {
 
       <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
         {error && <span className="text-xs text-red-500">{error}</span>}
+        {saved && !error && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
         <Button onClick={handleSave} disabled={saving}>
           {saving ? "Saving…" : "Save"}
         </Button>

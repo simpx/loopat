@@ -372,6 +372,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const [draft, setDraft] = useState<ProvidersDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
   const [newName, setNewName] = useState("")
   const [adding, setAdding] = useState(false)
   const [newModelName, setNewModelName] = useState<Record<string, string>>({})
@@ -387,7 +388,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   useEffect(() => { getAdminPresets().then(d => setProviderPresets(d.providerPresets)).catch(() => {}) }, [])
 
   useEffect(() => {
-    if (!disk) { setDraft(null); return }
+    if (!disk) { setDraft(null); setSaved(false); return }
     const next: ProvidersDraft = { default: "", providers: {} }
     for (const [name, val] of Object.entries(disk.providers)) {
       if (name === "default") {
@@ -565,6 +566,8 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     const r = await savePersonalDisk({ providers: providersOut })
     setSaving(false)
     if (!r.ok) { setErr(r.error ?? "save failed"); return }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
     onChanged()
   }
 
@@ -867,6 +870,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
 
       <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-100">
         {err && <span className="text-xs text-red-600">{err}</span>}
+        {saved && !err && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
         <Button size="sm" onClick={save} disabled={saving || disabled}>
           {saving ? "saving…" : "save providers"}
         </Button>
@@ -998,9 +1002,11 @@ function ApiTokensSection() {
   const [newToken, setNewToken] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
+    setError(null)
     const list = await listApiTokens()
     setTokens(list)
     setLoading(false)
@@ -1011,6 +1017,7 @@ function ApiTokensSection() {
   const handleCreate = async () => {
     if (creating) return
     setCreating(true)
+    setError(null)
     const result = await createApiToken(label.trim() || "default")
     setCreating(false)
     if (result) {
@@ -1018,13 +1025,17 @@ function ApiTokensSection() {
       setLabel("")
       setCopied(false)
       refresh()
+    } else {
+      setError("Failed to create token")
     }
   }
 
   const handleRevoke = async (tokenId: string) => {
-    await revokeApiToken(tokenId)
+    setError(null)
+    const ok = await revokeApiToken(tokenId)
     setDeleteConfirm(null)
-    refresh()
+    if (ok) refresh()
+    else setError("Failed to revoke token")
   }
 
   const handleCopy = () => {
@@ -1037,6 +1048,13 @@ function ApiTokensSection() {
 
   return (
     <div className="space-y-4">
+      {/* Error banner */}
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[12px] text-red-700 flex items-center gap-2">
+          <AlertCircle size={14} /> {error}
+        </div>
+      )}
+
       {/* new token reveal banner */}
       {newToken && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
@@ -1202,9 +1220,11 @@ function AccountsSection() {
   const [createError, setCreateError] = useState<string | null>(null)
   const [justCreated, setJustCreated] = useState<string | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
+    setDeleteError(null)
     const list = await listMyAccounts()
     setAccounts(list)
     setLoading(false)
@@ -1236,6 +1256,7 @@ function AccountsSection() {
     const r = await deleteMyAccount(id)
     setDeleteConfirm(null)
     if (r.ok) refresh()
+    else setDeleteError(r.error ?? "Failed to delete account")
   }
 
   return (
@@ -1245,6 +1266,13 @@ function AccountsSection() {
         <strong className="font-medium">What is this?</strong> Additional accounts you own. They cannot log in via password — only you, via this UI, can manage them. Each account has its own vault, .claude config, loops, and tokens. External programs (bots, CI hooks, etc.) drive them via Bearer tokens issued from <strong>API Tokens</strong>.
         See <a className="underline" href="/api/v1/docs" target="_blank" rel="noopener noreferrer">API docs</a>.
       </div>
+
+      {/* Error banner */}
+      {deleteError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[12px] text-red-700 flex items-center gap-2">
+          <AlertCircle size={14} /> {deleteError}
+        </div>
+      )}
 
       {/* Just-created confirmation */}
       {justCreated && (
