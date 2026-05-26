@@ -431,6 +431,66 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
   )
 }
 
+function ForcePullButton({ onRetry }: { onRetry: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [forcePulling, setForcePulling] = useState(false)
+
+  const handleForcePull = async () => {
+    setForcePulling(true)
+    const r = await pullPersonalVault({ force: true })
+    setForcePulling(false)
+    setConfirming(false)
+    // Replace the parent's result with the force pull result
+    if (r.ok) {
+      onRetry() // Let parent refresh — the successful pull result will show
+    }
+  }
+
+  if (forcePulling) {
+    return (
+      <button disabled className="flex-1 px-3 h-8 text-sm rounded bg-red-700 text-white opacity-50">
+        Force pulling…
+      </button>
+    )
+  }
+
+  if (confirming) {
+    return (
+      <div className="flex gap-2">
+        <button
+          onClick={handleForcePull}
+          className="flex-1 px-3 h-8 text-sm rounded bg-red-700 text-white hover:bg-red-800"
+        >
+          Confirm — discard all local changes
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="px-3 h-8 text-sm rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex gap-2">
+      <button
+        onClick={() => setConfirming(true)}
+        className="flex-1 px-3 h-8 text-sm rounded bg-amber-600 text-white hover:bg-amber-700"
+      >
+        Discard changes & force pull
+      </button>
+      <button
+        onClick={onRetry}
+        className="px-3 h-8 text-sm rounded bg-red-700 text-white hover:bg-red-800"
+      >
+        Retry
+      </button>
+    </div>
+  )
+}
+
 function PullPushResultFlow({
   type,
   result,
@@ -511,7 +571,7 @@ function PullPushResultFlow({
         </>
       )}
 
-      {result.needsStash && (
+      {result.needsStash && !result.error?.startsWith("stash failed:") && (
         <div className="text-xs text-red-800 leading-relaxed">
           Your local changes were stashed but couldn't be auto-applied after the pull.
           Run <code className="bg-white/60 px-1 rounded">git stash pop</code> manually to resolve.
@@ -524,14 +584,16 @@ function PullPushResultFlow({
         </div>
       )}
 
-      {!hasConflicts && !result.needsStash && !needsPull && (
+      {!hasConflicts && !needsPull && (
         <div className="text-xs text-red-800 leading-relaxed">
           {result.error}
         </div>
       )}
 
       <div className="flex gap-2 mt-1">
-        {hasConflicts || needsPull ? (
+        {result.needsStash && result.error?.startsWith("stash failed:") ? (
+          <ForcePullButton onRetry={onRetry} />
+        ) : hasConflicts || needsPull ? (
           <button
             type="button"
             onClick={needsPull ? () => { onDone(); setTimeout(() => window.location.reload(), 100) } : onDone}
