@@ -376,8 +376,9 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     args.push("--env", `${k}=${v}`)
   }
 
-  // Add config hash AFTER env/volumes are computed so it covers all of them.
-  const hash = hashCreateArgs(mounts, env, opts)
+  // Config hash. Covers mounts + opts but NOT env — see hashCreateArgs
+  // doc for why.
+  const hash = hashCreateArgs(mounts, opts)
   args.push("--label", `${LABEL_CONFIG_HASH}=${hash}`)
 
   // Image + command tail. The image's CMD already runs `sleep infinity`, but
@@ -387,9 +388,21 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
   return args
 }
 
+/**
+ * Config hash: covers everything that, if changed, would require recreating
+ * the container — mounts + loop-scoped opts. Deliberately EXCLUDES the env
+ * map because different callers (term.ts / session.ts) legitimately pass
+ * different extraEnv (PTY doesn't need ANTHROPIC_API_KEY; SDK does). If we
+ * hashed env, those callers would force-recreate the container on every
+ * activity flip, killing each other's exec'd processes with SIGKILL (the
+ * actual bug behind "PTY exits 137 the moment a chat starts").
+ *
+ * Env still lands in `podman create --env` for convenience (so an exec
+ * without explicit env inherits something sane), but the values that
+ * actually matter at runtime should be passed at exec time anyway.
+ */
 function hashCreateArgs(
   mounts: VolumeMount[],
-  env: Record<string, string>,
   opts: ContainerOptions,
 ): string {
   const h = createHash("sha256")
@@ -401,9 +414,6 @@ function hashCreateArgs(
   h.update(`mountAllLoops:${opts.mountAllLoops ? "1" : "0"}\n`)
   for (const m of [...mounts].sort((a, b) => a.dst.localeCompare(b.dst))) {
     h.update(`vol\t${m.src}\t${m.dst}\t${m.ro ? "ro" : "rw"}\n`)
-  }
-  for (const k of Object.keys(env).sort()) {
-    h.update(`env\t${k}\t${env[k]}\n`)
   }
   return h.digest("hex").slice(0, 16)
 }
@@ -559,15 +569,24 @@ export async function ensureContainer(opts: ContainerOptions): Promise<void> {
 
   const cur = await inspectContainer(opts.loopId)
   if (cur.running && cur.configHash === desiredHash) return
+  const tag = opts.loopId.slice(0, 8)
   if (cur.exists) {
-    if (cur.running) await runPodman(["stop", "--time", "5", containerName(opts.loopId)])
     if (cur.configHash !== desiredHash) {
+      // Spec drift — container has to be torn down and recreated. This kills
+      // any process exec'd into the old container (PTY shells, an active
+      // claude CLI). Log loudly so the cause is obvious if the user reports
+      // "my terminal disconnected when I sent a chat".
+      console.warn(`[podman:${tag}] config hash drift (${cur.configHash} → ${desiredHash}) — recreating container; any in-flight exec'd processes will be killed`)
+      if (cur.running) await runPodman(["stop", "--time", "5", containerName(opts.loopId)])
       await runPodman(["rm", "--force", containerName(opts.loopId)])
     } else {
+      // Hash matches; just (re)start.
+      console.log(`[podman:${tag}] restarting stopped container`)
       await runPodman(["start", containerName(opts.loopId)])
       return
     }
   }
+  console.log(`[podman:${tag}] creating + starting container (hash=${desiredHash})`)
   await runPodman(["create", ...createArgs])
   await runPodman(["start", containerName(opts.loopId)])
 }

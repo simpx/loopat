@@ -230,6 +230,33 @@ describe("buildPodmanCreateArgs — container shape", () => {
     expect(hashB).toBeDefined()
     expect(hashA).not.toBe(hashB)
   })
+
+  test("config-hash does NOT change when only extraEnv differs (regression: PTY exit-137 bug)", async () => {
+    // term.ts and session.ts call ensureContainer with the same loop opts
+    // but DIFFERENT extraEnv (PTY only needs vault envs; SDK adds
+    // ANTHROPIC_API_KEY / CLAUDE_CONFIG_DIR / etc.). If env were part of
+    // the hash, the second caller would force-recreate the container,
+    // SIGKILL'ing the first caller's exec'd process (the actual bug
+    // behind "PTY exits 137 when chat starts").
+    const ptyLike = await buildPodmanCreateArgs({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      extraEnv: { VAULT_KEY: "v" },
+    })
+    const sdkLike = await buildPodmanCreateArgs({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      extraEnv: {
+        VAULT_KEY: "v",
+        ANTHROPIC_API_KEY: "sk-test",
+        ANTHROPIC_BASE_URL: "https://example",
+        CLAUDE_CONFIG_DIR: "/loopat/loop/.../.claude",
+      },
+    })
+    const hashPty = ptyLike.find((s) => s.startsWith("loopat.config-hash="))
+    const hashSdk = sdkLike.find((s) => s.startsWith("loopat.config-hash="))
+    expect(hashPty).toBe(hashSdk)
+  })
 })
 
 describe("buildPodmanExecArgs — shape", () => {

@@ -87,6 +87,34 @@ describe.skipIf(!podmanAvailable)("podman E2E lifecycle", () => {
     expect(await containerRunning(LOOP_ID)).toBe(true)
   })
 
+  test("different extraEnv between callers does NOT recreate the container (regression: PTY exit-137 bug)", async () => {
+    // term.ts passes vault envs only; session.ts adds ANTHROPIC_* + others.
+    // If env participated in the config hash, the second call would tear
+    // down the container, killing any process exec'd by the first caller
+    // with SIGKILL — exactly the bug the user reported. Verify the
+    // container's id is preserved across the two calls.
+    await removeContainer(LOOP_ID).catch(() => {})
+    await ensureContainer({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      extraEnv: { VAULT_KEY: "v" },
+    })
+    const { stdout: id1 } = await execFileP(podmanBin, ["inspect", "--format", "{{.Id}}", containerName(LOOP_ID)])
+    await ensureContainer({
+      loopId: LOOP_ID,
+      createdBy: USER,
+      extraEnv: {
+        VAULT_KEY: "v",
+        ANTHROPIC_API_KEY: "sk-test",
+        ANTHROPIC_BASE_URL: "https://example",
+        CLAUDE_CONFIG_DIR: "/loopat/loop/foo/.claude",
+      },
+    })
+    const { stdout: id2 } = await execFileP(podmanBin, ["inspect", "--format", "{{.Id}}", containerName(LOOP_ID)])
+    expect(id1.trim()).toBe(id2.trim())
+    expect(await containerRunning(LOOP_ID)).toBe(true)
+  })
+
   test("podman exec into the running container yields the right uid+host fs view", async () => {
     await ensureContainer({ loopId: LOOP_ID, createdBy: USER })
     const args = buildPodmanExecArgs({
