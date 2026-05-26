@@ -262,7 +262,7 @@ export function KanbanBoard({
           {newColOpen ? (
             <div className="w-56 bg-gray-50 rounded-lg p-3 space-y-2">
               <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)} autoFocus
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateColumn() }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleCreateColumn() }}
                 className="w-full text-[13px] border border-gray-300 rounded px-2 py-1.5 outline-none focus:border-gray-500" placeholder="Column name" />
               <div className="flex items-center gap-1.5">
                 <button onClick={handleCreateColumn} disabled={!newColName.trim()} className="px-2.5 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40">Create</button>
@@ -307,7 +307,7 @@ export function KanbanBoard({
           {newColOpen ? (
             <div className="w-56 shrink-0 bg-gray-50 rounded-lg p-3 space-y-2 h-fit">
               <input type="text" value={newColName} onChange={(e) => setNewColName(e.target.value)} autoFocus
-                onKeyDown={(e) => { if (e.key === "Enter") handleCreateColumn() }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleCreateColumn() }}
                 className="w-full text-[13px] border border-gray-300 rounded px-2 py-1.5 outline-none focus:border-gray-500" placeholder="Column name" />
               <div className="flex items-center gap-1.5">
                 <button onClick={handleCreateColumn} disabled={!newColName.trim()} className="px-2.5 h-7 rounded text-[11px] bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40">Create</button>

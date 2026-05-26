@@ -234,7 +234,7 @@ function CreateInline({ depth, type, value, onChange, onSubmit, onCancel }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onSubmit()
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) onSubmit()
           if (e.key === "Escape") onCancel()
         }}
         placeholder={type === "file" ? "filename.txt" : "folder-name"}

@@ -634,7 +634,7 @@ function ExportKeyFlow({ onDone }: { onDone: () => void }) {
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") submit()
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) submit()
         }}
         autoFocus
         autoComplete="current-password"
@@ -852,7 +852,7 @@ function DeleteVaultFlow({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") submit(false)
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) submit(false)
         }}
         placeholder="confirm password"
         autoFocus

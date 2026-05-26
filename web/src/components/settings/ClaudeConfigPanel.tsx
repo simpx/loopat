@@ -654,7 +654,7 @@ export function MarketplaceEditor({
               autoFocus
               value={newName}
               onChange={(e) => { setNewName(e.target.value); setNameTouched(true) }}
-              onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") { setAdding(false); setNewName(""); setNameTouched(false) } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) add(); if (e.key === "Escape") { setAdding(false); setNewName(""); setNameTouched(false) } }}
               placeholder="marketplace name"
               className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white"
             />
@@ -789,7 +789,7 @@ function CreateProfileButton({ onCreated }: { onCreated: (name: string) => void 
         autoFocus
         value={name}
         onChange={(e) => { setName(e.target.value); setErr(null) }}
-        onKeyDown={(e) => { if (e.key === "Enter") create(); if (e.key === "Escape") { setAdding(false); setName("") } }}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); if (e.key === "Escape") { setAdding(false); setName("") } }}
         placeholder="profile name"
         className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] outline-none focus:border-gray-900 bg-white w-full"
       />

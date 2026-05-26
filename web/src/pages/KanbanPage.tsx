@@ -101,7 +101,7 @@ export function KanbanPage() {
               value={newBoardName}
               onChange={(e) => setNewBoardName(e.target.value)}
               autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") handleCreateBoard(); if (e.key === "Escape") { setShowNewBoard(false); setNewBoardName("") } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleCreateBoard(); if (e.key === "Escape") { setShowNewBoard(false); setNewBoardName("") } }}
               onBlur={() => { if (!newBoardName.trim()) { setShowNewBoard(false); setNewBoardName("") } }}
               className="w-24 h-7 px-2 text-[12px] border border-gray-300 rounded outline-none focus:border-gray-500"
               placeholder="board name"
@@ -142,7 +142,7 @@ export function KanbanPage() {
                 value={renameValue}
                 onChange={(e) => setRenameValue(e.target.value)}
                 autoFocus
-                onKeyDown={(e) => { if (e.key === "Enter") handleRename(renamingBoard); if (e.key === "Escape") setRenamingBoard("") }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRename(renamingBoard); if (e.key === "Escape") setRenamingBoard("") }}
                 className="w-full text-[13px] border border-gray-300 rounded px-2 py-1.5 outline-none focus:border-gray-500"
               />
               <div className="flex items-center gap-2">

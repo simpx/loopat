@@ -270,7 +270,7 @@ export function McpServerEditor({
               autoFocus
               value={newRow.name}
               onChange={(e) => setNewRow((r) => ({ ...r, name: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") commitAdd(); if (e.key === "Escape") { setAdding(false); setNewRow(emptyRow()) } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) commitAdd(); if (e.key === "Escape") { setAdding(false); setNewRow(emptyRow()) } }}
               placeholder="server name"
               className="flex-1 min-w-0 border border-gray-300 rounded px-2.5 py-1.5 text-[12px] font-medium outline-none focus:border-gray-900 bg-white"
             />

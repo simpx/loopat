@@ -492,7 +492,7 @@ function AddPluginRow({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onAdd()
+          if (e.key === "Enter" && !e.nativeEvent.isComposing) onAdd()
           if (e.key === "Escape") onCancel()
         }}
         placeholder="name@marketplace"

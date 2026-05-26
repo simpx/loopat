@@ -108,7 +108,7 @@ export function KanbanColumn({
         {adding && (
           <div className="rounded-lg border border-gray-300 bg-white px-2 py-1.5">
             <input type="text" value={newText} onChange={(e) => setNewText(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAdd() }; if (e.key === "Escape") { setAdding(false); setNewText("") } }}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); handleAdd() }; if (e.key === "Escape") { setAdding(false); setNewText("") } }}
               onBlur={() => { if (!newText.trim()) { setAdding(false); setNewText("") } }}
               className="w-full text-[13px] border-0 outline-none bg-transparent text-gray-900 placeholder:text-gray-400" placeholder="Card title…" />
             <div className="flex items-center gap-1.5 mt-1.5">
@@ -139,7 +139,7 @@ export function KanbanColumn({
             <div className="px-4 py-3 space-y-3">
               <label className="flex flex-col gap-1"><span className="text-[10px] text-gray-400 uppercase tracking-wider">Title</span>
                 <input type="text" value={colTitle} onChange={(e) => setColTitle(e.target.value)} autoFocus
-                  onKeyDown={(e) => { if (e.key === "Enter") handleRename() }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) handleRename() }}
                   className="w-full text-[13px] border border-gray-300 rounded px-2 py-1.5 outline-none focus:border-gray-500" />
               </label>
               <label className="flex flex-col gap-1"><span className="text-[10px] text-gray-400 uppercase tracking-wider">Color</span>
