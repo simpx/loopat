@@ -3,6 +3,7 @@ import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, getLoopWarning } from "./podman"
+import { updateLoopStatus } from "./loop-status"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
 
@@ -65,8 +66,11 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       extraEnv: personalCfg.vaultEnvs,
+    }, {
+      onProgress: (msg) => updateLoopStatus(loopId, msg),
     })
     markActive(loopId, "pty")
+    updateLoopStatus(loopId, "Ready")
 
     const podmanArgs = buildPodmanExecArgs({
       loopId,

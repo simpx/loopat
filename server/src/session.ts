@@ -483,7 +483,10 @@ class LoopSession {
       knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       extraEnv,
+    }, {
+      onProgress: (msg) => updateLoopStatus(loopId, msg),
     })
+    updateLoopStatus(loopId, "Ready")
     // Tell the container lifecycle scheduler that this loop has an active
     // SDK source. Released in destroy() via markInactive(loopId, "sdk").
     markActive(loopId, "sdk")

@@ -158,7 +158,7 @@ function LoopsList({ currentId }: { currentId: string }) {
           // upfront so users don't think the button is broken.
           const isOwner = ws.currentUser?.id === loop.createdBy
           const entry = statusMap[loop.id]
-          const isDone = entry?.status === "Done"
+          const isDone = entry?.status === "Done" || entry?.status === "Ready"
           const isRunning = entry !== undefined && !isDone
           return (
             <div

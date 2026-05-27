@@ -396,13 +396,30 @@ function hashCreateArgs(
 
 const PODMAN_BIN = process.env.LOOPAT_PODMAN_BIN || "podman"
 
-async function runPodman(args: string[], opts: { allowFail?: boolean } = {}): Promise<{ stdout: string, stderr: string, code: number }> {
+async function runPodman(
+  args: string[],
+  opts: { allowFail?: boolean; onLine?: (line: string) => void } = {},
+): Promise<{ stdout: string, stderr: string, code: number }> {
   return new Promise((resolve, reject) => {
     const child = spawn(PODMAN_BIN, args, { stdio: ["ignore", "pipe", "pipe"] })
     let stdout = ""
     let stderr = ""
-    child.stdout.on("data", (b) => stdout += b.toString())
-    child.stderr.on("data", (b) => stderr += b.toString())
+    const emit = (s: string) => {
+      const trimmed = s.trim()
+      if (trimmed) opts.onLine?.(trimmed)
+    }
+    child.stdout.on("data", (b: Buffer) => {
+      const s = b.toString()
+      stdout += s
+      const lines = s.split("\n")
+      for (const line of lines.slice(0, -1)) emit(line)
+    })
+    child.stderr.on("data", (b: Buffer) => {
+      const s = b.toString()
+      stderr += s
+      const lines = s.split("\n")
+      for (const line of lines.slice(0, -1)) emit(line)
+    })
     child.on("error", (e: any) => {
       if (e?.code === "ENOENT") {
         reject(new Error(`podman binary not found (looked for "${PODMAN_BIN}"); install with: sudo apt install podman uidmap fuse-overlayfs`))
@@ -456,22 +473,45 @@ export async function probePodman(): Promise<PodmanProbeResult> {
  * calls don't fire two builds.
  */
 let _imageBuildInFlight: Promise<void> | null = null
-export async function ensureSandboxImage(): Promise<void> {
+export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => void }): Promise<void> {
   if (_imageBuildInFlight) return _imageBuildInFlight
   _imageBuildInFlight = (async () => {
-    const present = await runPodman(["image", "exists", SANDBOX_IMAGE], { allowFail: true })
-    if (present.code === 0) return
     const containerfile = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox", "Containerfile")
     if (!existsSync(containerfile)) {
       throw new Error(`Cannot build sandbox image: Containerfile not found at ${containerfile}`)
     }
-    console.log(`[podman] building sandbox image ${SANDBOX_IMAGE} (first run; may take ~30s)`)
-    const r = await runPodman([
-      "build",
-      "-t", SANDBOX_IMAGE,
-      "-f", containerfile,
-      join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox"),
-    ])
+
+    // Hash the Containerfile so the base image auto-rebuilds when it changes.
+    const content = await readFile(containerfile, "utf8")
+    const hash = createHash("sha256").update(content).digest("hex").slice(0, 16)
+    const hashTag = `loopat-sandbox-${hash}:latest`
+
+    const present = await runPodman(["image", "exists", hashTag], { allowFail: true })
+    if (present.code === 0) {
+      // Re-tag so the unversioned SANDBOX_IMAGE name always points at the
+      // latest built version.
+      await runPodman(["tag", hashTag, SANDBOX_IMAGE], { allowFail: true })
+      return
+    }
+
+    console.log(`[podman] building sandbox image ${SANDBOX_IMAGE} (Containerfile changed or first run; may take ~30s)`)
+    opts?.onProgress?.("Building sandbox environment…")
+
+    // Stream build output, parsing STEP lines into progress messages.
+    const buildDir = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox")
+    let lastStep = ""
+    const r = await runPodman(
+      ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "-f", containerfile, buildDir],
+      {
+        onLine: (line) => {
+          const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
+          if (m) {
+            lastStep = descStep(m[3])
+            opts?.onProgress?.(`Building sandbox: ${lastStep} (step ${m[1]}/${m[2]})`)
+          }
+        },
+      },
+    )
     if (r.code !== 0) {
       throw new Error(`sandbox image build failed: ${r.stderr || r.stdout}`)
     }
@@ -482,6 +522,22 @@ export async function ensureSandboxImage(): Promise<void> {
   } finally {
     _imageBuildInFlight = null
   }
+}
+
+/** Translate a podman build STEP instruction into a short human label. */
+function descStep(instruction: string): string {
+  const lower = instruction.toLowerCase()
+  if (lower.startsWith("from ")) return "base image"
+  if (lower.includes("apt-get")) return "system packages"
+  if (lower.includes("userdel") || lower.includes("useradd") || lower.includes("groupadd")) return "user setup"
+  if (lower.includes("curl") && lower.includes("mise")) return "mise tool manager"
+  if (lower.includes("mkdir") && lower.includes("loopat-mise")) return "mise directories"
+  if (lower.startsWith("env ")) return "environment"
+  if (lower.startsWith("user ")) return "user"
+  if (lower.startsWith("copy ")) return "copying config"
+  if (lower.startsWith("run ")) return "running setup"
+  if (lower.startsWith("cmd ")) return "entrypoint"
+  return "building"
 }
 
 /**
@@ -512,8 +568,8 @@ export function getLoopWarning(loopId: string): string | undefined {
  * same tag are coalesced via _loopImageInFlight.
  */
 const _loopImageInFlight = new Map<string, Promise<string>>()
-export async function ensureLoopImage(loopId: string): Promise<string> {
-  await ensureSandboxImage()
+export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg: string) => void }): Promise<string> {
+  await ensureSandboxImage(opts)
 
   const miseTomlPath = join(loopClaudeDir(loopId), "mise.toml")
   if (!existsSync(miseTomlPath)) {
@@ -540,6 +596,7 @@ export async function ensureLoopImage(loopId: string): Promise<string> {
     }
 
     console.log(`[podman] building loop image ${tag} for loop ${loopId.slice(0, 8)}`)
+    opts?.onProgress?.("Installing tools from mise.toml…")
     const buildDir = await mkdtemp(join(tmpdir(), "loopat-img-"))
     try {
       await copyFile(miseTomlPath, join(buildDir, "mise.toml"))
@@ -557,12 +614,18 @@ export async function ensureLoopImage(loopId: string): Promise<string> {
       ].join("\n") + "\n"
       await writeFile(join(buildDir, "Containerfile"), childContainerfile)
 
-      const r = await runPodman([
-        "build",
-        "-t", tag,
-        "-f", join(buildDir, "Containerfile"),
-        buildDir,
-      ], { allowFail: true })
+      const r = await runPodman(
+        ["build", "-t", tag, "-f", join(buildDir, "Containerfile"), buildDir],
+        {
+          allowFail: true,
+          onLine: (line) => {
+            const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
+            if (m) {
+              opts?.onProgress?.(`Installing tools: ${descStep(m[3])} (step ${m[1]}/${m[2]})`)
+            }
+          },
+        },
+      )
       if (r.code !== 0) {
         // Don't throw — fall back to base so the loop still starts. The
         // user can inspect via terminal, fix mise.toml, and restart.
@@ -626,11 +689,11 @@ export async function containerRunning(loopId: string): Promise<boolean> {
  *   - running, hash matches → no-op
  *   - running, hash drift   → stop + rm + create + start
  */
-export async function ensureContainer(opts: ContainerOptions): Promise<void> {
+export async function ensureContainer(opts: ContainerOptions, progress?: { onProgress?: (msg: string) => void }): Promise<void> {
   // Resolve the image first — for loops with a composed mise.toml this
   // builds (or reuses) a per-loop child image with toolchains baked in.
   // For loops without mise.toml, this returns the base SANDBOX_IMAGE.
-  const image = opts.image ?? (await ensureLoopImage(opts.loopId))
+  const image = opts.image ?? (await ensureLoopImage(opts.loopId, progress))
   const resolvedOpts: ContainerOptions = { ...opts, image }
 
   // Pre-create every bind-destination's parent dir on the host. Otherwise
@@ -676,7 +739,9 @@ export async function ensureContainer(opts: ContainerOptions): Promise<void> {
     }
   }
   console.log(`[podman:${tag}] creating + starting container (hash=${desiredHash})`)
+  progress?.onProgress?.("Creating sandbox container…")
   await runPodman(["create", ...createArgs])
+  progress?.onProgress?.("Starting sandbox container…")
   await runPodman(["start", containerName(opts.loopId)])
 }
 
