@@ -1,0 +1,15 @@
+[package]
+name = "loopat-serve"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tiny_http = "0.12"
+ureq = { version = "3", default-features = false, features = ["gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

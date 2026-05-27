@@ -15,6 +15,13 @@ e2e/.test-meta.json
 server/src/*.js
 server/src/*.js.map
 
+# Rust
+server/src/serve-rs/target/
+
+# Python
+__pycache__/
+*.pyc
+
 # Editor swap / temp files
 .*.swp
 .*.swo

@@ -13,7 +13,7 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
   const [enabled, setEnabled] = useState(loop.shareEnabled ?? false)
   const [mode, setMode] = useState<"static" | "port">(loop.shareMode ?? "static")
   const [alias, setAlias] = useState(loop.shareAlias ?? "")
-  const [port, setPort] = useState(loop.sharePort ?? 10000)
+  const [port, setPort] = useState(loop.sharePort ?? 3000)
   const [aliasAvailable, setAliasAvailable] = useState<boolean | null>(null)
   const [aliasMsg, setAliasMsg] = useState("")
   const [copied, setCopied] = useState(false)
@@ -35,7 +35,7 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
       setEnabled(loop.shareEnabled ?? false)
       setMode(loop.shareMode ?? "static")
       setAlias(loop.shareAlias ?? "")
-      setPort(loop.sharePort ?? 10000)
+      setPort(loop.sharePort ?? 3000)
       setAliasAvailable(null)
       setAliasMsg("")
     }
@@ -100,7 +100,7 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
     }
   }
 
-  const canSave = !saving && (!idConflict || alias.trim().length > 0) && (mode !== "port" || (port >= 10000 && port <= 20000))
+  const canSave = !saving && (!idConflict || alias.trim().length > 0) && (mode !== "port" || (port >= 1024 && port <= 65535))
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -175,13 +175,13 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
               {/* Port (when mode is port) */}
               {mode === "port" && (
                 <div>
-                  <label className="text-[11px] text-gray-500 uppercase tracking-wider">Port (10000-20000)</label>
+                  <label className="text-[11px] text-gray-500 uppercase tracking-wider">Port (1024-65535)</label>
                   <input
                     type="number"
-                    min={10000}
-                    max={20000}
+                    min={1024}
+                    max={65535}
                     value={port}
-                    onChange={(e) => setPort(parseInt(e.target.value, 10) || 10000)}
+                    onChange={(e) => setPort(parseInt(e.target.value, 10) || 1024)}
                     className="w-full mt-1 px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:border-gray-300"
                   />
                 </div>

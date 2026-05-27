@@ -2941,18 +2941,16 @@ initChat(chatSeed)
 await printBootstrapBanner(cfg)
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
 
-// Start workspace serve service (separate port)
-import "./serve"
-
-const serveHost = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
-const servePort = process.env.LOOPAT_SERVE_PORT ?? "7788"
-
 // Probe podman availability up front so misconfigured hosts fail loudly on
 // boot rather than mid-session.
-import { probePodman, stopAllWorkspaceContainers } from "./podman"
+import { probePodman, stopAllWorkspaceContainers, ensureServeContainer } from "./podman"
 const podmanProbe = await probePodman()
 if (podmanProbe.ok) {
   console.log(`[loopat] sandbox runtime: ${podmanProbe.version}`)
+  // Start workspace serve in a container on the shared bridge network.
+  ensureServeContainer().catch((e) => {
+    console.warn(`[loopat] serve container failed: ${e?.message ?? e}`)
+  })
 } else {
   console.warn(`[loopat] sandbox runtime: NOT AVAILABLE — ${podmanProbe.hint}`)
   console.warn(`[loopat] chat / terminal will fail until podman is installed.`)
@@ -2974,7 +2972,7 @@ process.on("SIGTERM", () => { void stopAllOnExit().finally(() => process.exit(0)
 // install` inside each sandbox's .claude/ dir. No loopat-side prewarm.
 
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
-console.log(`[loopat] workspace serve listening on http://${serveHost}:${servePort}`)
+console.log(`[loopat] workspace serve starting via podman container (port ${process.env.LOOPAT_SERVE_PORT ?? "7788"})`)
 
 const server = Bun.serve({
   port,

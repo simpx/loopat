@@ -232,7 +232,7 @@ const server = createServer((req, res) => {
     return
   }
 
-  const { meta } = resolved
+  const { meta, loopId } = resolved
 
   if (!meta.shareEnabled) {
     res.writeHead(403)
@@ -240,7 +240,7 @@ const server = createServer((req, res) => {
     return
   }
 
-  const workdir = loopWorkdir(resolved.loopId)
+  const workdir = loopWorkdir(loopId)
   if (!existsSync(workdir)) {
     res.writeHead(404)
     res.end("Workdir not found")
@@ -248,9 +248,9 @@ const server = createServer((req, res) => {
   }
 
   if (meta.shareMode === "port" && meta.sharePort) {
-    if (meta.sharePort < 10000 || meta.sharePort > 20000) {
+    if (meta.sharePort < 1024 || meta.sharePort > 65535) {
       res.writeHead(400)
-      res.end("Invalid port — must be 10000-20000")
+      res.end("Invalid port — must be 1024-65535")
       return
     }
     proxyToPort(meta.sharePort, req, res)

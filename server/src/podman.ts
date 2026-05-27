@@ -16,9 +16,8 @@
  *     in from the host at container-create time via --volume. Glibc inside
  *     the image matches the host (both Ubuntu 24.04 lineage), so host-built
  *     binaries Just Work.
- *   - --network host (v1): API calls work zero-config; port collisions across
- *     loops are not yet isolated. Future: --network slirp4netns + per-loop
- *     netns.
+ *   - slirp4netns (default rootless): each container gets a private IP
+ *     (10.0.2.x); outbound API calls via NAT, inbound via container IP.
  *   - --userns=keep-id: host uid is mapped to the same uid inside, so files
  *     created by the AI are owned by the user on the host too. Rootless
  *     subuid/subgid mappings (see /etc/subuid) make this work.
@@ -330,9 +329,9 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     "--userns", "keep-id:uid=2000,gid=2000",
     // Init reaps zombies from orphaned bg processes.
     "--init",
-    // v1: share host network. Future per-loop netns: drop this and add
-    // slirp4netns.
-    "--network", "host",
+    // Shared bridge network so the serve container can reach loop
+    // containers by name (aardvark-dns). Outbound API calls via NAT.
+    "--network", "loopat",
     "--hostname", `loop-${opts.loopId.slice(0, 8)}`,
     // Container cwd at creation; per-exec we override with -w.
     "--workdir", V_LOOP_WORKDIR(opts.loopId),
@@ -681,6 +680,102 @@ export async function containerRunning(loopId: string): Promise<boolean> {
   return (await inspectContainer(loopId)).running
 }
 
+/** Return the container's bridge network IP, or null if not running. */
+export async function getContainerIP(loopId: string): Promise<string | null> {
+  const name = containerName(loopId)
+  const r = await runPodman(
+    ["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name],
+    { allowFail: true },
+  )
+  if (r.code !== 0) return null
+  const ip = r.stdout.trim()
+  if (!ip || ip === "<no value>") return null
+  return ip
+}
+
+const LOOPAT_NETWORK = "loopat"
+const SERVE_CONTAINER = `loopat-${WORKSPACE}-serve`
+
+let _networkReady = false
+let _serveReady: Promise<void> | null = null
+
+/** Ensure the shared bridge network exists so containers can reach each other. */
+export async function ensureLoopatNetwork(): Promise<void> {
+  if (_networkReady) return
+  const r = await runPodman(["network", "exists", LOOPAT_NETWORK], { allowFail: true })
+  if (r.code !== 0) {
+    console.log(`[podman] creating network ${LOOPAT_NETWORK}`)
+    const create = await runPodman(["network", "create", LOOPAT_NETWORK])
+    if (create.code !== 0) {
+      throw new Error(`Failed to create podman network ${LOOPAT_NETWORK}: ${create.stderr}`)
+    }
+  }
+  _networkReady = true
+}
+
+/** Ensure the workspace serve container is running on the shared network. */
+export async function ensureServeContainer(): Promise<void> {
+  if (_serveReady) return _serveReady
+  _serveReady = (async () => {
+    await ensureLoopatNetwork()
+    await ensureSandboxImage()
+
+    const cur = await runPodman(
+      ["inspect", "--format", "{{.State.Running}}", SERVE_CONTAINER],
+      { allowFail: true },
+    )
+    if (cur.code === 0 && cur.stdout.trim() === "true") {
+      _serveReady = null
+      return
+    }
+
+    if (cur.code === 0) {
+      // Exists but not running — start it
+      console.log(`[podman] starting serve container`)
+      await runPodman(["start", SERVE_CONTAINER])
+      _serveReady = null
+      return
+    }
+
+    // Create the serve container
+    console.log(`[podman] creating serve container on network ${LOOPAT_NETWORK}`)
+    const serveBinary = join(LOOPAT_INSTALL_DIR, "server", "src", "serve-rs", "target", "release", "loopat-serve")
+    if (!existsSync(serveBinary)) {
+      _serveReady = null
+      throw new Error(`serve binary not found at ${serveBinary}. Run: cd server/src/serve-rs && cargo build --release`)
+    }
+
+    const createArgs = [
+      "--name", SERVE_CONTAINER,
+      "--network", LOOPAT_NETWORK,
+      "--hostname", "loopat-serve",
+      "--volume", `${loopsDir()}:/loopat/loops:ro`,
+      "--volume", `${serveBinary}:/usr/local/bin/loopat-serve:ro`,
+      "-p", `${SERVE_HOST}:${SERVE_PORT}:7788`,
+      "-e", `LOOPAT_WORKSPACE=${WORKSPACE}`,
+      "-e", `LOOPAT_LOOPS_DIR=/loopat/loops`,
+      "--init",
+      SANDBOX_IMAGE,
+      "/usr/local/bin/loopat-serve",
+    ]
+    const r = await runPodman(["create", ...createArgs])
+    if (r.code !== 0) {
+      _serveReady = null
+      throw new Error(`serve container create failed: ${r.stderr}`)
+    }
+    await runPodman(["start", SERVE_CONTAINER])
+    console.log(`[podman] serve container ready on port ${SERVE_PORT}`)
+  })()
+  try {
+    await _serveReady
+  } finally {
+    _serveReady = null
+  }
+}
+
+const SERVE_HOST = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
+const SERVE_PORT = Number(process.env.LOOPAT_SERVE_PORT ?? 7788)
+
 /**
  * Idempotent: bring the container to "running with current config".
  *   - missing       → podman create + start
@@ -690,6 +785,7 @@ export async function containerRunning(loopId: string): Promise<boolean> {
  *   - running, hash drift   → stop + rm + create + start
  */
 export async function ensureContainer(opts: ContainerOptions, progress?: { onProgress?: (msg: string) => void }): Promise<void> {
+  await ensureLoopatNetwork()
   // Resolve the image first — for loops with a composed mise.toml this
   // builds (or reuses) a per-loop child image with toolchains baked in.
   // For loops without mise.toml, this returns the base SANDBOX_IMAGE.
