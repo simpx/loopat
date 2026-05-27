@@ -98,6 +98,10 @@ export function Terminal({
     try { term.loadAddon(new LigaturesAddon()) } catch {}
 
     term.open(containerRef.current)
+    // xterm.js creates an internal textarea for accessibility; give it a name
+    // for the browser's autofill/lighthouse audit.
+    const helper = containerRef.current.querySelector(".xterm-helper-textarea") as HTMLTextAreaElement | null
+    if (helper) helper.setAttribute("name", "terminal-input")
     fit.fit()
     term.focus()
 

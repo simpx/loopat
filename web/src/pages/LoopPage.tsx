@@ -143,6 +143,7 @@ function LoopsList({ currentId }: { currentId: string }) {
         </div>
         <input
           type="text"
+          name="loop-search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="search loops…"
