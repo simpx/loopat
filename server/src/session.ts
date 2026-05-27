@@ -12,7 +12,7 @@ import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
 import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE, activateMiseSandbox } from "./podman"
+import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus } from "./loop-status"
 
 // Tests override LOOPAT_CLAUDE_BIN to point at a mock binary (a script that
@@ -466,10 +466,11 @@ class LoopSession {
       extraEnv.DISABLE_COMPACT = "1"
       extraEnv.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(contextTokenOverride)
     }
-    // Mise toolchain: compose (above) created mise.toml; resolve env here so
-    // the SDK process inside the container sees the correct PATH.
-    const miseEnv = await activateMiseSandbox(loopClaudeDir(loopId))
-    if (miseEnv) Object.assign(extraEnv, miseEnv)
+    // Mise toolchain: baked into the per-loop image at ensureLoopImage
+    // build time. The image's ENV puts /opt/loopat-mise/shims on PATH, so
+    // every process inside the container (SDK + PTY) finds the right
+    // toolchain — no host-side activation needed here.
+    //
     // Ensure the per-loop podman container exists and is running. Idempotent:
     // if the container is already up with the same config-hash, no-op. Both
     // this SDK driver AND the PTY (term.ts) call ensureContainer with the

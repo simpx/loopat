@@ -37,8 +37,8 @@
 import { execFile, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
-import { mkdir, readFile } from "node:fs/promises"
-import { homedir } from "node:os"
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import {
@@ -109,6 +109,10 @@ export type ContainerOptions = {
   mountAllLoops?: boolean
   /** Extra env vars to pre-bake into the container at create time. */
   extraEnv?: Record<string, string>
+  /** Image to create the container from. Defaults to SANDBOX_IMAGE.
+   *  Production callers resolve a per-loop child via ensureLoopImage; tests
+   *  may omit this and get the base. */
+  image?: string
 }
 
 /**
@@ -142,40 +146,6 @@ function isValidOperatorMountSrc(s: unknown): s is string {
 function isValidMountDst(s: unknown): s is string {
   if (typeof s !== "string" || !s) return false
   return s === "~" || s === "$HOME" || s.startsWith("~/") || s.startsWith("$HOME/") || s.startsWith("/")
-}
-
-/**
- * mise toolchain integration: same logic as bwrap era — run `mise install`
- * + `mise env --json` on the HOST (mise is on host), inject the resolved env
- * into the container at create time via --env.
- *
- * Returns the env map mise would activate, or null if no mise.toml present /
- * mise activation failed (warning logged; not fatal).
- */
-export async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<string, string> | null> {
-  if (!existsSync(join(sandboxDirPath, "mise.toml"))) return null
-  const env = {
-    ...process.env,
-    MISE_TRUSTED_CONFIG_PATHS: sandboxDirPath,
-    MISE_LOCKFILE: "true",
-  }
-  try {
-    await execFileP("mise", ["install"], { env, cwd: sandboxDirPath })
-  } catch (e: any) {
-    if (e?.code === "ENOENT") {
-      console.warn(`[podman] mise binary not found on host; skipping toolchain activation`)
-      return null
-    }
-    console.warn(`[podman] mise install failed for ${sandboxDirPath}: ${e?.stderr ?? e?.message ?? e}`)
-    return null
-  }
-  try {
-    const { stdout } = await execFileP("mise", ["env", "--json"], { env, cwd: sandboxDirPath })
-    return JSON.parse(stdout)
-  } catch (e: any) {
-    console.warn(`[podman] mise env failed for ${sandboxDirPath}: ${e?.stderr ?? e?.message ?? e}`)
-    return null
-  }
 }
 
 export type VolumeMount = {
@@ -300,39 +270,24 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
     mounts.push({ src: m.src, dst: join(virtualHome, m.rel) })
   }
 
-  // mise data dir: tools mise installs live under $HOME/.local/share/mise on
-  // the host. Bind at the SAME path inside the sandbox $HOME so the
-  // host-resolved PATH (which references absolute paths) Just Works.
-  const hostMiseData = join(hostHome, ".local", "share", "mise")
-  if (existsSync(hostMiseData)) {
-    mounts.push({
-      src: hostMiseData,
-      dst: join(virtualHome, ".local", "share", "mise"),
-      ro: true,
-    })
-  }
+  // No mise bind — toolchains are baked into the per-loop image instead
+  // (see ensureLoopImage). The image's MISE_DATA_DIR=/opt/loopat-mise lives
+  // outside $HOME so the home-upper overlay can't shadow installed tools.
 
   return mounts
 }
 
 /**
- * Build env-var map to bake into the container at create time. Result:
- *   - mise-resolved env (if mise.toml present in loop's .claude/)
- *   - caller-supplied extraEnv (vault envs, ANTHROPIC_*, etc.)
+ * Build env-var map to bake into the container at create time.
  *
- * Caller-supplied wins on collision (vault envs go first by convention,
- * platform overrides come second in callers — we keep the same order here).
+ * mise PATH is set by the IMAGE (ENV directives in base + per-loop child),
+ * not here — so the toolchain works for any process inside the container
+ * without needing host-side env extraction.
  */
 export async function buildContainerEnv(opts: ContainerOptions): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
-  // Sandbox $HOME is /loopat/home/<user> (see V_HOME comment). Set it
-  // first so callers / mise / extraEnv get a shot at overriding if they
-  // really want, though no caller should.
+  // Sandbox $HOME is /loopat/home/<user> (see V_HOME comment).
   out.HOME = V_HOME(opts.createdBy)
-  const miseEnv = await activateMiseSandbox(loopClaudeDir(opts.loopId))
-  if (miseEnv) {
-    for (const [k, v] of Object.entries(miseEnv)) out[k] = v
-  }
   for (const [k, v] of Object.entries(opts.extraEnv ?? {})) {
     out[k] = v
   }
@@ -343,6 +298,12 @@ export async function buildContainerEnv(opts: ContainerOptions): Promise<Record<
  * Build the `podman create` argv (after "podman create"). The container is
  * named, labeled with the loop id + a config-hash so we can detect spec
  * drift and recreate when needed.
+ *
+ * The image name comes from `opts.image` when provided (typically the
+ * per-loop child image from ensureLoopImage); otherwise it defaults to
+ * the base SANDBOX_IMAGE. Callers in the production path (ensureContainer)
+ * always resolve via ensureLoopImage; tests that construct opts directly
+ * get the base image without a build step.
  */
 export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<string[]> {
   const mounts = await buildVolumeMounts(opts)
@@ -353,7 +314,16 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     "--name", containerName(opts.loopId),
     "--label", `${LABEL_LOOP}=${opts.loopId}`,
     "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`,
-    // Map current uid into the container as the same uid (rootless trick).
+    // --userns=keep-id maps host uid → same uid in container. Combined with
+    // the image's USER ubuntu (uid 1000), this makes "container ubuntu" ===
+    // host calling user, so files written through bind mounts are owned by
+    // the host user (manageable from outside the container). The user gets
+    // a full-stack workbench via passwordless sudo (see Containerfile).
+    //
+    // Why not "USER root" instead: claude CLI refuses to run with
+    // --dangerously-skip-permissions when uid == 0. loopat sandboxes use
+    // bypassPermissions by default, so container-root is untenable for the
+    // SDK driver.
     "--userns", "keep-id",
     // Init reaps zombies from orphaned bg processes.
     "--init",
@@ -384,7 +354,8 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
   // Image + command tail. The image's CMD already runs `sleep infinity`, but
   // we pass it explicitly so a future image-CMD change can't accidentally
   // break the long-lived semantic.
-  args.push(SANDBOX_IMAGE, "/bin/sleep", "infinity")
+  const image = opts.image ?? SANDBOX_IMAGE
+  args.push(image, "/bin/sleep", "infinity")
   return args
 }
 
@@ -510,6 +481,76 @@ export async function ensureSandboxImage(): Promise<void> {
   }
 }
 
+/**
+ * Ensure a per-loop image exists for this loop's composed mise.toml,
+ * returning its tag. If the loop has no mise.toml (or it's empty), returns
+ * the base SANDBOX_IMAGE — no child image needed.
+ *
+ * The tag is `loopat-sandbox-<sha256-of-mise.toml-content>:latest`, so two
+ * loops with the same toolchain spec share an image (and the build's mise
+ * install layer caches via podman layer cache). Concurrent builds of the
+ * same tag are coalesced via _loopImageInFlight.
+ */
+const _loopImageInFlight = new Map<string, Promise<string>>()
+export async function ensureLoopImage(loopId: string): Promise<string> {
+  await ensureSandboxImage()
+
+  const miseTomlPath = join(loopClaudeDir(loopId), "mise.toml")
+  if (!existsSync(miseTomlPath)) return SANDBOX_IMAGE
+  const content = await readFile(miseTomlPath, "utf8")
+  if (!content.trim()) return SANDBOX_IMAGE
+
+  const hash = createHash("sha256").update(content).digest("hex").slice(0, 16)
+  const tag = `loopat-sandbox-${hash}:latest`
+
+  const existing = _loopImageInFlight.get(tag)
+  if (existing) return existing
+
+  const built = (async () => {
+    const present = await runPodman(["image", "exists", tag], { allowFail: true })
+    if (present.code === 0) return tag
+
+    console.log(`[podman] building loop image ${tag} for loop ${loopId.slice(0, 8)}`)
+    const buildDir = await mkdtemp(join(tmpdir(), "loopat-img-"))
+    try {
+      await copyFile(miseTomlPath, join(buildDir, "mise.toml"))
+      // Override `mise trust` interactively by marking the config path
+      // trusted via env. `mise install -y` installs everything in
+      // mise.toml; `mise reshim` ensures /opt/loopat-mise/shims/ has a
+      // shim for every tool.
+      const childContainerfile = [
+        `FROM ${SANDBOX_IMAGE}`,
+        `COPY mise.toml /opt/loopat-mise/config/config.toml`,
+        `RUN MISE_TRUSTED_CONFIG_PATHS=/opt/loopat-mise/config/config.toml \\`,
+        `    mise install -y \\`,
+        ` && MISE_TRUSTED_CONFIG_PATHS=/opt/loopat-mise/config/config.toml \\`,
+        `    mise reshim`,
+      ].join("\n") + "\n"
+      await writeFile(join(buildDir, "Containerfile"), childContainerfile)
+
+      const r = await runPodman([
+        "build",
+        "-t", tag,
+        "-f", join(buildDir, "Containerfile"),
+        buildDir,
+      ])
+      if (r.code !== 0) {
+        throw new Error(`loop image build failed (${tag}): ${r.stderr || r.stdout}`)
+      }
+      console.log(`[podman] loop image ${tag} ready`)
+    } finally {
+      await rm(buildDir, { recursive: true, force: true }).catch(() => {})
+    }
+    return tag
+  })()
+  _loopImageInFlight.set(tag, built)
+  try {
+    return await built
+  } finally {
+    _loopImageInFlight.delete(tag)
+  }
+}
+
 type ContainerInspectRow = {
   exists: boolean
   running: boolean
@@ -550,8 +591,12 @@ export async function containerRunning(loopId: string): Promise<boolean> {
  *   - running, hash drift   → stop + rm + create + start
  */
 export async function ensureContainer(opts: ContainerOptions): Promise<void> {
-  // Make sure the base image exists. Cheap if cached; ~30s build on first run.
-  await ensureSandboxImage()
+  // Resolve the image first — for loops with a composed mise.toml this
+  // builds (or reuses) a per-loop child image with toolchains baked in.
+  // For loops without mise.toml, this returns the base SANDBOX_IMAGE.
+  const image = opts.image ?? (await ensureLoopImage(opts.loopId))
+  const resolvedOpts: ContainerOptions = { ...opts, image }
+
   // Pre-create every bind-destination's parent dir on the host. Otherwise
   // podman auto-creates them at container start as root-in-userns, which
   // maps to subuid 100000 outside — and then the host user can't delete
@@ -562,17 +607,17 @@ export async function ensureContainer(opts: ContainerOptions): Promise<void> {
   await mkdir(join(loopHomeUpper(opts.loopId), ".local", "share"), { recursive: true })
   await mkdir(loopDir(opts.loopId), { recursive: true })
 
-  const createArgs = await buildPodmanCreateArgs(opts)
+  const createArgs = await buildPodmanCreateArgs(resolvedOpts)
   // Extract hash from the args we just built.
   const hashIdx = createArgs.findIndex((a, i) =>
     createArgs[i - 1] === "--label" && a.startsWith(`${LABEL_CONFIG_HASH}=`),
   )
   const desiredHash = hashIdx >= 0 ? createArgs[hashIdx].split("=")[1] : ""
 
-  // Include image ID in the drift check so a rebuilt image (e.g. tmux added
-  // to Containerfile) triggers container recreation even when the config hash
-  // hasn't changed.
-  const curImageId = (await runPodman(["image", "inspect", "--format", "{{.Id}}", SANDBOX_IMAGE])).stdout.trim()
+  // Include image ID in the drift check so a rebuilt image (mise tools
+  // added, base layer changed, etc.) triggers container recreation even
+  // when the config hash hasn't changed.
+  const curImageId = (await runPodman(["image", "inspect", "--format", "{{.Id}}", image])).stdout.trim()
 
   const cur = await inspectContainer(opts.loopId)
   if (cur.running && cur.configHash === desiredHash && cur.imageId === curImageId) return

@@ -2,11 +2,9 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { homedir } from "node:os"
-import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_HOME, activateMiseSandbox } from "./podman"
+import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR } from "./podman"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
-import { loopClaudeDir, personalClaudeDir } from "./paths"
 
 type Term = {
   proc: IPty
@@ -18,8 +16,6 @@ type Term = {
    */
   scrollback: string[]
   scrollbackBytes: number
-  /** Warning to surface to the user on attach (e.g. mise activation failure). */
-  miseWarning?: string
 }
 
 const SCROLLBACK_MAX_BYTES = 64 * 1024
@@ -46,10 +42,10 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     let innerShell = personalCfg.shell
     if (!innerShell) innerShell = "/bin/bash"
     // `script -qfc "<shell> -i" /dev/null` gives the inner shell a fresh
-    // controlling tty so prompt + job control work cleanly.
-    // Prepend mise PATH explicitly — podman exec --env should carry it, but
-    // script(1) may not forward all env vars to the inner PTY on every system.
-    let innerCmd = `script -qfc "${innerShell} -i" /dev/null`
+    // controlling tty so prompt + job control work cleanly. PATH (incl.
+    // the mise shims dir) is baked into the per-loop image's ENV, so the
+    // toolchain works in here without host-side activation.
+    const innerCmd = `script -qfc "${innerShell} -i" /dev/null`
 
     // Fish (and other interactive shells) want XDG_DATA_HOME / XDG_RUNTIME_DIR
     // to be writable. /tmp is bound shared with host inside the container at
@@ -72,35 +68,12 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     })
     markActive(loopId, "pty")
 
-    // Mise toolchain activation — runs on the host, env vars injected into
-    // the exec session. Try the loop's composed mise.toml first, then fall
-    // back to the user's personal one (compose may not have run yet).
-    const miseEnv = await activateMiseSandbox(loopClaudeDir(loopId))
-      ?? await activateMiseSandbox(personalClaudeDir(driver))
-
-    let miseWarning: string | undefined
-    if (!miseEnv) {
-      miseWarning = "\r\n\x1b[33m⚠ mise toolchain activation failed — check mise.toml configuration\x1b[0m\r\n"
-    }
-
-    // Prepend mise PATH into the shell command so it survives script(1)'s
-    // PTY handoff. Translate host home paths to container virtual home.
-    if (miseEnv) {
-      const hostHome = homedir()
-      const containerHome = V_HOME(driver)
-      const miseExports = Object.entries(miseEnv)
-        .map(([k, v]) => `export ${k}="${v.replaceAll(hostHome, containerHome).replace(/"/g, '\\"')}"`)
-        .join("; ")
-      innerCmd = `script -qfc "${miseExports}; ${innerShell} -i" /dev/null`
-    }
-
     const podmanArgs = buildPodmanExecArgs({
       loopId,
       command: "/bin/bash",
       args: ["-c", innerCmd],
       env: {
         ...personalCfg.vaultEnvs,
-        ...miseEnv,
         TERM: "xterm-256color",
         XDG_DATA_HOME: fishData,
         XDG_RUNTIME_DIR: fishRuntime,
@@ -118,7 +91,7 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       rows: initRows,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     })
-    const t: Term = { proc, subscribers: new Set(), scrollback: [], scrollbackBytes: 0, miseWarning }
+    const t: Term = { proc, subscribers: new Set(), scrollback: [], scrollbackBytes: 0 }
     terms.set(loopId, t)
 
     proc.onData((chunk) => {
@@ -163,13 +136,8 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
 export async function attachTerm(loopId: string, ws: WSContext, initCols = 80, initRows = 24) {
   const t = await getOrSpawn(loopId, initCols, initRows)
   t.subscribers.add(ws)
-  if (t.miseWarning) {
-    // Surface mise warning in-band so the user sees it. Skip ^L to avoid
-    // clearing the warning; the client's onopen resize will trigger redraw.
-    try { ws.send(JSON.stringify({ type: "data", data: t.miseWarning })) } catch {}
-  } else {
-    t.proc.write("\x0c")
-  }
+  // Send ^L so the inner shell redraws once the new viewer is attached.
+  t.proc.write("\x0c")
 }
 
 export function detachTerm(loopId: string, ws: WSContext) {
