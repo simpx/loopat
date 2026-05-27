@@ -1,38 +1,73 @@
 # loopat sandbox base image.
 #
-# Built once at first launch (or manually via scripts/build-sandbox-image.sh)
-# and tagged `loopat-sandbox:latest` in podman's local store. Every loop's
-# container is `podman create`'d from this image.
+# The base is a "full-stack" interactive workbench: the user can apt
+# install, git, make, curl, etc. inside the loop without leaving. Per-loop
+# child images bake mise-managed toolchains on top of this base (see
+# `ensureLoopImage` in server/src/podman.ts).
 #
-# Philosophy: keep the image small + boring. The image provides the bare
-# shell + system utilities needed for an interactive session to function:
-# bash, coreutils, util-linux, procps. EVERYTHING ELSE — claude binary,
-# node, mise, host caches — is bound in from the host at container create
-# time via --volume.
+# Built once at first launch (or via scripts/build-sandbox-image.sh) and
+# tagged `loopat-sandbox:latest`. Each loop's container is `podman
+# create`'d from this image — or, when the loop has a composed mise.toml,
+# from a per-loop child `loopat-sandbox-<hash>:latest`.
 #
-# Base: ubuntu:24.04 so glibc matches the host (we use Ubuntu 24.04 dev
-# machines; binding host's claude binary into the container Just Works).
+# Base: ubuntu:24.04 so glibc matches the dev hosts (we use Ubuntu 24.04).
+# The host's claude binary binds in via --volume and runs against this glibc.
 FROM ubuntu:24.04
 
-# Avoid debconf prompts during install.
 ARG DEBIAN_FRONTEND=noninteractive
 
+# ubuntu:24.04's default `ubuntu` user (uid 1000) is the one we run as
+# inside the container. Why not root: the claude binary refuses to run
+# with `--dangerously-skip-permissions` when uid == 0 ("for security
+# reasons"). Since loopat sandboxes always use bypassPermissions for the
+# SDK, the binary's hard check makes "container root" untenable.
+#
+# Full-stack experience: sudo NOPASSWD + apt installed → `sudo apt
+# install <pkg>` works from any shell.
+#
+# We still need root for the apt install steps below; switch at end.
+USER root
+
+# Full-stack system layer. Everything a dev reflexively reaches for so the
+# loop can serve as a real workbench without falling back to host tooling.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        bash \
-        coreutils \
-        findutils \
-        grep \
-        sed \
-        less \
-        util-linux \
-        procps \
-        bsdmainutils \
-        ca-certificates \
+        bash coreutils findutils grep sed less \
+        util-linux procps bsdmainutils ca-certificates \
+        sudo curl git build-essential openssh-client \
+        jq vim fish python3-minimal \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-# The container's main process is just a long-lived sleeper that holds the
-# namespaces open. Both the SDK driver and the PTY shell will `podman exec`
-# in as siblings of this process.
+# Passwordless sudo for ubuntu so the user can `sudo apt install <pkg>`
+# from the loop's terminal without prompts.
+RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat-ubuntu \
+ && chmod 0440 /etc/sudoers.d/loopat-ubuntu
+
+# mise — tool version manager. Per-loop child images bake their tools via
+# `mise install` during their build, so the toolchain ends up baked into
+# image layers and reused across loops with the same composed mise.toml.
+# Note: mise.run's installer reads MISE_INSTALL_PATH (full path to the
+# binary), NOT a "dir" env var.
+RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+
+# mise state lives OUTSIDE $HOME so the per-loop $HOME overlay (used for
+# persistent shell history) can't shadow the tools the image bakes in.
+# Shims dir on PATH makes every tool globally callable without needing
+# `mise activate` in each shell.
+ENV MISE_DATA_DIR=/opt/loopat-mise \
+    MISE_CONFIG_DIR=/opt/loopat-mise/config \
+    MISE_CACHE_DIR=/opt/loopat-mise/cache \
+    PATH=/opt/loopat-mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN mkdir -p /opt/loopat-mise/shims /opt/loopat-mise/config /opt/loopat-mise/cache \
+ && chown -R ubuntu:ubuntu /opt/loopat-mise \
+ && chmod -R 755 /opt/loopat-mise
+
+# Switch back to the ubuntu user. mise install (per-loop image build) will
+# run as ubuntu so installed tools are owned consistently.
+USER ubuntu
+
+# The container's main process is just a long-lived sleeper holding the
+# namespaces open. SDK driver + PTY shell `podman exec` in as siblings.
 CMD ["/bin/sleep", "infinity"]
