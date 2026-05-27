@@ -2,7 +2,7 @@
  * Loop tab — AI chat with Claude Code-like experience.
  * Chat area uses assistant-ui runtime with custom claudecodeui-styled components.
  */
-import { useEffect, useState, useMemo, Fragment } from "react"
+import { useEffect, useState, useMemo, useRef, Fragment } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom"
 import { AssistantRuntimeProvider } from "@assistant-ui/react"
@@ -327,6 +327,14 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     })
   }
 
+  // Mobile quick-access buttons: exclusive — opening one closes others.
+  const exclusiveToggleMode = (m: RightMode) => {
+    setOpenPanels((prev) => {
+      if (prev.includes(m)) return prev.filter((p) => p !== m)
+      return [m]
+    })
+  }
+
   const closePanel = (m: RightMode) => {
     setOpenPanels((prev) => prev.filter((p) => p !== m))
     setFullscreenPanel((prev) => prev === m ? null : prev)
@@ -371,9 +379,6 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     }
   }
   const renderPanel = (mode: RightMode) => {
-    if (mode === "git") {
-      return <GitDiffSidebar key={mode} loopId={meta.id} onClose={() => closePanel("git")} onPickFile={openFile} />
-    }
     const isFullscreen = fullscreenPanel === mode
     return (
       <RightPanel
@@ -530,10 +535,29 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         </div>
       )}
       {hasPanels && isMobile && openPanels.map((mode) => (
-        <div key={mode} className="fixed inset-0 z-40">
+        <Fragment key={mode}>
           {renderPanel(mode)}
-        </div>
+        </Fragment>
       ))}
+      {isMobile && (
+        <div className="fixed bottom-0 left-0 z-30 w-9 flex flex-col items-center gap-0.5 pb-2">
+          {(["terminal", "editor", "workdir", "git"] as const).map((m) => {
+            const active = openPanels.includes(m)
+            const sym = m === "terminal" ? "▷" : m === "editor" ? "✎" : m === "workdir" ? "▤" : "⑂"
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => exclusiveToggleMode(m)}
+                className={`w-7 h-7 flex items-center justify-center rounded text-xs ${active ? "bg-gray-200 text-gray-900" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
+                title={m}
+              >
+                {sym}
+              </button>
+            )
+          })}
+        </div>
+      )}
       <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} onSaved={() => ws.refresh()} />
     </div>
   )
@@ -951,6 +975,71 @@ function RightPanel({
   onEditorSelection?: (sel: { from: number; to: number } | null) => void
 }) {
   const isMobile = useIsMobile()
+  const [mobilePct, setMobilePct] = useState(() => {
+    const saved = localStorage.getItem("loopat:mobilePanelPct")
+    return saved ? Math.max(20, Math.min(95, parseInt(saved) || 55)) : 55
+  })
+  const dragRef = useRef<{ startY: number; startPct: number } | null>(null)
+
+  const persistPct = (pct: number) => {
+    localStorage.setItem("loopat:mobilePanelPct", String(pct))
+  }
+
+  // shared drag logic
+  const startDrag = (clientY: number) => {
+    dragRef.current = { startY: clientY, startPct: mobilePct }
+    if (isFullscreen) {
+      const pct = Math.round((clientY / window.innerHeight) * 100)
+      const clamped = Math.max(20, Math.min(95, pct))
+      setMobilePct(clamped)
+      persistPct(clamped)
+      onToggleFullscreen?.()
+    }
+  }
+
+  const moveDrag = (clientY: number) => {
+    if (!dragRef.current) return
+    const dy = clientY - dragRef.current.startY
+    const dpct = Math.round((dy / window.innerHeight) * 100)
+    const pct = Math.max(20, Math.min(95, dragRef.current.startPct + dpct))
+    setMobilePct(pct)
+    persistPct(pct)
+  }
+
+  const endDrag = () => {
+    dragRef.current = null
+  }
+
+  // touch handlers (mobile)
+  const onMobileTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    startDrag(e.touches[0].clientY)
+  }
+  const onMobileTouchMove = (e: React.TouchEvent) => {
+    e.preventDefault()
+    moveDrag(e.touches[0].clientY)
+  }
+  const onMobileTouchEnd = (e: React.TouchEvent) => {
+    e.preventDefault()
+    endDrag()
+  }
+
+  // pointer handlers (mouse on desktop)
+  const onMobilePointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return // let touch handlers handle it
+    e.preventDefault()
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    startDrag(e.clientY)
+  }
+  const onMobilePointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch" || !dragRef.current) return
+    moveDrag(e.clientY)
+  }
+  const onMobilePointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch") return
+    endDrag()
+  }
 
   const header = (
     <header className="px-3 h-8 shrink-0 border-b border-gray-200 flex items-center gap-1 text-[11px] text-gray-500">
@@ -1000,9 +1089,37 @@ function RightPanel({
             <Terminal loopId={loopId} currentUserId={currentUserId} />
           </div>
         )}
+        {mode === "git" && (
+          <GitDiffSidebar loopId={loopId} onClose={onClose} onPickFile={onPickFile} />
+        )}
       </Suspense>
     </aside>
   )
+
+  if (isMobile) {
+    return (
+      <div
+        className="fixed inset-x-0 top-0 z-40 bg-white rounded-b-xl shadow-xl pointer-events-auto overflow-hidden"
+        style={{ height: isFullscreen ? "100vh" : `${mobilePct}vh` }}
+      >
+          <div className="absolute inset-0 bottom-7 overflow-y-auto flex flex-col">
+            {panel}
+          </div>
+          <div
+            className="absolute inset-x-0 bottom-0 h-7 z-10 flex items-center justify-center cursor-row-resize active:bg-gray-50 rounded-b-xl"
+            style={{ touchAction: "none" }}
+            onTouchStart={onMobileTouchStart}
+            onTouchMove={onMobileTouchMove}
+            onTouchEnd={onMobileTouchEnd}
+            onPointerDown={onMobilePointerDown}
+            onPointerMove={onMobilePointerMove}
+            onPointerUp={onMobilePointerUp}
+          >
+            <div className="w-8 h-1 rounded-full bg-gray-300" />
+          </div>
+        </div>
+    )
+  }
 
   if (isFullscreen) {
     return createPortal(
@@ -1010,14 +1127,6 @@ function RightPanel({
         {panel}
       </div>,
       document.body,
-    )
-  }
-
-  if (isMobile) {
-    return (
-      <div className="fixed inset-0 z-40 flex flex-col">
-        {panel}
-      </div>
     )
   }
 
