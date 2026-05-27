@@ -167,10 +167,11 @@ describe("buildPodmanCreateArgs — container shape", () => {
     expect(args).toContain("loopat-sandbox:latest")
   })
 
-  test("includes --userns keep-id, --init, --network host", async () => {
+  test("includes --userns keep-id:uid=2000,gid=2000, --init, --network host", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
     const usernsIdx = args.indexOf("--userns")
-    expect(args[usernsIdx + 1]).toBe("keep-id")
+    // Fixed loopat user at uid 2000 inside; see Containerfile + podman.ts.
+    expect(args[usernsIdx + 1]).toBe("keep-id:uid=2000,gid=2000")
     expect(args).toContain("--init")
     const netIdx = args.indexOf("--network")
     expect(args[netIdx + 1]).toBe("host")

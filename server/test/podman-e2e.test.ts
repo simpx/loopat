@@ -139,18 +139,20 @@ describe.skipIf(!podmanAvailable)("podman E2E lifecycle", () => {
     expect(out.trim()).toBe("got=hello-stdin")
   }, 15_000)
 
-  test("podman exec into the running container yields the right uid+host fs view", async () => {
+  test("podman exec yields container uid 2000 (loopat) + right cwd", async () => {
     await ensureContainer({ loopId: LOOP_ID, createdBy: USER })
     const args = buildPodmanExecArgs({
       loopId: LOOP_ID,
       command: "/bin/bash",
-      args: ["-c", "echo $(id -u):$(pwd)"],
+      args: ["-c", "echo $(id -u):$(whoami):$(pwd)"],
       workdir: V_LOOP_WORKDIR(LOOP_ID),
     })
     const { stdout } = await execFileP(podmanBin, args)
-    const out = stdout.trim()
-    const [uid, pwd] = out.split(":")
-    expect(Number(uid)).toBe(process.getuid?.() ?? -1)
+    const [uid, user, pwd] = stdout.trim().split(":")
+    // Fixed by --userns=keep-id:uid=2000,gid=2000 + image's loopat user
+    // at uid 2000. Host uid varies; container view is constant.
+    expect(Number(uid)).toBe(2000)
+    expect(user).toBe("loopat")
     expect(pwd).toBe(V_LOOP_WORKDIR(LOOP_ID))
   })
 

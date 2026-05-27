@@ -314,17 +314,20 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     "--name", containerName(opts.loopId),
     "--label", `${LABEL_LOOP}=${opts.loopId}`,
     "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`,
-    // --userns=keep-id maps host uid → same uid in container. Combined with
-    // the image's USER ubuntu (uid 1000), this makes "container ubuntu" ===
-    // host calling user, so files written through bind mounts are owned by
-    // the host user (manageable from outside the container). The user gets
-    // a full-stack workbench via passwordless sudo (see Containerfile).
+    // --userns=keep-id:uid=2000,gid=2000 maps whatever uid is running
+    // podman on the host → fixed container uid 2000. The image places
+    // the `loopat` user at uid 2000, so `whoami` inside is always
+    // "loopat" regardless of which host user owns the rootless daemon.
+    //
+    // File ownership across the boundary: container loopat ↔ host caller.
+    // Files we write through bind mounts are owned by the host user (the
+    // person who launched loopat), so they can manage them normally.
     //
     // Why not "USER root" instead: claude CLI refuses to run with
     // --dangerously-skip-permissions when uid == 0. loopat sandboxes use
-    // bypassPermissions by default, so container-root is untenable for the
-    // SDK driver.
-    "--userns", "keep-id",
+    // bypassPermissions by default, so container-root is untenable for
+    // the SDK driver.
+    "--userns", "keep-id:uid=2000,gid=2000",
     // Init reaps zombies from orphaned bg processes.
     "--init",
     // v1: share host network. Future per-loop netns: drop this and add

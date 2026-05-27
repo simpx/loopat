@@ -16,20 +16,26 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# ubuntu:24.04's default `ubuntu` user (uid 1000) is the one we run as
-# inside the container. Why not root: the claude binary refuses to run
-# with `--dangerously-skip-permissions` when uid == 0 ("for security
-# reasons"). Since loopat sandboxes always use bypassPermissions for the
-# SDK, the binary's hard check makes "container root" untenable.
-#
-# Full-stack experience: sudo NOPASSWD + apt installed → `sudo apt
-# install <pkg>` works from any shell.
-#
-# We still need root for the apt install steps below; switch at end.
 USER root
 
-# Full-stack system layer. Everything a dev reflexively reaches for so the
-# loop can serve as a real workbench without falling back to host tooling.
+# Strip the image's default `ubuntu` user (uid 1000) and create our own
+# fixed `loopat` user at uid 2000. The container then ALWAYS appears as
+# `loopat` to whoever's inside, regardless of which host user is running
+# rootless podman — see `--userns=keep-id:uid=2000,gid=2000` in podman.ts.
+# Why uid 2000: avoid colliding with 1000 (still common host uid; the
+# original ubuntu user previously claimed it inside this image).
+#
+# Why not root: the claude binary refuses --dangerously-skip-permissions
+# when uid == 0 ("for security reasons"). The SDK driver always uses
+# bypassPermissions in loopat, so container-root is untenable.
+#
+# Full-stack feel: sudo NOPASSWD for loopat → `sudo apt install <pkg>`
+# from any shell, no prompts.
+RUN userdel -r ubuntu 2>/dev/null || true \
+ && groupadd -g 2000 loopat \
+ && useradd -m -u 2000 -g 2000 -s /bin/bash loopat
+
+# Full-stack system layer. Everything a dev reflexively reaches for.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         bash coreutils findutils grep sed less \
@@ -39,10 +45,9 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-# Passwordless sudo for ubuntu so the user can `sudo apt install <pkg>`
-# from the loop's terminal without prompts.
-RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat-ubuntu \
- && chmod 0440 /etc/sudoers.d/loopat-ubuntu
+# Passwordless sudo for the loopat user.
+RUN echo "loopat ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat \
+ && chmod 0440 /etc/sudoers.d/loopat
 
 # mise — tool version manager. Per-loop child images bake their tools via
 # `mise install` during their build, so the toolchain ends up baked into
@@ -61,12 +66,12 @@ ENV MISE_DATA_DIR=/opt/loopat-mise \
     PATH=/opt/loopat-mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN mkdir -p /opt/loopat-mise/shims /opt/loopat-mise/config /opt/loopat-mise/cache \
- && chown -R ubuntu:ubuntu /opt/loopat-mise \
+ && chown -R loopat:loopat /opt/loopat-mise \
  && chmod -R 755 /opt/loopat-mise
 
-# Switch back to the ubuntu user. mise install (per-loop image build) will
-# run as ubuntu so installed tools are owned consistently.
-USER ubuntu
+# Switch to loopat. mise install (per-loop child build) and runtime
+# exec'd processes all run as this user.
+USER loopat
 
 # The container's main process is just a long-lived sleeper holding the
 # namespaces open. SDK driver + PTY shell `podman exec` in as siblings.
