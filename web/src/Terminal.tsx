@@ -37,8 +37,8 @@ const THEME = {
 
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000]
 
-function buildWsUrl(loopId: string) {
-  return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/loop/${loopId}/term`
+function buildWsUrl(loopId: string, cols: number, rows: number) {
+  return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/loop/${loopId}/term?cols=${cols}&rows=${rows}`
 }
 
 export function Terminal({
@@ -106,7 +106,7 @@ export function Terminal({
     searchRef.current = search
 
     function connect() {
-      const ws = new WebSocket(buildWsUrl(loopId))
+      const ws = new WebSocket(buildWsUrl(loopId, term.cols, term.rows))
       wsRef.current = ws
 
       ws.onopen = () => {
@@ -143,8 +143,6 @@ export function Terminal({
       }
     }
 
-    connect()
-
     const disposeData = term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "data", data }))
@@ -154,21 +152,26 @@ export function Terminal({
     const sendResize = () => {
       const ws = wsRef.current
       if (!ws || ws.readyState !== WebSocket.OPEN) return
-      const { cols, rows } = term
-      // Skip when the container div hasn't been laid out yet (e.g. just
-      // after panel open — the div starts at near-zero width). Sending
-      // a resize with cols=2 causes the shell to redraw at that tiny
-      // size, which wrecks the display when the real size kicks in later.
-      if (cols < 10) return
-      ws.send(JSON.stringify({ type: "resize", cols, rows }))
+      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }))
     }
 
+    let connected = false
     const onResize = () => {
       try {
         fit.fit()
-        sendResize()
+        if (!connected) {
+          console.log(`[term] onResize cols=${term.cols}x${term.rows} connected=${connected}`)
+          if (term.cols < 10) return
+          connected = true
+          console.log(`[term] → connect() url cols=${term.cols}x${term.rows}`)
+          connect()
+        } else {
+          sendResize()
+        }
       } catch {}
     }
+    // One immediate check in case the container is already laid out.
+    onResize()
     window.addEventListener("resize", onResize)
     const ro = new ResizeObserver(onResize)
     if (containerRef.current) ro.observe(containerRef.current)

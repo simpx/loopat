@@ -23,7 +23,7 @@ const SCROLLBACK_MAX_BYTES = 64 * 1024
 const terms = new Map<string, Term>()
 const pending = new Map<string, Promise<Term>>()
 
-async function getOrSpawn(loopId: string): Promise<Term> {
+async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise<Term> {
   const existing = terms.get(loopId)
   if (existing) return existing
   const inflight = pending.get(loopId)
@@ -82,11 +82,11 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     })
 
     const binary = process.env.LOOPAT_PODMAN_BIN || "podman"
-    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length}`)
+    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length} cols=${initCols}x${initRows}`)
     const proc = spawn(binary, podmanArgs, {
       name: "xterm-256color",
-      cols: 80,
-      rows: 24,
+      cols: initCols,
+      rows: initRows,
       env: { ...process.env, TERM: "xterm-256color" } as Record<string, string>,
     })
     const t: Term = { proc, subscribers: new Set(), scrollback: [], scrollbackBytes: 0 }
@@ -131,13 +131,16 @@ async function getOrSpawn(loopId: string): Promise<Term> {
   }
 }
 
-export async function attachTerm(loopId: string, ws: WSContext) {
-  const t = await getOrSpawn(loopId)
-  // Don't replay scrollback — content is generated at initial 80x24, but the
-  // client is already at its fitted size (e.g. 100x30). Replaying would render
-  // at the wrong dimensions, misplacing the cursor. Instead the client sends
-  // resize in onopen, which triggers SIGWINCH → bash redraws at the correct size.
+export async function attachTerm(loopId: string, ws: WSContext, initCols = 80, initRows = 24) {
+  const t8 = loopId.slice(0, 8)
+  const t = await getOrSpawn(loopId, initCols, initRows)
+  // Don't replay scrollback — accumulated output from SIGWINCH redraws and
+  // prior connections causes duplicated prompt text. Instead trigger a
+  // fresh screen redraw via ^L (clear-screen in readline). The PTY is
+  // already at the correct size from initCols/initRows.
   t.subscribers.add(ws)
+  console.error(`[term:${t8}] attach: subs=${t.subscribers.size} scrollback=${t.scrollback.length} chunks (not replayed)`)
+  t.proc.write("\x0c")
 }
 
 export function detachTerm(loopId: string, ws: WSContext) {
@@ -158,8 +161,10 @@ export function writeTerm(loopId: string, data: string) {
 }
 
 export function resizeTerm(loopId: string, cols: number, rows: number) {
+  const t8 = loopId.slice(0, 8)
   const t = terms.get(loopId)
-  if (!t) return
+  if (!t) { console.error(`[term:${t8}] resize: no term (${cols}x${rows})`); return }
+  console.error(`[term:${t8}] resize: ${cols}x${rows}`)
   try { t.proc.resize(cols, rows) } catch {}
 }
 
