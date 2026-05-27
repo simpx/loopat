@@ -485,9 +485,26 @@ export async function ensureSandboxImage(): Promise<void> {
 }
 
 /**
+ * Per-loop warning state set by ensureLoopImage when toolchain baking
+ * fails. Read by attachTerm (term.ts) to surface a yellow banner in the
+ * PTY so the user knows their mise.toml is broken — without losing the
+ * loop entirely (we fall back to the base image and keep going).
+ */
+const _loopWarnings = new Map<string, string>()
+export function getLoopWarning(loopId: string): string | undefined {
+  return _loopWarnings.get(loopId)
+}
+
+/**
  * Ensure a per-loop image exists for this loop's composed mise.toml,
- * returning its tag. If the loop has no mise.toml (or it's empty), returns
- * the base SANDBOX_IMAGE — no child image needed.
+ * returning its tag. Behavior:
+ *   - no mise.toml (or empty) → base SANDBOX_IMAGE
+ *   - mise.toml present, build OK → loopat-sandbox-<hash>:latest, clear any
+ *     prior warning for this loop
+ *   - mise.toml present, build FAILS → log error, stash a per-loop warning,
+ *     fall back to base SANDBOX_IMAGE so the loop still starts. The PTY
+ *     surfaces the warning on attach; the user can fix mise.toml and
+ *     restart the loop to re-attempt.
  *
  * The tag is `loopat-sandbox-<sha256-of-mise.toml-content>:latest`, so two
  * loops with the same toolchain spec share an image (and the build's mise
@@ -499,9 +516,15 @@ export async function ensureLoopImage(loopId: string): Promise<string> {
   await ensureSandboxImage()
 
   const miseTomlPath = join(loopClaudeDir(loopId), "mise.toml")
-  if (!existsSync(miseTomlPath)) return SANDBOX_IMAGE
+  if (!existsSync(miseTomlPath)) {
+    _loopWarnings.delete(loopId)
+    return SANDBOX_IMAGE
+  }
   const content = await readFile(miseTomlPath, "utf8")
-  if (!content.trim()) return SANDBOX_IMAGE
+  if (!content.trim()) {
+    _loopWarnings.delete(loopId)
+    return SANDBOX_IMAGE
+  }
 
   const hash = createHash("sha256").update(content).digest("hex").slice(0, 16)
   const tag = `loopat-sandbox-${hash}:latest`
@@ -511,7 +534,10 @@ export async function ensureLoopImage(loopId: string): Promise<string> {
 
   const built = (async () => {
     const present = await runPodman(["image", "exists", tag], { allowFail: true })
-    if (present.code === 0) return tag
+    if (present.code === 0) {
+      _loopWarnings.delete(loopId)
+      return tag
+    }
 
     console.log(`[podman] building loop image ${tag} for loop ${loopId.slice(0, 8)}`)
     const buildDir = await mkdtemp(join(tmpdir(), "loopat-img-"))
@@ -536,11 +562,18 @@ export async function ensureLoopImage(loopId: string): Promise<string> {
         "-t", tag,
         "-f", join(buildDir, "Containerfile"),
         buildDir,
-      ])
+      ], { allowFail: true })
       if (r.code !== 0) {
-        throw new Error(`loop image build failed (${tag}): ${r.stderr || r.stdout}`)
+        // Don't throw — fall back to base so the loop still starts. The
+        // user can inspect via terminal, fix mise.toml, and restart.
+        const detail = (r.stderr || r.stdout || "").trim().split("\n").slice(-3).join(" | ").slice(0, 400)
+        const msg = `toolchain build failed — sandbox started without baked tools. mise install rejected ${miseTomlPath}: ${detail}`
+        console.error(`[podman] ${msg}`)
+        _loopWarnings.set(loopId, msg)
+        return SANDBOX_IMAGE
       }
       console.log(`[podman] loop image ${tag} ready`)
+      _loopWarnings.delete(loopId)
     } finally {
       await rm(buildDir, { recursive: true, force: true }).catch(() => {})
     }

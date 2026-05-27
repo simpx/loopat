@@ -2,7 +2,7 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR } from "./podman"
+import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, getLoopWarning } from "./podman"
 import { effectiveDriver, getLoop } from "./loops"
 import { loadPersonalConfig } from "./config"
 
@@ -136,6 +136,19 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
 export async function attachTerm(loopId: string, ws: WSContext, initCols = 80, initRows = 24) {
   const t = await getOrSpawn(loopId, initCols, initRows)
   t.subscribers.add(ws)
+  // If ensureLoopImage fell back to the base image because the loop's
+  // mise.toml failed to build, surface the reason to the user in-band.
+  // The loop is still usable — the user just doesn't get their toolchain
+  // until they fix mise.toml and restart the loop.
+  const warning = getLoopWarning(loopId)
+  if (warning) {
+    try {
+      ws.send(JSON.stringify({
+        type: "data",
+        data: `\r\n\x1b[33m⚠ ${warning}\x1b[0m\r\n`,
+      }))
+    } catch {}
+  }
   // Send ^L so the inner shell redraws once the new viewer is attached.
   t.proc.write("\x0c")
 }
