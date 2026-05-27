@@ -81,6 +81,27 @@ const { app } = await import("../../src/index")
 const { createUser, createSession, COOKIE_NAME } = await import("../../src/auth")
 const { probePodman, containerName, ensureContainer, stopAllWorkspaceContainers } = await import("../../src/podman")
 const { getLoop } = await import("../../src/loops")
+
+// Earlier test files (chat-integration, multi-vault, etc.) may have left
+// stopped-but-not-removed containers behind. Each container holds a
+// session keyring entry, and `kernel.keys.maxkeys` is ~200 on stock
+// Linux — once we cross that threshold, every new `podman create` fails
+// with "unable to join session keyring: disk quota exceeded". Wipe the
+// slate at first api-e2e import; we own this workspace from here on.
+if ((await probePodman()).ok) {
+  try {
+    const { spawnSync } = await import("node:child_process")
+    const list = spawnSync(
+      "podman",
+      ["ps", "--all", "--quiet", "--filter", "label=loopat.workspace"],
+      { encoding: "utf8" },
+    )
+    const ids = (list.stdout ?? "").split("\n").map((s) => s.trim()).filter(Boolean)
+    if (ids.length > 0) {
+      spawnSync("podman", ["rm", "--force", ...ids], { stdio: "ignore" })
+    }
+  } catch {}
+}
 const { personalLoopatDir } = await import("../../src/paths")
 
 // Set up per-user dirs the SDK driver expects on first ensureContainer.
@@ -166,18 +187,19 @@ export function eventsStream(loopId: string): Promise<Response> {
 }
 
 /**
- * Read SSE events from a Response.body stream until `until(ev) === true` or
- * timeout. Always returns the events accumulated so far on either exit.
+ * Async generator over SSE events from a Response.body stream. Caller
+ * controls when to stop (a `break` in `for await` releases the underlying
+ * reader). Multi-phase tests (read → POST a choice answer → read more)
+ * use this directly; single-shot tests use `readSSE` / `readUntilTurnEnds`.
  */
-export async function readSSE(
+export async function* sseEvents(
   r: Response,
-  opts: { until: (ev: SSEEvent) => boolean; timeoutMs?: number },
-): Promise<SSEEvent[]> {
-  const events: SSEEvent[] = []
+  opts: { timeoutMs?: number } = {},
+): AsyncGenerator<SSEEvent> {
   const reader = r.body!.getReader()
   const decoder = new TextDecoder()
   let buf = ""
-  const deadline = Date.now() + (opts.timeoutMs ?? 30_000)
+  const deadline = Date.now() + (opts.timeoutMs ?? 60_000)
   try {
     while (Date.now() < deadline) {
       const remaining = deadline - Date.now()
@@ -187,7 +209,7 @@ export async function readSSE(
           setTimeout(() => res({ value: undefined, done: true } as any), remaining),
         ),
       ])
-      if (next.done) break
+      if (next.done) return
       buf += decoder.decode(next.value, { stream: true })
       let idx: number
       while ((idx = buf.indexOf("\n\n")) >= 0) {
@@ -204,15 +226,29 @@ export async function readSSE(
         try {
           parsed = JSON.parse(data)
         } catch {}
-        const sse = { event: ev, data: parsed }
-        events.push(sse)
-        if (opts.until(sse)) return events
+        yield { event: ev, data: parsed }
       }
     }
   } finally {
     try {
       reader.cancel()
     } catch {}
+  }
+}
+
+/**
+ * Eagerly drain SSE until `until(ev) === true` or timeout, then close.
+ * For tests that need to react mid-stream, use `sseEvents` directly.
+ */
+export async function readSSE(
+  r: Response,
+  opts: { until: (ev: SSEEvent) => boolean; timeoutMs?: number },
+): Promise<SSEEvent[]> {
+  const events: SSEEvent[] = []
+  const gen = sseEvents(r, { timeoutMs: opts.timeoutMs ?? 30_000 })
+  for await (const ev of gen) {
+    events.push(ev)
+    if (opts.until(ev)) break
   }
   return events
 }
@@ -222,6 +258,21 @@ export function readUntilTurnEnds(r: Response, timeoutMs = 60_000): Promise<SSEE
   return readSSE(r, {
     until: (ev) => ev.event === "done" || ev.event === "error" || ev.event === "interrupted",
     timeoutMs,
+  })
+}
+
+/** POST /api/v1/loops/:id/choices/:choiceId — answer a permission or
+ * question choice. `body` is either `{ allow: boolean }` (permission)
+ * or `{ answers: Record<string, string> }` (question). */
+export async function answerChoice(
+  loopId: string,
+  choiceId: string,
+  body: { allow: boolean } | { answers: Record<string, string> },
+): Promise<Response> {
+  return authedRequest(`/api/v1/loops/${loopId}/choices/${choiceId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
   })
 }
 
