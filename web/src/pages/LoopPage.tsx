@@ -301,6 +301,9 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   useEffect(() => {
     getContext(meta.id).then(setMounts)
     markLoopViewed(meta.id)
+    if (ws.currentUser?.id) {
+      localStorage.setItem(`loopat:lastLoop:${ws.currentUser.id}`, meta.id)
+    }
   }, [meta.id])
 
   // Kickoff message: when navigated here with router state { kickoff: "..." },

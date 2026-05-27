@@ -380,7 +380,20 @@ function LoopRedirect() {
   if (ws.loops.length === 0) {
     return <LoopEmpty loggedIn={!!ws.currentUser} onNew={() => ws.setNewLoopDialogOpen(true)} />
   }
-  return <Navigate to={`/loop/${ws.loops[0].id}`} replace />
+  // Prefer the current user's last-opened loop, then their newest loop,
+  // then fall back to the first loop in the list.
+  const lastLoopId = ws.currentUser?.id
+    ? localStorage.getItem(`loopat:lastLoop:${ws.currentUser.id}`)
+    : null
+  const myLoops = ws.currentUser?.id
+    ? ws.loops.filter((l) => l.createdBy === ws.currentUser!.id)
+    : []
+  const preferredId = (lastLoopId && ws.loops.some((l) => l.id === lastLoopId))
+    ? lastLoopId
+    : myLoops.length > 0
+      ? myLoops[0].id
+      : ws.loops[0].id
+  return <Navigate to={`/loop/${preferredId}`} replace />
 }
 
 function LoopEmpty({ loggedIn, onNew }: { loggedIn: boolean; onNew: () => void }) {
