@@ -280,6 +280,10 @@ export async function lookupPluginInstallPath(spec: string, loopId?: string): Pr
     )
   }
 
+  if (!ip) return null
+  const entry = ip.plugins?.[spec]?.[0]
+  if (!entry?.installPath) return null
+
   const atIdx = spec.lastIndexOf("@")
   if (atIdx >= 0) {
     const pluginName = spec.slice(0, atIdx)
@@ -298,8 +302,5 @@ export async function lookupPluginInstallPath(spec: string, loopId?: string): Pr
     }
   }
 
-  if (!ip) return null
-  const entry = ip.plugins?.[spec]?.[0]
-  if (!entry?.installPath) return null
   return existsSync(entry.installPath) ? entry.installPath : null
 }
