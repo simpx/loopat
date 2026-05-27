@@ -53,7 +53,7 @@ async function readJson<T = unknown>(path: string): Promise<T | null> {
  * Plugins shipping `.mcp.json` are NOT read here — loopat treats `.mcp.json`
  * as deprecated; plugin authors should put mcpServers in `settings.json`.
  */
-async function fillPluginMcpDefaults(mergedSettings: Record<string, any>): Promise<void> {
+async function fillPluginMcpDefaults(mergedSettings: Record<string, any>, loopId?: string): Promise<void> {
   const enabled = Object.entries(
     (mergedSettings.enabledPlugins ?? {}) as Record<string, boolean>,
   )
@@ -66,7 +66,7 @@ async function fillPluginMcpDefaults(mergedSettings: Record<string, any>): Promi
   const merged: Record<string, any> = { ...existing }
 
   for (const spec of enabled) {
-    const pluginDir = await lookupPluginInstallPath(spec)
+    const pluginDir = await lookupPluginInstallPath(spec, loopId)
     if (!pluginDir) continue
     const ps = await readJson<{ mcpServers?: Record<string, any> }>(
       join(pluginDir, "settings.json"),
@@ -329,7 +329,7 @@ export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<C
   // settings.json mcpServers — never `.mcp.json`, which loopat doesn't read).
   // Plugins are the lowest priority: their entries only fill keys not
   // already defined by team / profile / personal merge above.
-  await fillPluginMcpDefaults(mergedSettings)
+  await fillPluginMcpDefaults(mergedSettings, loopId)
 
   const settingsPath = join(dst, "settings.json")
   // Inject loopat-managed fields that downstream code expects.

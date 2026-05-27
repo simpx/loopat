@@ -262,13 +262,23 @@ export async function ensureLoopPluginsInstalled(loopId: string): Promise<void> 
  *
  * Prefers the marketplace's local source dir (preserves symlinks); falls back
  * to the CC cache installPath. Returns null if not installed.
+ *
+ * `loopId` (optional): when provided, also checks the loop's own
+ * `known_marketplaces.json` as a fallback. This is needed because
+ * `claude plugin marketplace add` for directory-type sources may write
+ * the marketplace entry into the loop's .claude/ (via bwrap bind) rather
+ * than the host-level ~/.claude/plugins/.
  */
-export async function lookupPluginInstallPath(spec: string): Promise<string | null> {
+export async function lookupPluginInstallPath(spec: string, loopId?: string): Promise<string | null> {
   const ip = await readJsonOpt<InstalledPluginsFile>(USER_INSTALLED_PLUGINS)
-  const km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
-  if (!ip) return null
-  const entry = ip.plugins?.[spec]?.[0]
-  if (!entry?.installPath) return null
+  let km = await readJsonOpt<KnownMarketplacesFile>(USER_KNOWN_MARKETPLACES)
+
+  // Fallback: read the loop's own known_marketplaces.json when host-level is missing
+  if (!km && loopId) {
+    km = await readJsonOpt<KnownMarketplacesFile>(
+      join(loopClaudeDir(loopId), "plugins", "known_marketplaces.json"),
+    )
+  }
 
   const atIdx = spec.lastIndexOf("@")
   if (atIdx >= 0) {
@@ -287,5 +297,9 @@ export async function lookupPluginInstallPath(spec: string): Promise<string | nu
       }
     }
   }
+
+  if (!ip) return null
+  const entry = ip.plugins?.[spec]?.[0]
+  if (!entry?.installPath) return null
   return existsSync(entry.installPath) ? entry.installPath : null
 }
