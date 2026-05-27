@@ -133,9 +133,10 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
 export async function attachTerm(loopId: string, ws: WSContext) {
   const t = await getOrSpawn(loopId)
-  for (const chunk of t.scrollback) {
-    try { ws.send(JSON.stringify({ type: "data", data: chunk })) } catch {}
-  }
+  // Don't replay scrollback — content is generated at initial 80x24, but the
+  // client is already at its fitted size (e.g. 100x30). Replaying would render
+  // at the wrong dimensions, misplacing the cursor. Instead the client sends
+  // resize in onopen, which triggers SIGWINCH → bash redraws at the correct size.
   t.subscribers.add(ws)
 }
 
