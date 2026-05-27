@@ -319,6 +319,9 @@ export const blocks = {
   text(t: string): MockBlock {
     return { type: "text", text: t }
   },
+  toolUse(name: string, input: Record<string, unknown>): MockBlock {
+    return { type: "tool_use", name, input }
+  },
   bash(command: string, opts: { run_in_background?: boolean; description?: string; timeout?: number } = {}): MockBlock {
     const input: Record<string, unknown> = { command }
     if (opts.run_in_background) input.run_in_background = true
