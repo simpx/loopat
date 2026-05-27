@@ -152,7 +152,7 @@ function isValidMountDst(s: unknown): s is string {
  * Returns the env map mise would activate, or null if no mise.toml present /
  * mise activation failed (warning logged; not fatal).
  */
-async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<string, string> | null> {
+export async function activateMiseSandbox(sandboxDirPath: string): Promise<Record<string, string> | null> {
   if (!existsSync(join(sandboxDirPath, "mise.toml"))) return null
   const env = {
     ...process.env,
