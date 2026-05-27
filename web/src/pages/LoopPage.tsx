@@ -11,7 +11,7 @@ import { Panel, Group, Separator } from "react-resizable-panels"
 import ChatInterface from "@/components/chat/ChatInterface"
 import { useWorkspace } from "../ctx"
 import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
-import { getContext, distillLoop, listProfiles, type ContextMount, type LoopMeta, markLoopViewed } from "../api"
+import { getContext, distillLoop, listProfiles, type ContextMount, type LoopMeta, markLoopViewed, getServeConfig, type ServeConfig } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
 import { useLoopStatus } from "../useLoopStatus"
@@ -292,6 +292,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
   // sandboxInfo + refresh-sandbox UI removed — profile model re-composes every spawn,
   // so there's nothing to "refresh" mid-loop.
   const [shareOpen, setShareOpen] = useState(false)
+  const [serveCfg, setServeCfg] = useState<ServeConfig | null>(null)
+  useEffect(() => { getServeConfig().then(setServeCfg) }, [])
   const [editorSelection, setEditorSelection] = useState<{ from: number; to: number } | null>(null)
   const openFile = (path: string) => {
     setPickedFile(path)
@@ -412,6 +414,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         openPanels={openPanels}
         toggleMode={toggleMode}
         onShareWork={() => setShareOpen(true)}
+        showShareButton={!serveCfg || serveCfg.serveEnabled || serveCfg.serveDynamicEnabled}
       />
       {isMobile ? (
         <div className="flex-1 min-h-0">
@@ -559,7 +562,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           })}
         </div>
       )}
-      <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} onSaved={() => ws.refresh()} />
+      <ShareArtifactDialog loop={meta} open={shareOpen} onClose={() => setShareOpen(false)} onSaved={async () => { await ws.refresh() }} />
     </div>
   )
 }
@@ -580,6 +583,7 @@ function LoopHeader({
   openPanels,
   toggleMode,
   onShareWork,
+  showShareButton,
 }: {
   meta: LoopMeta
   mounts: ContextMount[]
@@ -592,6 +596,7 @@ function LoopHeader({
   openPanels: RightMode[]
   toggleMode: (m: RightMode) => void
   onShareWork: () => void
+  showShareButton?: boolean
 }) {
   const isMobile = useIsMobile()
   const navigate = useNavigate()
@@ -700,6 +705,7 @@ function LoopHeader({
           <FlaskConical size={11} />
           {distilling ? "Distilling…" : "Distill"}
         </button>
+        {showShareButton !== false && (
         <button
           onClick={onShareWork}
           className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${meta.shareEnabled ? "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"}`}
@@ -708,6 +714,7 @@ function LoopHeader({
           <Globe size={11} />
           Share Artifact
         </button>
+        )}
         <DriveToggle meta={meta} />
         <ShareToggle meta={meta} />
       </div>

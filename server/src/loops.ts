@@ -160,6 +160,10 @@ export type LoopMeta = {
   shareMode?: "static" | "port"
   shareAlias?: string
   sharePort?: number
+  /** External port for direct TCP/UDP access (see port-proxy). */
+  shareExternalPort?: number
+  /** Protocol for shareExternalPort: "tcp" (default), "udp", or "static". */
+  shareProtocol?: "tcp" | "udp" | "static"
   /**
    * Set when the loop was spawned from a chat conversation. The snapshot of
    * the chat history is at loops/<id>/context/chat/<convId>.jsonl (mounted as

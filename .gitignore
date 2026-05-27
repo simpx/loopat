@@ -16,7 +16,7 @@ server/src/*.js
 server/src/*.js.map
 
 # Rust
-server/src/serve-rs/target/
+**/target/
 
 # Python
 __pycache__/
@@ -26,3 +26,6 @@ __pycache__/
 .*.swp
 .*.swo
 *~
+
+# Misc
+*.tmp

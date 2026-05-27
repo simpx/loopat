@@ -27,6 +27,8 @@ export type LoopMeta = {
   shareMode?: "static" | "port"
   shareAlias?: string
   sharePort?: number
+  shareExternalPort?: number
+  shareProtocol?: "tcp" | "udp" | "static"
   config?: {
     profiles?: string[]
     vault?: string
@@ -1308,21 +1310,53 @@ export async function deleteAdminUser(id: string): Promise<{ ok: boolean; error?
 
 // ── workspace serve ──
 
-export type ServeDomain = { domain: string; ip: string; baseUrl: string; withPort: boolean; https: boolean; displayPort: number }
-
-export async function getServeDomain(): Promise<ServeDomain> {
-  const r = await apiFetch("/api/serve/domain")
-  if (!r.ok) return { domain: "nip.io", ip: "127.0.0.1", baseUrl: ".127.0.0.1.nip.io", withPort: false, https: false, displayPort: 7788 }
-  return (await r.json()) as ServeDomain
+export type ServeConfig = {
+  // Standard serve
+  serveEnabled: boolean
+  domain: string
+  ip: string
+  baseUrl: string
+  withPort: boolean
+  https: boolean
+  displayPort: number
+  // Dynamic port
+  serveDynamicEnabled: boolean
+  serveDynamicDomain: string
+  serveDynamicPortRange: string
+  serveDynamicUdpEnabled: boolean
+  serveDynamicStaticEnabled: boolean
 }
 
-export async function setServeDomain(data: { domain?: string; withPort?: boolean; https?: boolean; displayPort?: number }): Promise<boolean> {
-  const r = await apiFetch("/api/serve/domain", {
+export async function getServeConfig(): Promise<ServeConfig> {
+  const r = await apiFetch("/api/serve/config")
+  if (!r.ok) return {
+    serveEnabled: true, domain: "nip.io", ip: "127.0.0.1", baseUrl: ".127.0.0.1.nip.io",
+    withPort: false, https: false, displayPort: 7788,
+    serveDynamicEnabled: false, serveDynamicDomain: "", serveDynamicPortRange: "10000-20000",
+    serveDynamicUdpEnabled: false, serveDynamicStaticEnabled: false,
+  }
+  return (await r.json()) as ServeConfig
+}
+
+export async function setServeConfig(data: Record<string, unknown>): Promise<boolean> {
+  const r = await apiFetch("/api/serve/config", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(data),
   })
   return r.ok
+}
+
+export async function getAvailablePort(): Promise<{ port: number | null; error?: string }> {
+  const r = await apiFetch("/api/serve/available-port")
+  if (!r.ok) return { port: null, error: "request failed" }
+  return (await r.json()) as { port: number | null; error?: string }
+}
+
+export async function checkPortAvailable(port: number, loopId?: string): Promise<{ available: boolean; reason?: string }> {
+  const r = await apiFetch(`/api/serve/check-port?port=${port}&loopId=${loopId || ""}`)
+  if (!r.ok) return { available: false, reason: "request failed" }
+  return (await r.json()) as { available: boolean; reason?: string }
 }
 
 export async function checkAliasAvailable(alias: string, loopId?: string): Promise<{ available: boolean; reason?: string }> {

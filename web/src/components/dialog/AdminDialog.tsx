@@ -13,8 +13,8 @@ import {
   deleteAdminUser,
   getWorkspaceSettings,
   updateWorkspaceSettings,
-  getServeDomain,
-  setServeDomain,
+  getServeConfig,
+  setServeConfig,
   testProviderConnection,
   getAdminPresets,
   type AdminUser,
@@ -776,24 +776,39 @@ function Labeled({ label, children, className }: { label: string; children: Reac
 // ── Workspace Serve panel ──
 
 export function ServePanel() {
+  // Standard serve
+  const [serveEnabled, setServeEnabled] = useState(true)
   const [domain, setDomainState] = useState("")
   const [ip, setServeIp] = useState("")
   const [baseUrl, setServeBaseUrl] = useState("")
   const [withPort, setServeWithPort] = useState(false)
   const [https, setServeHttps] = useState(false)
   const [displayPort, setServeDisplayPort] = useState(7788)
+  // Dynamic port
+  const [dynEnabled, setDynEnabled] = useState(false)
+  const [dynDomain, setDynDomain] = useState("")
+  const [dynPortRange, setDynPortRange] = useState("10000-20000")
+  const [dynUdpEnabled, setDynUdpEnabled] = useState(false)
+  const [dynStaticEnabled, setDynStaticEnabled] = useState(false)
+  // UI
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    getServeDomain().then((d) => {
+    getServeConfig().then((d) => {
+      setServeEnabled(d.serveEnabled)
       setDomainState(d.domain)
       setServeIp(d.ip)
       setServeBaseUrl(d.baseUrl)
       setServeWithPort(d.withPort ?? false)
       setServeHttps(d.https ?? false)
       setServeDisplayPort(d.displayPort ?? 7788)
+      setDynEnabled(d.serveDynamicEnabled)
+      setDynDomain(d.serveDynamicDomain)
+      setDynPortRange(d.serveDynamicPortRange)
+      setDynUdpEnabled(d.serveDynamicUdpEnabled)
+      setDynStaticEnabled(d.serveDynamicStaticEnabled)
     }).catch((e) => {
       setError(e?.message ?? "load failed")
     })
@@ -802,22 +817,34 @@ export function ServePanel() {
   async function handleSave() {
     setSaving(true); setError("")
     try {
-      const ok = await setServeDomain({
+      const ok = await setServeConfig({
+        serveEnabled,
         domain: domain.trim(),
         withPort,
         https,
         displayPort,
+        serveDynamicEnabled: dynEnabled,
+        serveDynamicDomain: dynDomain.trim(),
+        serveDynamicPortRange: dynPortRange.trim(),
+        serveDynamicUdpEnabled: dynUdpEnabled,
+        serveDynamicStaticEnabled: dynStaticEnabled,
       })
       if (!ok) { setError("save failed"); return }
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
-      const d = await getServeDomain()
+      const d = await getServeConfig()
+      setServeEnabled(d.serveEnabled)
       setDomainState(d.domain)
       setServeIp(d.ip)
       setServeBaseUrl(d.baseUrl)
       setServeWithPort(d.withPort)
       setServeHttps(d.https)
       setServeDisplayPort(d.displayPort)
+      setDynEnabled(d.serveDynamicEnabled)
+      setDynDomain(d.serveDynamicDomain)
+      setDynPortRange(d.serveDynamicPortRange)
+      setDynUdpEnabled(d.serveDynamicUdpEnabled)
+      setDynStaticEnabled(d.serveDynamicStaticEnabled)
     } catch (e: any) {
       setError(e?.message ?? "save failed")
     } finally {
@@ -826,50 +853,78 @@ export function ServePanel() {
   }
 
   return (
-    <div className="flex flex-col gap-4 min-h-full">
-      <div className="flex-1">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Domain Suffix</label>
-        <input
-          type="text"
-          value={domain}
-          onChange={(e) => setDomainState(e.target.value)}
-          placeholder="nip.io"
-          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Workspace sharing URLs: <code className="bg-gray-50 px-1 rounded">&lt;alias&gt;{baseUrl}</code>
-        </p>
-        <p className="text-xs text-gray-400 mt-1">
-          Only <code className="bg-gray-50 px-1 rounded">nip.io</code> requires IP prefix. Custom domains use direct subdomain.
-        </p>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <label className="flex items-center gap-2.5 text-sm text-gray-700">
-          <Switch checked={https} onCheckedChange={setServeHttps} size="sm" />
-          HTTPS
-        </label>
-        <label className="flex items-center gap-2.5 text-sm text-gray-700">
-          <Switch checked={withPort} onCheckedChange={setServeWithPort} size="sm" />
-          Show port in URL
-        </label>
-      </div>
-
-      {withPort && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Display Port</label>
-          <input
-            type="number"
-            value={displayPort}
-            onChange={(e) => setServeDisplayPort(parseInt(e.target.value, 10) || 7788)}
-            placeholder="7788"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900"
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Port shown in share URL (does not change actual server listen port).
-          </p>
+    <div className="flex flex-col gap-6 min-h-full">
+      {/* ── Standard Serve ── */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">Standard Serve</h3>
+          <Switch checked={serveEnabled} onCheckedChange={setServeEnabled} size="sm" />
         </div>
-      )}
+        <p className="text-xs text-gray-400 mb-3">
+          Subdomain-based sharing via <code className="bg-gray-50 px-1 rounded">alias.domain</code> URLs.
+        </p>
+
+        {serveEnabled && (
+          <div className="flex flex-col gap-3 pl-1">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Domain Suffix</label>
+              <input type="text" value={domain} onChange={(e) => setDomainState(e.target.value)} placeholder="nip.io" className={inputClass} />
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                URL: <code className="bg-gray-50 px-1 rounded">&lt;alias&gt;{baseUrl}</code>
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <Switch checked={https} onCheckedChange={setServeHttps} size="sm" /> HTTPS
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <Switch checked={withPort} onCheckedChange={setServeWithPort} size="sm" /> Show port in URL
+              </label>
+            </div>
+            {withPort && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Display Port</label>
+                <input type="number" value={displayPort} onChange={(e) => setServeDisplayPort(parseInt(e.target.value, 10) || 7788)} placeholder="7788" className={inputClass} />
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Dynamic Port ── */}
+      <section className="border-t border-gray-200 pt-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">Dynamic Port</h3>
+          <Switch checked={dynEnabled} onCheckedChange={setDynEnabled} size="sm" />
+        </div>
+        <p className="text-xs text-gray-400 mb-3">
+          Direct TCP/UDP port forwarding — no domain needed. Access via <code className="bg-gray-50 px-1 rounded">host:port</code>.
+        </p>
+
+        {dynEnabled && (
+          <div className="flex flex-col gap-3 pl-1">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Domain / IP (optional)</label>
+              <input type="text" value={dynDomain} onChange={(e) => setDynDomain(e.target.value)} placeholder={ip || "auto-detect IP"} className={inputClass} />
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Leave empty to auto-detect. Access URL: <code className="bg-gray-50 px-1 rounded">{(dynDomain || ip || "&lt;ip&gt;")}:&lt;external-port&gt;</code>
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Port Range</label>
+              <input type="text" value={dynPortRange} onChange={(e) => setDynPortRange(e.target.value)} placeholder="10000-20000" className={inputClass} />
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <Switch checked={dynUdpEnabled} onCheckedChange={setDynUdpEnabled} size="sm" /> Enable UDP
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-700">
+                <Switch checked={dynStaticEnabled} onCheckedChange={setDynStaticEnabled} size="sm" /> Enable static file serving
+              </label>
+            </div>
+          </div>
+        )}
+      </section>
 
       <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-200">
         {error && <span className="text-xs text-red-500">{error}</span>}

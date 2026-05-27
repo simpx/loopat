@@ -49,6 +49,7 @@ import {
   workspaceNotesDir,
   workspaceRepoDir,
   workspaceReposDir,
+  loopsDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
@@ -126,28 +127,42 @@ function getLocalIp(): string {
   return "127.0.0.1"
 }
 
-app.get("/api/serve/domain", requireAdmin, async (c) => {
+app.get("/api/serve/config", requireAdmin, async (c) => {
   const cfg = await loadConfig()
   const domain = cfg.serveDomain ?? "nip.io"
   const ip = getLocalIp()
   const isNip = domain === "nip.io"
   return c.json({
+    // Standard serve
+    serveEnabled: cfg.serveEnabled ?? true,
     domain,
     ip,
     baseUrl: isNip ? `.${ip}.${domain}` : `.${domain}`,
     withPort: cfg.serveWithPort ?? false,
     https: cfg.serveHttps ?? false,
     displayPort: cfg.serveDisplayPort ?? 7788,
+    // Dynamic port
+    serveDynamicEnabled: cfg.serveDynamicEnabled ?? false,
+    serveDynamicDomain: cfg.serveDynamicDomain ?? "",
+    serveDynamicPortRange: cfg.serveDynamicPortRange ?? "10000-20000",
+    serveDynamicUdpEnabled: cfg.serveDynamicUdpEnabled ?? false,
+    serveDynamicStaticEnabled: cfg.serveDynamicStaticEnabled ?? false,
   })
 })
 
-app.put("/api/serve/domain", requireAdmin, async (c) => {
+app.put("/api/serve/config", requireAdmin, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const patch: Record<string, unknown> = {}
   if (typeof body.domain === "string" && body.domain.trim()) patch.serveDomain = body.domain.trim()
   if (typeof body.withPort === "boolean") patch.serveWithPort = body.withPort
   if (typeof body.https === "boolean") patch.serveHttps = body.https
   if (typeof body.displayPort === "number") patch.serveDisplayPort = body.displayPort
+  if (typeof body.serveEnabled === "boolean") patch.serveEnabled = body.serveEnabled
+  if (typeof body.serveDynamicEnabled === "boolean") patch.serveDynamicEnabled = body.serveDynamicEnabled
+  if (typeof body.serveDynamicDomain === "string") patch.serveDynamicDomain = body.serveDynamicDomain.trim()
+  if (typeof body.serveDynamicPortRange === "string") patch.serveDynamicPortRange = body.serveDynamicPortRange.trim()
+  if (typeof body.serveDynamicUdpEnabled === "boolean") patch.serveDynamicUdpEnabled = body.serveDynamicUdpEnabled
+  if (typeof body.serveDynamicStaticEnabled === "boolean") patch.serveDynamicStaticEnabled = body.serveDynamicStaticEnabled
   if (Object.keys(patch).length === 0) return c.json({ error: "no fields to update" }, 400)
   await saveWorkspaceConfig(patch)
   return c.json({ ok: true })
@@ -167,6 +182,55 @@ app.get("/api/serve/alias-check", requireAuth, async (c) => {
       return c.json({ available: false, reason: "Already in use" })
     }
   }
+  return c.json({ available: true })
+})
+
+// Return a random unused port from the dynamic port range, or null if none available.
+app.get("/api/serve/available-port", requireAuth, async (c) => {
+  const cfg = await loadConfig()
+  const range = cfg.serveDynamicPortRange || "10000-20000"
+  const [lo, hi] = range.split("-").map(Number)
+  if (!lo || !hi || lo >= hi) return c.json({ port: null, error: "invalid port range" })
+
+  // Port-proxy maps the entire range — binding test would always fail.
+  // Just pick a port not already claimed by another ENABLED loop.
+  const used = new Set<number>()
+  try {
+    const all = await listLoops()
+    for (const loop of all) {
+      if (loop.shareEnabled && loop.shareExternalPort) used.add(loop.shareExternalPort)
+    }
+  } catch {}
+
+  for (let i = 0; i < 100; i++) {
+    const port = lo + Math.floor(Math.random() * (hi - lo + 1))
+    if (!used.has(port)) return c.json({ port })
+  }
+  return c.json({ port: null, error: "no available port in range" })
+})
+
+// Check if a specific port is available for use by a loop.
+app.get("/api/serve/check-port", requireAuth, async (c) => {
+  const port = parseInt(c.req.query("port") ?? "")
+  const loopId = (c.req.query("loopId") ?? "").trim()
+  if (!port || port < 1 || port > 65535) return c.json({ available: false, reason: "Invalid port" })
+
+  const cfg = await loadConfig()
+  const range = cfg.serveDynamicPortRange || "10000-20000"
+  const [lo, hi] = range.split("-").map(Number)
+  if (port < lo || port > hi) return c.json({ available: false, reason: `Port outside configured range (${range})` })
+
+  // Check if another ENABLED loop already claims this port
+  try {
+    const all = await listLoops()
+    for (const loop of all) {
+      if (loop.id === loopId) continue
+      if (loop.shareEnabled && loop.shareExternalPort === port) {
+        return c.json({ available: false, reason: `Port ${port} is already used by another loop` })
+      }
+    }
+  } catch {}
+
   return c.json({ available: true })
 })
 
@@ -923,7 +987,7 @@ app.get("/api/settings/token-usage/loops", requireAuth, async (c) => {
 
 // ── token usage recompute helpers ──
 
-import { readFile, appendFile, mkdir } from "node:fs/promises"
+import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises"
 
 type TokenUsageEntry = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }
 
@@ -1545,8 +1609,18 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   if (body.shareMode === "static" || body.shareMode === "port") patch.shareMode = body.shareMode
   if (typeof body.shareAlias === "string") patch.shareAlias = body.shareAlias.trim() || undefined
   if (typeof body.sharePort === "number") patch.sharePort = body.sharePort
+  if (typeof body.shareExternalPort === "number") patch.shareExternalPort = body.shareExternalPort
+  if (body.shareProtocol === "tcp" || body.shareProtocol === "udp" || body.shareProtocol === "static") patch.shareProtocol = body.shareProtocol
   if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
   const updated = await patchLoopMeta(id, patch)
+  // If share config changed, touch a trigger file so the port-proxy's
+  // inotify picks up the change immediately (no polling needed).
+  if ("shareEnabled" in patch || "shareExternalPort" in patch || "sharePort" in patch || "shareProtocol" in patch || "shareMode" in patch) {
+    try {
+      const trigger = pathJoin(loopsDir(), ".port-proxy-trigger")
+      await writeFile(trigger, String(Date.now())) // write ts to guarantee inotify Modify event
+    } catch {}
+  }
   // On archive: tear down the Claude SDK process and terminal PTY so no
   // orphaned processes linger. Un-archive is fine — next connect re-spawns.
   if (body.archived === true) {
@@ -2943,13 +3017,16 @@ if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfil
 
 // Probe podman availability up front so misconfigured hosts fail loudly on
 // boot rather than mid-session.
-import { probePodman, stopAllWorkspaceContainers, ensureServeContainer } from "./podman"
+import { probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer } from "./podman"
 const podmanProbe = await probePodman()
 if (podmanProbe.ok) {
   console.log(`[loopat] sandbox runtime: ${podmanProbe.version}`)
   // Start workspace serve in a container on the shared bridge network.
   ensureServeContainer().catch((e) => {
     console.warn(`[loopat] serve container failed: ${e?.message ?? e}`)
+  })
+  ensurePortProxyContainer().catch((e) => {
+    console.warn(`[loopat] port-proxy container failed: ${e?.message ?? e}`)
   })
 } else {
   console.warn(`[loopat] sandbox runtime: NOT AVAILABLE — ${podmanProbe.hint}`)

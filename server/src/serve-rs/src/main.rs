@@ -93,6 +93,12 @@ struct LoopMeta {
     share_alias: Option<String>,
     #[serde(rename = "sharePort")]
     share_port: Option<u16>,
+    #[serde(rename = "shareExternalPort")]
+    #[allow(dead_code)]
+    share_external_port: Option<u16>,
+    #[serde(rename = "shareProtocol", default)]
+    #[allow(dead_code)]
+    share_protocol: String,
 }
 
 fn load_meta(loop_id: &str) -> Option<LoopMeta> {

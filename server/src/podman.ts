@@ -728,13 +728,29 @@ export async function ensureLoopatNetwork(): Promise<void> {
 export async function ensureServeContainer(): Promise<void> {
   if (_serveReady) return _serveReady
   _serveReady = (async () => {
-    await ensureLoopatNetwork()
-    await ensureSandboxImage()
+    const cfg = await loadConfig()
+    const enabled = cfg.serveEnabled ?? true // default on for backward compat
 
+    // Check current container state
     const cur = await runPodman(
       ["inspect", "--format", "{{.State.Running}}", SERVE_CONTAINER],
       { allowFail: true },
     )
+
+    if (!enabled) {
+      // Disabled — stop and remove if exists
+      if (cur.code === 0) {
+        console.log(`[podman] serve disabled, removing serve container`)
+        await runPodman(["stop", "--time", "5", SERVE_CONTAINER], { allowFail: true })
+        await runPodman(["rm", "--force", SERVE_CONTAINER], { allowFail: true })
+      }
+      _serveReady = null
+      return
+    }
+
+    await ensureLoopatNetwork()
+    await ensureSandboxImage()
+
     if (cur.code === 0 && cur.stdout.trim() === "true") {
       _serveReady = null
       return
@@ -781,6 +797,139 @@ export async function ensureServeContainer(): Promise<void> {
     await _serveReady
   } finally {
     _serveReady = null
+  }
+}
+
+const PORT_PROXY_CONTAINER = `loopat-${WORKSPACE}-port-proxy`
+
+let _portProxyReady: Promise<void> | null = null
+
+/** Find occupied TCP ports in a range using lsof. */
+function findOccupiedPorts(lo: number, hi: number): Set<number> {
+  const ports = new Set<number>()
+  try {
+    const { execSync } = require("node:child_process")
+    const out = execSync("lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null", { encoding: "utf8", timeout: 3000 }) as string
+    for (const line of out.split("\n")) {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length < 9) continue
+      const addr = parts[8] // e.g. "127.0.0.1:8080" or "*:8080"
+      const colonIdx = addr.lastIndexOf(":")
+      if (colonIdx === -1) continue
+      const port = Number(addr.slice(colonIdx + 1))
+      if (port >= lo && port <= hi) ports.add(port)
+    }
+  } catch {}
+  return ports
+}
+
+/** Build port-proxy create args, excluding occupiedPorts from the -p range. */
+function buildPortProxyCreateArgs(binary: string, portRange: string, occupiedPorts: Set<number>): string[] {
+  const [lo, hi] = portRange.split("-").map(Number)
+  const publishArgs: string[] = []
+  for (let p = lo; p <= hi; p++) {
+    if (!occupiedPorts.has(p)) {
+      publishArgs.push("-p", `0.0.0.0:${p}:${p}`)
+    }
+  }
+  return [
+    "--name", PORT_PROXY_CONTAINER,
+    "--network", LOOPAT_NETWORK,
+    "--hostname", "loopat-port-proxy",
+    "--volume", `${loopsDir()}:/loopat/loops:ro`,
+    "--volume", `${binary}:/usr/local/bin/loopat-port-proxy:ro`,
+    ...publishArgs,
+    "-e", `LOOPAT_WORKSPACE=${WORKSPACE}`,
+    "-e", `LOOPAT_LOOPS_DIR=/loopat/loops`,
+    "--init",
+    SANDBOX_IMAGE,
+    "/usr/local/bin/loopat-port-proxy",
+  ]
+}
+
+/** Ensure the port-proxy container is running for direct TCP/UDP forwarding. */
+export async function ensurePortProxyContainer(): Promise<void> {
+  if (_portProxyReady) return _portProxyReady
+  _portProxyReady = (async () => {
+    const cfg = await loadConfig()
+    const enabled = cfg.serveDynamicEnabled ?? false
+    const portRange = cfg.serveDynamicPortRange || (process.env.LOOPAT_EXTERNAL_PORT_RANGE ?? "10000-20000")
+
+    const cur = await runPodman(
+      ["inspect", "--format", "{{.State.Running}}", PORT_PROXY_CONTAINER],
+      { allowFail: true },
+    )
+
+    if (!enabled) {
+      if (cur.code === 0) {
+        console.log(`[podman] dynamic port disabled, removing port-proxy container`)
+        await runPodman(["stop", "--time", "5", PORT_PROXY_CONTAINER], { allowFail: true })
+        await runPodman(["rm", "--force", PORT_PROXY_CONTAINER], { allowFail: true })
+      }
+      _portProxyReady = null
+      return
+    }
+
+    await ensureLoopatNetwork()
+    await ensureSandboxImage()
+
+    if (cur.code === 0 && cur.stdout.trim() === "true") {
+      _portProxyReady = null
+      return
+    }
+
+    if (cur.code === 0) {
+      // Exists but not running. Try start first, but if it fails with a
+      // port conflict, fall through to recreate without occupied ports.
+      const startR = await runPodman(["start", PORT_PROXY_CONTAINER], { allowFail: true })
+      if (startR.code === 0) {
+        _portProxyReady = null
+        return
+      }
+      if (/(bind|address already in use|rootlessport)/i.test(startR.stderr + startR.stdout)) {
+        console.log(`[podman] existing port-proxy container has port conflicts — recreating`)
+        await runPodman(["rm", "--force", PORT_PROXY_CONTAINER], { allowFail: true })
+      } else {
+        _portProxyReady = null
+        throw new Error(`port-proxy start failed: ${startR.stderr || startR.stdout}`)
+      }
+    }
+
+    const binary = join(LOOPAT_INSTALL_DIR, "server", "src", "port-proxy-rs", "target", "release", "loopat-port-proxy")
+    if (!existsSync(binary)) {
+      _portProxyReady = null
+      throw new Error(`port-proxy binary not found at ${binary}. Run: cd server/src/port-proxy-rs && cargo build --release`)
+    }
+
+    // Use lsof to find ports already in use, then exclude them from -p.
+    // The port-proxy inside uses inotify for dynamic listener lifecycle —
+    // no container restart needed when shareExternalPort configs change.
+    const [lo, hi] = portRange.split("-").map(Number)
+    if (!lo || !hi || lo >= hi) {
+      _portProxyReady = null
+      throw new Error(`invalid port range: ${portRange}`)
+    }
+    const occupied = findOccupiedPorts(lo, hi)
+    if (occupied.size > 0) console.log(`[podman] ${occupied.size} port(s) in ${portRange} already in use — skipping`)
+
+    const args = buildPortProxyCreateArgs(binary, portRange, occupied)
+    const createR = await runPodman(["create", ...args])
+    if (createR.code !== 0) {
+      _portProxyReady = null
+      throw new Error(`port-proxy container create failed: ${createR.stderr}`)
+    }
+    const startR = await runPodman(["start", PORT_PROXY_CONTAINER])
+    if (startR.code !== 0) {
+      _portProxyReady = null
+      throw new Error(`port-proxy start failed: ${startR.stderr}`)
+    }
+    const mapped = (hi - lo + 1) - occupied.size
+    console.log(`[podman] port-proxy container ready (${mapped} ports in ${portRange})`)
+  })()
+  try {
+    await _portProxyReady
+  } finally {
+    _portProxyReady = null
   }
 }
 

@@ -144,6 +144,18 @@ export type WorkspaceConfig = {
   serveHttps?: boolean
   /** Custom port to show in share URL (does not affect actual server listen port). */
   serveDisplayPort?: number
+  /** Enable standard serve (subdomain-based, serve-rs). */
+  serveEnabled?: boolean
+  /** Enable dynamic port forwarding (port-proxy). */
+  serveDynamicEnabled?: boolean
+  /** Domain or IP for dynamic port access URLs (empty = auto-detect IP). */
+  serveDynamicDomain?: string
+  /** Port range for dynamic port forwarding (e.g., "10000-20000"). */
+  serveDynamicPortRange?: string
+  /** Whether to allow UDP protocol in dynamic port forwarding. */
+  serveDynamicUdpEnabled?: boolean
+  /** Whether dynamic ports can serve static files from workdir. */
+  serveDynamicStaticEnabled?: boolean
   /** Admin-managed presets for quick-add in provider/mise tool configs. */
   presets?: PresetsData
 }
@@ -747,6 +759,12 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   if (cfg.serveWithPort !== undefined) merged.serveWithPort = cfg.serveWithPort
   if (cfg.serveHttps !== undefined) merged.serveHttps = cfg.serveHttps
   if (cfg.serveDisplayPort !== undefined) merged.serveDisplayPort = cfg.serveDisplayPort
+  if (cfg.serveEnabled !== undefined) merged.serveEnabled = cfg.serveEnabled
+  if (cfg.serveDynamicEnabled !== undefined) merged.serveDynamicEnabled = cfg.serveDynamicEnabled
+  if (cfg.serveDynamicDomain !== undefined) merged.serveDynamicDomain = cfg.serveDynamicDomain
+  if (cfg.serveDynamicPortRange !== undefined) merged.serveDynamicPortRange = cfg.serveDynamicPortRange
+  if (cfg.serveDynamicUdpEnabled !== undefined) merged.serveDynamicUdpEnabled = cfg.serveDynamicUdpEnabled
+  if (cfg.serveDynamicStaticEnabled !== undefined) merged.serveDynamicStaticEnabled = cfg.serveDynamicStaticEnabled
   if (cfg.presets !== undefined) merged.presets = cfg.presets
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
