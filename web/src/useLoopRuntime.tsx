@@ -488,9 +488,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   const wsRef = useRef<WebSocket | null>(null)
   // v1 SSE subscription for live SDK messages (parallel to WS). The WS keeps
   // delivering history + initial state + operator-feature broadcasts; v1 SSE
-  // delivers the same live SDK events via `sdk_message` pass-through. Dedupe
-  // by uuid (see seenUuidsRef) so we don't double-dispatch.
-  const sseRef = useRef<EventSource | null>(null)
   const seenUuidsRef = useRef<Set<string>>(new Set())
   // Ref (not state) so ws.onmessage closure sees fresh value without
   // re-attaching the handler. Only the gating logic inside onmessage reads it.
@@ -1339,26 +1336,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         dispatchMsg(m)
       }
 
-      // ── v1 SSE: parallel live channel ──
-      // EventSource auto-reconnects + uses cookie auth (no Bearer needed for
-      // the web origin). Live SDK messages come in via `sdk_message` events;
-      // dispatchMsg dedupes by uuid, so WS + SSE double-delivery is safe.
-      try {
-        if (sseRef.current) sseRef.current.close()
-        const sse = new EventSource(`/api/v1/loops/loop_${loopId}/events`)
-        sseRef.current = sse
-        sse.addEventListener("sdk_message", (ev) => {
-          try {
-            const m = JSON.parse((ev as MessageEvent).data)
-            dispatchMsg(m)
-          } catch {}
-        })
-        // Bot-facing v1 events (assistant_delta, requires_choice, done, ...)
-        // carry the same content the SDK pass-through delivers, so we ignore
-        // them on the web side to avoid double-counting.
-      } catch (e) {
-        console.warn("[useLoopRuntime] failed to open v1 SSE:", e)
-      }
     }
 
     connect()
@@ -1383,10 +1360,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         }
       }
       wsRef.current = null
-      if (sseRef.current) {
-        sseRef.current.close()
-        sseRef.current = null
-      }
       setReconnecting(false)
       attemptsRef.current = 0
     }
