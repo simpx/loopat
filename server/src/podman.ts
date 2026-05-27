@@ -514,20 +514,22 @@ type ContainerInspectRow = {
   exists: boolean
   running: boolean
   configHash?: string
+  imageId?: string
 }
 
 async function inspectContainer(loopId: string): Promise<ContainerInspectRow> {
   const name = containerName(loopId)
   const r = await runPodman(
-    ["inspect", "--format", "{{.State.Running}}|{{index .Config.Labels \"" + LABEL_CONFIG_HASH + "\"}}", name],
+    ["inspect", "--format", "{{.State.Running}}|{{index .Config.Labels \"" + LABEL_CONFIG_HASH + "\"}}|{{.Image}}", name],
     { allowFail: true },
   )
   if (r.code !== 0) return { exists: false, running: false }
-  const [running, configHash] = r.stdout.trim().split("|")
+  const [running, configHash, imageId] = r.stdout.trim().split("|")
   return {
     exists: true,
     running: running === "true",
     configHash: configHash === "<no value>" || configHash === "" ? undefined : configHash,
+    imageId: imageId === "<no value>" || imageId === "" ? undefined : imageId,
   }
 }
 
@@ -567,16 +569,22 @@ export async function ensureContainer(opts: ContainerOptions): Promise<void> {
   )
   const desiredHash = hashIdx >= 0 ? createArgs[hashIdx].split("=")[1] : ""
 
+  // Include image ID in the drift check so a rebuilt image (e.g. tmux added
+  // to Containerfile) triggers container recreation even when the config hash
+  // hasn't changed.
+  const curImageId = (await runPodman(["image", "inspect", "--format", "{{.Id}}", SANDBOX_IMAGE])).stdout.trim()
+
   const cur = await inspectContainer(opts.loopId)
-  if (cur.running && cur.configHash === desiredHash) return
+  if (cur.running && cur.configHash === desiredHash && cur.imageId === curImageId) return
   const tag = opts.loopId.slice(0, 8)
   if (cur.exists) {
-    if (cur.configHash !== desiredHash) {
-      // Spec drift — container has to be torn down and recreated. This kills
-      // any process exec'd into the old container (PTY shells, an active
-      // claude CLI). Log loudly so the cause is obvious if the user reports
-      // "my terminal disconnected when I sent a chat".
-      console.warn(`[podman:${tag}] config hash drift (${cur.configHash} → ${desiredHash}) — recreating container; any in-flight exec'd processes will be killed`)
+    if (cur.configHash !== desiredHash || cur.imageId !== curImageId) {
+      // Spec or image drift — container has to be torn down and recreated.
+      // This kills any process exec'd into the old container (PTY shells, an
+      // active claude CLI). Log loudly so the cause is obvious if the user
+      // reports "my terminal disconnected when I sent a chat".
+      const reason = cur.configHash !== desiredHash ? "config hash drift" : "image drift (rebuilt)"
+      console.warn(`[podman:${tag}] ${reason} — recreating container; any in-flight exec'd processes will be killed`)
       if (cur.running) await runPodman(["stop", "--time", "5", containerName(opts.loopId)])
       await runPodman(["rm", "--force", containerName(opts.loopId)])
     } else {

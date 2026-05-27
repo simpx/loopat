@@ -31,11 +31,6 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
   const tag = loopId.slice(0, 8)
   const p = (async () => {
-    // The PTY is a `podman exec -it` into the same per-loop container the
-    // SDK driver uses (session.ts). Both `ensureContainer` calls are
-    // idempotent — first caller creates the container, second sees it
-    // already running. That's how SDK and PTY end up sharing the same
-    // PID / Mount / Net namespace.
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const driver = effectiveDriver(meta)
@@ -61,8 +56,6 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     await mkdir(fishRuntime, { recursive: true })
     await chmod(fishRuntime, 0o700).catch(() => {})
 
-    // Ensure the per-loop container is up. If the SDK side already brought it
-    // up, this is a no-op (idempotent).
     await ensureContainer({
       loopId,
       createdBy: driver,
@@ -71,15 +64,12 @@ async function getOrSpawn(loopId: string): Promise<Term> {
       mountAllLoops: meta.config?.mount_all_loops,
       extraEnv: personalCfg.vaultEnvs,
     })
-    // Tell the container lifecycle scheduler that PTY is an active source.
-    // Released in killTerm / detachTerm's last-subscriber branch below.
     markActive(loopId, "pty")
 
     const podmanArgs = buildPodmanExecArgs({
       loopId,
       command: "/bin/bash",
       args: ["-c", innerCmd],
-      // Vault envs go first; platform-managed vars (TERM, XDG_*) override.
       env: {
         ...personalCfg.vaultEnvs,
         TERM: "xterm-256color",
@@ -92,7 +82,7 @@ async function getOrSpawn(loopId: string): Promise<Term> {
     })
 
     const binary = process.env.LOOPAT_PODMAN_BIN || "podman"
-    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length} profiles=${meta.config?.profiles?.join(",") ?? "<none>"}`)
+    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length}`)
     const proc = spawn(binary, podmanArgs, {
       name: "xterm-256color",
       cols: 80,
@@ -110,15 +100,10 @@ async function getOrSpawn(loopId: string): Promise<Term> {
         t.scrollbackBytes -= dropped.length
       }
       for (const ws of t.subscribers) {
-        try {
-          ws.send(JSON.stringify({ type: "data", data: chunk }))
-        } catch {}
+        try { ws.send(JSON.stringify({ type: "data", data: chunk })) } catch {}
       }
     })
     proc.onExit(({ exitCode }) => {
-      // podman exec nonzero exit usually means: container died, exec command
-      // failed, signal received. Surface in server log + scrollback so the
-      // user can debug without grepping. Zero exit = normal shell quit.
       if (exitCode !== 0) {
         const trailing = t.scrollback.join("").slice(-400)
         console.error(`[term:${tag}] podman exit=${exitCode}; last 400 bytes of pty output:\n${trailing}`)
@@ -148,12 +133,8 @@ async function getOrSpawn(loopId: string): Promise<Term> {
 
 export async function attachTerm(loopId: string, ws: WSContext) {
   const t = await getOrSpawn(loopId)
-  // Replay scrollback BEFORE adding to subscribers so the new viewer sees the
-  // initial prompt + prior output exactly once (live chunks come after).
   for (const chunk of t.scrollback) {
-    try {
-      ws.send(JSON.stringify({ type: "data", data: chunk }))
-    } catch {}
+    try { ws.send(JSON.stringify({ type: "data", data: chunk })) } catch {}
   }
   t.subscribers.add(ws)
 }
@@ -163,12 +144,8 @@ export function detachTerm(loopId: string, ws: WSContext) {
   if (!t) return
   t.subscribers.delete(ws)
   if (t.subscribers.size === 0) {
-    try {
-      t.proc.kill()
-    } catch {}
+    try { t.proc.kill() } catch {}
     terms.delete(loopId)
-    // Release the PTY source — the container will be idle-stopped after the
-    // configured window unless something else keeps it active.
     markInactive(loopId, "pty")
   }
 }
@@ -182,9 +159,7 @@ export function writeTerm(loopId: string, data: string) {
 export function resizeTerm(loopId: string, cols: number, rows: number) {
   const t = terms.get(loopId)
   if (!t) return
-  try {
-    t.proc.resize(cols, rows)
-  } catch {}
+  try { t.proc.resize(cols, rows) } catch {}
 }
 
 /** Force-kill a loop's terminal PTY process and disconnect all subscribers.
