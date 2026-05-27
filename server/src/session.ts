@@ -15,7 +15,15 @@ import { spawn as nodeSpawn } from "node:child_process"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus } from "./loop-status"
 
-const CLAUDE_BINARY = resolveClaudeBinary()
+// Tests override LOOPAT_CLAUDE_BIN to point at a mock binary (a script that
+// reads stream-json from stdin and writes canned messages back) so we can
+// exercise the full chat pipeline without burning real API credits.
+// Resolved lazily — each spawn re-reads the env var so the full-suite test
+// run, where module load order isn't guaranteed, sees the test's override
+// even if session.ts was imported earlier with the env var unset.
+function getClaudeBinary(): string {
+  return process.env.LOOPAT_CLAUDE_BIN || resolveClaudeBinary()
+}
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
 
 function parseSkillDescription(content: string): string | undefined {
@@ -474,11 +482,12 @@ class LoopSession {
     // Tell the container lifecycle scheduler that this loop has an active
     // SDK source. Released in destroy() via markInactive(loopId, "sdk").
     markActive(loopId, "sdk")
+    const claudeBinary = getClaudeBinary()
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
       console.error(`[sdk:${tag}] config: provider=${providerName} model=${activeModel?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
-      console.error(`[sdk:${tag}] config: binary=${CLAUDE_BINARY}`)
+      console.error(`[sdk:${tag}] config: binary=${claudeBinary}`)
     }
 
     this.q = query({
@@ -505,7 +514,7 @@ class LoopSession {
         // LOOPAT_INSTALL_DIR (not in CC's plugin cache).
         plugins: [{ type: "local" as const, path: BUILTIN_LOOPAT_PLUGIN_PATH }],
         stderr: (s) => console.error(`[sdk:${loopId.slice(0, 8)}] ${s.trimEnd()}`),
-        pathToClaudeCodeExecutable: CLAUDE_BINARY,
+        pathToClaudeCodeExecutable: claudeBinary,
         canUseTool: async (toolName, input, { toolUseID, signal, title, displayName }) => {
           // ── AskUserQuestion: always broadcast to frontend ──
           if (toolName === "AskUserQuestion") {

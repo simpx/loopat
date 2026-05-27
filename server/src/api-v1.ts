@@ -522,13 +522,23 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
 
       const unsubscribe = session.onMessage((msg) => {
         if (closed) return
+        // Gather every emit() promise for this message — when a terminal
+        // event (done/interrupted/error) arrives, we MUST wait for all
+        // SSE writes from the SAME batch to flush before calling
+        // finishStream(). Otherwise streamSSE's finally{stream.close()}
+        // races the pending writeSSE, and the client never sees `done`.
+        const pending: Promise<void>[] = []
         const raw = sdkPassthrough(msg)
-        if (raw) emit(raw).catch(() => {})
+        if (raw) pending.push(emit(raw).catch(() => {}))
+        let terminal = false
         for (const ev of mapSdkMessageToV1(msg, runtime)) {
-          emit(ev).catch(() => {})
+          pending.push(emit(ev).catch(() => {}))
           if (ev.event === "done" || ev.event === "interrupted" || ev.event === "error") {
-            finishStream()
+            terminal = true
           }
+        }
+        if (terminal) {
+          Promise.all(pending).finally(() => finishStream())
         }
       })
 
