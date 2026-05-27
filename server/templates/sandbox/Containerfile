@@ -36,18 +36,53 @@ RUN userdel -r ubuntu 2>/dev/null || true \
  && useradd -m -u 2000 -g 2000 -s /bin/bash loopat
 
 # Full-stack system layer. Everything a dev reflexively reaches for.
+# podman/uidmap/fuse-overlayfs/slirp4netns: nested rootless podman support
+# — every sandbox can run podman without per-loop opt-in. The sandbox's
+# create-args carry `--privileged --device /dev/fuse`, and inner loopat
+# (or any AI workflow) probes for podman at runtime via the existing
+# self-detection path.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         bash coreutils findutils grep sed less \
         util-linux procps bsdmainutils ca-certificates \
         sudo curl git build-essential openssh-client \
         jq vim fish python3-minimal \
+        podman uidmap fuse-overlayfs slirp4netns \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
 # Passwordless sudo for the loopat user.
 RUN echo "loopat ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat \
  && chmod 0440 /etc/sudoers.d/loopat
+
+# Nested rootless podman setup for `loopat` (uid 2000).
+#
+# Why the unusual subuid range (10000:50000, not the typical 100000:65536):
+# the OUTER container's userns size is bounded by the host user's subuid
+# allocation (typically 65536). With `--userns=keep-id:uid=2000,gid=2000`,
+# uids 0..65535 are mapped inside; uid 100000 simply doesn't exist in
+# this namespace, so newuidmap rejects it. Inner subuid must be a SUBSET
+# of the outer-mapped range. 10000:50000 stays within 0..65535 and avoids
+# clashing with uid 2000 (loopat itself).
+#
+# Storage driver `vfs`: rootless-in-rootless overlayfs is fragile across
+# kernel/podman/storage combinations. vfs always works (cost: disk space
+# proportional to layers × containers). Switch to fuse-overlayfs later if
+# disk pressure shows up.
+#
+# Cgroup manager `cgroupfs`: there's no systemd inside the sandbox, so
+# the systemd cgroup driver can't be used.
+# NOTE on `>`: Ubuntu's useradd auto-allocates `loopat:100000:65536` via
+# /etc/login.defs defaults. Appending our entry leaves both, and rootless
+# podman tries to apply BOTH ranges — the 100000 one falls outside outer's
+# 0..65535 view and newuidmap fails. Overwrite, don't append.
+RUN echo "loopat:10000:50000" > /etc/subuid \
+ && echo "loopat:10000:50000" > /etc/subgid \
+ && mkdir -p /home/loopat/.config/containers \
+ && printf '[storage]\ndriver = "vfs"\n' > /home/loopat/.config/containers/storage.conf \
+ && printf '[containers]\ncgroup_manager = "cgroupfs"\n' > /home/loopat/.config/containers/containers.conf \
+ && printf 'unqualified-search-registries = ["docker.io"]\n' > /home/loopat/.config/containers/registries.conf \
+ && chown -R loopat:loopat /home/loopat/.config
 
 # mise — tool version manager. Per-loop child images bake their tools via
 # `mise install` during their build, so the toolchain ends up baked into

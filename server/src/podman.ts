@@ -329,6 +329,17 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     "--userns", "keep-id:uid=2000,gid=2000",
     // Init reaps zombies from orphaned bg processes.
     "--init",
+    // Nested rootless podman: every sandbox can run podman without a
+    // per-loop opt-in. --privileged is the only sustainable choice — a
+    // precise cap set ends up chasing one new boundary per podman release
+    // (NET_RAW for slirp, unmask for ro sysctls, ...). Tradeoff: outer
+    // container loses kernel isolation, but the userns + bind-mount
+    // boundary (uid 2000 ↔ host caller via keep-id) still constrains
+    // host damage. Sandbox doctrine here is "containerized dev env",
+    // not "untrusted-code prison". /dev/fuse is for the future switch
+    // to fuse-overlayfs storage if vfs ever bites on disk pressure.
+    "--privileged",
+    "--device", "/dev/fuse",
     // Shared bridge network so the serve container can reach loop
     // containers by name (aardvark-dns). Outbound API calls via NAT.
     "--network", "loopat",
