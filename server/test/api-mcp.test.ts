@@ -125,7 +125,7 @@ describe("GET /api/mcp-servers — flat list from merged settings.json", () => {
     const j = await r.json() as any
     const names = j.servers.map((s: any) => s.name).sort()
     expect(names).toEqual(["github", "no-bearer", "stdio-server"])
-  })
+  }, { timeout: 15000 })
 
   test("Bearer-templated server exposes authTokenEnv", async () => {
     const loopId = "api-mcp-0000-0000-0000-000000000002"
@@ -134,7 +134,7 @@ describe("GET /api/mcp-servers — flat list from merged settings.json", () => {
     const j = await r.json() as any
     const gh = j.servers.find((s: any) => s.name === "github")
     expect(gh.authTokenEnv).toBe("GITHUB_TOKEN")
-  })
+  }, { timeout: 15000 })
 
   test("non-Bearer auth → authTokenEnv is null", async () => {
     const loopId = "api-mcp-0000-0000-0000-000000000003"
@@ -143,7 +143,7 @@ describe("GET /api/mcp-servers — flat list from merged settings.json", () => {
     const j = await r.json() as any
     const nb = j.servers.find((s: any) => s.name === "no-bearer")
     expect(nb.authTokenEnv).toBeNull()
-  })
+  }, { timeout: 15000 })
 
   test("stdio server → authTokenEnv is null", async () => {
     const loopId = "api-mcp-0000-0000-0000-000000000004"

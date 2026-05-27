@@ -2630,14 +2630,12 @@ app.get(
     // larger terminal, which misplaces the cursor.
     const qCols = parseInt(c.req.query("cols") || "0")
     const qRows = parseInt(c.req.query("rows") || "0")
-    console.error(`[term:${id.slice(0, 8)}] ws urlParams cols=${qCols}x${qRows}`)
     let attachedTerm: any = null
     return {
       async onOpen(_e, ws) {
         attachedTerm = ws
         try {
           if (qCols > 0 && qRows > 0) {
-            console.error(`[term:${id.slice(0, 8)}] ws init-size ${qCols}x${qRows}`)
             await attachTerm(id, ws, qCols, qRows)
           } else {
             await attachTerm(id, ws)

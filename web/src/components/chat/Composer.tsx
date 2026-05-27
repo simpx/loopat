@@ -48,11 +48,6 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
   const [addedFiles, setAddedFiles] = useState<string[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
 
-  // Debug: log pickedFile changes
-  useEffect(() => {
-    console.log(`%c[Composer] %cpickedFile: %c${pickedFile || "(none)"} %csel: %c${editorSelection ? `${editorSelection.from}-${editorSelection.to}` : "none"}`, "color:#98c379", "color:#666", "color:#61afef", "color:#666", "color:#e5c07b")
-  }, [pickedFile, editorSelection?.from, editorSelection?.to])
-
   const allFileRefs = [
     ...(includeEditorFile && pickedFile ? [pickedFile] : []),
     ...addedFiles,

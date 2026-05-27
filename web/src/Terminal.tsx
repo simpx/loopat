@@ -160,10 +160,8 @@ export function Terminal({
       try {
         fit.fit()
         if (!connected) {
-          console.log(`[term] onResize cols=${term.cols}x${term.rows} connected=${connected}`)
           if (term.cols < 10) return
           connected = true
-          console.log(`[term] → connect() url cols=${term.cols}x${term.rows}`)
           connect()
         } else {
           sendResize()

@@ -31,9 +31,13 @@ let SESSION_A = ""
 let SESSION_B = ""
 let TOKEN_A = ""
 
+async function ensureUser(id: string, opts: { password: string, role: string, status: string }) {
+  try { await createUser({ id, ...opts }) } catch {}
+}
+
 beforeAll(async () => {
-  await createUser({ id: USER_A, password: "pw", role: "admin", status: "active" })
-  await createUser({ id: USER_B, password: "pw", role: "member", status: "active" })
+  await ensureUser(USER_A, { password: "pw", role: "admin", status: "active" })
+  await ensureUser(USER_B, { password: "pw", role: "member", status: "active" })
   SESSION_A = createSession(USER_A)
   SESSION_B = createSession(USER_B)
   _resetCache()

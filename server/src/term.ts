@@ -82,7 +82,7 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     })
 
     const binary = process.env.LOOPAT_PODMAN_BIN || "podman"
-    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length} cols=${initCols}x${initRows}`)
+    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length}`)
     const proc = spawn(binary, podmanArgs, {
       name: "xterm-256color",
       cols: initCols,
@@ -132,14 +132,12 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
 }
 
 export async function attachTerm(loopId: string, ws: WSContext, initCols = 80, initRows = 24) {
-  const t8 = loopId.slice(0, 8)
   const t = await getOrSpawn(loopId, initCols, initRows)
   // Don't replay scrollback — accumulated output from SIGWINCH redraws and
   // prior connections causes duplicated prompt text. Instead trigger a
   // fresh screen redraw via ^L (clear-screen in readline). The PTY is
   // already at the correct size from initCols/initRows.
   t.subscribers.add(ws)
-  console.error(`[term:${t8}] attach: subs=${t.subscribers.size} scrollback=${t.scrollback.length} chunks (not replayed)`)
   t.proc.write("\x0c")
 }
 
@@ -161,10 +159,8 @@ export function writeTerm(loopId: string, data: string) {
 }
 
 export function resizeTerm(loopId: string, cols: number, rows: number) {
-  const t8 = loopId.slice(0, 8)
   const t = terms.get(loopId)
-  if (!t) { console.error(`[term:${t8}] resize: no term (${cols}x${rows})`); return }
-  console.error(`[term:${t8}] resize: ${cols}x${rows}`)
+  if (!t) return
   try { t.proc.resize(cols, rows) } catch {}
 }
 
