@@ -996,7 +996,7 @@ function RightPanel({
       <Suspense fallback={<div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Loading...</div>}>
         {mode === "editor" && <Editor loopId={loopId} path={pickedFile} onSelectionChange={onEditorSelection} />}
         {mode === "terminal" && (
-          <div className="flex-1 min-h-0 bg-[#1a1c20] overflow-auto">
+          <div className="flex-1 min-h-0 bg-[#1a1c20] overflow-hidden">
             <Terminal loopId={loopId} currentUserId={currentUserId} />
           </div>
         )}
@@ -1004,20 +1004,20 @@ function RightPanel({
     </aside>
   )
 
-  if (isMobile) {
-    return (
-      <div className="fixed inset-0 z-40">
-        {panel}
-      </div>
-    )
-  }
-
   if (isFullscreen) {
     return createPortal(
       <div className="fixed inset-0 z-50 flex flex-col">
         {panel}
       </div>,
       document.body,
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-40 flex flex-col">
+        {panel}
+      </div>
     )
   }
 
