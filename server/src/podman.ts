@@ -93,6 +93,17 @@ const LABEL_CONFIG_HASH = "loopat.config-hash"
 // server/templates/sandbox/Containerfile via ensureSandboxImage().
 export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || "loopat-sandbox:latest"
 
+// ── Pod mode ──────────────────────────────────────────────────────
+const NETWORK_MODE = (process.env.LOOPAT_NETWORK_MODE ?? "bridge") as "bridge" | "host"
+const POD_MODE = process.env.LOOPAT_POD_MODE === "true"
+
+function isPodMode() { return POD_MODE }
+
+/** Pod name for a loop sandbox. Bridge network resolves this as DNS hostname. */
+function loopPodName(loopId: string): string {
+  return `loopat-${WORKSPACE}-loop-${loopId.slice(0, 8)}`
+}
+
 // Container name: prefix with workspace to avoid collisions between loopat
 // instances running on the same host with different LOOPAT_HOME. Loop UUIDs
 // are already globally unique; the prefix is for human grep.
@@ -315,44 +326,23 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
   const home = homedir()
 
   const args: string[] = [
-    "--name", containerName(opts.loopId),
     "--label", `${LABEL_LOOP}=${opts.loopId}`,
     "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`,
-    // --userns=keep-id:uid=2000,gid=2000 maps whatever uid is running
-    // podman on the host → fixed container uid 2000. The image places
-    // the `loopat` user at uid 2000, so `whoami` inside is always
-    // "loopat" regardless of which host user owns the rootless daemon.
-    //
-    // File ownership across the boundary: container loopat ↔ host caller.
-    // Files we write through bind mounts are owned by the host user (the
-    // person who launched loopat), so they can manage them normally.
-    //
-    // Why not "USER root" instead: claude CLI refuses to run with
-    // --dangerously-skip-permissions when uid == 0. loopat sandboxes use
-    // bypassPermissions by default, so container-root is untenable for
-    // the SDK driver.
-    "--userns", "keep-id:uid=2000,gid=2000",
-    // Init reaps zombies from orphaned bg processes.
     "--init",
-    // Nested rootless podman: every sandbox can run podman without a
-    // per-loop opt-in. --privileged is the only sustainable choice — a
-    // precise cap set ends up chasing one new boundary per podman release
-    // (NET_RAW for slirp, unmask for ro sysctls, ...). Tradeoff: outer
-    // container loses kernel isolation, but the userns + bind-mount
-    // boundary (uid 2000 ↔ host caller via keep-id) still constrains
-    // host damage. Sandbox doctrine here is "containerized dev env",
-    // not "untrusted-code prison". /dev/fuse is for the future switch
-    // to fuse-overlayfs storage if vfs ever bites on disk pressure.
     "--privileged",
     "--device", "/dev/fuse",
-    // Shared bridge network so the serve container can reach loop
-    // containers by name (aardvark-dns). Outbound API calls via NAT.
-    "--network", "loopat",
-    "--hostname", `loop-${opts.loopId.slice(0, 8)}`,
-    // Container cwd at creation; per-exec we override with -w.
     "--workdir", V_LOOP_WORKDIR(opts.loopId),
-    // No interactive stdin / tty on the main process — it's just a sleeper.
   ]
+
+  if (isPodMode()) {
+    args.push("--pod", loopPodName(opts.loopId))
+    args.push("--name", `${loopPodName(opts.loopId)}-sandbox`)
+  } else {
+    args.push("--name", containerName(opts.loopId))
+    args.push("--userns", "keep-id:uid=2000,gid=2000")
+    args.push("--network", "loopat")
+    args.push("--hostname", `loop-${opts.loopId.slice(0, 8)}`)
+  }
 
   // Volumes.
   for (const m of mounts) {
@@ -366,12 +356,12 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
 
   // Ephemeral port publish. `-p :<inner>` tells podman to ask the kernel
   // for any free host port; query `podman port` after start to learn
-  // which one. Different from the port-proxy path (which publishes the
-  // whole range up front from a separate container) — here each loop
-  // container directly owns its share port mapping.
+  // which one. In host mode, bind to 127.0.0.1 to keep server pod's
+  // localhost path working.
   for (const ep of opts.ephemeralPorts ?? []) {
     const proto = ep.protocol === "udp" ? "/udp" : ""
-    args.push("-p", `:${ep.internalPort}${proto}`)
+    const bind = NETWORK_MODE === "host" ? "127.0.0.1::" : ":"
+    args.push("-p", `${bind}${ep.internalPort}${proto}`)
   }
 
   // Config hash. Covers mounts + opts but NOT env — see hashCreateArgs
@@ -544,9 +534,10 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
     const buildDir = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox")
     let lastStep = ""
     const r = await runPodman(
-      ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "-f", containerfile, buildDir],
+      ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "-f", containerfile, buildDir, ...proxyBuildArgs()],
       {
         onLine: (line) => {
+          console.error(`[podman:build:sandbox] ${line}`)
           const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
           if (m) {
             lastStep = descStep(m[3])
@@ -565,6 +556,16 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
   } finally {
     _imageBuildInFlight = null
   }
+}
+
+/** Build --build-arg flags for proxy env vars (if set). */
+function proxyBuildArgs(): string[] {
+  const args: string[] = []
+  for (const v of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy"]) {
+    const val = process.env[v]
+    if (val) args.push("--build-arg", `${v}=${val}`)
+  }
+  return args
 }
 
 /** Translate a podman build STEP instruction into a short human label. */
@@ -665,10 +666,11 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
       await writeFile(join(buildDir, "Containerfile"), childContainerfile)
 
       const r = await runPodman(
-        ["build", "-t", tag, "-f", join(buildDir, "Containerfile"), buildDir],
+        ["build", "-t", tag, "-f", join(buildDir, "Containerfile"), buildDir, ...proxyBuildArgs()],
         {
           allowFail: true,
           onLine: (line) => {
+            console.error(`[podman:build:${tag}] ${line}`)
             const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
             if (m) {
               opts?.onProgress?.(`Installing tools: ${descStep(m[3])} (step ${m[1]}/${m[2]})`)
@@ -708,7 +710,8 @@ type ContainerInspectRow = {
 }
 
 async function inspectContainer(loopId: string): Promise<ContainerInspectRow> {
-  const name = containerName(loopId)
+  // In pod mode, inspect the sandbox container inside the pod (which has the labels).
+  const name = isPodMode() ? `${loopPodName(loopId)}-sandbox` : containerName(loopId)
   const r = await runPodman(
     ["inspect", "--format", "{{.State.Running}}|{{index .Config.Labels \"" + LABEL_CONFIG_HASH + "\"}}|{{.Image}}", name],
     { allowFail: true },
@@ -729,6 +732,19 @@ export async function containerExists(loopId: string): Promise<boolean> {
 
 export async function containerRunning(loopId: string): Promise<boolean> {
   return (await inspectContainer(loopId)).running
+}
+
+/** Ensure a pod exists for the loop sandbox. Idempotent. */
+async function ensureLoopPod(loopId: string): Promise<void> {
+  const name = loopPodName(loopId)
+  const r = await runPodman(["pod", "exists", name], { allowFail: true })
+  if (r.code === 0) return
+  console.log(`[podman] creating pod ${name}`)
+  const args = ["pod", "create", "--name", name, "--network", "loopat"]
+  const createR = await runPodman(args)
+  if (createR.code !== 0) {
+    throw new Error(`pod create ${name} failed: ${createR.stderr}`)
+  }
 }
 
 /** Return the container's bridge network IP, or null if not running. */
@@ -793,6 +809,7 @@ export async function ensureLoopatNetwork(): Promise<void> {
 
 /** Ensure the workspace serve container is running on the shared network. */
 export async function ensureServeContainer(): Promise<void> {
+  if (isPodMode()) return // managed by pod deployment script
   if (_serveReady) return _serveReady
   _serveReady = (async () => {
     const cfg = await loadConfig()
@@ -882,6 +899,7 @@ let _portProxyReady: Promise<void> | null = null
  * publish.
  */
 function findOccupiedPorts(lo: number, hi: number): Set<number> {
+  if (isPodMode()) return new Set() // can't see host ports from container; rely on start-failure retry
   const ports = new Set<number>()
   try {
     const { execFileSync } = require("node:child_process")
@@ -925,6 +943,7 @@ function buildPortProxyCreateArgs(binary: string, portRange: string, occupiedPor
 
 /** Ensure the port-proxy container is running for direct TCP/UDP forwarding. */
 export async function ensurePortProxyContainer(): Promise<void> {
+  if (isPodMode() && NETWORK_MODE === "host") return // host mode: loop pods use direct -p
   if (_portProxyReady) return _portProxyReady
   _portProxyReady = (async () => {
     const cfg = await loadConfig()
@@ -988,19 +1007,41 @@ export async function ensurePortProxyContainer(): Promise<void> {
     const occupied = findOccupiedPorts(lo, hi)
     if (occupied.size > 0) console.log(`[podman] ${occupied.size} port(s) in ${portRange} already in use — skipping`)
 
-    const args = buildPortProxyCreateArgs(binary, portRange, occupied)
-    const createR = await runPodman(["create", ...args])
-    if (createR.code !== 0) {
-      _portProxyReady = null
-      throw new Error(`port-proxy container create failed: ${createR.stderr}`)
+    // Retry loop: if start fails with port conflicts, parse occupied ports
+    // from the error and retry without them (up to 3 attempts).
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const args = buildPortProxyCreateArgs(binary, portRange, occupied)
+      const createR = await runPodman(["create", "--replace", ...args])
+      if (createR.code !== 0) {
+        _portProxyReady = null
+        throw new Error(`port-proxy container create failed: ${createR.stderr}`)
+      }
+      const startR = await runPodman(["start", PORT_PROXY_CONTAINER], { allowFail: true })
+      if (startR.code === 0) {
+        const mapped = (hi - lo + 1) - occupied.size
+        if (occupied.size > 0) console.log(`[podman] ${occupied.size} port(s) occupied — skipped`)
+        console.log(`[podman] port-proxy container ready (${mapped} ports in ${portRange})`)
+        return
+      }
+      const errText = (startR.stderr + startR.stdout)
+      if (!/(bind|address already in use|rootlessport)/i.test(errText)) {
+        _portProxyReady = null
+        throw new Error(`port-proxy start failed: ${errText.trim()}`)
+      }
+      // Parse occupied ports from error and retry
+      const newOccupied = new Set<number>()
+      for (const m of errText.matchAll(/listen tcp [\d.]+:(\d+):\s*bind:/g)) {
+        newOccupied.add(Number(m[1]))
+      }
+      if (newOccupied.size === 0) {
+        _portProxyReady = null
+        throw new Error(`port-proxy start failed: ${errText.trim()}`)
+      }
+      for (const p of newOccupied) occupied.add(p)
+      console.log(`[podman] port(s) ${[...newOccupied].join(",")} in use — retrying`)
     }
-    const startR = await runPodman(["start", PORT_PROXY_CONTAINER])
-    if (startR.code !== 0) {
-      _portProxyReady = null
-      throw new Error(`port-proxy start failed: ${startR.stderr}`)
-    }
-    const mapped = (hi - lo + 1) - occupied.size
-    console.log(`[podman] port-proxy container ready (${mapped} ports in ${portRange})`)
+    _portProxyReady = null
+    throw new Error(`port-proxy start failed after 3 attempts`)
   })()
   try {
     await _portProxyReady
@@ -1021,7 +1062,11 @@ const SERVE_PORT = Number(process.env.LOOPAT_SERVE_PORT ?? 7788)
  *   - running, hash drift   → stop + rm + create + start
  */
 export async function ensureContainer(opts: ContainerOptions, progress?: { onProgress?: (msg: string) => void }): Promise<void> {
-  await ensureLoopatNetwork()
+  if (isPodMode()) {
+    await ensureLoopPod(opts.loopId)
+  } else {
+    await ensureLoopatNetwork()
+  }
   // Resolve the image first — for loops with a composed mise.toml this
   // builds (or reuses) a per-loop child image with toolchains baked in.
   // For loops without mise.toml, this returns the base SANDBOX_IMAGE.
@@ -1033,7 +1078,7 @@ export async function ensureContainer(opts: ContainerOptions, progress?: { onPro
   // maps to subuid 100000 outside — and then the host user can't delete
   // them. The bind targets under V_HOME (e.g. .claude/plugins/) and the
   // host-upper itself are the typical culprits.
-  await mkdir(loopHomeUpper(opts.loopId), { recursive: true })
+  await mkdir(loopHomeUpper(opts.loopId), { recursive: true, mode: 0o777 })
   await mkdir(join(loopHomeUpper(opts.loopId), ".claude", "plugins"), { recursive: true })
   await mkdir(join(loopHomeUpper(opts.loopId), ".local", "share"), { recursive: true })
   await mkdir(loopDir(opts.loopId), { recursive: true })
@@ -1053,53 +1098,73 @@ export async function ensureContainer(opts: ContainerOptions, progress?: { onPro
   const cur = await inspectContainer(opts.loopId)
   if (cur.running && cur.configHash === desiredHash && cur.imageId === curImageId) return
   const tag = opts.loopId.slice(0, 8)
+  const nameOrPod = isPodMode() ? loopPodName(opts.loopId) : containerName(opts.loopId)
+  const stopCmd = isPodMode() ? ["pod", "stop", "--time", "5"] : ["stop", "--time", "5"]
+  const rmCmd = isPodMode() ? ["pod", "rm", "--force"] : ["rm", "--force"]
+  const startCmd = isPodMode() ? ["pod", "start"] : ["start"]
+
   if (cur.exists) {
     if (cur.configHash !== desiredHash || cur.imageId !== curImageId) {
-      // Spec or image drift — container has to be torn down and recreated.
-      // This kills any process exec'd into the old container (PTY shells, an
-      // active claude CLI). Log loudly so the cause is obvious if the user
-      // reports "my terminal disconnected when I sent a chat".
       const reason = cur.configHash !== desiredHash ? "config hash drift" : "image drift (rebuilt)"
-      console.warn(`[podman:${tag}] ${reason} — recreating container; any in-flight exec'd processes will be killed`)
-      if (cur.running) await runPodman(["stop", "--time", "5", containerName(opts.loopId)])
-      await runPodman(["rm", "--force", containerName(opts.loopId)])
+      console.warn(`[podman:${tag}] ${reason} — recreating; in-flight processes will be killed`)
+      if (cur.running) await runPodman([...stopCmd, nameOrPod])
+      await runPodman([...rmCmd, nameOrPod])
     } else {
-      // Hash matches; just (re)start.
-      console.log(`[podman:${tag}] restarting stopped container`)
-      await runPodman(["start", containerName(opts.loopId)])
+      console.log(`[podman:${tag}] restarting stopped`)
+      await runPodman([...startCmd, nameOrPod])
       return
     }
   }
-  console.log(`[podman:${tag}] creating + starting container (hash=${desiredHash})`)
+  console.log(`[podman:${tag}] creating + starting (hash=${desiredHash})`)
   progress?.onProgress?.("Creating sandbox container…")
   await runPodman(["create", ...createArgs])
   progress?.onProgress?.("Starting sandbox container…")
-  await runPodman(["start", containerName(opts.loopId)])
+  await runPodman([...startCmd, nameOrPod])
 }
 
 export async function stopContainer(loopId: string): Promise<void> {
-  const r = await runPodman(["stop", "--time", "5", containerName(loopId)], { allowFail: true })
-  if (r.code !== 0 && !r.stderr.includes("no such container")) {
-    console.warn(`[podman] stop ${loopId} non-zero exit (${r.code}): ${r.stderr.trim()}`)
+  if (isPodMode()) {
+    const r = await runPodman(["pod", "stop", "--time", "5", loopPodName(loopId)], { allowFail: true })
+    if (r.code !== 0 && !r.stderr.includes("no such pod")) {
+      console.warn(`[podman] stop pod ${loopId.slice(0, 8)} non-zero exit (${r.code}): ${r.stderr.trim()}`)
+    }
+  } else {
+    const r = await runPodman(["stop", "--time", "5", containerName(loopId)], { allowFail: true })
+    if (r.code !== 0 && !r.stderr.includes("no such container")) {
+      console.warn(`[podman] stop ${loopId} non-zero exit (${r.code}): ${r.stderr.trim()}`)
+    }
   }
 }
 
 export async function removeContainer(loopId: string): Promise<void> {
-  await runPodman(["rm", "--force", containerName(loopId)], { allowFail: true })
+  if (isPodMode()) {
+    await runPodman(["pod", "rm", "--force", loopPodName(loopId)], { allowFail: true })
+  } else {
+    await runPodman(["rm", "--force", containerName(loopId)], { allowFail: true })
+  }
 }
 
 /**
- * Stop ALL loopat containers for this workspace. Called on server shutdown
- * so the host isn't left with hundreds of idle sandbox containers.
+ * Stop ALL loopat containers/pods for this workspace. Called on server shutdown.
  */
 export async function stopAllWorkspaceContainers(): Promise<void> {
-  const r = await runPodman(
-    ["ps", "--all", "--filter", `label=${LABEL_WORKSPACE}=${WORKSPACE}`, "--format", "{{.Names}}"],
-    { allowFail: true },
-  )
-  if (r.code !== 0) return
-  const names = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean)
-  await Promise.all(names.map((n) => runPodman(["stop", "--time", "5", n], { allowFail: true })))
+  if (isPodMode()) {
+    const r = await runPodman(
+      ["pod", "ps", "--filter", `label=${LABEL_WORKSPACE}=${WORKSPACE}`, "--format", "{{.Name}}"],
+      { allowFail: true },
+    )
+    if (r.code !== 0) return
+    const names = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean)
+    await Promise.all(names.map((n) => runPodman(["pod", "stop", "--time", "5", n], { allowFail: true })))
+  } else {
+    const r = await runPodman(
+      ["ps", "--all", "--filter", `label=${LABEL_WORKSPACE}=${WORKSPACE}`, "--format", "{{.Names}}"],
+      { allowFail: true },
+    )
+    if (r.code !== 0) return
+    const names = r.stdout.split("\n").map((s) => s.trim()).filter(Boolean)
+    await Promise.all(names.map((n) => runPodman(["stop", "--time", "5", n], { allowFail: true })))
+  }
 }
 
 // ── idle stop scheduler ───────────────────────────────────────────────────
@@ -1211,6 +1276,7 @@ export function buildPodmanExecArgs(opts: ExecOptions): string[] {
   for (const [k, v] of Object.entries(opts.env ?? {})) {
     args.push("--env", `${k}=${v}`)
   }
-  args.push(containerName(opts.loopId), opts.command, ...opts.args)
+  const execTarget = isPodMode() ? `${loopPodName(opts.loopId)}-sandbox` : containerName(opts.loopId)
+  args.push(execTarget, opts.command, ...opts.args)
   return args
 }

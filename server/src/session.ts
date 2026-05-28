@@ -501,6 +501,7 @@ class LoopSession {
 
     this.q = query({
       prompt: this.input.iter,
+      prompt: this.input.iter,
       options: {
         cwd: V_LOOP_WORKDIR(loopId),
         env: {

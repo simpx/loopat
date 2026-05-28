@@ -41,15 +41,17 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 # create-args carry `--privileged --device /dev/fuse`, and inner loopat
 # (or any AI workflow) probes for podman at runtime via the existing
 # self-detection path.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-        bash coreutils findutils grep sed less \
-        util-linux procps bsdmainutils ca-certificates \
-        sudo curl git build-essential openssh-client \
-        jq vim fish python3-minimal \
-        podman uidmap fuse-overlayfs slirp4netns \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources \
+	 && sed -i 's|http://security.ubuntu.com/ubuntu|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources \
+	 && apt-get update \
+	 && apt-get install -y --no-install-recommends \
+	        bash coreutils findutils grep sed less \
+	        util-linux procps bsdmainutils ca-certificates \
+	        sudo curl git build-essential openssh-client \
+	        jq vim fish python3-minimal \
+	        podman uidmap fuse-overlayfs slirp4netns \
+	 && apt-get clean \
+	 && rm -rf /var/lib/apt/lists/*
 
 # Passwordless sudo for the loopat user.
 RUN echo "loopat ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat \
