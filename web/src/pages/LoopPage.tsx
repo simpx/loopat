@@ -414,7 +414,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         openPanels={openPanels}
         toggleMode={toggleMode}
         onShareWork={() => setShareOpen(true)}
-        showShareButton={!serveCfg || serveCfg.serveEnabled || serveCfg.serveDynamicEnabled}
+        showShareButton={!serveCfg || serveCfg.serveEnabled || serveCfg.serveDynamicEnabled || serveCfg.serveEphemeralEnabled}
       />
       {isMobile ? (
         <div className="flex-1 min-h-0">
