@@ -502,6 +502,20 @@ export async function probePodman(): Promise<PodmanProbeResult> {
  * guard with a per-process Promise so two simultaneous ensureContainer
  * calls don't fire two builds.
  */
+/** Hash the base Containerfile content. Used both as the tag suffix for
+ *  the base image itself and mixed into per-loop child image tags so that
+ *  base-image changes (e.g. apt installs added to the Containerfile) cascade
+ *  through and invalidate stale child images.
+ */
+export async function baseContainerfileHash(): Promise<string> {
+  const containerfile = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox", "Containerfile")
+  if (!existsSync(containerfile)) {
+    throw new Error(`Containerfile not found at ${containerfile}`)
+  }
+  const content = await readFile(containerfile, "utf8")
+  return createHash("sha256").update(content).digest("hex").slice(0, 16)
+}
+
 let _imageBuildInFlight: Promise<void> | null = null
 export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => void }): Promise<void> {
   if (_imageBuildInFlight) return _imageBuildInFlight
@@ -512,8 +526,7 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
     }
 
     // Hash the Containerfile so the base image auto-rebuilds when it changes.
-    const content = await readFile(containerfile, "utf8")
-    const hash = createHash("sha256").update(content).digest("hex").slice(0, 16)
+    const hash = await baseContainerfileHash()
     const hashTag = `loopat-sandbox-${hash}:latest`
 
     const present = await runPodman(["image", "exists", hashTag], { allowFail: true })
@@ -612,7 +625,14 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
     return SANDBOX_IMAGE
   }
 
-  const hash = createHash("sha256").update(content).digest("hex").slice(0, 16)
+  // Hash both mise.toml AND the base Containerfile so that base-image
+  // changes (apt installs added, configs changed) cascade into a fresh
+  // child build. Without the base part, child images stay frozen against
+  // an old base layer set even after `loopat-sandbox:latest` is rebuilt
+  // — silent skew that has bitten us (e.g. podman missing from loops
+  // after the nested-podman base change shipped).
+  const baseHash = await baseContainerfileHash()
+  const hash = createHash("sha256").update(`base:${baseHash}\n`).update(content).digest("hex").slice(0, 16)
   const tag = `loopat-sandbox-${hash}:latest`
 
   const existing = _loopImageInFlight.get(tag)
