@@ -153,11 +153,19 @@ export type LoopMeta = {
   publicAt?: string
   /**
    * Workspace serve config. When shareEnabled, the loop's workdir is accessible
-   * via <id|alias>.<domain>. Two modes: "static" serves files, "port" forwards
-   * HTTP to the configured sharePort (10000-20000). Mutually exclusive.
+   * via one of three modes:
+   *
+   *  - "static"    — serve container streams workdir files via subdomain
+   *  - "port"      — serve container HTTP-proxies to sharePort via subdomain
+   *  - "direct"    — port-proxy container TCP/UDP-relays a fixed external
+   *                  port (shareExternalPort) to sharePort
+   *  - "ephemeral" — the loop container itself publishes sharePort via
+   *                  `-p :<sharePort>`, kernel-assigned host port that
+   *                  changes on every container restart. No port-proxy.
+   *                  Read the current host port via `podman port`.
    */
   shareEnabled?: boolean
-  shareMode?: "static" | "port"
+  shareMode?: "static" | "port" | "ephemeral"
   shareAlias?: string
   sharePort?: number
   /** External port for direct TCP/UDP access (see port-proxy). */
@@ -217,6 +225,21 @@ export function effectiveDriver(meta: { createdBy: string; driver?: string }): s
 
 export function isDriver(meta: { createdBy: string; driver?: string }, userId: string): boolean {
   return effectiveDriver(meta) === userId
+}
+
+/**
+ * Derive the ephemeral `-p` set to pass into the loop's container at create
+ * time. Returns an empty list unless the loop is in "ephemeral" share mode
+ * with a valid internal port. Static mode and the legacy "port"/"direct"
+ * modes don't touch the loop container's own port mappings (they go via
+ * the serve / port-proxy containers instead).
+ */
+export function loopEphemeralPorts(
+  meta: Pick<LoopMeta, "shareEnabled" | "shareMode" | "sharePort" | "shareProtocol">,
+): { internalPort: number; protocol?: "tcp" | "udp" }[] {
+  if (!meta.shareEnabled || meta.shareMode !== "ephemeral" || !meta.sharePort) return []
+  const proto = meta.shareProtocol === "udp" ? "udp" : "tcp"
+  return [{ internalPort: meta.sharePort, protocol: proto }]
 }
 
 async function gitInitIfMissing(dir: string) {

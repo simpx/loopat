@@ -5,6 +5,7 @@ import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -147,6 +148,10 @@ app.get("/api/serve/config", requireAdmin, async (c) => {
     serveDynamicPortRange: cfg.serveDynamicPortRange ?? "10000-20000",
     serveDynamicUdpEnabled: cfg.serveDynamicUdpEnabled ?? false,
     serveDynamicStaticEnabled: cfg.serveDynamicStaticEnabled ?? false,
+    // Ephemeral port: kernel-assigned host port per loop, changes on
+    // every loop restart. No port-proxy involved.
+    serveEphemeralEnabled: cfg.serveEphemeralEnabled ?? false,
+    serveEphemeralDomain: cfg.serveEphemeralDomain ?? "",
   })
 })
 
@@ -163,6 +168,8 @@ app.put("/api/serve/config", requireAdmin, async (c) => {
   if (typeof body.serveDynamicPortRange === "string") patch.serveDynamicPortRange = body.serveDynamicPortRange.trim()
   if (typeof body.serveDynamicUdpEnabled === "boolean") patch.serveDynamicUdpEnabled = body.serveDynamicUdpEnabled
   if (typeof body.serveDynamicStaticEnabled === "boolean") patch.serveDynamicStaticEnabled = body.serveDynamicStaticEnabled
+  if (typeof body.serveEphemeralEnabled === "boolean") patch.serveEphemeralEnabled = body.serveEphemeralEnabled
+  if (typeof body.serveEphemeralDomain === "string") patch.serveEphemeralDomain = body.serveEphemeralDomain.trim()
   if (Object.keys(patch).length === 0) return c.json({ error: "no fields to update" }, 400)
   await saveWorkspaceConfig(patch)
   return c.json({ ok: true })
@@ -1606,20 +1613,35 @@ app.patch("/api/loops/:id", requireAuth, async (c) => {
   }
   // Share config fields
   if (typeof body.shareEnabled === "boolean") patch.shareEnabled = body.shareEnabled
-  if (body.shareMode === "static" || body.shareMode === "port") patch.shareMode = body.shareMode
+  if (body.shareMode === "static" || body.shareMode === "port" || body.shareMode === "ephemeral") patch.shareMode = body.shareMode
   if (typeof body.shareAlias === "string") patch.shareAlias = body.shareAlias.trim() || undefined
   if (typeof body.sharePort === "number") patch.sharePort = body.sharePort
   if (typeof body.shareExternalPort === "number") patch.shareExternalPort = body.shareExternalPort
   if (body.shareProtocol === "tcp" || body.shareProtocol === "udp" || body.shareProtocol === "static") patch.shareProtocol = body.shareProtocol
   if (Object.keys(patch).length === 0) return c.json({ error: "no allowed fields" }, 400)
+  const previous = await getLoop(id) // before patch (for old mode comparison)
   const updated = await patchLoopMeta(id, patch)
-  // If share config changed, touch a trigger file so the port-proxy's
-  // inotify picks up the change immediately (no polling needed).
-  if ("shareEnabled" in patch || "shareExternalPort" in patch || "sharePort" in patch || "shareProtocol" in patch || "shareMode" in patch) {
+  const shareTouched =
+    "shareEnabled" in patch || "shareExternalPort" in patch || "sharePort" in patch ||
+    "shareProtocol" in patch || "shareMode" in patch
+  if (shareTouched) {
+    // Touch trigger for port-proxy (direct mode hot-reloads from inotify).
     try {
       const trigger = pathJoin(loopsDir(), ".port-proxy-trigger")
       await writeFile(trigger, String(Date.now())) // write ts to guarantee inotify Modify event
     } catch {}
+    // Ephemeral mode: -p flags live on the loop container's create-args,
+    // so the container itself must be recreated. Kill attached SDK + PTY;
+    // the next attach calls ensureContainer, sees config-hash drift, and
+    // recreates with the new `-p :<sharePort>` (kernel picks new host port).
+    const wasEphemeral = previous && previous.shareEnabled && previous.shareMode === "ephemeral"
+    const isEphemeral = updated && updated.shareEnabled && updated.shareMode === "ephemeral"
+    const portChanged = previous && updated && previous.sharePort !== updated.sharePort
+    const protoChanged = previous && updated && previous.shareProtocol !== updated.shareProtocol
+    if (wasEphemeral || isEphemeral || (isEphemeral && (portChanged || protoChanged))) {
+      destroyLoopSession(id)
+      killTerm(id)
+    }
   }
   // On archive: tear down the Claude SDK process and terminal PTY so no
   // orphaned processes linger. Un-archive is fine — next connect re-spawns.
@@ -1693,6 +1715,25 @@ app.post("/api/loops/:id/strip-thinking", requireAuth, async (c) => {
   const session = getSession(id)
   const r = await session.stripThinkingBlocks()
   return c.json(r)
+})
+
+/**
+ * Read the live host port for an ephemeral-mode share. Returns null when
+ * the container is down, not in ephemeral mode, or the mapping hasn't
+ * been observed yet (e.g. container is still starting). The UI polls
+ * this endpoint while the dialog is open so a fresh restart's new port
+ * appears without the user reloading.
+ */
+app.get("/api/loops/:id/share/current-port", requireAuth, async (c) => {
+  const id = c.req.param("id") ?? ""
+  const meta = await getLoop(id)
+  if (!meta) return c.json({ error: "not found" }, 404)
+  if (!meta.shareEnabled || meta.shareMode !== "ephemeral" || !meta.sharePort) {
+    return c.json({ port: null })
+  }
+  const proto: "tcp" | "udp" = meta.shareProtocol === "udp" ? "udp" : "tcp"
+  const port = await getEphemeralHostPort(id, meta.sharePort, proto)
+  return c.json({ port, internalPort: meta.sharePort, protocol: proto })
 })
 
 app.get("/api/loops/:id/context", requireAuth, async (c) => {

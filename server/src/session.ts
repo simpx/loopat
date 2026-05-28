@@ -10,7 +10,7 @@ import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } fro
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
-import { effectiveDriver, getLoop, patchLoopMeta } from "./loops"
+import { effectiveDriver, getLoop, loopEphemeralPorts, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus } from "./loop-status"
@@ -483,6 +483,7 @@ class LoopSession {
       knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       extraEnv,
+      ephemeralPorts: loopEphemeralPorts(meta),
     }, {
       onProgress: (msg) => updateLoopStatus(loopId, msg),
     })
