@@ -804,16 +804,25 @@ const PORT_PROXY_CONTAINER = `loopat-${WORKSPACE}-port-proxy`
 
 let _portProxyReady: Promise<void> | null = null
 
-/** Find occupied TCP ports in a range using lsof. */
+/** Find occupied TCP ports in a range.
+ *
+ * Uses `ss` instead of `lsof`: unprivileged `lsof` only sees sockets owned
+ * by the current user, so cross-user services (ollama, system dashboards,
+ * other devs on a shared box) get missed and the port-proxy container
+ * fails to start with `bind: address already in use`. `ss` reads from
+ * /proc/net/tcp directly and shows every listening socket on the host,
+ * which is what we actually need to know when picking host ports to
+ * publish.
+ */
 function findOccupiedPorts(lo: number, hi: number): Set<number> {
   const ports = new Set<number>()
   try {
-    const { execSync } = require("node:child_process")
-    const out = execSync("lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null", { encoding: "utf8", timeout: 3000 }) as string
+    const { execFileSync } = require("node:child_process")
+    const out = execFileSync("ss", ["-tlnH"], { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] }) as string
     for (const line of out.split("\n")) {
       const parts = line.trim().split(/\s+/)
-      if (parts.length < 9) continue
-      const addr = parts[8] // e.g. "127.0.0.1:8080" or "*:8080"
+      if (parts.length < 4) continue
+      const addr = parts[3] // e.g. "0.0.0.0:8080" or "[::]:8080" or "127.0.0.1:8080"
       const colonIdx = addr.lastIndexOf(":")
       if (colonIdx === -1) continue
       const port = Number(addr.slice(colonIdx + 1))
