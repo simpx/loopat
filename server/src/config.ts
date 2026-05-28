@@ -156,6 +156,12 @@ export type WorkspaceConfig = {
   serveDynamicUdpEnabled?: boolean
   /** Whether dynamic ports can serve static files from workdir. */
   serveDynamicStaticEnabled?: boolean
+  /** Enable ephemeral-port mode: each loop container publishes its share
+   *  port via `podman -p :<internal>`, kernel-assigned host port, fresh
+   *  every container restart. No port-proxy involved. */
+  serveEphemeralEnabled?: boolean
+  /** Domain or IP for ephemeral-port access URLs (empty = auto-detect IP). */
+  serveEphemeralDomain?: string
   /** Admin-managed presets for quick-add in provider/mise tool configs. */
   presets?: PresetsData
 }
@@ -765,6 +771,8 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   if (cfg.serveDynamicPortRange !== undefined) merged.serveDynamicPortRange = cfg.serveDynamicPortRange
   if (cfg.serveDynamicUdpEnabled !== undefined) merged.serveDynamicUdpEnabled = cfg.serveDynamicUdpEnabled
   if (cfg.serveDynamicStaticEnabled !== undefined) merged.serveDynamicStaticEnabled = cfg.serveDynamicStaticEnabled
+  if (cfg.serveEphemeralEnabled !== undefined) merged.serveEphemeralEnabled = cfg.serveEphemeralEnabled
+  if (cfg.serveEphemeralDomain !== undefined) merged.serveEphemeralDomain = cfg.serveEphemeralDomain
   if (cfg.presets !== undefined) merged.presets = cfg.presets
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null

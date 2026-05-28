@@ -1,15 +1,24 @@
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { getServeConfig, checkAliasAvailable, getAvailablePort, checkPortAvailable, type LoopMeta, type ServeConfig } from "../api"
-import { Globe, Copy, Check, AlertCircle, Shuffle } from "lucide-react"
+import { getServeConfig, checkAliasAvailable, getAvailablePort, checkPortAvailable, getCurrentSharePort, type LoopMeta, type ServeConfig } from "../api"
+import { Globe, Copy, Check, AlertCircle, Shuffle, RefreshCw } from "lucide-react"
 
-type ShareMode = "static" | "port" | "direct"
+type ShareMode = "static" | "port" | "direct" | "ephemeral"
+type TabKey = "standard" | "direct" | "ephemeral"
+
+function initialTab(loop: LoopMeta): TabKey {
+  if (loop.shareMode === "ephemeral") return "ephemeral"
+  if (loop.shareExternalPort) return "direct"
+  return "standard"
+}
 
 export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: LoopMeta; open: boolean; onClose: () => void; onSaved?: () => Promise<any> | void }) {
   const [sc, setSc] = useState<ServeConfig | null>(null)
   const [enabled, setEnabled] = useState(loop.shareEnabled ?? false)
   const [mode, setMode] = useState<ShareMode>(
-    loop.shareExternalPort ? "direct" : (loop.shareMode ?? "static") as ShareMode
+    loop.shareMode === "ephemeral" ? "ephemeral" :
+      loop.shareExternalPort ? "direct" :
+        (loop.shareMode ?? "static") as ShareMode
   )
   const [alias, setAlias] = useState(loop.shareAlias ?? "")
   const [port, setPort] = useState(loop.sharePort ?? 3000)
@@ -24,31 +33,59 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
   const [portChecking, setPortChecking] = useState(false)
   const [savedMsg, setSavedMsg] = useState("")
   const [error, setError] = useState("")
-  // Tab state when both serves are enabled
-  const [tab, setTab] = useState<"standard" | "direct">(
-    loop.shareExternalPort ? "direct" : "standard"
-  )
+  const [tab, setTab] = useState<TabKey>(initialTab(loop))
+  // Ephemeral live port (polled while dialog is open + ephemeral tab active).
+  const [ephLivePort, setEphLivePort] = useState<number | null>(null)
 
   const shortId = loop.id.slice(0, 8)
-  const standardOnly = sc && sc.serveEnabled && !sc.serveDynamicEnabled
-  const directOnly = sc && !sc.serveEnabled && sc.serveDynamicEnabled
-  const bothOn = sc && sc.serveEnabled && sc.serveDynamicEnabled
+  const standardEnabled = !!(sc && sc.serveEnabled)
+  const directEnabled = !!(sc && sc.serveDynamicEnabled)
+  const ephEnabled = !!(sc && sc.serveEphemeralEnabled)
+  const enabledTabsCount = [standardEnabled, directEnabled, ephEnabled].filter(Boolean).length
+  const showTabs = enabledTabsCount > 1
+  const standardOnly = standardEnabled && !directEnabled && !ephEnabled
+  const directOnly = !standardEnabled && directEnabled && !ephEnabled
+  const ephOnly = !standardEnabled && !directEnabled && ephEnabled
+  const bothOn = standardEnabled && directEnabled  // legacy alias kept for the existing standard/direct tab rendering
 
   useEffect(() => {
     if (open) {
       getServeConfig().then(setSc)
       setEnabled(loop.shareEnabled ?? false)
-      setMode(loop.shareExternalPort ? "direct" : (loop.shareMode ?? "static") as ShareMode)
+      setMode(
+        loop.shareMode === "ephemeral" ? "ephemeral" :
+          loop.shareExternalPort ? "direct" :
+            (loop.shareMode ?? "static") as ShareMode
+      )
       setAlias(loop.shareAlias ?? "")
       setPort(loop.sharePort ?? 3000)
       setExternalPort(loop.shareExternalPort ?? 10000)
       setProtocol(loop.shareProtocol ?? "tcp")
-      setTab(loop.shareExternalPort ? "direct" : "standard")
+      setTab(initialTab(loop))
       setAliasAvailable(null)
       setAliasMsg("")
       setPortError("")
+      setEphLivePort(null)
     }
   }, [open, loop])
+
+  // Poll the loop's current host port while the dialog is open and the
+  // ephemeral tab is active. Loop restart picks a new port; this loop
+  // reflects that without the user manually reloading.
+  useEffect(() => {
+    if (!open) return
+    const isEphTab = ephOnly || (showTabs && tab === "ephemeral")
+    if (!isEphTab) return
+    if (!loop.shareEnabled || loop.shareMode !== "ephemeral") return
+    let stopped = false
+    const tick = async () => {
+      const r = await getCurrentSharePort(loop.id)
+      if (!stopped) setEphLivePort(r.port)
+    }
+    tick()
+    const h = setInterval(tick, 3000)
+    return () => { stopped = true; clearInterval(h) }
+  }, [open, tab, ephOnly, showTabs, loop.id, loop.shareEnabled, loop.shareMode])
 
   // Auto-pick port after serve config loads. Only for fresh loops that
   // have never had share enabled — if the user already saved a config
@@ -92,8 +129,15 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
     ? `http://${dynHost}:${externalPort}`
     : `tcp://${dynHost}:${externalPort}`
 
-  const isDirectTab = directOnly || (bothOn && tab === "direct")
-  const shareUrl = isDirectTab ? directUrl : subdomainUrl
+  const ephHost = sc?.serveEphemeralDomain || sc?.ip || "<host-ip>"
+  const ephProtoPrefix = protocol === "udp" ? "udp" : "tcp"
+  const ephUrl = ephLivePort
+    ? `${ephProtoPrefix}://${ephHost}:${ephLivePort}`
+    : "(no active port — save & wait for container restart)"
+
+  const isDirectTab = directOnly || (showTabs && tab === "direct" && directEnabled && !ephOnly)
+  const isEphTab = ephOnly || (showTabs && tab === "ephemeral")
+  const shareUrl = isEphTab ? ephUrl : isDirectTab ? directUrl : subdomainUrl
 
   // Validate external port availability (debounced)
   useEffect(() => {
@@ -110,7 +154,8 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
 
   const handleSave = async () => {
     setSaving(true)
-    // Final port check on save
+    // Final port check on save (direct tab only — ephemeral kernel-picks,
+    // standard doesn't need it).
     if (isDirectTab) {
       const r = await checkPortAvailable(externalPort, loop.id)
       if (!r.available) {
@@ -121,7 +166,15 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
     }
     const patch: Record<string, any> = { shareEnabled: enabled }
     if (enabled) {
-      if (isDirectTab) {
+      if (isEphTab) {
+        // Ephemeral: only need sharePort (internal) + protocol; host port
+        // is assigned by kernel on container start.
+        patch.shareMode = "ephemeral"
+        patch.sharePort = port
+        patch.shareProtocol = protocol === "static" ? "tcp" : protocol
+        patch.shareAlias = undefined
+        patch.shareExternalPort = undefined
+      } else if (isDirectTab) {
         patch.shareMode = "port"
         patch.sharePort = port
         patch.shareExternalPort = externalPort
@@ -159,10 +212,14 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
 
   const canSave =
     !saving && !portError && !portChecking &&
-    (!isDirectTab || (externalPort >= 1024)) &&
-    (!isDirectTab || (port >= 1 || protocol === "static")) &&
-    (isDirectTab || mode !== "port" || (!idConflict || alias.trim().length > 0)) &&
-    (isDirectTab || mode !== "port" || (port >= 1024))
+    (isEphTab
+      ? (port >= 1 && port <= 65535)
+      : (
+          (!isDirectTab || (externalPort >= 1024)) &&
+          (!isDirectTab || (port >= 1 || protocol === "static")) &&
+          (isDirectTab || mode !== "port" || (!idConflict || alias.trim().length > 0)) &&
+          (isDirectTab || mode !== "port" || (port >= 1024))
+        ))
 
   if (!sc) return null
 
@@ -191,22 +248,32 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
 
           {enabled && (
             <>
-              {/* Tabs when both serves enabled */}
-              {bothOn && (
+              {/* Tabs when more than one serve mode is enabled in workspace config */}
+              {showTabs && (
                 <div className="flex gap-1.5 border-b border-gray-200 pb-2">
-                  <button onClick={() => { setTab("standard"); setMode("static") }}
-                    className={`px-3 py-1 text-xs rounded-t ${tab === "standard" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
-                    Subdomain
-                  </button>
-                  <button onClick={() => { setTab("direct"); setMode("direct") }}
-                    className={`px-3 py-1 text-xs rounded-t ${tab === "direct" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
-                    Direct Port
-                  </button>
+                  {standardEnabled && (
+                    <button onClick={() => { setTab("standard"); setMode("static") }}
+                      className={`px-3 py-1 text-xs rounded-t ${tab === "standard" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
+                      Subdomain
+                    </button>
+                  )}
+                  {directEnabled && (
+                    <button onClick={() => { setTab("direct"); setMode("direct") }}
+                      className={`px-3 py-1 text-xs rounded-t ${tab === "direct" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
+                      Direct Port
+                    </button>
+                  )}
+                  {ephEnabled && (
+                    <button onClick={() => { setTab("ephemeral"); setMode("ephemeral") }}
+                      className={`px-3 py-1 text-xs rounded-t ${tab === "ephemeral" ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-500 hover:text-gray-700"}`}>
+                      Ephemeral
+                    </button>
+                  )}
                 </div>
               )}
 
               {/* ── Standard (subdomain) modes ── */}
-              {(standardOnly || (bothOn && tab === "standard")) && (
+              {(standardOnly || (showTabs && tab === "standard")) && (
                 <>
                   <div>
                     <label className="text-[11px] text-gray-500 uppercase tracking-wider">Share mode</label>
@@ -246,8 +313,52 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
                 </>
               )}
 
+              {/* ── Ephemeral Port mode ── */}
+              {isEphTab && (
+                <>
+                  <div>
+                    <label className="text-[11px] text-gray-500 uppercase tracking-wider">Container port</label>
+                    <input type="number" min={1} max={65535} value={port}
+                      onChange={(e) => setPort(parseInt(e.target.value, 10) || 3000)}
+                      className="w-full mt-1 px-2 py-1.5 text-sm border border-gray-200 rounded outline-none focus:border-gray-300" />
+                    <p className="text-[10px] text-gray-400 mt-0.5">The port your app listens on inside the sandbox</p>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-gray-500 uppercase tracking-wider">Protocol</label>
+                    <div className="flex gap-1.5 mt-1">
+                      <button onClick={() => setProtocol("tcp")}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded border ${protocol === "tcp" ? "bg-blue-50 border-blue-300 text-blue-700" : "border-gray-200 text-gray-600"}`}>TCP</button>
+                      <button onClick={() => setProtocol("udp")}
+                        className={`flex-1 px-2 py-1.5 text-xs rounded border ${protocol === "udp" ? "bg-blue-50 border-blue-300 text-blue-700" : "border-gray-200 text-gray-600"}`}>UDP</button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                      Current host port
+                      <RefreshCw size={10} className="text-gray-300" />
+                    </label>
+                    <div className="mt-1 px-2 py-1.5 text-sm bg-gray-50 rounded text-gray-700">
+                      {ephLivePort != null ? (
+                        <span className="font-mono">{ephLivePort}</span>
+                      ) : (
+                        <span className="text-gray-400 text-xs">
+                          {loop.shareEnabled && loop.shareMode === "ephemeral"
+                            ? "(container starting / not running)"
+                            : "(save to start — port assigned by kernel on restart)"}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-amber-600 mt-1 flex items-center gap-1">
+                      <AlertCircle size={10} /> Changes on every loop restart. Saving also restarts the container.
+                    </p>
+                  </div>
+                </>
+              )}
+
               {/* ── Direct Port mode ── */}
-              {(directOnly || (bothOn && tab === "direct")) && (
+              {(directOnly || (showTabs && tab === "direct" && !isEphTab)) && (
                 <>
                   <div>
                     <label className="text-[11px] text-gray-500 uppercase tracking-wider">External port</label>

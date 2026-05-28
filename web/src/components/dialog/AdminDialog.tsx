@@ -790,6 +790,9 @@ export function ServePanel() {
   const [dynPortRange, setDynPortRange] = useState("10000-20000")
   const [dynUdpEnabled, setDynUdpEnabled] = useState(false)
   const [dynStaticEnabled, setDynStaticEnabled] = useState(false)
+  // Ephemeral port
+  const [ephEnabled, setEphEnabled] = useState(false)
+  const [ephDomain, setEphDomain] = useState("")
   // UI
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -809,6 +812,8 @@ export function ServePanel() {
       setDynPortRange(d.serveDynamicPortRange)
       setDynUdpEnabled(d.serveDynamicUdpEnabled)
       setDynStaticEnabled(d.serveDynamicStaticEnabled)
+      setEphEnabled(d.serveEphemeralEnabled ?? false)
+      setEphDomain(d.serveEphemeralDomain ?? "")
     }).catch((e) => {
       setError(e?.message ?? "load failed")
     })
@@ -828,6 +833,8 @@ export function ServePanel() {
         serveDynamicPortRange: dynPortRange.trim(),
         serveDynamicUdpEnabled: dynUdpEnabled,
         serveDynamicStaticEnabled: dynStaticEnabled,
+        serveEphemeralEnabled: ephEnabled,
+        serveEphemeralDomain: ephDomain.trim(),
       })
       if (!ok) { setError("save failed"); return }
       setSaved(true)
@@ -845,6 +852,8 @@ export function ServePanel() {
       setDynPortRange(d.serveDynamicPortRange)
       setDynUdpEnabled(d.serveDynamicUdpEnabled)
       setDynStaticEnabled(d.serveDynamicStaticEnabled)
+      setEphEnabled(d.serveEphemeralEnabled ?? false)
+      setEphDomain(d.serveEphemeralDomain ?? "")
     } catch (e: any) {
       setError(e?.message ?? "save failed")
     } finally {
@@ -921,6 +930,31 @@ export function ServePanel() {
               <label className="flex items-center gap-2 text-xs text-gray-700">
                 <Switch checked={dynStaticEnabled} onCheckedChange={setDynStaticEnabled} size="sm" /> Enable static file serving
               </label>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── Ephemeral Port ── */}
+      <section className="border-t border-gray-200 pt-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-800">Ephemeral Port</h3>
+          <Switch checked={ephEnabled} onCheckedChange={setEphEnabled} size="sm" />
+        </div>
+        <p className="text-xs text-gray-400 mb-3">
+          Per-loop random host port via <code className="bg-gray-50 px-1 rounded">podman -p :inner</code>.
+          The kernel picks an unused port on each loop container start — the URL changes after every restart.
+          Recommended when you don't need a stable URL and want zero port-conflict risk.
+        </p>
+
+        {ephEnabled && (
+          <div className="flex flex-col gap-3 pl-1">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Domain / IP (optional)</label>
+              <input type="text" value={ephDomain} onChange={(e) => setEphDomain(e.target.value)} placeholder={ip || "auto-detect IP"} className={inputClass} />
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Leave empty to auto-detect. Access URL: <code className="bg-gray-50 px-1 rounded">{(ephDomain || ip || "&lt;ip&gt;")}:&lt;random&gt;</code>
+              </p>
             </div>
           </div>
         )}

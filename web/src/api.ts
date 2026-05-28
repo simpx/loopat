@@ -24,7 +24,7 @@ export type LoopMeta = {
   public?: boolean
   publicAt?: string
   shareEnabled?: boolean
-  shareMode?: "static" | "port"
+  shareMode?: "static" | "port" | "ephemeral"
   shareAlias?: string
   sharePort?: number
   shareExternalPort?: number
@@ -1325,6 +1325,9 @@ export type ServeConfig = {
   serveDynamicPortRange: string
   serveDynamicUdpEnabled: boolean
   serveDynamicStaticEnabled: boolean
+  // Ephemeral port
+  serveEphemeralEnabled: boolean
+  serveEphemeralDomain: string
 }
 
 export async function getServeConfig(): Promise<ServeConfig> {
@@ -1334,8 +1337,17 @@ export async function getServeConfig(): Promise<ServeConfig> {
     withPort: false, https: false, displayPort: 7788,
     serveDynamicEnabled: false, serveDynamicDomain: "", serveDynamicPortRange: "10000-20000",
     serveDynamicUdpEnabled: false, serveDynamicStaticEnabled: false,
+    serveEphemeralEnabled: false, serveEphemeralDomain: "",
   }
   return (await r.json()) as ServeConfig
+}
+
+/** Read the live host port for a loop's ephemeral share. Returns null if
+ *  the loop isn't in ephemeral mode, or the container isn't running yet. */
+export async function getCurrentSharePort(loopId: string): Promise<{ port: number | null; internalPort?: number; protocol?: "tcp" | "udp" }> {
+  const r = await apiFetch(`/api/loops/${loopId}/share/current-port`)
+  if (!r.ok) return { port: null }
+  return (await r.json()) as { port: number | null; internalPort?: number; protocol?: "tcp" | "udp" }
 }
 
 export async function setServeConfig(data: Record<string, unknown>): Promise<boolean> {

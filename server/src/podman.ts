@@ -112,6 +112,11 @@ export type ContainerOptions = {
    *  Production callers resolve a per-loop child via ensureLoopImage; tests
    *  may omit this and get the base. */
   image?: string
+  /** Ephemeral port publishing: when set, the container is created with
+   *  `-p :<internalPort>[/<proto>]` so the kernel assigns a random host
+   *  port. Host port is queried via `podman port` after start. Changing
+   *  this list shifts the config hash → container recreate. */
+  ephemeralPorts?: { internalPort: number; protocol?: "tcp" | "udp" }[]
 }
 
 /**
@@ -359,6 +364,16 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     args.push("--env", `${k}=${v}`)
   }
 
+  // Ephemeral port publish. `-p :<inner>` tells podman to ask the kernel
+  // for any free host port; query `podman port` after start to learn
+  // which one. Different from the port-proxy path (which publishes the
+  // whole range up front from a separate container) — here each loop
+  // container directly owns its share port mapping.
+  for (const ep of opts.ephemeralPorts ?? []) {
+    const proto = ep.protocol === "udp" ? "/udp" : ""
+    args.push("-p", `:${ep.internalPort}${proto}`)
+  }
+
   // Config hash. Covers mounts + opts but NOT env — see hashCreateArgs
   // doc for why.
   const hash = hashCreateArgs(mounts, opts)
@@ -398,6 +413,11 @@ function hashCreateArgs(
   h.update(`mountAllLoops:${opts.mountAllLoops ? "1" : "0"}\n`)
   for (const m of [...mounts].sort((a, b) => a.dst.localeCompare(b.dst))) {
     h.update(`vol\t${m.src}\t${m.dst}\t${m.ro ? "ro" : "rw"}\n`)
+  }
+  // Ephemeral port set is part of create-args — must invalidate hash so
+  // toggling share rebuilds the container with new `-p` flags.
+  for (const ep of [...(opts.ephemeralPorts ?? [])].sort((a, b) => a.internalPort - b.internalPort)) {
+    h.update(`epport\t${ep.internalPort}\t${ep.protocol ?? "tcp"}\n`)
   }
   return h.digest("hex").slice(0, 16)
 }
@@ -702,6 +722,33 @@ export async function getContainerIP(loopId: string): Promise<string | null> {
   const ip = r.stdout.trim()
   if (!ip || ip === "<no value>") return null
   return ip
+}
+
+/** Look up the actual host port for an ephemeral `-p :<inner>` mapping.
+ *
+ * `podman port <ct> <inner>/<proto>` prints lines like `0.0.0.0:44513`.
+ * Returns the first numeric port, or null if the container isn't running
+ * or doesn't have a mapping for that internal port. Cheap (~ms), so we
+ * call it on demand from the API rather than caching aggressively — the
+ * mapping changes only when the container is recreated.
+ */
+export async function getEphemeralHostPort(
+  loopId: string,
+  internalPort: number,
+  protocol: "tcp" | "udp" = "tcp",
+): Promise<number | null> {
+  const name = containerName(loopId)
+  const r = await runPodman(
+    ["port", name, `${internalPort}/${protocol}`],
+    { allowFail: true },
+  )
+  if (r.code !== 0) return null
+  // First line is the v4 binding (e.g. "0.0.0.0:44513"); take it.
+  const first = r.stdout.split("\n").find((l) => l.trim().length > 0) ?? ""
+  const m = first.trim().match(/:(\d+)$/)
+  if (!m) return null
+  const port = Number(m[1])
+  return Number.isFinite(port) && port > 0 ? port : null
 }
 
 const LOOPAT_NETWORK = "loopat"
