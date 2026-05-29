@@ -117,3 +117,60 @@ to the shared repos (separate `personal/` git initialized locally).
    exist with auto-commits
 
 If any of these fail, see [troubleshoot.md](troubleshoot.md).
+
+## Podman 容器启动
+
+除了 `bun run dev`（开发）和 `docker compose up`（生产 Docker），
+loopat 还支持在 Podman 容器内运行主服务，适合没有 bun/node 运行时的环境。
+
+### 前置条件
+
+```sh
+sudo apt install podman uidmap slirp4netns fuse-overlayfs
+systemctl --user enable --now podman.socket   # 启用 podman 远程 API
+```
+
+### 快速启动
+
+```sh
+cd loopat
+./scripts/podman-start.sh
+```
+
+首次运行会自动构建 `loopat-server` 镜像（约 2–3 分钟），之后启动约 2 秒。
+访问 <http://localhost:7787>。
+
+### 环境变量
+
+| var | default | use |
+|---|---|---|
+| `LOOPAT_HOME` | `~/.loopat` | 数据目录路径 |
+| `LOOPAT_PORT` | `7787` | HTTP 端口 |
+| `LOOPAT_IMAGE` | `loopat-server:latest` | 自定义镜像名 |
+| `LOOPAT_CONTAINER` | `loopat-server` | 自定义容器名 |
+| `APT_MIRROR` | _(empty)_ | Debian apt 源镜像（如 `mirrors.tuna.tsinghua.edu.cn`） |
+| `DOCKER_MIRROR` | _(empty)_ | Docker Hub 镜像（如 `docker.m.daocloud.io`） |
+
+### 中国大陆加速示例
+
+```sh
+APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+DOCKER_MIRROR=docker.m.daocloud.io \
+./scripts/podman-start.sh
+```
+
+### 停止
+
+```sh
+./scripts/podman-stop.sh
+```
+
+### 工作原理
+
+1. `podman-start.sh` 构建 `loopat-server:latest` 镜像（如未构建或 APT/DOCKER 参数变化）
+2. 容器以 `--userns keep-id:uid=2000,gid=2000` 运行，宿主机 uid 映射到容器内 uid 2000
+3. 宿主机的 `.loopat` 数据和代码目录以**原始路径**挂载到容器内（保证 sandbox 容器 bind-mount 路径一致）
+4. 宿主机 podman socket 挂载到容器内，`LOOPAT_PODMAN_BIN=/usr/local/bin/podman-remote-wrapper`
+   让容器的 podman 命令通过 `--remote --url` 转发到宿主机的 podman daemon
+5. 创建 sandbox 时，podman daemon 在宿主机上执行，bind-mount 路径指向宿主机文件系统
+

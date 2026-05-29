@@ -166,7 +166,7 @@ function buildBwrapArgv(opts: {
   args.push(
     "--proc", "/proc",
     "--dev", "/dev",
-    "--bind", "/tmp", "/tmp",
+    // "--bind", "/tmp", "/tmp",
     "--bind", opts.loopDir, "/loopat/loop",
     "--bind", opts.homeDir, opts.homeDir,
   )

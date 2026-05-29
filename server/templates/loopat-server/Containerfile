@@ -1,0 +1,158 @@
+# loopat-server — 在 Podman 容器内运行 loopat 主程序
+#
+# 镜像提供 bun 运行时 + 系统包 (git, curl, openssh) + podman 远程客户端工具。
+# 应用代码和数据在运行时通过 --volume 挂载进来，挂载路径与宿主机完全一致。
+# 这样，loopat 通过宿主机 podman socket 创建 sandbox 容器时，bindmount 源路径
+# 在宿主机上存在，sandbox 容器也能正常找到这些文件。
+#
+# 关键设计：
+# - UID 2000 (loopat 用户) 匹配 sandbox 容器里的用户
+# - LOOPAT_PODMAN_BIN 指向一个 wrapper 脚本，把 podman 命令通过 socket 转发到宿主机
+# - 支持国内 apt 镜像 (APT_MIRROR) 加速构建
+# - 支持 docker.io 镜像 (DOCKER_MIRROR) 加速 sandbox 拉取 ubuntu:24.04
+#
+# 构建参数:
+#   APT_MIRROR   - apt 镜像，如: mirrors.tuna.tsinghua.edu.cn, mirrors.ustc.edu.cn
+#   DOCKER_MIRROR - Docker Hub 镜像，如: docker.m.daocloud.io, registry.cn-hangzhou.aliyuncs.com
+#
+# 运行时: 通过 scripts/podman-start.sh 启动
+
+FROM oven/bun:1-slim AS base
+
+ARG APT_MIRROR=""
+ARG DOCKER_MIRROR=""
+
+USER root
+
+# ── apt 配置与安装 ────────────────────────────────────────────────────────────
+# oven/bun:1-slim 基于 Debian trixie，使用 deb822 格式:
+#   /etc/apt/sources.list.d/debian.sources
+# 当传入 APT_MIRROR 时，替换所有 deb.debian.org 引用为镜像地址。
+# 注意: security.debian.org 在某些镜像上不可用 (需要单独的 security 镜像)，
+# 这里统一替换，如果失败可以改用不同的 security 镜像。
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+          /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        podman \
+        uidmap fuse-overlayfs slirp4netns \
+        ca-certificates curl git openssh-client \
+        sudo fish vim && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+# 包说明:
+#   podman             — podman 客户端 + 远程模式支持 (--remote)
+#   uidmap/slirp4netns/fuse-overlayfs — podman 工作所需 (即使不用本地 podman)
+#   ca-certificates    — HTTPS/TLS 证书
+#   curl/git/openssh   — 服务器运行中用到的工具
+#   sudo/fish/vim      — 调试方便 (nopasswd sudo for loopat)
+
+# ── 创建 loopat 用户 (uid 2000) ───────────────────────────────────────────────
+# 与 sandbox 容器中的 loopat 用户 uid 一致。
+# oven/bun:1-slim 有一个 bun 用户 (uid 1000)；这里保持 bun 用户不动，
+# 新增一个 loopat 用户 (uid 2000) 作为服务器运行用户。
+#
+# 注意: 宿主机用户通常是 uid 1000。通过 --userns keep-id:uid=2000，
+# 宿主机 uid 1000 被映射到容器内 uid 2000 (loopat)。
+RUN groupadd -g 2000 loopat && \
+    useradd -m -u 2000 -g 2000 -s /bin/bash -G sudo loopat && \
+    echo "loopat ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/loopat && \
+    chmod 0440 /etc/sudoers.d/loopat
+
+# ── subuid/subgid (podman 需要) ──────────────────────────────────────────────
+# 即使容器内不直接运行 podman (--remote 通过 socket 走宿主机)，
+# podman 客户端仍然检查 subuid 配置，所以需要设置。
+RUN echo "loopat:10000:50000" > /etc/subuid && \
+    echo "loopat:10000:50000" > /etc/subgid
+
+# ── podman 容器运行配置 ────────────────────────────────────────────────────
+# vfs: 简单的存储驱动，不需要 fuse-overlayfs 也能工作；rootless podman 最兼容的选择
+# cgroupfs: 容器内没有 systemd，不能用 cgroup_manager = systemd
+# registries.conf: 配置 docker.io 镜像加速 sandbox 容器拉取 ubuntu:24.04
+RUN mkdir -p /home/loopat/.config/containers && \
+    printf '[storage]\ndriver = "vfs"\n' \
+        > /home/loopat/.config/containers/storage.conf && \
+    printf '[containers]\ncgroup_manager = "cgroupfs"\n' \
+        > /home/loopat/.config/containers/containers.conf
+
+# ── Docker Hub 镜像 (sandbox 拉取 ubuntu:24.04 时使用) ───────────────────────
+# 只在传入 DOCKER_MIRROR 时添加镜像配置；否则使用默认 docker.io
+# sandbox 容器创建时使用宿主机 podman daemon，但镜像拉取配置写在这里
+# 会覆盖到 sandbox 容器的 podman 环境 (通过 LOOPAT_HOME 挂载)
+RUN if [ -n "$DOCKER_MIRROR" ]; then \
+      { printf '[[registry]]\n'; \
+        printf 'location = "docker.io"\n'; \
+        printf '[[registry.mirror]]\n'; \
+        printf 'location = "%s"\n' "$DOCKER_MIRROR"; } \
+      > /etc/containers/registries.conf; \
+    fi
+
+RUN chown -R loopat:loopat /home/loopat/.config
+
+# ── podman 远程 wrapper 脚本 ─────────────────────────────────────────────────
+# loopat 服务器代码里直接调用 "podman" 命令 (通过 LOOPAT_PODMAN_BIN 环境变量)。
+# 在容器内，"podman" 实际上是这个 wrapper 脚本，它把命令通过 --remote 模式
+# 转发到宿主机 podman daemon (通过 socket)。
+#
+# Socket 路径 (与宿主机一致，通过 bind-mount 注入):
+#   1. /run/user/$(id -u)/podman/podman.sock  — 标准 rootless podman socket
+#   2. /var/run/docker.sock                    — Docker socket (如果有)
+#   3. /run/podman/podman.sock                — rootful podman socket
+#
+# 优先级: 标准 rootless > Docker > rootful
+RUN printf '#!/bin/sh\n' > /usr/local/bin/podman-remote-wrapper && \
+    printf 'SOCK=""\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf '[ -S /run/user/1000/podman/podman.sock ] && SOCK=unix:///run/user/1000/podman/podman.sock\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf '[ -z "$SOCK" ] && [ -S /var/run/docker.sock ] && SOCK=unix:///var/run/docker.sock\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf '[ -z "$SOCK" ] && [ -S /run/podman/podman.sock ] && SOCK=unix:///run/podman/podman.sock\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf 'if [ -n "$SOCK" ]; then\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf '  exec /usr/bin/podman --remote --url "$SOCK" "$@"\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf 'else\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf '  exec /usr/bin/podman "$@"\n' >> /usr/local/bin/podman-remote-wrapper && \
+    printf 'fi\n' >> /usr/local/bin/podman-remote-wrapper && \
+    chmod +x /usr/local/bin/podman-remote-wrapper
+
+# ── mise (dev tool version manager) ─────────────────────────────────────────
+# Sandbox 子镜像构建时用 mise 安装工具链。服务器本身也需要 mise 二进制文件
+# 来读取 mise.toml 计算 hash (用于检测工具链变化)。
+RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+
+ENV MISE_DATA_DIR=/opt/loopat-mise \
+    MISE_CONFIG_DIR=/opt/loopat-mise/config \
+    MISE_CACHE_DIR=/opt/loopat-mise/cache \
+    PATH=/opt/loopat-mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN mkdir -p /opt/loopat-mise/shims /opt/loopat-mise/config /opt/loopat-mise/cache && \
+    chown -R loopat:loopat /opt/loopat-mise && \
+    chmod -R 755 /opt/loopat-mise
+
+# ── 运行时环境变量 ─────────────────────────────────────────────────────────────
+# HOST=0.0.0.0: 容器内监听所有网络接口 (publish 到宿主机 0.0.0.0:7787)
+# LOOPAT_PODMAN_BIN: 使用 wrapper 脚本，把 podman 命令通过 socket 转发
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=7787 \
+    LOOPAT_SERVE_HOST=0.0.0.0 \
+    LOOPAT_SERVE_PORT=7788 \
+    LOOPAT_PODMAN_BIN=/usr/local/bin/podman-remote-wrapper
+
+# ── 工作目录 & entrypoint ─────────────────────────────────────────────────────
+# 代码目录在运行时通过 --volume 挂载到 LOOPAT_INSTALL_DIR (与宿主机路径一致)。
+# WORKDIR 无法使用运行时环境变量，因此通过 entrypoint 脚本在 CMD 执行前
+# cd 到代码目录，确保 "bun run server/src/index.ts" 能正确解析相对路径。
+# 若 LOOPAT_INSTALL_DIR 未设置，回退到 /opt/loopat。
+WORKDIR /opt/loopat
+
+RUN printf '#!/bin/sh\n'           > /usr/local/bin/loopat-entrypoint && \
+    printf 'set -e\n'             >> /usr/local/bin/loopat-entrypoint && \
+    printf 'cd "${LOOPAT_INSTALL_DIR:-/opt/loopat}"\n' >> /usr/local/bin/loopat-entrypoint && \
+    printf 'exec "$@"\n'          >> /usr/local/bin/loopat-entrypoint && \
+    chmod +x /usr/local/bin/loopat-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/loopat-entrypoint"]
+
+USER loopat
+
+EXPOSE 7787 7788
+
+CMD ["bun", "run", "server/src/index.ts"]

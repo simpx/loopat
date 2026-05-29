@@ -12,8 +12,11 @@ export const LOOPAT_HOME = process.env.LOOPAT_HOME ?? join(homedir(), ".loopat")
 
 // loopat code install dir (contains node_modules/, helper binaries the sandbox needs)
 // Computed from this file's path: server/src/paths.ts → loop/
+// Override via LOOPAT_INSTALL_DIR env var when running in podman mode:
+// the code is mounted from the host at its original path, so bind-mount
+// sources for sandbox containers must resolve to host-absolute paths.
 const __DIRNAME = dirname(fileURLToPath(import.meta.url))
-export const LOOPAT_INSTALL_DIR = resolve(__DIRNAME, "../..")
+export const LOOPAT_INSTALL_DIR = process.env.LOOPAT_INSTALL_DIR ?? resolve(__DIRNAME, "../..")
 export const TEMPLATES_DIR = join(LOOPAT_INSTALL_DIR, "server", "templates")
 
 export const WORKSPACE = basename(LOOPAT_HOME).replace(/^\.+/, "") || "loopat"

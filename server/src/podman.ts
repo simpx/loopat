@@ -541,12 +541,14 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
     opts?.onProgress?.("Building sandbox environment…")
 
     // Stream build output, parsing STEP lines into progress messages.
+    // Also echo every line to console so operators can see full build detail.
     const buildDir = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox")
     let lastStep = ""
     const r = await runPodman(
       ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "-f", containerfile, buildDir],
       {
         onLine: (line) => {
+          console.log(`[podman:build:sandbox] ${line}`)
           const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
           if (m) {
             lastStep = descStep(m[3])
@@ -645,7 +647,7 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
       return tag
     }
 
-    console.log(`[podman] building loop image ${tag} for loop ${loopId.slice(0, 8)}`)
+    console.log(`[podman] building loop image ${tag} for loop ${loopId.slice(0, 8)} (${content.length} bytes mise.toml)`)
     opts?.onProgress?.("Installing tools from mise.toml…")
     const buildDir = await mkdtemp(join(tmpdir(), "loopat-img-"))
     try {
@@ -664,11 +666,15 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
       ].join("\n") + "\n"
       await writeFile(join(buildDir, "Containerfile"), childContainerfile)
 
+      // Stream build output line-by-line so operators can follow mise install
+      // progress (tool downloads, shim creation, etc.). Non-STEP lines are
+      // raw mise output — log them all at debug-level verbosity.
       const r = await runPodman(
         ["build", "-t", tag, "-f", join(buildDir, "Containerfile"), buildDir],
         {
           allowFail: true,
           onLine: (line) => {
+            console.log(`[podman:build:${tag.slice(0, 16)}] ${line}`)
             const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
             if (m) {
               opts?.onProgress?.(`Installing tools: ${descStep(m[3])} (step ${m[1]}/${m[2]})`)

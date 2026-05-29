@@ -138,6 +138,48 @@ PORT=7787 bun run server/src/index.ts
 Single Hono process serves API + static SPA + websocket on one port.
 Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
 
+### Podman 容器启动 (无需在主机安装 bun)
+
+```sh
+# 主机只需要安装 podman，不需要 bun / node / mise
+./scripts/podman-start.sh
+```
+
+打开 <http://localhost:7787>（默认端口）。脚本会自动：
+
+1. 构建 `loopat-server` 镜像（首次运行或 `--no-cache`）
+2. 启动 rootless podman 容器，自动注入 podman socket
+3. 将主机的 `.loopat` 数据和代码目录以相同路径挂载到容器内
+
+支持的可选环境变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `LOOPAT_HOME` | `~/.loopat` | 数据目录路径（容器内同名挂载） |
+| `LOOPAT_PORT` | `7787` | HTTP 监听端口 |
+| `APT_MIRROR` | (官方) | apt 镜像源，例如 `mirrors.tuna.tsinghua.edu.cn` |
+| `DOCKER_MIRROR` | (官方) | Docker Hub 镜像，例如 `docker.m.daocloud.io` |
+
+中国大陆示例（加速构建和 sandbox 拉取）：
+
+```sh
+APT_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+DOCKER_MIRROR=docker.m.daocloud.io \
+./scripts/podman-start.sh
+```
+
+**工作原理：** 容器内的 loopat 服务器通过 `LOOPAT_PODMAN_BIN` 环境变量指向一个 wrapper 脚本。该脚本把所有 `podman` 命令通过注入的 socket 转发到宿主机的 podman daemon。这样 sandbox 容器就是在宿主机上创建的，可以正常 bind-mount 宿主机上的代码和数据文件。
+
+停止容器：
+
+```sh
+./scripts/podman-stop.sh
+```
+
+> **注意：** 如果需要 workspace-serve（端口 7788 子域名路由）功能，需要先在宿主机编译 Rust 二进制：
+> `cd server/src/serve-rs && cargo build --release`。port-proxy 类似（`server/src/port-proxy-rs`）。
+> 不编译也能正常运行主功能和 sandbox，只是这两个附加功能不可用。
+
 ## Documentation
 
 - **[Admin setup](docs/setup-admin.md)** — workspace config, knowledge /
