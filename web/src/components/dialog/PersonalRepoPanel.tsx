@@ -4,6 +4,7 @@ import {
   exportPersonalCryptKey,
   getPersonalStatus,
   importPersonal,
+  setupPersonalGithub,
   pullPersonalVault,
   pushPersonalVault,
   type PersonalStatus,
@@ -38,6 +39,10 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
   const [notClean, setNotClean] = useState(false)
   const [exposedFiles, setExposedFiles] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [ghToken, setGhToken] = useState("")
+  const [ghRepoName, setGhRepoName] = useState("")
+  const [ghBusy, setGhBusy] = useState(false)
+  const [ghError, setGhError] = useState<string | null>(null)
   const [copiedPub, setCopiedPub] = useState(false)
   const [backupKey, setBackupKey] = useState<string | null>(null)
   const [backupCopied, setBackupCopied] = useState(false)
@@ -105,6 +110,29 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  // GitHub token path: loopat creates the repo, registers the deploy key, and
+  // clones + git-crypts it — no manual repo creation or deploy-key pasting.
+  const submitGithub = async () => {
+    if (ghBusy) return
+    setGhError(null)
+    setGhBusy(true)
+    try {
+      const r = await setupPersonalGithub(ghToken.trim(), ghRepoName.trim() || undefined)
+      if (!r.ok) {
+        setGhError(r.error ?? "github setup failed")
+        return
+      }
+      if (r.autoInitialized && r.cryptKey) {
+        setBackupKey(r.cryptKey)
+      } else {
+        const fresh = await getPersonalStatus()
+        setStatus(fresh)
+      }
+    } finally {
+      setGhBusy(false)
     }
   }
 
@@ -188,6 +216,45 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* GitHub token — the easy path: loopat creates the repo + deploy key */}
+      <div className="border border-gray-200 rounded p-2.5 flex flex-col gap-2">
+        <div className="text-xs font-semibold text-gray-900">Set up with a GitHub token (easiest)</div>
+        <div className="text-[11px] text-gray-500 leading-relaxed">
+          Paste a GitHub personal access token (scopes{" "}
+          <code className="bg-gray-100 px-1 rounded">repo</code> +{" "}
+          <code className="bg-gray-100 px-1 rounded">write:public_key</code>). Loopat creates the repo,
+          registers the deploy key, and runs git-crypt for you.
+        </div>
+        <input
+          type="password"
+          value={ghToken}
+          onChange={(e) => setGhToken(e.target.value)}
+          placeholder="ghp_… (personal access token)"
+          autoComplete="off"
+          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+        />
+        <input
+          type="text"
+          value={ghRepoName}
+          onChange={(e) => setGhRepoName(e.target.value)}
+          placeholder="repo name (default: loopat-personal)"
+          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+        />
+        {ghError && (
+          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{ghError}</div>
+        )}
+        <button
+          type="button"
+          onClick={submitGithub}
+          disabled={ghBusy || !ghToken.trim()}
+          className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {ghBusy ? "setting up…" : "Set up with GitHub"}
+        </button>
+      </div>
+
+      <div className="text-[11px] text-gray-400 text-center">— or set it up manually —</div>
+
       <div className="text-xs text-gray-600 leading-relaxed">
         Two steps:
         <ol className="list-decimal pl-5 mt-1 space-y-0.5 text-gray-600">

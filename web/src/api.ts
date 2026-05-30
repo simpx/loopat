@@ -275,6 +275,44 @@ export async function importPersonal(
   }
 }
 
+// Onboard personal via a GitHub PAT: loopat creates the repo, registers the
+// deploy key, clones + handles git-crypt. The token is used host-side only.
+export async function setupPersonalGithub(
+  token: string,
+  repoName?: string,
+  cryptKey?: string,
+  baseUrl?: string,
+): Promise<{
+  ok: boolean
+  error?: string
+  needsCryptKey?: boolean
+  repo?: string
+  created?: boolean
+  autoInitialized?: boolean
+  cryptKey?: string | null
+}> {
+  const payload: Record<string, string> = { token }
+  if (repoName) payload.repoName = repoName
+  if (cryptKey) payload.cryptKey = cryptKey
+  if (baseUrl) payload.baseUrl = baseUrl
+  const r = await apiFetch("/api/personal/github", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) {
+    return { ok: false, error: j.error ?? `github setup failed (${r.status})`, needsCryptKey: !!j.needsCryptKey }
+  }
+  return {
+    ok: true,
+    repo: typeof j.repo === "string" ? j.repo : undefined,
+    created: !!j.created,
+    autoInitialized: !!j.autoInitialized,
+    cryptKey: typeof j.cryptKey === "string" ? j.cryptKey : null,
+  }
+}
+
 export async function logout(): Promise<void> {
   await apiFetch("/api/auth/logout", { method: "POST" }).catch(() => {})
 }
