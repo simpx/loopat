@@ -460,6 +460,66 @@ export async function provisionUserPersonal(userId: string): Promise<{ publicKey
 }
 
 /**
+ * GitHub PAT onboarding (docs/identity.md integration contract). Uses the
+ * user's token, HOST-SIDE ONLY (never enters a sandbox), to:
+ *   1. create the personal repo if missing,
+ *   2. register the loopat-managed deploy key on it,
+ * then reuses importPersonalFromRepo to clone + handle git-crypt (empty repo →
+ * auto-init and return the generated key; existing → needsCryptKey).
+ *
+ * The token is only a way to *set things up*; runtime git uses the deploy key /
+ * vault, not the PAT. `baseUrl` lets it target GitHub Enterprise / internal.
+ */
+export async function setupPersonalViaGithub(opts: {
+  userId: string
+  token: string
+  repoName: string
+  baseUrl?: string
+  cryptKey?: string
+}): Promise<
+  | { ok: true; repo: string; created: boolean; autoInitialized?: boolean; cryptKey?: string }
+  | { ok: false; error: string; needsCryptKey?: boolean }
+> {
+  const { githubClient, getViewer, ensureUserRepo, ensureDeployKey } = await import("./github")
+  const c = githubClient(opts.token, opts.baseUrl)
+
+  let login: string
+  try {
+    login = (await getViewer(c)).login
+  } catch (e: any) {
+    return { ok: false, error: `github auth failed: ${e?.message ?? e}` }
+  }
+
+  let repo: { created: boolean; sshUrl: string; fullName: string }
+  try {
+    repo = await ensureUserRepo(c, opts.repoName, { private: true, description: "loopat personal" })
+  } catch (e: any) {
+    return { ok: false, error: `ensure repo failed: ${e?.message ?? e}` }
+  }
+
+  // Register the loopat deploy key (rw: host bootstrap clone + personal promote).
+  const { publicKey } = await ensurePersonalKeypair(opts.userId)
+  if (publicKey) {
+    try {
+      await ensureDeployKey(c, login, opts.repoName, `loopat:${opts.userId}`, publicKey, false)
+    } catch (e: any) {
+      return { ok: false, error: `register deploy key failed: ${e?.message ?? e}` }
+    }
+  }
+
+  // Clone + git-crypt via the existing import path.
+  const imp = await importPersonalFromRepo(opts.userId, repo.sshUrl, opts.cryptKey)
+  if (!imp.ok) return { ok: false, error: imp.error, needsCryptKey: imp.needsCryptKey }
+  return {
+    ok: true,
+    repo: repo.fullName,
+    created: repo.created,
+    autoInitialized: imp.autoInitialized,
+    cryptKey: imp.cryptKey,
+  }
+}
+
+/**
  * Detect whether `personal/<user>/` is "fresh" — i.e. only has the
  * scaffolding we put there (`.git`, `memory/`). If yes, it's safe to wipe +
  * clone over the top. Anything else means we refuse to overwrite.
