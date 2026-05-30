@@ -148,6 +148,9 @@ Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
   environment variables.
 - **[Architecture](docs/architecture.md)** — the read/write path, layered
   context model, distillation pipeline, Claude config injection paths.
+- **[Context flow](docs/context-flow.md)** — the horizontal working model: a
+  loop is a git worktree, shared context is `main`, and loops exchange it over
+  two edges — pull and promote.
 - **[.claude composition](docs/composition.md)** — how team / profile /
   personal / repo `.claude/` tiers merge into the loop runtime, and what
   you can put in each tier.
