@@ -54,6 +54,9 @@ export interface GitHostProvider {
     login: string,
     level: "read" | "write",
   ): Promise<void>
+
+  /** List the user's repos (names) for an onboarding picker. Optional. */
+  listRepos?(cred: HostCred): Promise<{ name: string; path: string }[]>
 }
 
 const providers = new Map<string, GitHostProvider>()

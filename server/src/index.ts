@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -1210,7 +1210,11 @@ app.get("/api/personal/status", requireAuth, async (c) => {
     personalRepo: user.personalRepo ?? null,
     publicKey,
     imported,
-    gitHost: { provider: wcfg.gitHost?.provider ?? "github", baseUrl: wcfg.gitHost?.baseUrl ?? null },
+    gitHost: {
+      provider: wcfg.gitHost?.provider ?? "github",
+      baseUrl: wcfg.gitHost?.baseUrl ?? null,
+      defaultRepo: wcfg.gitHost?.defaultRepo ?? "loopat-personal",
+    },
   })
 })
 
@@ -1285,7 +1289,7 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   const token = typeof body.token === "string" ? body.token.trim() : ""
   if (!token) return c.json({ error: "github token required" }, 400)
   const wcfg = await loadConfig()
-  const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || "loopat-personal"
+  const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || wcfg.gitHost?.defaultRepo || "loopat-personal"
   const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
   const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
   const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
@@ -1296,6 +1300,23 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   }
   await setPersonalRepo(userId, r.repoUrl)
   return c.json({ ok: true, repo: r.repo, created: r.created, autoInitialized: !!r.autoInitialized, cryptKey: r.cryptKey ?? null })
+})
+
+// POST /api/personal/repos — list the user's repos for the onboarding picker.
+// "personal"-named repos come first. Empty when the provider can't list.
+app.post("/api/personal/repos", requireAuth, async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const token = typeof body.token === "string" ? body.token.trim() : ""
+  if (!token) return c.json({ repos: [] })
+  const wcfg = await loadConfig()
+  const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
+  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
+  try {
+    const repos = await listPersonalReposViaProvider({ provider, token, baseUrl })
+    return c.json({ repos })
+  } catch (e: any) {
+    return c.json({ repos: [], error: e?.message ?? String(e) })
+  }
 })
 
 // Destroy personal/<user>/ AND the saved git-crypt key. Two-step from the

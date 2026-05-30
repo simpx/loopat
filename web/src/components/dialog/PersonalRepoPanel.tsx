@@ -5,6 +5,7 @@ import {
   getPersonalStatus,
   importPersonal,
   setupPersonalGithub,
+  listPersonalRepos,
   pullPersonalVault,
   pushPersonalVault,
   type PersonalStatus,
@@ -43,6 +44,7 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
   const [ghRepoName, setGhRepoName] = useState("")
   const [ghCryptKey, setGhCryptKey] = useState("")
   const [ghNeedsCryptKey, setGhNeedsCryptKey] = useState(false)
+  const [ghRepos, setGhRepos] = useState<{ name: string; path: string }[]>([])
   const [ghBusy, setGhBusy] = useState(false)
   const [ghError, setGhError] = useState<string | null>(null)
   const [copiedPub, setCopiedPub] = useState(false)
@@ -63,6 +65,7 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
       .then((s) => {
         setStatus(s)
         setRepoUrl(s?.personalRepo ?? "")
+        setGhRepoName(s?.gitHost?.defaultRepo ?? "loopat-personal")
       })
       .finally(() => setLoading(false))
   }, [])
@@ -237,17 +240,35 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
           type="password"
           value={ghToken}
           onChange={(e) => setGhToken(e.target.value)}
+          onBlur={() => {
+            if (ghToken.trim()) listPersonalRepos(ghToken.trim()).then(setGhRepos).catch(() => {})
+          }}
           placeholder="personal access / private token"
           autoComplete="off"
           className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
         />
-        <input
-          type="text"
-          value={ghRepoName}
-          onChange={(e) => setGhRepoName(e.target.value)}
-          placeholder="repo name — existing → use it · new → create it (default: loopat-personal)"
-          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            list="gh-repo-list"
+            value={ghRepoName}
+            onChange={(e) => setGhRepoName(e.target.value)}
+            placeholder="pick an existing repo or type a new name"
+            className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+          />
+          <datalist id="gh-repo-list">
+            {ghRepos.map((r) => (
+              <option key={r.path} value={r.name} />
+            ))}
+          </datalist>
+          <span
+            className={`text-[11px] whitespace-nowrap ${
+              ghRepos.some((r) => r.name === ghRepoName.trim()) ? "text-gray-500" : "text-emerald-600"
+            }`}
+          >
+            {ghRepos.some((r) => r.name === ghRepoName.trim()) ? "use existing" : "will create"}
+          </span>
+        </div>
         {ghNeedsCryptKey && (
           <textarea
             value={ghCryptKey}

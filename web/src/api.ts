@@ -130,7 +130,19 @@ export type PersonalStatus = {
   personalRepo: string | null
   publicKey: string | null
   imported: boolean
-  gitHost?: { provider: string; baseUrl: string | null }
+  gitHost?: { provider: string; baseUrl: string | null; defaultRepo?: string }
+}
+
+// List the user's repos for the onboarding picker ("personal"-named first).
+export async function listPersonalRepos(token: string): Promise<{ name: string; path: string }[]> {
+  const r = await apiFetch("/api/personal/repos", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token }),
+  })
+  if (!r.ok) return []
+  const j = await r.json().catch(() => ({}))
+  return Array.isArray(j.repos) ? j.repos : []
 }
 
 export async function getPersonalStatus(): Promise<PersonalStatus | null> {

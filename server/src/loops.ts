@@ -503,6 +503,25 @@ export async function setupPersonalViaGithub(opts: {
   return setupPersonalViaProvider({ ...opts, provider: "github" })
 }
 
+/** List the user's repos via a provider (onboarding picker), "personal"-named
+ *  first. Empty when the provider can't list or the call fails. */
+export async function listPersonalReposViaProvider(opts: {
+  provider?: string
+  token: string
+  baseUrl?: string
+}): Promise<{ name: string; path: string }[]> {
+  await loadExtensionProviders()
+  const provider = getProvider(opts.provider ?? "github")
+  if (!provider?.listRepos) return []
+  let repos: { name: string; path: string }[]
+  try {
+    repos = await provider.listRepos({ token: opts.token, baseUrl: opts.baseUrl })
+  } catch {
+    return []
+  }
+  return repos.sort((a, b) => (b.name.includes("personal") ? 1 : 0) - (a.name.includes("personal") ? 1 : 0))
+}
+
 /**
  * Detect whether `personal/<user>/` is "fresh" — i.e. only has the
  * scaffolding we put there (`.git`, `memory/`). If yes, it's safe to wipe +
