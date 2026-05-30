@@ -683,6 +683,7 @@ async function swapPersonalDir(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const dir = personalDir(userId)
   try {
+    await mkdir(join(dir, ".."), { recursive: true })
     await rm(dir, { recursive: true, force: true })
     await rename(tmp, dir)
     const pm = personalMemoryDir(userId)
