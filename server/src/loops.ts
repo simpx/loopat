@@ -480,7 +480,18 @@ export async function setupPersonalViaProvider(opts: {
 
   // Clone + git-crypt via the existing import path (commit author from the
   // platform identity — some hosts reject non-corporate emails).
-  const imp = await importPersonalFromRepo(opts.userId, cloneUrl, opts.cryptKey, { name: login, email })
+  // Internal-setup hook (optional): the provider may seed default files into
+  // the fresh repo (provider configs, ssh keys, …). Only fires on auto-init.
+  const seed = provider.seedDefaults
+    ? (repoDir: string) =>
+        provider.seedDefaults!({
+          repoDir,
+          vaultDir: join(repoDir, ".loopat", "vaults", "default"),
+          userId: opts.userId,
+          login,
+        })
+    : undefined
+  const imp = await importPersonalFromRepo(opts.userId, cloneUrl, opts.cryptKey, { name: login, email }, seed)
   if (!imp.ok) return { ok: false, error: imp.error, needsCryptKey: imp.needsCryptKey }
   return {
     ok: true,
@@ -520,6 +531,31 @@ export async function listPersonalReposViaProvider(opts: {
     return []
   }
   return repos.sort((a, b) => (b.name.includes("personal") ? 1 : 0) - (a.name.includes("personal") ? 1 : 0))
+}
+
+/** Validate a token by authenticating it against the provider. The onboarding
+ *  picker calls this to fail fast on a bad token instead of silently showing
+ *  an empty repo list. */
+export async function authenticateViaProvider(opts: {
+  provider?: string
+  token: string
+  baseUrl?: string
+}): Promise<{ ok: true; login: string } | { ok: false; error: string }> {
+  await loadExtensionProviders()
+  const provider = getProvider(opts.provider ?? "github")
+  if (!provider) return { ok: false, error: `unknown git host provider: ${opts.provider}` }
+  try {
+    const auth = await provider.authenticate({ token: opts.token, baseUrl: opts.baseUrl })
+    return { ok: true, login: auth.login }
+  } catch (e: any) {
+    return { ok: false, error: `${provider.id} auth failed: ${e?.message ?? e}` }
+  }
+}
+
+/** The provider's optional token-help hint (URL/text), for the onboarding UI. */
+export async function providerTokenHelp(providerId?: string): Promise<string | null> {
+  await loadExtensionProviders()
+  return getProvider(providerId ?? "github")?.tokenHelp ?? null
 }
 
 /**
@@ -571,6 +607,7 @@ export async function importPersonalFromRepo(
   repoUrl: string,
   cryptKey?: string,
   author?: { name?: string; email?: string },
+  seed?: (repoDir: string) => Promise<void>,
 ): Promise<
   | { ok: true; autoInitialized?: boolean; cryptKey?: string }
   | {
@@ -665,7 +702,7 @@ export async function importPersonalFromRepo(
     }
   }
 
-  const init = await autoInitGitCrypt(tmp, userId, author)
+  const init = await autoInitGitCrypt(tmp, userId, author, seed)
   if (!init.ok) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     return { ok: false, error: init.error }
@@ -714,6 +751,7 @@ async function autoInitGitCrypt(
   repoDir: string,
   userId: string,
   author?: { name?: string; email?: string },
+  seed?: (repoDir: string) => Promise<void>,
 ): Promise<{ ok: true; cryptKey: string } | { ok: false; error: string }> {
   // git-crypt must be on the host; check early with a useful error
   try {
@@ -766,6 +804,18 @@ async function autoInitGitCrypt(
   await mkdir(join(repoDir, "memory"), { recursive: true })
   if (!existsSyncBase(join(repoDir, "memory/MEMORY.md"))) {
     await writeFile(join(repoDir, "memory/MEMORY.md"), PERSONAL_MEMORY_INDEX_STUB)
+  }
+
+  // Internal-setup hook: let the provider seed default files (provider configs,
+  // ssh keys, …) into the working tree now. git-crypt is initialized, so
+  // anything written under .loopat/vaults/** is encrypted, and the scaffold
+  // commit below picks it up via `git add .loopat`. Non-fatal.
+  if (seed) {
+    try {
+      await seed(repoDir)
+    } catch (e: any) {
+      console.warn(`[loopat] seedDefaults hook failed: ${e?.message ?? e}`)
+    }
   }
 
   // Export the key BEFORE pushing so a push failure rolls back to a state
@@ -1025,12 +1075,88 @@ export async function syncPersonalToRemote(
 }
 
 /**
- * Pull from remote. Best-effort: fetches and merges. If there are conflicts,
- * returns conflict details so the UI can let the user choose.
+ * ff-only sync core — the loop-outside (no-AI) rule from docs/context-flow.md:
+ * rebase a checkout's local commits onto origin/<branch>. A clean rebase means
+ * local is now origin + local commits, linear, ready to ff-push. A real
+ * same-spot conflict is *held back*: we abort (local commits preserved —
+ * nothing is lost) and report the files so the caller can surface the choice
+ * (discard local / take remote / resolve in a loop). Never a blind merge.
+ */
+async function rebaseOntoOrigin(
+  dir: string,
+  userId: string,
+  branch: string,
+): Promise<{ ok: true } | { ok: false; error: string } | { ok: false; conflict: true; files: string[] }> {
+  try {
+    await execFileP("git", ["-C", dir, "fetch", "origin"], {
+      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId), GIT_TERMINAL_PROMPT: "0" },
+      timeout: 30_000,
+    })
+  } catch (e: any) {
+    return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+  // No upstream branch yet (empty remote) → nothing to rebase onto.
+  try {
+    await execFileP("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `origin/${branch}`])
+  } catch {
+    return { ok: true }
+  }
+  try { await execFileP("git", ["-C", dir, "rebase", "--abort"]) } catch {}
+  try {
+    await execFileP("git", ["-C", dir, "rebase", `origin/${branch}`], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    })
+    return { ok: true }
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString()
+    let files: string[] = []
+    try {
+      const { stdout } = await execFileP("git", ["-C", dir, "diff", "--name-only", "--diff-filter=U"])
+      files = stdout.split("\n").filter((l) => l.trim())
+    } catch {}
+    try { await execFileP("git", ["-C", dir, "rebase", "--abort"]) } catch {}
+    if (files.length > 0 || /CONFLICT/.test(stderr)) return { ok: false, conflict: true, files }
+    return { ok: false, error: `rebase failed: ${stderr || e?.message || e}` }
+  }
+}
+
+/**
+ * Stage + commit local changes. Preserves the repo's existing author (set at
+ * import from the platform identity — some hosts reject non-corporate emails);
+ * only falls back to a local identity if none is configured.
+ */
+async function commitLocalChanges(
+  dir: string,
+  message: string,
+): Promise<{ ok: true; committed: boolean } | { ok: false; error: string }> {
+  try {
+    try { await execFileP("git", ["-C", dir, "config", "user.email"]) }
+    catch { await execFileP("git", ["-C", dir, "config", "user.email", "loopat@local"]) }
+    try { await execFileP("git", ["-C", dir, "config", "user.name"]) }
+    catch { await execFileP("git", ["-C", dir, "config", "user.name", "loopat"]) }
+    await execFileP("git", ["-C", dir, "add", "-A"])
+  } catch (e: any) {
+    return { ok: false, error: `git add failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+  let staged = false
+  try { await execFileP("git", ["-C", dir, "diff", "--cached", "--quiet"]) } catch { staged = true }
+  if (!staged) return { ok: true, committed: false }
+  try {
+    await execFileP("git", ["-C", dir, "commit", "-m", message])
+  } catch (e: any) {
+    return { ok: false, error: `commit failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+  return { ok: true, committed: true }
+}
+
+/**
+ * Pull = align this checkout to origin (the SoT). Commits local edits, rebases
+ * them onto origin/<branch> (held back on real conflict). With `force`, discards
+ * local entirely and takes the remote — the "take remote" escape hatch.
  */
 export type PersonalPullResult =
   | { ok: true; message: string }
-  | { ok: false; error: string; conflicts?: string[]; needsStash?: boolean }
+  | { ok: false; error: string; conflict?: boolean; files?: string[]; needsStash?: boolean }
 
 export async function pullPersonalFromRemote(
   userId: string,
@@ -1041,120 +1167,54 @@ export async function pullPersonalFromRemote(
   if (!existsSyncBase(join(dir, ".git"))) {
     return { ok: false, error: "personal/ is not a git repo" }
   }
-
   let hasOrigin = false
-  try {
-    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
-    hasOrigin = true
-  } catch {}
-  if (!hasOrigin) {
-    return { ok: false, error: "no remote configured" }
-  }
+  try { await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]); hasOrigin = true } catch {}
+  if (!hasOrigin) return { ok: false, error: "no remote configured" }
 
-  // Determine current branch
   let branch = "main"
   try {
     const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
-    const v = stdout.trim()
-    if (v) branch = v
-  } catch {}
-
-  // Check for uncommitted changes
-  let uncommitted = 0
-  try {
-    const { stdout } = await execFileP("git", ["-C", dir, "status", "--porcelain"])
-    uncommitted = stdout.split("\n").filter((l) => l.trim().length > 0).length
+    if (stdout.trim()) branch = stdout.trim()
   } catch {}
 
   if (force) {
-    // Force pull: discard ALL local state and reset to origin/<branch>.
-    // Runs regardless of uncommitted count — works around broken git state
-    // (stuck merge, corrupted index, hook failures) that normal pull can't fix.
+    // "Take the remote": discard ALL local state, re-align to origin. Doubles as
+    // the escape hatch for a wedged repo (stuck rebase/merge, dirty index).
+    const silent = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
     try {
-      const silentEnv = { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" }
-      // Abort any in-progress merge (ignore errors — there may not be one)
-      try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silentEnv }) } catch {}
-      await execFileP("git", ["-C", dir, "reset", "--hard", "HEAD"], { env: silentEnv })
-      await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
+      try { await execFileP("git", ["-C", dir, "rebase", "--abort"], { env: silent }) } catch {}
+      try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silent }) } catch {}
       await execFileP("git", ["-C", dir, "fetch", "origin"], {
-        env: { ...silentEnv, GIT_SSH_COMMAND: sshCommandForUser(userId) },
-        timeout: 30_000,
+        env: { ...silent, GIT_SSH_COMMAND: sshCommandForUser(userId) }, timeout: 30_000,
       })
-      await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silentEnv })
-      await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silentEnv })
-      return { ok: true, message: "force pulled — reset to origin/" + branch }
+      await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silent })
+      await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silent })
+      return { ok: true, message: `reset to origin/${branch}` }
     } catch (e: any) {
-      return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
+      return { ok: false, error: `force pull failed: ${e?.stderr ?? e?.message ?? e}` }
     }
   }
 
-  if (uncommitted > 0) {
-    // Stash changes before pull
-    try {
-      await execFileP("git", ["-C", dir, "stash", "push", "-m", "loopat: auto-stash before pull"])
-    } catch (e: any) {
-      return { ok: false, error: `stash failed: ${e?.stderr ?? e?.message ?? e}`, needsStash: true }
-    }
+  // Normal pull: commit local edits so the tree is clean, then rebase onto origin.
+  const c = await commitLocalChanges(dir, "loopat: local personal edits")
+  if (!c.ok) return { ok: false, error: c.error }
+  const reb = await rebaseOntoOrigin(dir, userId, branch)
+  if (!reb.ok) {
+    if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
+    return { ok: false, error: reb.error }
   }
-
-  // Fetch
-  try {
-    await execFileP("git", ["-C", dir, "fetch", "origin"], {
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
-      timeout: 30_000,
-    })
-  } catch (e: any) {
-    return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
-  }
-
-  // Merge — abort any stuck merge state first (e.g. leftover from a previous
-  // failure, or a git-crypt hook that bailed mid-way).
-  try { await execFileP("git", ["-C", dir, "merge", "--abort"]) } catch {}
-
-  try {
-    await execFileP("git", ["-C", dir, "merge", `origin/${branch}`], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    })
-  } catch (e: any) {
-    const stderr = (e?.stderr ?? "").toString()
-    // Always abort after a failed merge to leave the repo clean
-    try { await execFileP("git", ["-C", dir, "merge", "--abort"]) } catch {}
-    if (stderr.includes("CONFLICT")) {
-      const conflicts: string[] = []
-      const lines = stderr.split("\n")
-      for (const line of lines) {
-        const match = line.match(/CONFLICT\s*\(.*?\):\s*Merge conflict in\s*(.+)/)
-        if (match) conflicts.push(match[1].trim())
-      }
-      try {
-        const { stdout } = await execFileP("git", ["-C", dir, "diff", "--name-only", "--diff-filter=U"])
-        const statusConflicts = stdout.split("\n").filter((l) => l.trim())
-        conflicts.push(...statusConflicts)
-      } catch {}
-      return { ok: false, error: "merge conflicts", conflicts: [...new Set(conflicts)] }
-    }
-    return { ok: false, error: `merge failed: ${stderr || e?.message || e}`, needsStash: true }
-  }
-
-  // Pop stash if we stashed earlier
-  if (uncommitted > 0) {
-    try {
-      await execFileP("git", ["-C", dir, "stash", "pop"])
-    } catch (e: any) {
-      // Stash pop conflict — user will need to resolve manually
-      return { ok: false, error: `pull succeeded but stash pop failed: ${e?.stderr ?? e?.message ?? e}. Your changes are still in stash.`, needsStash: true }
-    }
-  }
-
-  return { ok: true, message: "pulled successfully" }
+  return { ok: true, message: `aligned to origin/${branch}` }
 }
 
 /**
- * Push to remote. Stages, commits, and pushes. Returns conflict/error details.
+ * Push = land this checkout on origin (the SoT). Commits local edits, rebases
+ * onto origin/<branch> (held back on a real conflict — never a blind merge),
+ * then ff-pushes. Outside a loop there's no AI, so a conflict is surfaced
+ * (`conflict` + `files`), not swallowed.
  */
 export type PersonalPushResult =
   | { ok: true; message: string }
-  | { ok: false; error: string; needsPull?: boolean }
+  | { ok: false; error: string; conflict?: boolean; files?: string[]; needsPull?: boolean }
 
 export async function pushPersonalToRemote(
   userId: string,
@@ -1163,68 +1223,34 @@ export async function pushPersonalToRemote(
   if (!existsSyncBase(join(dir, ".git"))) {
     return { ok: false, error: "personal/ is not a git repo" }
   }
+  let hasOrigin = false
+  try { await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]); hasOrigin = true } catch {}
+  if (!hasOrigin) return { ok: false, error: "no remote configured" }
 
-  // Author must be set
-  try {
-    await execFileP("git", ["-C", dir, "config", "user.email", "loopat@local"])
-    await execFileP("git", ["-C", dir, "config", "user.name", "loopat"])
-  } catch (e: any) {
-    return { ok: false, error: `git config failed: ${e?.message ?? e}` }
-  }
-
-  // Stage everything
-  try {
-    await execFileP("git", ["-C", dir, "add", "-A"])
-  } catch (e: any) {
-    return { ok: false, error: `git add failed: ${e?.stderr ?? e?.message ?? e}` }
-  }
-
-  // Commit if there's anything staged
-  let hadStaged = false
-  try {
-    await execFileP("git", ["-C", dir, "diff", "--cached", "--quiet"])
-  } catch {
-    hadStaged = true
-  }
-  if (hadStaged) {
-    try {
-      await execFileP("git", ["-C", dir, "commit", "-m", "loopat: sync personal vault"])
-    } catch (e: any) {
-      return { ok: false, error: `commit failed: ${e?.stderr ?? e?.message ?? e}` }
-    }
-  }
-
-  // Determine target branch
   let branch = "main"
   try {
     const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
-    const v = stdout.trim()
-    if (v) branch = v
+    if (stdout.trim()) branch = stdout.trim()
   } catch {}
 
-  // Need an origin
-  let hasOrigin = false
-  try {
-    await execFileP("git", ["-C", dir, "remote", "get-url", "origin"])
-    hasOrigin = true
-  } catch {}
-  if (!hasOrigin) {
-    return { ok: false, error: "no remote configured" }
+  const c = await commitLocalChanges(dir, "loopat: sync personal vault")
+  if (!c.ok) return { ok: false, error: c.error }
+  const reb = await rebaseOntoOrigin(dir, userId, branch)
+  if (!reb.ok) {
+    if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
+    return { ok: false, error: reb.error }
   }
-
   try {
     await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
       env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
     })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
-    if (stderr.includes("non-fast-forward") || stderr.includes("rejected") || stderr.includes("pull")) {
-      return { ok: false, error: `push rejected: remote has newer commits`, needsPull: true }
-    }
-    return { ok: false, error: `push failed: ${stderr || e?.message || e}` }
+    // We just rebased onto origin, so a rejection means the remote moved again
+    // between rebase and push (rare) — caller can simply retry.
+    return { ok: false, error: `push failed: ${stderr || e?.message || e}`, needsPull: true }
   }
-
-  return { ok: true, message: hadStaged ? "committed and pushed" : "pushed (no new changes)" }
+  return { ok: true, message: c.committed ? "committed and pushed" : "pushed" }
 }
 
 // ── Generic repo sync (knowledge / notes / repos) ─────────────────────

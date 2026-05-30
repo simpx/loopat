@@ -130,19 +130,23 @@ export type PersonalStatus = {
   personalRepo: string | null
   publicKey: string | null
   imported: boolean
-  gitHost?: { provider: string; baseUrl: string | null; defaultRepo?: string }
+  gitHost?: { provider: string; baseUrl: string | null; defaultRepo?: string; tokenHelp?: string | null }
 }
 
 // List the user's repos for the onboarding picker ("personal"-named first).
-export async function listPersonalRepos(token: string): Promise<{ name: string; path: string }[]> {
+// `ok: false` means the token was rejected (or the request failed) — surface
+// `error` instead of treating it as an empty list.
+export async function listPersonalRepos(
+  token: string,
+): Promise<{ ok: boolean; repos: { name: string; path: string }[]; login?: string; error?: string }> {
   const r = await apiFetch("/api/personal/repos", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ token }),
   })
-  if (!r.ok) return []
-  const j = await r.json().catch(() => ({}))
-  return Array.isArray(j.repos) ? j.repos : []
+  const j = await r.json().catch(() => ({}) as any)
+  if (!r.ok) return { ok: false, repos: [], error: j?.error ?? "request failed" }
+  return { ok: j.ok !== false, repos: Array.isArray(j.repos) ? j.repos : [], login: j.login, error: j.error }
 }
 
 export async function getPersonalStatus(): Promise<PersonalStatus | null> {
@@ -210,7 +214,8 @@ export async function deletePersonalVault(
 export async function pullPersonalVault(opts?: { force?: boolean }): Promise<{
   ok: boolean
   error?: string
-  conflicts?: string[]
+  conflict?: boolean
+  files?: string[]
   needsStash?: boolean
   message?: string
 }> {
@@ -224,7 +229,8 @@ export async function pullPersonalVault(opts?: { force?: boolean }): Promise<{
     return {
       ok: false,
       error: j.error ?? `pull failed (${r.status})`,
-      conflicts: j.conflicts,
+      conflict: j.conflict,
+      files: j.files,
       needsStash: j.needsStash,
     }
   }
@@ -234,6 +240,8 @@ export async function pullPersonalVault(opts?: { force?: boolean }): Promise<{
 export async function pushPersonalVault(): Promise<{
   ok: boolean
   error?: string
+  conflict?: boolean
+  files?: string[]
   needsPull?: boolean
   message?: string
 }> {
@@ -243,6 +251,8 @@ export async function pushPersonalVault(): Promise<{
     return {
       ok: false,
       error: j.error ?? `push failed (${r.status})`,
+      conflict: j.conflict,
+      files: j.files,
       needsPull: j.needsPull,
     }
   }

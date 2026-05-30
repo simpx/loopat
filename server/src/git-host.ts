@@ -15,6 +15,11 @@ export interface GitHostProvider {
   readonly id: string
   readonly label: string
 
+  /** Optional: where/how the user gets a token, shown in the onboarding token
+   *  step. A URL or short hint. Platform-specific, so the provider supplies it
+   *  (core stays platform-agnostic). */
+  readonly tokenHelp?: string
+
   /**
    * How git authenticates clone/push on this platform:
    *  - "ssh-deploy-key": loopat generates an ssh key, the provider registers it
@@ -57,6 +62,33 @@ export interface GitHostProvider {
 
   /** List the user's repos (names) for an onboarding picker. Optional. */
   listRepos?(cred: HostCred): Promise<{ name: string; path: string }[]>
+
+  /**
+   * Optional internal-setup hook. Runs once during personal-repo init, right
+   * after `git-crypt init` (so `.gitattributes` already encrypts
+   * `.loopat/vaults/**`) and before the scaffold is committed + pushed. Use it
+   * to seed default files into the working tree — provider configs, ssh keys,
+   * jumpbox configs, … This is where a team bakes its internal defaults.
+   *
+   * Encryption boundary: files under `.loopat/vaults/**` are git-crypt
+   * encrypted; everything else (e.g. `.loopat/config.json`) is committed in
+   * PLAINTEXT — so never write real secrets outside the vault (use env-var
+   * refs like `"$FOO_API_KEY"` in config.json instead).
+   *
+   * loopat stages (`git add .loopat memory`), commits and pushes whatever you
+   * write. Throwing only logs a warning — setup still succeeds.
+   *
+   *   ctx.repoDir  — cloned working tree (write paths relative to this)
+   *   ctx.vaultDir — `${repoDir}/.loopat/vaults/default` (encrypted)
+   *   ctx.userId   — the loopat user being set up
+   *   ctx.login    — their login on this platform
+   */
+  seedDefaults?(ctx: {
+    repoDir: string
+    vaultDir: string
+    userId: string
+    login: string
+  }): Promise<void>
 }
 
 const providers = new Map<string, GitHostProvider>()
