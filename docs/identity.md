@@ -12,6 +12,10 @@ status: living doc
 > `personal/<user>` repo** and **holds the one key that unlocks it**. Everything
 > else — who you are, what you may read or write — already lives in git.
 
+<p align="center">
+  <img src="identity.svg" alt="loopat is a shell; the git platform is the identity layer; the credential chain is deploy key → git-crypt → vault" width="100%">
+</p>
+
 Most tools build their own user system: accounts, roles, permission tables.
 loopat builds none of that. Identity, membership, and access already exist — in
 the git platform your team already uses. loopat **integrates into that platform**
