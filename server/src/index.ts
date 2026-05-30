@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaGithub, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -1269,6 +1269,29 @@ app.post("/api/personal/import", requireAuth, async (c) => {
   // On auto-init, `cryptKey` is returned exactly once for the user to back
   // up. Subsequent /api/personal/status calls do NOT expose it.
   return c.json({ ok: true, autoInitialized: !!r.autoInitialized, cryptKey: r.cryptKey ?? null })
+})
+
+// POST /api/personal/github — onboard personal via a GitHub PAT (host-side
+// only): create the repo, register the deploy key, clone + git-crypt. The PAT
+// never enters a sandbox; runtime git uses the deploy key / vault. See
+// docs/identity.md (integration contract).
+app.post("/api/personal/github", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const user = await findUser(userId)
+  if (!user) return c.json({ error: "user missing" }, 500)
+  const body = await c.req.json().catch(() => ({}))
+  const token = typeof body.token === "string" ? body.token.trim() : ""
+  if (!token) return c.json({ error: "github token required" }, 400)
+  const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || "loopat-personal"
+  const baseUrl = typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined
+  const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
+  const r = await setupPersonalViaGithub({ userId, token, repoName, baseUrl, cryptKey })
+  if (!r.ok) {
+    if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
+    return c.json({ error: r.error }, 400)
+  }
+  await setPersonalRepo(userId, r.repoUrl)
+  return c.json({ ok: true, repo: r.repo, created: r.created, autoInitialized: !!r.autoInitialized, cryptKey: r.cryptKey ?? null })
 })
 
 // Destroy personal/<user>/ AND the saved git-crypt key. Two-step from the

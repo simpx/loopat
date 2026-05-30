@@ -477,7 +477,7 @@ export async function setupPersonalViaGithub(opts: {
   baseUrl?: string
   cryptKey?: string
 }): Promise<
-  | { ok: true; repo: string; created: boolean; autoInitialized?: boolean; cryptKey?: string }
+  | { ok: true; repo: string; repoUrl: string; created: boolean; autoInitialized?: boolean; cryptKey?: string }
   | { ok: false; error: string; needsCryptKey?: boolean }
 > {
   const { githubClient, getViewer, ensureUserRepo, ensureDeployKey } = await import("./github")
@@ -513,6 +513,7 @@ export async function setupPersonalViaGithub(opts: {
   return {
     ok: true,
     repo: repo.fullName,
+    repoUrl: repo.sshUrl,
     created: repo.created,
     autoInitialized: imp.autoInitialized,
     cryptKey: imp.cryptKey,
