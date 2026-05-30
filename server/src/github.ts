@@ -8,6 +8,7 @@
  * (https://api.github.com) or a GitHub Enterprise / internal host
  * (https://<host>/api/v3).
  */
+import { registerProvider, type GitHostProvider } from "./git-host"
 
 export type GithubClient = {
   baseUrl: string
@@ -127,3 +128,33 @@ export async function ensureCollaborator(
   // 201 = invitation created, 204 = already a collaborator
   if (r.status !== 201 && r.status !== 204) fail("add collaborator", r)
 }
+
+/** The built-in GitHub provider — adapts the functions above onto GitHostProvider. */
+export const githubProvider: GitHostProvider = {
+  id: "github",
+  label: "GitHub",
+  async authenticate(cred) {
+    return await getViewer(githubClient(cred.token, cred.baseUrl))
+  },
+  async ensureRepo(cred, name, opts) {
+    const r = await ensureUserRepo(githubClient(cred.token, cred.baseUrl), name, { private: opts?.private })
+    return { url: r.sshUrl, created: r.created }
+  },
+  async registerDeployKey(cred, repo, title, pubkey, readOnly) {
+    await ensureDeployKey(githubClient(cred.token, cred.baseUrl), repo.owner, repo.name, title, pubkey, readOnly)
+  },
+  async registerUserKey(cred, title, pubkey) {
+    await ensureUserKey(githubClient(cred.token, cred.baseUrl), title, pubkey)
+  },
+  async grantAccess(cred, repo, login, level) {
+    await ensureCollaborator(
+      githubClient(cred.token, cred.baseUrl),
+      repo.owner,
+      repo.name,
+      login,
+      level === "write" ? "push" : "pull",
+    )
+  },
+}
+
+registerProvider(githubProvider)

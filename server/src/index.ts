@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaGithub, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -1285,7 +1285,8 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || "loopat-personal"
   const baseUrl = typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined
   const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
-  const r = await setupPersonalViaGithub({ userId, token, repoName, baseUrl, cryptKey })
+  const provider = typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : "github"
+  const r = await setupPersonalViaProvider({ userId, provider, token, baseUrl, repoName, cryptKey })
   if (!r.ok) {
     if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
     return c.json({ error: r.error }, 400)

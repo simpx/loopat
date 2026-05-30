@@ -37,6 +37,8 @@ import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
+import { getProvider } from "./git-host"
+import "./providers" // side effect: register built-in + second-party providers
 
 const execFileP = promisify(execFile)
 
@@ -460,39 +462,41 @@ export async function provisionUserPersonal(userId: string): Promise<{ publicKey
 }
 
 /**
- * GitHub PAT onboarding (docs/identity.md integration contract). Uses the
- * user's token, HOST-SIDE ONLY (never enters a sandbox), to:
- *   1. create the personal repo if missing,
- *   2. register the loopat-managed deploy key on it,
- * then reuses importPersonalFromRepo to clone + handle git-crypt (empty repo →
+ * Provider-agnostic personal onboarding (docs/identity.md integration contract).
+ * Uses a host-side credential (token, never enters a sandbox) via the selected
+ * GitHostProvider to create the personal repo + register the deploy key, then
+ * reuses importPersonalFromRepo to clone + handle git-crypt (empty repo →
  * auto-init and return the generated key; existing → needsCryptKey).
  *
- * The token is only a way to *set things up*; runtime git uses the deploy key /
- * vault, not the PAT. `baseUrl` lets it target GitHub Enterprise / internal.
+ * The token only *sets things up*; runtime git uses the deploy key / vault.
+ * `provider` selects the git platform (default "github"); add platforms by
+ * implementing GitHostProvider (see git-host.ts / providers.ts).
  */
-export async function setupPersonalViaGithub(opts: {
+export async function setupPersonalViaProvider(opts: {
   userId: string
+  provider?: string
   token: string
-  repoName: string
   baseUrl?: string
+  repoName: string
   cryptKey?: string
 }): Promise<
   | { ok: true; repo: string; repoUrl: string; created: boolean; autoInitialized?: boolean; cryptKey?: string }
   | { ok: false; error: string; needsCryptKey?: boolean }
 > {
-  const { githubClient, getViewer, ensureUserRepo, ensureDeployKey } = await import("./github")
-  const c = githubClient(opts.token, opts.baseUrl)
+  const provider = getProvider(opts.provider ?? "github")
+  if (!provider) return { ok: false, error: `unknown git host provider: ${opts.provider}` }
+  const cred = { token: opts.token, baseUrl: opts.baseUrl }
 
   let login: string
   try {
-    login = (await getViewer(c)).login
+    login = (await provider.authenticate(cred)).login
   } catch (e: any) {
-    return { ok: false, error: `github auth failed: ${e?.message ?? e}` }
+    return { ok: false, error: `${provider.id} auth failed: ${e?.message ?? e}` }
   }
 
-  let repo: { created: boolean; sshUrl: string; fullName: string }
+  let repo: { url: string; created: boolean }
   try {
-    repo = await ensureUserRepo(c, opts.repoName, { private: true, description: "loopat personal" })
+    repo = await provider.ensureRepo(cred, opts.repoName, { private: true })
   } catch (e: any) {
     return { ok: false, error: `ensure repo failed: ${e?.message ?? e}` }
   }
@@ -501,23 +505,34 @@ export async function setupPersonalViaGithub(opts: {
   const { publicKey } = await ensurePersonalKeypair(opts.userId)
   if (publicKey) {
     try {
-      await ensureDeployKey(c, login, opts.repoName, `loopat:${opts.userId}`, publicKey, false)
+      await provider.registerDeployKey(cred, { owner: login, name: opts.repoName }, `loopat:${opts.userId}`, publicKey, false)
     } catch (e: any) {
       return { ok: false, error: `register deploy key failed: ${e?.message ?? e}` }
     }
   }
 
   // Clone + git-crypt via the existing import path.
-  const imp = await importPersonalFromRepo(opts.userId, repo.sshUrl, opts.cryptKey)
+  const imp = await importPersonalFromRepo(opts.userId, repo.url, opts.cryptKey)
   if (!imp.ok) return { ok: false, error: imp.error, needsCryptKey: imp.needsCryptKey }
   return {
     ok: true,
-    repo: repo.fullName,
-    repoUrl: repo.sshUrl,
+    repo: `${login}/${opts.repoName}`,
+    repoUrl: repo.url,
     created: repo.created,
     autoInitialized: imp.autoInitialized,
     cryptKey: imp.cryptKey,
   }
+}
+
+/** Back-compat thin wrapper — GitHub is just the default provider. */
+export async function setupPersonalViaGithub(opts: {
+  userId: string
+  token: string
+  repoName: string
+  baseUrl?: string
+  cryptKey?: string
+}) {
+  return setupPersonalViaProvider({ ...opts, provider: "github" })
 }
 
 /**
