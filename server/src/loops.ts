@@ -328,6 +328,11 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
   } else if (existsSyncBase(join(dir, ".git"))) {
     const hasOrigin = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
     if (!hasOrigin) await execFileP("git", ["-C", dir, "remote", "add", "origin", bare]).catch(() => {})
+  } else {
+    // non-empty dir that isn't a git repo yet (e.g. a freshly-scaffolded
+    // personal/) → init in place and point it at the local bare origin.
+    await execFileP("git", ["-C", dir, "init", "-q", "-b", "main"]).catch(() => {})
+    await execFileP("git", ["-C", dir, "remote", "add", "origin", bare]).catch(() => {})
   }
 }
 
@@ -445,7 +450,10 @@ export async function provisionUserPersonal(userId: string): Promise<{ publicKey
   const pmIdx = `${pm}/MEMORY.md`
   if (!existsSyncBase(pmIdx)) await writeFile(pmIdx, PERSONAL_MEMORY_INDEX_STUB)
 
-  await gitInitIfMissing(dir)
+  // personal gets a loopat-hosted bare origin too (local backend), so its
+  // promote is `push origin` like every other context repo. A later import of
+  // the user's own remote repo (importPersonalFromRepo) replaces this origin.
+  await ensureContextRepo(dir, `personal-${userId}`, undefined)
 
   const { publicKey } = await ensurePersonalKeypair(userId)
   return { publicKey }
