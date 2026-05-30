@@ -284,18 +284,44 @@ async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ clo
   return { cloned: false }
 }
 
-async function ensureRepos(specs: RepoSpec[]) {
-  for (const r of specs) {
-    if (!r?.name || !r?.git) continue
-    const dir = workspaceRepoDir(r.name)
-    if (existsSyncBase(dir)) continue
-    try {
-      await mkdir(workspaceReposDir(), { recursive: true })
-      await execFileP("git", ["clone", "--", r.git, dir])
-      console.log(`[loopat] cloned ${r.git} → ${dir}`)
-    } catch (e: any) {
-      console.warn(`[loopat] repo clone failed (${r.git}): ${e?.stderr ?? e?.message ?? e}`)
-    }
+/**
+ * Repos are clone-on-demand — they can be large, so we don't pre-clone the
+ * whole set. Instead write a manifest (REPOS.md) listing the full roster, and
+ * clone a repo only when it's actually needed. Per docs/context-flow.md the AI
+ * can also clone any listed repo by hand into context/repos/<name>.
+ */
+async function writeReposManifest(specs: RepoSpec[]) {
+  await mkdir(workspaceReposDir(), { recursive: true })
+  const body = [
+    "# repos — clone on demand",
+    "",
+    "Full roster below. Only already-cloned repos exist as subdirectories;",
+    "clone any other on demand: `git clone <git> /loopat/context/repos/<name>`.",
+    "",
+    ...specs.filter((r) => r?.name && r?.git).map((r) => `- **${r.name}** — \`${r.git}\``),
+    "",
+  ].join("\n")
+  await writeFile(join(workspaceReposDir(), "REPOS.md"), body)
+}
+
+/**
+ * Clone a single registered repo if it isn't present yet. Returns whether the
+ * repo dir exists afterwards. Used by loop creation and any on-demand path.
+ */
+async function ensureRepoCloned(name: string): Promise<boolean> {
+  const dir = workspaceRepoDir(name)
+  if (existsSyncBase(dir)) return true
+  const cfg = await loadConfig()
+  const spec = cfg.repos?.find((r) => r.name === name)
+  if (!spec?.git) return false
+  try {
+    await mkdir(workspaceReposDir(), { recursive: true })
+    await execFileP("git", ["clone", "--", spec.git, dir])
+    console.log(`[loopat] cloned on demand ${spec.git} → ${dir}`)
+    return true
+  } catch (e: any) {
+    console.warn(`[loopat] repo clone failed (${spec.git}): ${e?.stderr ?? e?.message ?? e}`)
+    return false
   }
 }
 
@@ -308,7 +334,7 @@ export async function ensureWorkspaceDirs() {
   const cfg = await loadConfig()
   const k = await cloneOrMkdir(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)
   const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
-  if (cfg.repos?.length) await ensureRepos(cfg.repos)
+  await writeReposManifest(cfg.repos ?? [])
 
   // workspace memory dir + stub
   const tm = workspaceMemoryDir()
@@ -328,18 +354,7 @@ export async function ensureWorkspaceDirs() {
   // new ref so its working dir doesn't go stale. `updateInstead` would race
   // on the primary worktree under concurrent pushes — verified empirically.
   for (const dir of [workspaceNotesDir(), workspaceKnowledgeDir()]) {
-    if (existsSyncBase(join(dir, ".git"))) {
-      try {
-        await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
-        const hooksDir = join(dir, ".git", "hooks")
-        await mkdir(hooksDir, { recursive: true })
-        const hookPath = join(hooksDir, "post-receive")
-        await writeFile(hookPath, TRUNK_SYNC_HOOK)
-        await chmod(hookPath, 0o755)
-      } catch (e: any) {
-        console.warn(`[loopat] failed to set up trunk-sync on ${dir}: ${e?.message ?? e}`)
-      }
-    }
+    await ensureLocalTrunkSync(dir)
   }
 }
 
@@ -1394,6 +1409,9 @@ async function ensureSymlink(link: string, target: string) {
  * read access still works.
  */
 async function ensureContextWorktree(repo: string, path: string, branchName: string) {
+  // notes / knowledge / personal are all just git repos — give each the same
+  // local trunk-sync so loop worktrees can promote back even with no remote.
+  await ensureLocalTrunkSync(repo)
   let stats: Awaited<ReturnType<typeof lstat>> | null = null
   try { stats = await lstat(path) } catch {}
   // Real dir with .git → already a worktree, leave it alone.
@@ -1439,11 +1457,36 @@ async function remoteStartPoint(repo: string): Promise<string | null> {
   }
 }
 
+/**
+ * Let a context source repo accept `git push . HEAD:<trunk>` from its own loop
+ * worktrees — the solo / no-remote promote path. git refuses pushing to a
+ * checked-out branch, so allow it (`denyCurrentBranch=ignore`) and reset the
+ * primary worktree via the post-receive hook. notes / knowledge / personal are
+ * all just git repos, so they all get the same thing. Idempotent; no-op when
+ * the dir isn't a git repo (e.g. a not-yet-initialized personal/).
+ */
+async function ensureLocalTrunkSync(dir: string) {
+  if (!existsSyncBase(join(dir, ".git"))) return
+  try {
+    await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
+    const hooksDir = join(dir, ".git", "hooks")
+    await mkdir(hooksDir, { recursive: true })
+    const hookPath = join(hooksDir, "post-receive")
+    await writeFile(hookPath, TRUNK_SYNC_HOOK)
+    await chmod(hookPath, 0o755)
+  } catch (e: any) {
+    console.warn(`[loopat] failed to set up trunk-sync on ${dir}: ${e?.message ?? e}`)
+  }
+}
+
 export async function ensureContextMounts(id: string, createdBy: string) {
   await mkdir(loopContextDir(id), { recursive: true })
   await ensureContextWorktree(workspaceKnowledgeDir(), loopContextKnowledge(id), `loop/${id}`)
   await ensureContextWorktree(workspaceNotesDir(), loopContextNotes(id), `loop/${id}`)
-  await ensureSymlink(loopContextPersonal(id), personalDir(createdBy))
+  // personal is also a per-loop worktree (docs/context-flow.md) — same shape as
+  // notes, just wired to the user's private remote. ensureContextWorktree falls
+  // back to a symlink when personal/ isn't a git repo yet.
+  await ensureContextWorktree(personalDir(createdBy), loopContextPersonal(id), `loop/${id}`)
   await ensureSymlink(loopContextRepos(id), workspaceReposDir())
 }
 
@@ -1521,10 +1564,11 @@ export async function createLoop(opts: {
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {
-    const repoPath = workspaceRepoDir(opts.repo)
-    if (!existsSync(repoPath)) {
-      throw new Error(`repo "${opts.repo}" not found in context/repos/`)
+    // clone-on-demand: pull the repo down only now that a loop actually needs it
+    if (!(await ensureRepoCloned(opts.repo))) {
+      throw new Error(`repo "${opts.repo}" not found / clone failed`)
     }
+    const repoPath = workspaceRepoDir(opts.repo)
     const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
     try {
       // ① pull (docs/context-flow.md): base the workdir branch on origin/main
