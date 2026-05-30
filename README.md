@@ -151,6 +151,9 @@ Put a reverse proxy in front and proxy `/api` + `/ws` to the server.
 - **[Context flow](docs/context-flow.md)** — the horizontal working model: a
   loop is a git worktree, shared context is `main`, and loops exchange it over
   two edges — pull and promote.
+- **[Identity](docs/identity.md)** — who a loop acts as: the credential chain
+  (deploy key → git-crypt → vault), and how loopat integrates with your git
+  host so onboarding is one authorization.
 - **[.claude composition](docs/composition.md)** — how team / profile /
   personal / repo `.claude/` tiers merge into the loop runtime, and what
   you can put in each tier.
