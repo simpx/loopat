@@ -21,6 +21,8 @@ import {
   workspaceNotesDir,
   workspaceReposDir,
   workspaceRepoDir,
+  workspaceOriginsDir,
+  workspaceOriginPath,
   personalDir,
   personalMemoryDir,
   workspaceMemoryDir,
@@ -285,6 +287,51 @@ async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ clo
 }
 
 /**
+ * Materialize a context repo (knowledge / notes) with an `origin` to pull/push.
+ * Remote backend: clone the configured git url. Local backend (no url): loopat
+ * hosts the remote itself — a bare repo at origins/<name>.git becomes `origin`
+ * (docs/context-flow.md "solo"). Either way the working dir ends up a git repo
+ * with `origin` set, so the symmetric pull/push model just works.
+ */
+async function ensureContextRepo(dir: string, name: string, url?: string): Promise<void> {
+  if (url && (await isEmptyOrMissing(dir))) {
+    try {
+      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      await mkdir(join(dir, ".."), { recursive: true })
+      await execFileP("git", ["clone", "--", url, dir])
+      console.log(`[loopat] cloned ${url} → ${dir}`)
+      return
+    } catch (e: any) {
+      console.warn(`[loopat] clone failed (${url}): ${e?.stderr ?? e?.message ?? e} — falling back to local origin`)
+    }
+  }
+  // Local backend: loopat-hosted bare origin.
+  const bare = workspaceOriginPath(name)
+  if (!existsSyncBase(join(bare, "HEAD"))) {
+    await mkdir(workspaceOriginsDir(), { recursive: true })
+    try {
+      await execFileP("git", ["init", "--bare", "-b", "main", bare])
+    } catch (e: any) {
+      console.warn(`[loopat] bare init failed (${bare}): ${e?.message ?? e}`)
+    }
+  }
+  if (await isEmptyOrMissing(dir)) {
+    try { await rm(dir, { recursive: true, force: true }) } catch {}
+    await mkdir(join(dir, ".."), { recursive: true })
+    try {
+      await execFileP("git", ["clone", "--", bare, dir])
+    } catch {
+      await mkdir(dir, { recursive: true })
+      await execFileP("git", ["-C", dir, "init", "-q", "-b", "main"]).catch(() => {})
+      await execFileP("git", ["-C", dir, "remote", "add", "origin", bare]).catch(() => {})
+    }
+  } else if (existsSyncBase(join(dir, ".git"))) {
+    const hasOrigin = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
+    if (!hasOrigin) await execFileP("git", ["-C", dir, "remote", "add", "origin", bare]).catch(() => {})
+  }
+}
+
+/**
  * Repos are clone-on-demand — they can be large, so we don't pre-clone the
  * whole set. Instead write a manifest (REPOS.md) listing the full roster, and
  * clone a repo only when it's actually needed. Per docs/context-flow.md the AI
@@ -332,8 +379,8 @@ export async function ensureWorkspaceDirs() {
 
   // knowledge / notes / repos: clone from config'd remote if present
   const cfg = await loadConfig()
-  const k = await cloneOrMkdir(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)
-  const n = await cloneOrMkdir(workspaceNotesDir(), cfg.notes?.git || undefined)
+  await ensureContextRepo(workspaceKnowledgeDir(), "knowledge", cfg.knowledge?.git || undefined)
+  await ensureContextRepo(workspaceNotesDir(), "notes", cfg.notes?.git || undefined)
   await writeReposManifest(cfg.repos ?? [])
 
   // workspace memory dir + stub
@@ -342,11 +389,7 @@ export async function ensureWorkspaceDirs() {
   const tmIdx = `${tm}/MEMORY.md`
   if (!existsSyncBase(tmIdx)) await writeFile(tmIdx, TEAM_MEMORY_INDEX_STUB)
 
-  // git init notes so vaultWrite auto-commits work locally. Skip if cloned
-  // (already a repo). Knowledge stays plain unless cloned.
-  if (!n.cloned) await gitInitIfMissing(workspaceNotesDir())
-  // suppress unused warning for k.cloned (kept for symmetry / future use)
-  void k
+  // knowledge / notes are already git repos with `origin` (ensureContextRepo).
 
   // Per-loop worktrees push back here via `git push . HEAD:<trunk>`. Allow
   // pushing to the currently checked-out branch (ref-only update). The

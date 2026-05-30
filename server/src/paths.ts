@@ -26,6 +26,10 @@ export const workspaceKnowledgeDir = () => join(workspaceContextDir(), "knowledg
 export const workspaceNotesDir = () => join(workspaceContextDir(), "notes")
 export const workspaceReposDir = () => join(workspaceContextDir(), "repos")
 export const workspaceRepoDir = (name: string) => join(workspaceReposDir(), name)
+// Local git hosting: when a context repo has no remote, loopat hosts the
+// `origin` itself as a bare repo here (docs/context-flow.md "solo").
+export const workspaceOriginsDir = () => join(LOOPAT_HOME, "origins")
+export const workspaceOriginPath = (name: string) => join(workspaceOriginsDir(), `${name}.git`)
 export const personalDir = (user: string) => join(LOOPAT_HOME, "personal", user)
 
 export const loopDir = (id: string) => join(loopsDir(), id)

@@ -152,9 +152,11 @@ Concurrent promotes serialize naturally: git rejects the losing push, that loop
 
 The remote is **optional**, so it's one model at every scale:
 
-- **solo** — no remote; the edges run against a purely local `main`.
-- **team** — attach the remote; the same edges run, with everyone converging on
-  it.
+- **solo** — loopat hosts the remote itself: a bare repo per context repo on the
+  same machine (`git init --bare`) is the `origin`. The edges run `pull`/`push
+  origin` against it — no external git platform, no credentials needed.
+- **team** — point `origin` at a remote git host instead; the same edges run,
+  with everyone converging on it.
 
 *Works solo, scales to teams* — at the context layer, not two systems but one.
 

@@ -17,8 +17,8 @@ then capture your work and merge the latest consensus:
 
 ```sh
 git add -A && git commit -m "<what you're sharing>"
-git fetch origin            # skip if there is no origin (solo)
-git merge origin/main       # solo (no origin): git merge main
+git fetch origin
+git merge origin/main
 ```
 
 **If the merge conflicts**, resolve it now, here:
@@ -32,7 +32,7 @@ Then push:
 
 ```sh
 # ungated — notes · personal — straight into main:
-git push origin HEAD:main            # solo: git push . HEAD:main
+git push origin HEAD:main
 
 # gated — knowledge · repos — open a PR instead:
 git push origin HEAD
@@ -50,3 +50,4 @@ worked), re-run `git merge origin/main`, resolve again, push again. It converges
 - `notes` / `personal` push straight to `main`; `knowledge` / repos are gated —
   open a PR. (Gating is the team's choice; default for knowledge/repos = PR.)
 - Trunk is `main` (your runtime context block names it if it ever differs).
+- Solo works the same: `origin` is just a loopat-hosted local repo — same commands.

@@ -134,9 +134,16 @@ platform; the private halves go to their two homes from the chain:
 So "how does the user's key get generated?" — loopat generates it; the
 authorization just lets loopat *register* it. The user pastes nothing.
 
-## Example A — self-hosted git
+## Example A — self-hosted / purely local git
 
-Two shapes, depending on whether the self-hosted host has an API:
+The simplest backend has **no platform at all**: loopat `git init --bare`s a repo
+per context repo on the same machine and points each `origin` at it. With no
+platform the whole chain collapses — `file://` clones need no deploy key, local
+pushes need no credential, git-crypt is optional. Just loopat and git, zero
+external dependencies. This is "works solo" at its most literal.
+
+Scaling that up, self-hosting takes two shapes depending on whether the host
+has an API:
 
 - **A managed self-host (e.g. self-run GitLab):** it has a REST API and the same
   five capabilities as a SaaS — integrate exactly like GitHub below, just against
