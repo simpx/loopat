@@ -266,29 +266,6 @@ async function isEmptyOrMissing(dir: string): Promise<boolean> {
 }
 
 /**
- * If the dir is empty / missing AND a clone URL is set, clone it. On any
- * failure (network, auth, etc.) fall through to mkdir so the workspace can
- * still come up. Returns whether the dir came from a remote clone — caller
- * uses that to decide whether to git init locally.
- */
-async function cloneOrMkdir(dir: string, url: string | undefined): Promise<{ cloned: boolean }> {
-  if (url && (await isEmptyOrMissing(dir))) {
-    try {
-      // remove the empty placeholder if it exists, git clone wants to create
-      try { await rm(dir, { recursive: true, force: true }) } catch {}
-      await mkdir(join(dir, ".."), { recursive: true })
-      await execFileP("git", ["clone", "--", url, dir])
-      console.log(`[loopat] cloned ${url} → ${dir}`)
-      return { cloned: true }
-    } catch (e: any) {
-      console.warn(`[loopat] clone failed (${url}): ${e?.stderr ?? e?.message ?? e} — falling back to empty dir`)
-    }
-  }
-  await mkdir(dir, { recursive: true })
-  return { cloned: false }
-}
-
-/**
  * Materialize a context repo (knowledge / notes) with an `origin` to pull/push.
  * Remote backend: clone the configured git url. Local backend (no url): loopat
  * hosts the remote itself — a bare repo at origins/<name>.git becomes `origin`
@@ -398,35 +375,7 @@ export async function ensureWorkspaceDirs() {
 
   // knowledge / notes are already git repos with `origin` (ensureContextRepo).
 
-  // Per-loop worktrees push back here via `git push . HEAD:<trunk>`. Allow
-  // pushing to the currently checked-out branch (ref-only update). The
-  // companion post-receive hook then resets the primary worktree to the
-  // new ref so its working dir doesn't go stale. `updateInstead` would race
-  // on the primary worktree under concurrent pushes — verified empirically.
-  for (const dir of [workspaceNotesDir(), workspaceKnowledgeDir()]) {
-    await ensureLocalTrunkSync(dir)
-  }
 }
-
-// post-receive hook for notes/knowledge primary repos. Pairs with
-// receive.denyCurrentBranch=ignore: that lets loop worktrees push to the
-// trunk ref but doesn't update primary's working dir, so this hook does it
-// via reset --hard. Uses --git-common-dir because $GIT_DIR points at the
-// pushing worktree's private gitdir, where HEAD = loop/<id>, not trunk.
-const TRUNK_SYNC_HOOK = `#!/bin/sh
-set -e
-COMMON=$(git rev-parse --git-common-dir)
-COMMON=$(cd "$COMMON" && pwd -P)
-PRIMARY=$(dirname "$COMMON")
-TRUNK_REF=$(sed -n 's|^ref: ||p' "$COMMON/HEAD")
-[ -n "$TRUNK_REF" ] || exit 0
-
-while read oldrev newrev refname; do
-  if [ "$refname" = "$TRUNK_REF" ]; then
-    git --git-dir="$COMMON" --work-tree="$PRIMARY" reset --hard "$newrev" >/dev/null
-  fi
-done
-`
 
 /**
  * Provision a freshly-registered user's personal/ tree. NEVER clones the
@@ -1537,9 +1486,6 @@ async function ensureSymlink(link: string, target: string) {
  * read access still works.
  */
 async function ensureContextWorktree(repo: string, path: string, branchName: string) {
-  // notes / knowledge / personal are all just git repos — give each the same
-  // local trunk-sync so loop worktrees can promote back even with no remote.
-  await ensureLocalTrunkSync(repo)
   let stats: Awaited<ReturnType<typeof lstat>> | null = null
   try { stats = await lstat(path) } catch {}
   // Real dir with .git → already a worktree, leave it alone.
@@ -1582,28 +1528,6 @@ async function remoteStartPoint(repo: string): Promise<string | null> {
     return "origin/main"
   } catch {
     return null
-  }
-}
-
-/**
- * Let a context source repo accept `git push . HEAD:<trunk>` from its own loop
- * worktrees — the solo / no-remote promote path. git refuses pushing to a
- * checked-out branch, so allow it (`denyCurrentBranch=ignore`) and reset the
- * primary worktree via the post-receive hook. notes / knowledge / personal are
- * all just git repos, so they all get the same thing. Idempotent; no-op when
- * the dir isn't a git repo (e.g. a not-yet-initialized personal/).
- */
-async function ensureLocalTrunkSync(dir: string) {
-  if (!existsSyncBase(join(dir, ".git"))) return
-  try {
-    await execFileP("git", ["-C", dir, "config", "receive.denyCurrentBranch", "ignore"])
-    const hooksDir = join(dir, ".git", "hooks")
-    await mkdir(hooksDir, { recursive: true })
-    const hookPath = join(hooksDir, "post-receive")
-    await writeFile(hookPath, TRUNK_SYNC_HOOK)
-    await chmod(hookPath, 0o755)
-  } catch (e: any) {
-    console.warn(`[loopat] failed to set up trunk-sync on ${dir}: ${e?.message ?? e}`)
   }
 }
 
