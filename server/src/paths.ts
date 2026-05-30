@@ -30,6 +30,9 @@ export const workspaceRepoDir = (name: string) => join(workspaceReposDir(), name
 // `origin` itself as a bare repo here (docs/context-flow.md "solo").
 export const workspaceOriginsDir = () => join(LOOPAT_HOME, "origins")
 export const workspaceOriginPath = (name: string) => join(workspaceOriginsDir(), `${name}.git`)
+// External git-host provider extensions (e.g. internal "Code" platform). Drop a
+// duck-typed provider file here; loopat loads it without any core change.
+export const extensionsProvidersDir = () => join(LOOPAT_HOME, "extensions", "providers")
 export const personalDir = (user: string) => join(LOOPAT_HOME, "personal", user)
 
 export const loopDir = (id: string) => join(loopsDir(), id)

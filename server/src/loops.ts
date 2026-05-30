@@ -38,7 +38,7 @@ import { loadConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider } from "./git-host"
-import "./providers" // side effect: register built-in + second-party providers
+import { loadExtensionProviders } from "./providers" // also registers built-in providers
 
 const execFileP = promisify(execFile)
 
@@ -432,13 +432,17 @@ export async function setupPersonalViaProvider(opts: {
   | { ok: true; repo: string; repoUrl: string; created: boolean; autoInitialized?: boolean; cryptKey?: string }
   | { ok: false; error: string; needsCryptKey?: boolean }
 > {
+  await loadExtensionProviders() // ensure external (internal-platform) providers are registered
   const provider = getProvider(opts.provider ?? "github")
   if (!provider) return { ok: false, error: `unknown git host provider: ${opts.provider}` }
   const cred = { token: opts.token, baseUrl: opts.baseUrl }
 
   let login: string
+  let email: string | undefined
   try {
-    login = (await provider.authenticate(cred)).login
+    const auth = await provider.authenticate(cred)
+    login = auth.login
+    email = auth.email
   } catch (e: any) {
     return { ok: false, error: `${provider.id} auth failed: ${e?.message ?? e}` }
   }
@@ -450,18 +454,33 @@ export async function setupPersonalViaProvider(opts: {
     return { ok: false, error: `ensure repo failed: ${e?.message ?? e}` }
   }
 
-  // Register the loopat deploy key (rw: host bootstrap clone + personal promote).
-  const { publicKey } = await ensurePersonalKeypair(opts.userId)
-  if (publicKey) {
-    try {
-      await provider.registerDeployKey(cred, { owner: login, name: opts.repoName }, `loopat:${opts.userId}`, publicKey, false)
-    } catch (e: any) {
-      return { ok: false, error: `register deploy key failed: ${e?.message ?? e}` }
+  // Set up git auth per the provider's mode.
+  let cloneUrl = repo.url
+  if (provider.gitAuthMode === "ssh-deploy-key") {
+    // GitHub-style: register a loopat-generated deploy key; git clones via ssh.
+    const { publicKey } = await ensurePersonalKeypair(opts.userId)
+    if (publicKey && provider.registerDeployKey) {
+      try {
+        await provider.registerDeployKey(cred, { owner: login, name: opts.repoName }, `loopat:${opts.userId}`, publicKey, false)
+      } catch (e: any) {
+        return { ok: false, error: `register deploy key failed: ${e?.message ?? e}` }
+      }
     }
+  } else {
+    // https-token git: https://<login>:<token>@host/path — GitLab/Code use the
+    // username + private_token as basic auth (GitHub PAT works the same way).
+    // Normalize http→https. (MVP: the token lands in the worktree's .git/config —
+    // fine for a private, user-owned personal repo; a credential-helper pass can
+    // harden it later.)
+    cloneUrl = repo.url.replace(
+      /^https?:\/\//,
+      `https://${encodeURIComponent(login)}:${encodeURIComponent(opts.token)}@`,
+    )
   }
 
-  // Clone + git-crypt via the existing import path.
-  const imp = await importPersonalFromRepo(opts.userId, repo.url, opts.cryptKey)
+  // Clone + git-crypt via the existing import path (commit author from the
+  // platform identity — some hosts reject non-corporate emails).
+  const imp = await importPersonalFromRepo(opts.userId, cloneUrl, opts.cryptKey, { name: login, email })
   if (!imp.ok) return { ok: false, error: imp.error, needsCryptKey: imp.needsCryptKey }
   return {
     ok: true,
@@ -532,6 +551,7 @@ export async function importPersonalFromRepo(
   userId: string,
   repoUrl: string,
   cryptKey?: string,
+  author?: { name?: string; email?: string },
 ): Promise<
   | { ok: true; autoInitialized?: boolean; cryptKey?: string }
   | {
@@ -551,20 +571,20 @@ export async function importPersonalFromRepo(
     return { ok: false, error: "personal/ is not empty — refusing to overwrite" }
   }
 
+  // https-token urls carry their own auth (https://user:token@…) and need no
+  // ssh deploy key; ssh urls require the loopat-managed deploy key.
+  const isHttps = /^https?:\/\//.test(repoUrl)
   const priv = hostDeployKeyPath(userId)
-  if (!existsSyncBase(priv)) {
+  if (!isHttps && !existsSyncBase(priv)) {
     return { ok: false, error: "deploy keypair missing — re-register" }
   }
 
-  // Clone into a tmp dir using the user's deploy key. StrictHostKeyChecking=
-  // accept-new because we have no pre-populated known_hosts for github/gitlab
-  // on first run; UserKnownHostsFile=/dev/null avoids polluting any host file.
+  // Clone into a tmp dir. ssh uses the deploy key (StrictHostKeyChecking=
+  // accept-new, no pre-populated known_hosts on first run); https auths via url.
   const tmp = await mkdtemp(join(tmpdir(), `loopat-import-${userId}-`))
-  const gitSsh = sshCommandForUser(userId)
+  const cloneEnv = isHttps ? { ...process.env } : { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) }
   try {
-    await execFileP("git", ["clone", "--", repoUrl, tmp], {
-      env: { ...process.env, GIT_SSH_COMMAND: gitSsh },
-    })
+    await execFileP("git", ["clone", "--", repoUrl, tmp], { env: cloneEnv })
   } catch (e: any) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     const msg = (e?.stderr || e?.message || String(e)).toString().trim().split("\n").slice(-3).join(" ")
@@ -626,7 +646,7 @@ export async function importPersonalFromRepo(
     }
   }
 
-  const init = await autoInitGitCrypt(tmp, userId)
+  const init = await autoInitGitCrypt(tmp, userId, author)
   if (!init.ok) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     return { ok: false, error: init.error }
@@ -674,6 +694,7 @@ async function swapPersonalDir(
 async function autoInitGitCrypt(
   repoDir: string,
   userId: string,
+  author?: { name?: string; email?: string },
 ): Promise<{ ok: true; cryptKey: string } | { ok: false; error: string }> {
   // git-crypt must be on the host; check early with a useful error
   try {
@@ -687,8 +708,8 @@ async function autoInitGitCrypt(
 
   // Local-only commit author so this doesn't depend on global git config
   try {
-    await execFileP("git", ["-C", repoDir, "config", "user.email", "loopat@local"])
-    await execFileP("git", ["-C", repoDir, "config", "user.name", "loopat"])
+    await execFileP("git", ["-C", repoDir, "config", "user.email", author?.email ?? "loopat@local"])
+    await execFileP("git", ["-C", repoDir, "config", "user.name", author?.name ?? "loopat"])
   } catch (e: any) {
     return { ok: false, error: `git config failed: ${e?.message ?? e}` }
   }

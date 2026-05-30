@@ -15,8 +15,18 @@ export interface GitHostProvider {
   readonly id: string
   readonly label: string
 
-  /** ① authenticate — turn a credential into the user's login. */
-  authenticate(cred: HostCred): Promise<{ login: string }>
+  /**
+   * How git authenticates clone/push on this platform:
+   *  - "ssh-deploy-key": loopat generates an ssh key, the provider registers it
+   *    (registerDeployKey), and git uses ssh. (GitHub.)
+   *  - "https-token": git uses `https://oauth2:<token>@…`; no key is registered.
+   *    (GitLab / internal — one token does API + git.)
+   */
+  readonly gitAuthMode: "ssh-deploy-key" | "https-token"
+
+  /** ① authenticate — turn a credential into the user's login (+ email for
+   *  commit authorship, where the platform enforces a valid address). */
+  authenticate(cred: HostCred): Promise<{ login: string; email?: string }>
 
   /** ② create a private repo in the user's namespace if missing. */
   ensureRepo(
@@ -25,8 +35,8 @@ export interface GitHostProvider {
     opts?: { private?: boolean },
   ): Promise<{ url: string; created: boolean }>
 
-  /** ③ register a deploy key on a repo (bootstrap clone). */
-  registerDeployKey(
+  /** ③ register a deploy key on a repo (only for "ssh-deploy-key" mode). */
+  registerDeployKey?(
     cred: HostCred,
     repo: RepoRef,
     title: string,
@@ -34,8 +44,8 @@ export interface GitHostProvider {
     readOnly: boolean,
   ): Promise<void>
 
-  /** ④ register an account-level key (the runtime key). */
-  registerUserKey(cred: HostCred, title: string, pubkey: string): Promise<void>
+  /** ④ register an account-level key (only for "ssh-deploy-key" mode). */
+  registerUserKey?(cred: HostCred, title: string, pubkey: string): Promise<void>
 
   /** ⑤ grant a member access to a repo (usually admin-gated). */
   grantAccess(

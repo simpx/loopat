@@ -133,6 +133,7 @@ export async function ensureCollaborator(
 export const githubProvider: GitHostProvider = {
   id: "github",
   label: "GitHub",
+  gitAuthMode: "ssh-deploy-key",
   async authenticate(cred) {
     return await getViewer(githubClient(cred.token, cred.baseUrl))
   },
