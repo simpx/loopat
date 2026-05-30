@@ -14,7 +14,7 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 - `/loopat/context/knowledge/`      — workspace's distilled docs. **Your private git worktree** on branch `loop/<id>`. Read-only by default; rw if the loop opted in. Other loops see your edits only after you publish (see below).
 - `/loopat/context/notes/`          — workspace prose layer (rw). **Your private git worktree** on branch `loop/<id>`. `inbox.md`, `focus.md`, plus `memory/` (team memory). Other loops see your edits only after you publish.
 - `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory) and `.loopat/config.json` (per-user config).
-- `/loopat/context/repos/<name>/`   — workspace repos (rw). All repos registered in this workspace. The current loop's workdir is typically a worktree of one of them.
+- `/loopat/context/repos/<name>/`   — workspace repos (rw), **clone-on-demand**. Only already-cloned repos exist as subdirs; the full roster (with git urls) is in `repos/REPOS.md`. Need one that isn't there yet? `git clone <git> /loopat/context/repos/<name>`. The current loop's workdir is typically a worktree of one of them.
 - `$HOME` (`/home/$USER`)           — per-loop overlayfs (docker container-layer semantics). Persistent across sandbox restarts; pip/npm installs, shell history, dotfiles survive. The sandbox arrives pre-configured: `~/.ssh/`, `~/.config/gh/`, your `~/.gitconfig`, and any other CLI configs the user set up — already in place. Just use them.
 
 Network is open (host network is shared). Use it for API calls, git fetch, package installs, etc.
