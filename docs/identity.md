@@ -187,6 +187,10 @@ moment it can satisfy the five-capability contract. To integrate one, wire up:
 
 There is nothing platform-specific in loopat's core — adding a new backend is
 writing a small adapter that maps these five operations onto that platform's API.
+In code this is the `GitHostProvider` interface (`server/src/git-host.ts`): a
+second-party platform implements those five methods and adds one `import` line
+to `server/src/providers.ts` — loopat core stays untouched. GitHub ships as the
+built-in `githubProvider`.
 
 ---
 
