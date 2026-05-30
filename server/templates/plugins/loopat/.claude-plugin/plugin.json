@@ -1,5 +1,5 @@
 {
   "name": "loopat",
-  "description": "Built-in loopat platform skills (onboarding, help)",
-  "version": "0.1.0"
+  "description": "Built-in loopat platform skills (onboarding, promote, help)",
+  "version": "0.2.0"
 }

@@ -31,24 +31,11 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
 - `/loopat/context/repos/<name>/` — rw, but **don't commit directly** into a main repo. Commits go through the workdir worktree (which sits on a `loop/<slug>-<id6>` branch). Reading other repos is encouraged for cross-repo work.
 - Cross-doc references use wikilink `[[basename]]` (no `.md`), Obsidian-style. The Context tab UI renders these clickable + builds backlinks.
 
-## publishing context edits
+## publishing context edits (promote)
 
-`notes/` and `knowledge/` are per-loop git worktrees. Your edits stay on branch `loop/<id>` until you publish them. To publish:
+`notes/` and `knowledge/` are per-loop git worktrees — your edits stay on branch `loop/<id>` until you **promote** them into shared `main`. Use the **`/promote`** skill: it merges in the latest, pushes to `main` (or opens a PR for gated context like `knowledge`/repos), and walks you through any conflict — which you, the loop's AI, resolve in place (you're the merge agent; no other agent, no script). This is the ② edge of `docs/context-flow.md`.
 
-    cd /loopat/context/notes        # or knowledge
-    git add -A && git commit -m "..."
-    git merge <trunk>               # pull in concurrent edits from other loops
-    git push . HEAD:<trunk>         # ff-push; rejected if trunk moved out from under you
-
-`<trunk>` is the trunk branch name (typically `main` or `master`) — your runtime context block lists it.
-
-If `git push` is rejected with `non-fast-forward`, the trunk moved while you were merging. Run `git merge <trunk>` again, resolve any new conflicts, push again. The retry loop converges.
-
-**On conflict** during merge: edit the conflicted files (markers are visible), `git add`, `git commit` to finish the merge. You're the merge agent — resolve semantically. Concurrent loops likely added context, not contradicted you. To abandon a merge cleanly: `git merge --abort`.
-
-**When to publish**: when an edit is genuinely meant for the workspace, not on every save. Working notes / scratch can live unpublished as long as the loop lives.
-
-**Runtime never auto-publishes.** If you don't push, your edits stay in the worktree and persist as long as the loop does.
+**When to promote**: when an edit is genuinely meant for the workspace, not on every save. Working notes / scratch can live unpromoted as long as the loop lives. **Runtime never auto-promotes** — if you don't promote, your edits stay in the worktree and persist as long as the loop does.
 
 ## .claude config tiers
 

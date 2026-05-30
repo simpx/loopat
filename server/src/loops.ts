@@ -1408,7 +1408,35 @@ async function ensureContextWorktree(repo: string, path: string, branchName: str
 
   // Stale state (old symlink, empty dir, leftover from manual cleanup) → wipe + create.
   try { await rm(path, { recursive: true, force: true }) } catch {}
-  await execFileP("git", ["-C", repo, "worktree", "add", "-b", branchName, path])
+  // ① pull (docs/context-flow.md): open the worktree from origin/main so the
+  // loop starts from latest consensus, not a possibly-stale local HEAD.
+  const start = await remoteStartPoint(repo)
+  const args = ["-C", repo, "worktree", "add", "-b", branchName, path]
+  if (start) args.push(start)
+  await execFileP("git", args)
+}
+
+/**
+ * ① pull, per docs/context-flow.md: a loop starts from consensus. Best-effort
+ * fetch origin, then return `origin/main` as the worktree start-point so the
+ * loop opens from the latest shared state. Returns null to fall back to local
+ * HEAD (solo / offline / no remote / no origin/main yet).
+ */
+async function remoteStartPoint(repo: string): Promise<string | null> {
+  try {
+    await execFileP("git", ["-C", repo, "remote", "get-url", "origin"])
+  } catch {
+    return null
+  }
+  try {
+    await execFileP("git", ["-C", repo, "fetch", "--quiet", "origin"], { timeout: 15_000 })
+  } catch {}
+  try {
+    await execFileP("git", ["-C", repo, "rev-parse", "--verify", "--quiet", "origin/main^{commit}"])
+    return "origin/main"
+  } catch {
+    return null
+  }
 }
 
 export async function ensureContextMounts(id: string, createdBy: string) {
@@ -1499,8 +1527,13 @@ export async function createLoop(opts: {
     }
     const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
     try {
-      // best-effort worktree add (creates a new branch off origin/HEAD or current HEAD)
-      await execFileP("git", ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)])
+      // ① pull (docs/context-flow.md): base the workdir branch on origin/main
+      // (best-effort fetch) so it starts from latest consensus; fall back to
+      // local HEAD when there's no remote / no origin/main.
+      const start = await remoteStartPoint(repoPath)
+      const wtArgs = ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
+      if (start) wtArgs.push(start)
+      await execFileP("git", wtArgs)
       meta.repo = opts.repo
       meta.branch = branch
     } catch (e: any) {
