@@ -35,7 +35,7 @@ its own remote over two edges:
 | Edge | Direction | Driven by | When |
 |---|---|---|---|
 | **① pull** | remote → loop | the runtime | once, at loop creation |
-| **② promote** | loop → remote | the loop's AI | when work is worth sharing |
+| **② promote** | loop → remote | the loop (its AI, or you in the UI) | when work is worth sharing |
 
 ---
 
@@ -50,8 +50,10 @@ git fetch origin
 git worktree add loops/<id>/context/notes -b loop/<id> origin/main
 ```
 
-After that the loop is **isolated** — it does not keep pulling. (Pulling
-mid-loop is always possible by hand; it just isn't automatic.)
+After that the loop is **isolated** — it does not keep pulling until it
+promotes (which folds in everyone's latest). So "fresh" is guaranteed at the
+creation instant, by design; pulling mid-loop is always possible by hand, it
+just isn't automatic.
 
 ### ② promote — share what's worth keeping
 
@@ -75,12 +77,24 @@ gh pr create --base main --head loop/<id>   # gated: review, then merge
 
 ---
 
-## Every write happens inside a loop
+## Every context operation is a loop — even the settings UI
 
-> **There is no write path to a remote outside a loop.**
+> **`origin` is the source of truth. Pull from it, work locally, merge back —
+> origin always wins.**
 
-Because every write lives in a loop, the loop's own AI is always on hand to
-resolve a conflict. Three consequences:
+A loop is just **a checkout of `origin/main` + a worker**. Almost always the
+worker is an AI in a sandbox. **The settings UI is the one loop without an AI:**
+opening it pulls your personal context, you edit, it pushes back — the same two
+edges. Nothing reaches a remote except through a loop, AI-driven or not.
+
+The only thing that differs by loop is **who resolves a conflict**:
+
+- **AI loop** (the common case) — the loop's AI three-way-merges onto `main`;
+  resolved in-loop, invisible to others until it lands.
+- **UI loop** (no AI) — fast-forward only; a conflict it can't rebase away is
+  *held back and surfaced for you* (see [Conflicts](#conflicts)).
+
+Three consequences:
 
 - **Want to sync? Open a loop** — there is nothing else to run, and it doubles
   as the escape hatch for anything tricky.
@@ -108,8 +122,9 @@ checkouts, not N clones (add `--filter=blob:none` to keep even that lean).
 ## The four kinds of context
 
 Same skeleton everywhere — per-loop worktree, ① pull / ② promote, conflicts
-resolved by the loop's AI. They differ only in **which remote**, **who writes**,
-and **how**. The **gate is an optional modifier on promote**, not a fixed trait.
+resolved by whoever runs the loop (its AI, or you in the UI loop). They differ
+only in **which remote**, **who writes**, and **how**. The **gate is an optional
+modifier on promote**, not a fixed trait.
 
 | | **notes** | **knowledge** | **personal** | **repos** |
 |---|---|---|---|---|
@@ -133,7 +148,8 @@ and the higher its gate.** *Read down, write up — slowly.*
 
 ## Conflicts
 
-A graceful chain; a human is never required:
+Everything reconciles **toward `origin`**, the source of truth. Inside a loop a
+human is never *required* — a graceful chain handles it:
 
 1. **Structure first (no AI, ~99%).** One-file-per-item + index, per-author /
    per-loop directories, append-only surfaces → different writers, different
@@ -145,6 +161,22 @@ A graceful chain; a human is never required:
 
 Concurrent promotes serialize naturally: git rejects the losing push, that loop
 `fetch → merge → push`es again.
+
+**Outside a loop there is no AI to call on**, so a write from the settings UI
+(personal config) uses the bluntest rule that cannot go wrong:
+
+- **Fast-forward only.** If the remote hasn't moved, the push just lands.
+- **If it moved, rebase the local edit on top.** Different files merge cleanly
+  and your change survives untouched — the common case, and invisible to you.
+- **Only a real same-spot conflict stops here**, and it is *surfaced, not
+  swallowed*: your change is **kept locally and never auto-discarded**, the push
+  is held back, and you're told. An unresolved conflict **does not count as
+  reaching `origin`.**
+
+Resolving it is then your call — **keep yours** (by hand, or in a loop) or
+**take the remote** (drop this edit). Two invariants, both the point: **nothing
+lands on the SoT with a conflict buried inside it, and nothing of yours is
+dropped without you saying so.**
 
 ---
 
