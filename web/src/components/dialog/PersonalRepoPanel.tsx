@@ -41,6 +41,8 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
   const [busy, setBusy] = useState(false)
   const [ghToken, setGhToken] = useState("")
   const [ghRepoName, setGhRepoName] = useState("")
+  const [ghCryptKey, setGhCryptKey] = useState("")
+  const [ghNeedsCryptKey, setGhNeedsCryptKey] = useState(false)
   const [ghBusy, setGhBusy] = useState(false)
   const [ghError, setGhError] = useState<string | null>(null)
   const [copiedPub, setCopiedPub] = useState(false)
@@ -120,9 +122,14 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
     setGhError(null)
     setGhBusy(true)
     try {
-      const r = await setupPersonalGithub(ghToken.trim(), ghRepoName.trim() || undefined)
+      const r = await setupPersonalGithub(ghToken.trim(), ghRepoName.trim() || undefined, ghCryptKey.trim() || undefined)
       if (!r.ok) {
-        setGhError(r.error ?? "github setup failed")
+        if (r.needsCryptKey) {
+          setGhNeedsCryptKey(true)
+          setGhError("This repo already has a .loopat vault — paste its git-crypt key to unlock it.")
+        } else {
+          setGhError(r.error ?? "setup failed")
+        }
         return
       }
       if (r.autoInitialized && r.cryptKey) {
@@ -135,6 +142,9 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
       setGhBusy(false)
     }
   }
+
+  const ghProvider = status?.gitHost?.provider ?? "github"
+  const ghProviderLabel = ghProvider === "github" ? "GitHub" : ghProvider
 
   if (loading) {
     return <div className="text-sm text-gray-400 py-8 text-center">loading…</div>
@@ -216,20 +226,18 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* GitHub token — the easy path: loopat creates the repo + deploy key */}
+      {/* Token path: loopat creates/reuses the repo + sets up git-crypt */}
       <div className="border border-gray-200 rounded p-2.5 flex flex-col gap-2">
-        <div className="text-xs font-semibold text-gray-900">Set up with a GitHub token (easiest)</div>
+        <div className="text-xs font-semibold text-gray-900">Set up with a {ghProviderLabel} token (easiest)</div>
         <div className="text-[11px] text-gray-500 leading-relaxed">
-          Paste a GitHub personal access token (scopes{" "}
-          <code className="bg-gray-100 px-1 rounded">repo</code> +{" "}
-          <code className="bg-gray-100 px-1 rounded">write:public_key</code>). Loopat creates the repo,
-          registers the deploy key, and runs git-crypt for you.
+          Paste your {ghProviderLabel} token. Loopat creates the repo (or reuses an existing one)
+          and runs git-crypt for you — no manual repo creation or deploy-key pasting.
         </div>
         <input
           type="password"
           value={ghToken}
           onChange={(e) => setGhToken(e.target.value)}
-          placeholder="ghp_… (personal access token)"
+          placeholder="personal access / private token"
           autoComplete="off"
           className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
         />
@@ -237,9 +245,18 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
           type="text"
           value={ghRepoName}
           onChange={(e) => setGhRepoName(e.target.value)}
-          placeholder="repo name (default: loopat-personal)"
+          placeholder="repo name — existing → use it · new → create it (default: loopat-personal)"
           className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
         />
+        {ghNeedsCryptKey && (
+          <textarea
+            value={ghCryptKey}
+            onChange={(e) => setGhCryptKey(e.target.value)}
+            rows={2}
+            placeholder="git-crypt key — this repo already has a .loopat vault, paste its key to unlock"
+            className="w-full px-2 py-1.5 text-[11px] font-mono border border-gray-300 rounded outline-none focus:border-gray-500 resize-none"
+          />
+        )}
         {ghError && (
           <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{ghError}</div>
         )}
@@ -249,11 +266,11 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
           disabled={ghBusy || !ghToken.trim()}
           className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
         >
-          {ghBusy ? "setting up…" : "Set up with GitHub"}
+          {ghBusy ? "setting up…" : `Set up with ${ghProviderLabel}`}
         </button>
       </div>
 
-      <div className="text-[11px] text-gray-400 text-center">— or set it up manually —</div>
+      <div className="text-[11px] text-gray-400 text-center">— or set up a deploy key manually —</div>
 
       <div className="text-xs text-gray-600 leading-relaxed">
         Two steps:

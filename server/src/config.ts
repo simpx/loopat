@@ -133,6 +133,10 @@ export type WorkspaceConfig = {
   repos?: RepoSpec[]
   providers?: Record<string, ProviderConfig>
   default?: string
+  /** Platform-level git host for personal onboarding. `provider` is a
+   *  GitHostProvider id (= the extension filename, e.g. "code"); empty/absent
+   *  means GitHub. `baseUrl` is the API host for self-hosted/internal. */
+  gitHost?: { provider?: string; baseUrl?: string }
   /** Operator-level mounts — any host path. Shared across all loops on this
    *  workspace. Only the operator (the host shell user) can edit. */
   mounts?: OperatorMount[]

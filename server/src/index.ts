@@ -1204,11 +1204,13 @@ app.get("/api/personal/status", requireAuth, async (c) => {
     publicKey = r.publicKey
   }
   const imported = !(await isPersonalFresh(userId))
+  const wcfg = await loadConfig()
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
     publicKey,
     imported,
+    gitHost: { provider: wcfg.gitHost?.provider ?? "github", baseUrl: wcfg.gitHost?.baseUrl ?? null },
   })
 })
 
@@ -1282,10 +1284,11 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const token = typeof body.token === "string" ? body.token.trim() : ""
   if (!token) return c.json({ error: "github token required" }, 400)
+  const wcfg = await loadConfig()
   const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || "loopat-personal"
-  const baseUrl = typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined
+  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
   const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
-  const provider = typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : "github"
+  const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
   const r = await setupPersonalViaProvider({ userId, provider, token, baseUrl, repoName, cryptKey })
   if (!r.ok) {
     if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)

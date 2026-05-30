@@ -130,6 +130,7 @@ export type PersonalStatus = {
   personalRepo: string | null
   publicKey: string | null
   imported: boolean
+  gitHost?: { provider: string; baseUrl: string | null }
 }
 
 export async function getPersonalStatus(): Promise<PersonalStatus | null> {
