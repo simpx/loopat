@@ -13,6 +13,35 @@ import {
 import { ArrowUp, ArrowDown, AlertTriangle, Check, X } from "lucide-react"
 
 /**
+ * Robust clipboard copy. navigator.clipboard is undefined in non-secure
+ * contexts (e.g. dev:host accessed over http://<ip>:port), which silently
+ * broke the "copy" buttons. Fall back to a hidden textarea + execCommand,
+ * which works there too.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {}
+  try {
+    const ta = document.createElement("textarea")
+    ta.value = text
+    ta.style.position = "fixed"
+    ta.style.left = "-9999px"
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    const ok = document.execCommand("copy")
+    document.body.removeChild(ta)
+    return ok
+  } catch {
+    return false
+  }
+}
+
+/**
  * Personal-repo deploy-key flow, rendered as a settings panel.
  *
  * UX model:
@@ -51,6 +80,8 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
   const [backupKey, setBackupKey] = useState<string | null>(null)
   const [backupCopied, setBackupCopied] = useState(false)
   const [backupAck, setBackupAck] = useState(false)
+  const [step, setStep] = useState<"token" | "repo" | "confirm">("token")
+  const [ghLogin, setGhLogin] = useState("")
 
   useEffect(() => {
     setError(null)
@@ -72,20 +103,18 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
 
   const copyPub = async () => {
     if (!status?.publicKey) return
-    try {
-      await navigator.clipboard.writeText(status.publicKey)
+    if (await copyText(status.publicKey)) {
       setCopiedPub(true)
       setTimeout(() => setCopiedPub(false), 1500)
-    } catch {}
+    }
   }
 
   const copyBackup = async () => {
     if (!backupKey) return
-    try {
-      await navigator.clipboard.writeText(backupKey)
+    if (await copyText(backupKey)) {
       setBackupCopied(true)
       setTimeout(() => setBackupCopied(false), 1500)
-    } catch {}
+    }
   }
 
   const submit = async () => {
@@ -146,8 +175,34 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
     }
   }
 
+  // Wizard nav: token step → fetch the user's repos → repo-picker step.
+  const goToRepo = async () => {
+    if (ghBusy || !ghToken.trim()) return
+    setGhError(null)
+    setGhBusy(true)
+    try {
+      const res = await listPersonalRepos(ghToken.trim())
+      if (!res.ok) {
+        // bad token → stay on the token step and show the error, instead of
+        // advancing to a misleading empty repo picker
+        setGhError(res.error ?? "invalid token")
+        return
+      }
+      setGhRepos(res.repos)
+      if (res.login) setGhLogin(res.login)
+      setStep("repo")
+    } finally {
+      setGhBusy(false)
+    }
+  }
+
   const ghProvider = status?.gitHost?.provider ?? "github"
   const ghProviderLabel = ghProvider === "github" ? "GitHub" : ghProvider
+  const ghRepoExists = ghRepos.some((r) => r.name === ghRepoName.trim())
+  const ghRepoWebUrl =
+    status?.gitHost?.baseUrl && ghLogin && ghRepoName.trim()
+      ? `${status.gitHost.baseUrl.replace(/\/+$/, "")}/${ghLogin}/${ghRepoName.trim()}`
+      : null
 
   if (loading) {
     return <div className="text-sm text-gray-400 py-8 text-center">loading…</div>
@@ -160,12 +215,18 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
   if (backupKey) {
     return (
       <div className="flex flex-col gap-3">
-        <div className="text-sm font-semibold text-gray-900">Back up your git-crypt key</div>
+        <div className="flex flex-col items-center text-center gap-2 py-1">
+          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100">
+            <Check size={20} className="text-emerald-600" />
+          </div>
+          <div className="text-sm font-semibold text-gray-900">Your personal repo is ready 🎉</div>
+        </div>
+        <div className="text-sm font-semibold text-gray-900">One last thing — back up your git-crypt key</div>
         <div className="text-xs text-gray-600 leading-relaxed">
-          Loopat just initialized your repo with git-crypt. The symmetric key below
-          decrypts everything under <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/vaults/</code>.
-          It's already stored on this host, but <b>you should save your own copy</b> —
-          if this host dies and you don't have it, all secrets are unrecoverable.
+          The symmetric key below decrypts everything under{" "}
+          <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/vaults/</code>. It's already
+          stored on this host, but <b>save your own copy</b> — if this host dies and you don't have
+          it, your secrets are unrecoverable.
         </div>
         <div className="relative">
           <textarea
@@ -187,6 +248,10 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
           <b>Suggested:</b> stash this in your password manager (1Password / Bitwarden / Apple
           Keychain). To later restore on a new host, paste this same value into the
           Recovery field on the new host's Personal repo settings.
+        </div>
+        <div className="text-[11px] text-emerald-700 leading-relaxed bg-emerald-50 border border-emerald-200 rounded p-2">
+          <b>Next:</b> if your providers need API keys, add them in{" "}
+          <b>Settings → Providers</b> to start chatting.
         </div>
         <label className="flex items-center gap-2 text-xs text-gray-700">
           <input
@@ -227,71 +292,92 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
     )
   }
 
+  const steps = ["token", "repo", "confirm"] as const
+  const stepIdx = steps.indexOf(step)
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Token path: loopat creates/reuses the repo + sets up git-crypt */}
-      <div className="border border-gray-200 rounded p-2.5 flex flex-col gap-2">
-        <div className="text-xs font-semibold text-gray-900">Set up with a {ghProviderLabel} token (easiest)</div>
-        <div className="text-[11px] text-gray-500 leading-relaxed">
-          Paste your {ghProviderLabel} token. Loopat creates the repo (or reuses an existing one)
-          and runs git-crypt for you — no manual repo creation or deploy-key pasting.
-        </div>
-        <input
-          type="password"
-          value={ghToken}
-          onChange={(e) => setGhToken(e.target.value)}
-          onBlur={() => {
-            if (ghToken.trim()) listPersonalRepos(ghToken.trim()).then(setGhRepos).catch(() => {})
-          }}
-          placeholder="personal access / private token"
-          autoComplete="off"
-          className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
-        />
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            list="gh-repo-list"
-            value={ghRepoName}
-            onChange={(e) => setGhRepoName(e.target.value)}
-            placeholder="pick an existing repo or type a new name"
-            className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
-          />
-          <datalist id="gh-repo-list">
-            {ghRepos.map((r) => (
-              <option key={r.path} value={r.name} />
-            ))}
-          </datalist>
-          <span
-            className={`text-[11px] whitespace-nowrap ${
-              ghRepos.some((r) => r.name === ghRepoName.trim()) ? "text-gray-500" : "text-emerald-600"
-            }`}
-          >
-            {ghRepos.some((r) => r.name === ghRepoName.trim()) ? "use existing" : "will create"}
-          </span>
-        </div>
-        {ghNeedsCryptKey && (
-          <textarea
-            value={ghCryptKey}
-            onChange={(e) => setGhCryptKey(e.target.value)}
-            rows={2}
-            placeholder="git-crypt key — this repo already has a .loopat vault, paste its key to unlock"
-            className="w-full px-2 py-1.5 text-[11px] font-mono border border-gray-300 rounded outline-none focus:border-gray-500 resize-none"
-          />
-        )}
-        {ghError && (
-          <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{ghError}</div>
-        )}
-        <button
-          type="button"
-          onClick={submitGithub}
-          disabled={ghBusy || !ghToken.trim()}
-          className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
-        >
-          {ghBusy ? "setting up…" : `Set up with ${ghProviderLabel}`}
-        </button>
+      {/* wizard progress */}
+      <div className="flex items-center gap-2 text-[11px] mb-1">
+        {[
+          { k: "token", label: "Token" },
+          { k: "repo", label: "Repository" },
+          { k: "confirm", label: "Confirm" },
+        ].map((s, i) => (
+          <div key={s.k} className="flex items-center gap-2">
+            <span
+              className={`flex items-center gap-1.5 ${
+                step === s.k ? "text-gray-900 font-medium" : i < stepIdx ? "text-emerald-600" : "text-gray-400"
+              }`}
+            >
+              <span
+                className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[9px] ${
+                  step === s.k
+                    ? "bg-gray-900 text-white"
+                    : i < stepIdx
+                    ? "bg-emerald-500 text-white"
+                    : "bg-gray-200 text-gray-500"
+                }`}
+              >
+                {i < stepIdx ? "✓" : i + 1}
+              </span>
+              {s.label}
+            </span>
+            {i < 2 && <span className="text-gray-300">→</span>}
+          </div>
+        ))}
       </div>
 
-      <div className="text-[11px] text-gray-400 text-center">— or set up a deploy key manually —</div>
+      {/* ── Step 1: token ── */}
+      {step === "token" && (
+        <div className="flex flex-col gap-3">
+          <div className="text-[11px] text-gray-500 leading-relaxed">
+            Paste your {ghProviderLabel} token. Loopat will list your repos so you can
+            pick one (or create a new one), then set everything up with git-crypt —
+            no manual repo creation or deploy-key pasting.
+          </div>
+          <input
+            type="password"
+            value={ghToken}
+            onChange={(e) => setGhToken(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                void goToRepo()
+              }
+            }}
+            placeholder={`${ghProviderLabel} personal access / private token`}
+            autoComplete="off"
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+          />
+          {status.gitHost?.tokenHelp &&
+            (/^https?:\/\//.test(status.gitHost.tokenHelp) ? (
+              <a
+                href={status.gitHost.tokenHelp}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-blue-600 hover:underline w-fit"
+              >
+                Where do I get a token? ↗
+              </a>
+            ) : (
+              <div className="text-[11px] text-gray-400 leading-relaxed">{status.gitHost.tokenHelp}</div>
+            ))}
+          {ghError && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{ghError}</div>
+          )}
+          <button
+            type="button"
+            onClick={goToRepo}
+            disabled={ghBusy || !ghToken.trim()}
+            className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {ghBusy ? "loading repos…" : "Next"}
+          </button>
+
+          {ghProvider === "github" && (
+          <>
+          <div className="text-[11px] text-gray-400 text-center">— or set up a deploy key manually —</div>
 
       <div className="text-xs text-gray-600 leading-relaxed">
         Two steps:
@@ -430,6 +516,185 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
             : "Continue"}
         </button>
       </div>
+      </>
+      )}
+        </div>
+      )}
+
+      {/* ── Step 2: pick a repository ── */}
+      {step === "repo" && (
+        <div className="flex flex-col gap-3">
+          <div className="text-[11px] text-gray-500 leading-relaxed">
+            Pick one of your repos, or type a new name to create one. Repos with
+            "personal" in the name are listed first.
+          </div>
+          <div className="flex flex-col gap-1 max-h-52 overflow-auto border border-gray-200 rounded p-1">
+            {ghRepos.length === 0 && (
+              <div className="text-[11px] text-gray-400 px-2 py-4 text-center">
+                no existing repos found — type a name below to create one
+              </div>
+            )}
+            {ghRepos.map((r) => {
+              const sel = ghRepoName.trim() === r.name
+              return (
+                <button
+                  key={r.path}
+                  type="button"
+                  onClick={() => setGhRepoName(r.name)}
+                  className={`flex items-center justify-between gap-2 px-2 py-1.5 rounded text-left text-xs ${
+                    sel ? "bg-gray-900 text-white" : "hover:bg-gray-100 text-gray-700"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    {sel && <Check size={12} className="shrink-0" />}
+                    <span className="truncate font-medium">{r.name}</span>
+                    {r.name.includes("personal") && (
+                      <span
+                        className={`text-[9px] px-1 rounded ${
+                          sel ? "bg-white/20" : "bg-emerald-100 text-emerald-700"
+                        }`}
+                      >
+                        personal
+                      </span>
+                    )}
+                  </span>
+                  <span className={`text-[10px] truncate ${sel ? "text-white/60" : "text-gray-400"}`}>
+                    {r.path}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] text-gray-500">or type a new repo name</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={ghRepoName}
+                onChange={(e) => setGhRepoName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && ghRepoName.trim()) {
+                    e.preventDefault()
+                    setGhError(null)
+                    setStep("confirm")
+                  }
+                }}
+                placeholder="loopat-personal"
+                className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+              />
+              <span
+                className={`text-[11px] whitespace-nowrap ${
+                  ghRepoExists ? "text-gray-500" : "text-emerald-600"
+                }`}
+              >
+                {ghRepoName.trim() ? (ghRepoExists ? "use existing" : "will create") : ""}
+              </span>
+            </div>
+          </label>
+          <div className="flex gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("token")
+                setGhError(null)
+              }}
+              className="px-3 h-9 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setGhError(null)
+                setStep("confirm")
+              }}
+              disabled={!ghRepoName.trim()}
+              className="flex-1 px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Step 3: confirm what's about to happen ── */}
+      {step === "confirm" && (
+        <div className="flex flex-col gap-3">
+          <div className="border border-gray-200 rounded p-3 text-xs text-gray-700 leading-relaxed flex flex-col gap-2">
+            {ghRepoExists ? (
+              <>
+                <div className="font-semibold text-gray-900">Use existing repo</div>
+                <div>
+                  Loopat will use your existing repo{" "}
+                  <code className="text-[11px] bg-gray-100 px-1 rounded">{ghRepoName.trim()}</code> and
+                  create a git-crypt-encrypted{" "}
+                  <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/</code> vault inside it.
+                  The repo should be a clean slate — if it already has a{" "}
+                  <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat</code> vault you'll be
+                  asked for its git-crypt key.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="font-semibold text-gray-900">Create new repo</div>
+                <div>
+                  Loopat will create a new private {ghProviderLabel} repo named{" "}
+                  <code className="text-[11px] bg-gray-100 px-1 rounded">{ghRepoName.trim()}</code>, then
+                  initialize a git-crypt-encrypted{" "}
+                  <code className="text-[11px] bg-gray-100 px-1 rounded">.loopat/</code> vault and push it.
+                  Your secrets stay encrypted in git.
+                </div>
+              </>
+            )}
+            <div className="text-[11px] text-gray-500">
+              You'll get a one-time git-crypt key to back up right after.
+            </div>
+            {ghRepoWebUrl && (
+              <a
+                href={ghRepoWebUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[11px] text-blue-600 hover:underline break-all w-fit"
+              >
+                {ghRepoWebUrl} ↗
+              </a>
+            )}
+          </div>
+          {ghNeedsCryptKey && (
+            <textarea
+              value={ghCryptKey}
+              onChange={(e) => setGhCryptKey(e.target.value)}
+              rows={3}
+              placeholder="git-crypt key — this repo already has a .loopat vault, paste its key to unlock"
+              className="w-full px-2 py-1.5 text-[11px] font-mono border border-gray-300 rounded outline-none focus:border-gray-500 resize-none"
+            />
+          )}
+          {ghError && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">{ghError}</div>
+          )}
+          <div className="flex gap-2 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("repo")
+                setGhError(null)
+              }}
+              disabled={ghBusy}
+              className="px-3 h-9 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={submitGithub}
+              disabled={ghBusy}
+              className="flex-1 px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
+            >
+              {ghBusy ? "setting up…" : ghRepoExists ? "Use this repo" : "Create & set up"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -447,8 +712,8 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
 function ImportedPanel({ status }: { status: PersonalStatus }) {
   type Action = null | "export" | "delete" | "pull" | "push"
   const [action, setAction] = useState<Action>(null)
-  const [pullResult, setPullResult] = useState<{ ok: boolean; error?: string; conflicts?: string[]; needsStash?: boolean } | null>(null)
-  const [pushResult, setPushResult] = useState<{ ok: boolean; error?: string; needsPull?: boolean } | null>(null)
+  const [pullResult, setPullResult] = useState<{ ok: boolean; error?: string; conflict?: boolean; files?: string[]; needsStash?: boolean } | null>(null)
+  const [pushResult, setPushResult] = useState<{ ok: boolean; error?: string; conflict?: boolean; files?: string[]; needsPull?: boolean } | null>(null)
 
   const handlePull = async () => {
     setAction("pull")
@@ -603,7 +868,7 @@ function PullPushResultFlow({
   onRetry,
 }: {
   type: "pull" | "push"
-  result: { ok: boolean; error?: string; conflicts?: string[]; needsStash?: boolean; needsPull?: boolean } | null
+  result: { ok: boolean; error?: string; conflict?: boolean; files?: string[]; needsStash?: boolean; needsPull?: boolean } | null
   onDone: () => void
   onRetry: () => void
 }) {
@@ -642,33 +907,34 @@ function PullPushResultFlow({
     )
   }
 
-  // Error state
-  const hasConflicts = type === "pull" && result.conflicts && result.conflicts.length > 0
+  // Held-back conflict (rebase couldn't auto-merge) — can happen on pull or push.
+  const hasConflict = (result.conflict ?? false) && (result.files?.length ?? 0) > 0
   const needsPull = type === "push" && result.needsPull
 
   return (
     <div className="flex flex-col gap-2 border border-red-200 bg-red-50 rounded p-2.5">
       <div className="flex items-center gap-2 text-sm font-semibold text-red-800">
         <AlertTriangle size={14} />
-        {type === "pull" ? "Pull failed" : "Push failed"}
+        {hasConflict ? "Held back — conflicts with remote" : type === "pull" ? "Pull failed" : "Push failed"}
       </div>
 
-      {hasConflicts && (
+      {hasConflict && (
         <>
           <div className="text-xs text-red-800 leading-relaxed">
-            Merge conflicts detected. You'll need to resolve them manually in the
-            terminal or by editing the files directly.
+            Your change conflicts with the remote, so it wasn't merged — but your
+            local edit is <b>kept, not lost</b>. Either take the remote (discard
+            this edit) or resolve it by hand / in a loop.
           </div>
           <button
             type="button"
             onClick={() => setShowConflicts(!showConflicts)}
             className="text-left text-[11px] text-red-700 underline"
           >
-            {showConflicts ? "Hide" : "Show"} conflicted files ({result.conflicts!.length})
+            {showConflicts ? "Hide" : "Show"} conflicting files ({result.files!.length})
           </button>
           {showConflicts && (
             <ul className="font-mono text-[10.5px] text-red-900 bg-white/60 rounded p-1.5 max-h-24 overflow-auto">
-              {result.conflicts!.map((f) => (
+              {result.files!.map((f) => (
                 <li key={f}>{f}</li>
               ))}
             </ul>
@@ -676,36 +942,22 @@ function PullPushResultFlow({
         </>
       )}
 
-      {result.needsStash && result.error?.startsWith("pull succeeded") && (
+      {needsPull && !hasConflict && (
         <div className="text-xs text-red-800 leading-relaxed">
-          Pull succeeded but local changes couldn't be auto-applied.
-          Run <code className="bg-white/60 px-1 rounded">git stash pop</code> manually to resolve.
+          Remote moved again while pushing. Just try again.
         </div>
       )}
 
-      {needsPull && (
-        <div className="text-xs text-red-800 leading-relaxed">
-          Remote has newer commits. Pull first, then try pushing again.
-        </div>
-      )}
-
-      {!hasConflicts && !needsPull && !(result.needsStash && result.error?.startsWith("pull succeeded")) && (
+      {!hasConflict && !needsPull && (
         <div className="text-xs text-red-800 leading-relaxed">
           {result.error}
         </div>
       )}
 
       <div className="flex gap-2 mt-1">
-        {result.needsStash ? (
+        {hasConflict ? (
+          // "take remote" — force pull discards the local edit and re-aligns to origin
           <ForcePullButton onRetry={onRetry} />
-        ) : hasConflicts || needsPull ? (
-          <button
-            type="button"
-            onClick={needsPull ? () => { onDone(); setTimeout(() => window.location.reload(), 100) } : onDone}
-            className="flex-1 px-3 h-8 text-sm rounded bg-red-700 text-white hover:bg-red-800"
-          >
-            {needsPull ? "Switch to Pull" : "Done"}
-          </button>
         ) : (
           <button
             type="button"

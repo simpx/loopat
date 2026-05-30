@@ -17,6 +17,8 @@ import {
   getPersonalDisk,
   savePersonalDisk,
   writeVaultEnv,
+  pushPersonalVault,
+  pullPersonalVault,
   testProviderConnection,
   listApiTokens,
   createApiToken,
@@ -102,7 +104,11 @@ export function SettingsPage() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  // On opening Settings, pull personal from the remote once (best-effort) so
+  // config edits made on another host show up, then load.
+  useEffect(() => {
+    pullPersonalVault().catch(() => {}).finally(() => { refresh() })
+  }, [refresh])
 
   // If the active tab is gated and personal repo isn't ready, bounce to the
   // personal-repo tab so users see the unlock path instead of a dead pane.
@@ -556,8 +562,19 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       }
     }
     const r = await savePersonalDisk({ providers: providersOut })
+    if (!r.ok) { setSaving(false); setErr(r.error ?? "save failed"); return }
+    // Write-through: personal is a per-user repo — push the change to the remote
+    // right away. Best-effort: the save already landed locally; if the remote
+    // moved ahead, ask the user to pull rather than failing the save.
+    const pushRes = await pushPersonalVault()
     setSaving(false)
-    if (!r.ok) { setErr(r.error ?? "save failed"); return }
+    if (!pushRes.ok) {
+      setErr(pushRes.conflict
+        ? "Saved locally, but it conflicts with the remote — your edit is kept, not lost. Resolve it in Settings → Personal repo (take remote, or in a loop)."
+        : pushRes.needsPull
+          ? "Saved locally — remote moved while pushing. Save again to retry."
+          : `Saved locally, but push to remote failed: ${pushRes.error ?? "unknown"}`)
+    }
     setSaved(true)
     setTimeout(() => setSaved(false), 2500)
     onChanged()
@@ -914,8 +931,17 @@ function ShellSection({ disk, onChanged, disabled }: {
     setErr(null)
     setSaved(false)
     const r = await savePersonalDisk({ shell: val })
+    if (!r.ok) { setSaving(false); setErr(r.error ?? "save failed"); return }
+    // Write-through to the personal remote (best-effort — see providers save).
+    const pushRes = await pushPersonalVault()
     setSaving(false)
-    if (!r.ok) { setErr(r.error ?? "save failed"); return }
+    if (!pushRes.ok) {
+      setErr(pushRes.conflict
+        ? "Saved locally, but it conflicts with the remote — your edit is kept, not lost. Resolve it in Settings → Personal repo (take remote, or in a loop)."
+        : pushRes.needsPull
+          ? "Saved locally — remote moved while pushing. Save again to retry."
+          : `Saved locally, but push to remote failed: ${pushRes.error ?? "unknown"}`)
+    }
     setSaved(true)
     onChanged()
   }

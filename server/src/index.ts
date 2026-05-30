@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -1205,15 +1205,17 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   }
   const imported = !(await isPersonalFresh(userId))
   const wcfg = await loadConfig()
+  const providerId = wcfg.gitHost?.provider ?? "github"
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
     publicKey,
     imported,
     gitHost: {
-      provider: wcfg.gitHost?.provider ?? "github",
+      provider: providerId,
       baseUrl: wcfg.gitHost?.baseUrl ?? null,
       defaultRepo: wcfg.gitHost?.defaultRepo ?? "loopat-personal",
+      tokenHelp: await providerTokenHelp(providerId),
     },
   })
 })
@@ -1307,15 +1309,19 @@ app.post("/api/personal/github", requireAuth, async (c) => {
 app.post("/api/personal/repos", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const token = typeof body.token === "string" ? body.token.trim() : ""
-  if (!token) return c.json({ repos: [] })
+  if (!token) return c.json({ ok: false, repos: [], error: "token required" })
   const wcfg = await loadConfig()
   const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
   const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
   try {
+    // Validate the token first so a bad token surfaces as an error in the token
+    // step, instead of an empty (misleading "no repos") picker.
+    const auth = await authenticateViaProvider({ provider, token, baseUrl })
+    if (!auth.ok) return c.json({ ok: false, repos: [], error: auth.error })
     const repos = await listPersonalReposViaProvider({ provider, token, baseUrl })
-    return c.json({ repos })
+    return c.json({ ok: true, repos, login: auth.login })
   } catch (e: any) {
-    return c.json({ repos: [], error: e?.message ?? String(e) })
+    return c.json({ ok: false, repos: [], error: e?.message ?? String(e) })
   }
 })
 
@@ -1374,19 +1380,23 @@ app.post("/api/personal/pull", requireAuth, async (c) => {
   const r = await pullPersonalFromRemote(userId, { force: !!body.force })
   if (!r.ok) {
     const status: Record<string, unknown> = { error: r.error }
-    if (r.conflicts) status.conflicts = r.conflicts
+    if (r.conflict) { status.conflict = true; status.files = r.files }
     if (r.needsStash) status.needsStash = true
-    return c.json(status, r.conflicts ? 409 : 400)
+    return c.json(status, r.conflict ? 409 : 400)
   }
   return c.json({ ok: true, message: r.message })
 })
 
-// Push to remote. Stages, commits, and pushes.
+// Push to remote. Commits, rebases onto origin (held back on real conflict),
+// then ff-pushes.
 app.post("/api/personal/push", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const r = await pushPersonalToRemote(userId)
   if (!r.ok) {
-    return c.json({ error: r.error, needsPull: r.needsPull }, r.needsPull ? 409 : 400)
+    const status: Record<string, unknown> = { error: r.error }
+    if (r.conflict) { status.conflict = true; status.files = r.files }
+    if (r.needsPull) status.needsPull = true
+    return c.json(status, (r.conflict || r.needsPull) ? 409 : 400)
   }
   return c.json({ ok: true, message: r.message })
 })
@@ -3089,8 +3099,9 @@ app.get("*", async (c, next) => {
 
 const port = Number(process.env.PORT ?? 7787)
 const hostname = process.env.HOST ?? "127.0.0.1"
+
+// Fast, serve-critical init only — keep this short so the port opens quickly.
 await ensureWorkspaceDirs()
-const backfilled = await backfillAllMounts()
 const cfg = await loadConfig()
 // Initialise chat DB. bootstrap user = first admin (if one exists) — only used
 // to seed the default #general channel on a fresh DB.
@@ -3101,8 +3112,37 @@ try {
   chatSeed = firstAdmin?.id ?? users[0]?.id ?? ""
 } catch {}
 initChat(chatSeed)
+
+// Open the port NOW, before the slow boot work below (mount backfill, podman
+// probe, container prewarm). Otherwise the vite dev proxy hits ECONNREFUSED
+// during the seconds those awaits run. The rest boots while we're listening.
+const server = Bun.serve({
+  port,
+  hostname,
+  fetch: app.fetch,
+  websocket,
+})
+console.log(`[loopat] server listening on http://${hostname}:${port}`)
+console.log(`[loopat] workspace serve starting via podman container (port ${process.env.LOOPAT_SERVE_PORT ?? "7788"})`)
+
 await printBootstrapBanner(cfg)
+const backfilled = await backfillAllMounts()
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
+
+// Pull every imported personal repo from its remote on boot (best-effort).
+// personal is a per-user repo synced directly (not via loops), so a host that
+// was offline catches up here; settings edits then write-through on save.
+void (async () => {
+  try {
+    for (const u of await listUsers()) {
+      if (await isPersonalFresh(u.id)) continue // not imported yet — nothing to pull
+      const r = await pullPersonalFromRemote(u.id).catch(() => null)
+      if (r && !r.ok) console.warn(`[loopat] boot pull personal (${u.id}): ${r.error}`)
+    }
+  } catch (e: any) {
+    console.warn(`[loopat] boot personal pull-all failed: ${e?.message ?? e}`)
+  }
+})()
 
 // Probe podman availability up front so misconfigured hosts fail loudly on
 // boot rather than mid-session.
@@ -3136,15 +3176,5 @@ process.on("SIGTERM", () => { void stopAllOnExit().finally(() => process.exit(0)
 
 // Plugin caching is delegated to CC itself — admin uses `claude plugin
 // install` inside each sandbox's .claude/ dir. No loopat-side prewarm.
-
-console.log(`[loopat] server listening on http://${hostname}:${port}`)
-console.log(`[loopat] workspace serve starting via podman container (port ${process.env.LOOPAT_SERVE_PORT ?? "7788"})`)
-
-const server = Bun.serve({
-  port,
-  hostname,
-  fetch: app.fetch,
-  websocket,
-})
 
 export { server }
