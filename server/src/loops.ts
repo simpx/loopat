@@ -326,11 +326,11 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
  * The startup clone (driven by host config.json) stays as a display mirror;
  * here the personal-declared url wins and becomes the context repo's origin.
  *
- * We only set the origin + fetch with the vault key — we deliberately do NOT
- * persist a `core.sshCommand`: the same `.git` is mounted into the sandbox,
- * where that host path is invalid. The sandbox's own git already authenticates
- * with the vault key via `$HOME/.ssh` (the vault home-mount), so its promote
- * pushes as the user without any per-repo config.
+ * It sets the origin, fetches with the vault key (host-side), AND persists a
+ * `core.sshCommand` pointing at the vault key's SANDBOX path so the AI's
+ * promote (git push from inside the sandbox) authenticates as the user with no
+ * interactive host-key prompt. Host-side git overrides that config via
+ * GIT_SSH_COMMAND (env beats config), so the sandbox path is never used here.
  */
 export async function ensureUserContext(user: string, vault: string = "default"): Promise<void> {
   const cfg = await loadPersonalConfig(user, vault)
@@ -344,6 +344,15 @@ export async function ensureUserContext(user: string, vault: string = "default")
     if (!existsSyncBase(join(dir, ".git"))) continue // not initialized yet (startup hasn't run)
     const has = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
     await execFileP("git", ["-C", dir, "remote", has ? "set-url" : "add", "origin", url]).catch(() => {})
+    // Sandbox-side promote: persist core.sshCommand pointing at the vault key's
+    // SANDBOX path (/loopat/home/<user>/.ssh/id, where the vault home-mount
+    // lands) with accept-new, so the AI's `git push` inside the sandbox
+    // authenticates as the user without an interactive host-key prompt. Host-
+    // side ops override this with GIT_SSH_COMMAND (env beats config), so the
+    // sandbox path is never used server-side.
+    const sandboxKey = `/loopat/home/${user}/.ssh/id`
+    await execFileP("git", ["-C", dir, "config", "core.sshCommand",
+      `ssh -i ${sandboxKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`]).catch(() => {})
     // validate connectivity + populate origin/* with the user's key (transient,
     // server-side only).
     await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 20_000 }).catch(() => {})
