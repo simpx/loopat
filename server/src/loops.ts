@@ -1658,10 +1658,13 @@ async function ensureContextWorktree(repo: string, path: string, branchName: str
 
   // Stale state (old symlink, empty dir, leftover from manual cleanup) → wipe + create.
   try { await rm(path, { recursive: true, force: true }) } catch {}
-  // ① pull (docs/context-flow.md): open the worktree from origin/main so the
-  // loop starts from latest consensus, not a possibly-stale local HEAD.
+  try { await execFileP("git", ["-C", repo, "worktree", "prune"]) } catch {}
+  // ① pull (docs/context-flow.md): open the worktree from origin's default
+  // branch so the loop starts from latest consensus, not a stale local HEAD.
   const start = await remoteStartPoint(repo)
-  const args = ["-C", repo, "worktree", "add", "-b", branchName, path]
+  // -B (not -b): reset the branch if it lingers from a removed worktree, so a
+  // rebuild always re-opens cleanly from the start point.
+  const args = ["-C", repo, "worktree", "add", "-B", branchName, path]
   if (start) args.push(start)
   await execFileP("git", args)
 }
