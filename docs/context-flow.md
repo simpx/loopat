@@ -103,6 +103,16 @@ Three consequences:
 - **Going solo → team is itself a promote** — attach a remote, open a loop, and
   it does `fetch → merge → push`. No migration step.
 
+The "loop" generalizes past settings: **any no-AI editing session is a UI loop**
+— one browser tab editing notes is a worktree like any other. So **multi-user on
+one server and multi-user across servers are the same thing**: every session is
+an independent worktree converging on `origin`, whether two tabs share one
+server's object store or sit on machines apart. A server is never
+authoritative — it's a disposable replica of `origin` plus a gateway. It may run
+a **local change feed** (push a just-landed commit to its own tabs so they skip
+the poll), but that's a best-effort shortcut carrying only what's already in
+git — correctness always rests on `origin`.
+
 ---
 
 ## A loop is a worktree, not a pushed branch
