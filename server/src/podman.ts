@@ -46,12 +46,12 @@ import {
   loopClaudeDir,
   loopsDir,
   loopContextChatDir,
-  workspaceKnowledgeDir,
-  workspaceNotesDir,
-  workspaceReposDir,
   loopContextKnowledge,
   loopContextNotes,
   personalDir,
+  personalKnowledgeDir,
+  personalNotesDir,
+  personalReposDir,
   LOOPAT_INSTALL_DIR,
   loopHomeUpper,
   workspaceHomeSkelDir,
@@ -250,20 +250,22 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
   }
 
   // Repos: bind at virtual path AND host-absolute path (git worktree internals
-  // store absolute gitdir paths). Both RW.
-  const reposDir = workspaceReposDir()
+  // store absolute gitdir paths). Both RW. PER-USER (the loop's own roster).
+  const reposDir = personalReposDir(createdBy)
   if (existsSync(reposDir)) {
     mounts.push({ src: reposDir, dst: V_CONTEXT_REPOS })
     mounts.push({ src: reposDir, dst: reposDir })
   }
 
-  // notes/knowledge main repos: re-bind at host-absolute path so per-loop
-  // worktree `.git` files resolve.
-  const notesRepo = workspaceNotesDir()
+  // notes/knowledge main repos: re-bind at host-absolute path so the per-loop
+  // worktree `.git` files resolve. PER-USER — the worktrees are derived from
+  // personalKnowledgeDir/personalNotesDir(createdBy), so the main repos bound
+  // here must match (same as personalDir above).
+  const notesRepo = personalNotesDir(createdBy)
   if (existsSync(notesRepo)) {
     mounts.push({ src: notesRepo, dst: notesRepo })
   }
-  const knowledgeRepo = workspaceKnowledgeDir()
+  const knowledgeRepo = personalKnowledgeDir(createdBy)
   if (existsSync(knowledgeRepo)) {
     mounts.push({ src: knowledgeRepo, dst: knowledgeRepo, ro: !knowledgeRw })
   }

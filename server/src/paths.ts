@@ -35,6 +35,21 @@ export const workspaceOriginPath = (name: string) => join(workspaceOriginsDir(),
 export const extensionsProvidersDir = () => join(LOOPAT_HOME, "extensions", "providers")
 export const personalDir = (user: string) => join(LOOPAT_HOME, "personal", user)
 
+// Per-user context main repos. knowledge/notes/repos are NOT workspace-shared:
+// each user's loop sees ONLY what their personal.knowledge points at (no
+// fallback to the workspace default). These are the main repos the loop's
+// context worktrees are derived from — the per-user analogue of the shared
+// workspaceKnowledgeDir()/workspaceNotesDir(). Live under context/users/<user>/
+// so they never collide with the workspace-default context/knowledge.
+export const userContextDir = (user: string) => join(workspaceContextDir(), "users", user)
+export const personalKnowledgeDir = (user: string) => join(userContextDir(user), "knowledge")
+export const personalNotesDir = (user: string) => join(userContextDir(user), "notes")
+export const personalReposDir = (user: string) => join(userContextDir(user), "repos")
+export const personalRepoDir = (user: string, name: string) => join(personalReposDir(user), name)
+// The per-user knowledge repo's .loopat root (holds its config.json = notes +
+// repo roster). Workspace-default equivalent is workspaceLoopatRoot().
+export const personalKnowledgeLoopatRoot = (user: string) => join(personalKnowledgeDir(user), ".loopat")
+
 export const loopDir = (id: string) => join(loopsDir(), id)
 export const loopWorkdir = (id: string) => join(loopDir(id), "workdir")
 export const loopClaudeDir = (id: string) => join(loopDir(id), ".claude")

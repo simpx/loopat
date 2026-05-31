@@ -49,6 +49,10 @@ import {
   workspaceNotesDir,
   workspaceRepoDir,
   workspaceReposDir,
+  personalKnowledgeDir,
+  personalNotesDir,
+  personalRepoDir,
+  personalReposDir,
   loopsDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
@@ -1373,45 +1377,50 @@ app.post("/api/personal/push", requireAuth, async (c) => {
 // All ff-only. Any authenticated user may sync. Push to repos/<name> is
 // not supported — code flows through PRs upstream, never from primary.
 
-function syncDirFor(resource: string, name?: string): string | null {
-  if (resource === "knowledge") return workspaceKnowledgeDir()
-  if (resource === "notes") return workspaceNotesDir()
+function syncDirFor(user: string, resource: string, name?: string): string | null {
+  if (resource === "knowledge") return personalKnowledgeDir(user)
+  if (resource === "notes") return personalNotesDir(user)
   if (resource === "repos" && name) {
-    const dir = workspaceRepoDir(name)
+    const dir = personalRepoDir(user, name)
     return existsSync(dir) ? dir : null
   }
   return null
 }
 
-app.get("/api/sync/knowledge/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceKnowledgeDir(), c.get("userId") as string)))
+app.get("/api/sync/knowledge/status", requireAuth, async (c) => { const u = c.get("userId") as string; return c.json(await inspectRepoSync(personalKnowledgeDir(u), u)) })
 app.post("/api/sync/knowledge/pull", requireAuth, async (c) => {
-  const r = await pullRepoFromRemote(workspaceKnowledgeDir(), c.get("userId") as string)
+  const u = c.get("userId") as string
+  const r = await pullRepoFromRemote(personalKnowledgeDir(u), u)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 app.post("/api/sync/knowledge/push", requireAuth, async (c) => {
-  const r = await pushRepoToRemote(workspaceKnowledgeDir(), c.get("userId") as string)
+  const u = c.get("userId") as string
+  const r = await pushRepoToRemote(personalKnowledgeDir(u), u)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
-app.get("/api/sync/notes/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceNotesDir(), c.get("userId") as string)))
+app.get("/api/sync/notes/status", requireAuth, async (c) => { const u = c.get("userId") as string; return c.json(await inspectRepoSync(personalNotesDir(u), u)) })
 app.post("/api/sync/notes/pull", requireAuth, async (c) => {
-  const r = await pullRepoFromRemote(workspaceNotesDir(), c.get("userId") as string)
+  const u = c.get("userId") as string
+  const r = await pullRepoFromRemote(personalNotesDir(u), u)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 app.post("/api/sync/notes/push", requireAuth, async (c) => {
-  const r = await pushRepoToRemote(workspaceNotesDir(), c.get("userId") as string)
+  const u = c.get("userId") as string
+  const r = await pushRepoToRemote(personalNotesDir(u), u)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
 app.get("/api/sync/repos", requireAuth, async (c) => {
-  // List repos available for sync (just names of subdirs of workspaceReposDir).
+  // List the user's per-user repos available for sync (subdirs of their repos dir).
+  const u = c.get("userId") as string
   try {
     const { readdir } = await import("node:fs/promises")
-    const entries = await readdir(workspaceReposDir())
+    const entries = await readdir(personalReposDir(u))
     const repos: string[] = []
     for (const e of entries) {
       if (e.startsWith(".")) continue
-      if (existsSync(workspaceRepoDir(e) + "/.git")) repos.push(e)
+      if (existsSync(personalRepoDir(u, e) + "/.git")) repos.push(e)
     }
     return c.json({ repos })
   } catch {
@@ -1419,14 +1428,16 @@ app.get("/api/sync/repos", requireAuth, async (c) => {
   }
 })
 app.get("/api/sync/repos/:name/status", requireAuth, async (c) => {
-  const dir = syncDirFor("repos", c.req.param("name"))
+  const u = c.get("userId") as string
+  const dir = syncDirFor(u, "repos", c.req.param("name"))
   if (!dir) return c.json({ error: "repo not found" }, 404)
-  return c.json(await inspectRepoSync(dir, c.get("userId") as string))
+  return c.json(await inspectRepoSync(dir, u))
 })
 app.post("/api/sync/repos/:name/pull", requireAuth, async (c) => {
-  const dir = syncDirFor("repos", c.req.param("name"))
+  const u = c.get("userId") as string
+  const dir = syncDirFor(u, "repos", c.req.param("name"))
   if (!dir) return c.json({ error: "repo not found" }, 404)
-  const r = await pullRepoFromRemote(dir, c.get("userId") as string)
+  const r = await pullRepoFromRemote(dir, u)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
