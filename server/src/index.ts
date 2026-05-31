@@ -3114,13 +3114,26 @@ app.get("*", async (c, next) => {
   // Try to serve the exact file
   const file = Bun.file(join(webDist, path === "/" ? "index.html" : path))
   if (await file.exists()) {
+    // Hashed build assets are content-addressed → cache hard. HTML must always
+    // revalidate so a version swap (new chunk names) is picked up immediately.
+    const isAsset = path.startsWith("/assets/")
     return new Response(file, {
-      headers: { "content-type": file.type },
+      headers: {
+        "content-type": file.type,
+        "cache-control": isAsset ? "public, max-age=31536000, immutable" : "no-cache",
+      },
     })
   }
-  // SPA fallback
+  // A missing build asset (a stale chunk after a deploy, e.g. when a browser
+  // still holds an old index.html) must 404 — NOT fall through to index.html,
+  // or the browser loads HTML as a JS module and throws "Failed to fetch
+  // dynamically imported module". Only extensionless paths are real SPA routes.
+  if (path.startsWith("/assets/") || /\.[a-zA-Z0-9]+$/.test(path)) {
+    return c.notFound()
+  }
+  // SPA fallback (real client-side routes) — always revalidate.
   return new Response(Bun.file(indexHtml), {
-    headers: { "content-type": "text/html" },
+    headers: { "content-type": "text/html", "cache-control": "no-cache" },
   })
 })
 
