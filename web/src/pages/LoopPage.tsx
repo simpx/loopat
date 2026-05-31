@@ -416,6 +416,17 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
         onShareWork={() => setShareOpen(true)}
         showShareButton={!serveCfg || serveCfg.serveEnabled || serveCfg.serveDynamicEnabled || serveCfg.serveEphemeralEnabled}
       />
+      {meta.contextWarnings && meta.contextWarnings.length > 0 && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-[12px] text-amber-800 leading-relaxed">
+          <span className="font-semibold">⚠ Context not fully loaded.</span>{" "}
+          This loop's knowledge/notes couldn't be cloned — it runs with an empty context until the access is fixed (check the key has access to the repo):
+          <ul className="mt-1 ml-4 list-disc">
+            {meta.contextWarnings.map((w, i) => (
+              <li key={i} className="font-mono text-[11px] break-all">{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {isMobile ? (
         <div className="flex-1 min-h-0">
           <LoopRuntimeProvider extra={extra}>

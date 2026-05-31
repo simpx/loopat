@@ -88,6 +88,13 @@ export type LoopMeta = {
   pendingDriverNote?: { from: string; to: string; at: string }
   repo?: string
   branch?: string
+  /**
+   * Context-setup problems captured at loop creation (e.g. the per-user
+   * knowledge/notes clone failed — bad/again-missing key, no access). Surfaced
+   * as a banner in the loop UI so the user isn't left with a silently-empty
+   * context. Empty/absent = context set up cleanly.
+   */
+  contextWarnings?: string[]
   config?: {
     default_model?: string
     default_model_source?: "personal" | "workspace"
@@ -336,7 +343,8 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
  * interactive host-key prompt. Host-side git overrides that config via
  * GIT_SSH_COMMAND (env beats config), so the sandbox path is never used here.
  */
-export async function ensureUserContext(user: string, vault: string = "default"): Promise<void> {
+export async function ensureUserContext(user: string, vault: string = "default"): Promise<string[]> {
+  const errors: string[] = []
   const cfg = await loadPersonalConfig(user, vault)
   const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
   // Sandbox-side promote: core.sshCommand points at the vault key's SANDBOX path
@@ -350,7 +358,7 @@ export async function ensureUserContext(user: string, vault: string = "default")
   // STRICT, per the context model: personal wins even when empty — an empty url
   // means the dir is REMOVED so the loop sees nothing (no fallback to any
   // workspace default). Returns whether the repo exists afterwards.
-  const ensurePerUserRepo = async (dir: string, url: string | undefined): Promise<boolean> => {
+  const ensurePerUserRepo = async (dir: string, url: string | undefined, label: string): Promise<boolean> => {
     if (!url) {
       try { await rm(dir, { recursive: true, force: true }) } catch {}
       return false
@@ -365,7 +373,11 @@ export async function ensureUserContext(user: string, vault: string = "default")
         await execFileP("git", ["clone", "--", url, dir], { env: sshEnv, timeout: 60_000 })
         console.log(`[loopat] cloned per-user context ${url} → ${dir}`)
       } catch (e: any) {
+        // Concise reason (last non-empty stderr line — e.g. "Permission denied
+        // (publickey)") for the loop-creation warning surfaced in the UI.
+        const reason = (e?.stderr ?? e?.message ?? String(e)).toString().trim().split("\n").filter(Boolean).pop() ?? "clone failed"
         console.warn(`[loopat] per-user context clone failed (${url}): ${e?.stderr ?? e?.message ?? e}`)
+        errors.push(`${label}: couldn't clone ${url} — ${reason}`)
         return false
       }
     }
@@ -377,10 +389,11 @@ export async function ensureUserContext(user: string, vault: string = "default")
   // knowledge is the entry pointer (personal-declared url); clone it first, then
   // read ITS .loopat/config.json for the notes remote + repo roster — notes and
   // repos now live inside the per-user knowledge repo, not in personal config.
-  const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), cfg.knowledge?.git)
+  const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), cfg.knowledge?.git, "knowledge")
   const kcfg = hasKnowledge ? await loadKnowledgeConfig(user) : { notes: undefined, repos: [] as RepoSpec[] }
-  await ensurePerUserRepo(personalNotesDir(user), kcfg.notes?.git)
+  await ensurePerUserRepo(personalNotesDir(user), kcfg.notes?.git, "notes")
   await writeReposManifest(personalReposDir(user), kcfg.repos ?? [])
+  return errors
 }
 
 /**
@@ -1939,9 +1952,12 @@ export async function createLoop(opts: {
   // Pull the per-user knowledge/notes FIRST: clones the user's knowledge repo
   // (from personal.knowledge) and reads its .loopat/config.json for the notes
   // remote + repo roster — which the workdir clone-on-demand below depends on.
-  await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
-    (e: any) => console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`),
+  // Surface any clone failures (bad key / no access) as a loop banner so the
+  // user isn't left with a silently-empty context.
+  const ctxWarnings = await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
+    (e: any) => { console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`); return [`context init failed: ${e?.message ?? e}`] },
   )
+  if (ctxWarnings.length) meta.contextWarnings = ctxWarnings
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {

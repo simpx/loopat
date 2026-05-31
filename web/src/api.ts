@@ -18,6 +18,10 @@ export type LoopMeta = {
   rfdRequestedBy?: string
   repo?: string
   branch?: string
+  /** Context-setup problems captured at loop creation (e.g. the per-user
+   *  knowledge/notes clone failed). Shown as a warning banner in the loop view
+   *  so a silently-empty context doesn't go unnoticed. */
+  contextWarnings?: string[]
   archived?: boolean
   archivedAt?: string
   /** If true, /share/:id is publicly viewable. Toggle via setLoopPublic. */
