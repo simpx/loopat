@@ -24,6 +24,7 @@ import {
   workspaceOriginsDir,
   workspaceOriginPath,
   personalDir,
+  personalVaultDir,
   uiNotesDir,
   personalMemoryDir,
   workspaceMemoryDir,
@@ -35,7 +36,7 @@ import {
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
-import { loadConfig } from "./config"
+import { loadConfig, loadPersonalConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider } from "./git-host"
@@ -313,6 +314,42 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
     // personal/) → init in place and point it at the local bare origin.
     await execFileP("git", ["-C", dir, "init", "-q", "-b", "main"]).catch(() => {})
     await execFileP("git", ["-C", dir, "remote", "add", "origin", bare]).catch(() => {})
+  }
+}
+
+/**
+ * The personal repo is self-describing: its `.loopat/config.json` declares the
+ * authoritative kn/notes remotes, and a loop connects to them with the user's
+ * OWN key from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`), not
+ * the host's ssh. Called at loop creation, which has the user + vault in hand.
+ *
+ * The startup clone (driven by host config.json) stays as a display mirror;
+ * here the personal-declared url wins and becomes the context repo's origin.
+ *
+ * We only set the origin + fetch with the vault key — we deliberately do NOT
+ * persist a `core.sshCommand`: the same `.git` is mounted into the sandbox,
+ * where that host path is invalid. The sandbox's own git already authenticates
+ * with the vault key via `$HOME/.ssh` (the vault home-mount), so its promote
+ * pushes as the user without any per-repo config.
+ */
+export async function ensureUserContext(user: string, vault: string = "default"): Promise<void> {
+  const cfg = await loadPersonalConfig(user, vault)
+  const keyPath = join(personalVaultDir(user, vault), "mounts", "home", ".ssh", "id")
+  const sshEnv = existsSyncBase(keyPath)
+    ? { ...process.env, GIT_SSH_COMMAND: `ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new` }
+    : process.env
+  const layers: Array<[string, string | undefined]> = [
+    [workspaceKnowledgeDir(), cfg.knowledge?.git],
+    [workspaceNotesDir(), cfg.notes?.git],
+  ]
+  for (const [dir, url] of layers) {
+    if (!url) continue // personal didn't declare one → keep the host/local origin
+    if (!existsSyncBase(join(dir, ".git"))) continue // not initialized yet (startup hasn't run)
+    const has = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
+    await execFileP("git", ["-C", dir, "remote", has ? "set-url" : "add", "origin", url]).catch(() => {})
+    // validate connectivity + populate origin/* with the user's key (transient,
+    // server-side only).
+    await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 20_000 }).catch(() => {})
   }
 }
 
@@ -1819,6 +1856,11 @@ export async function createLoop(opts: {
     await mkdir(loopWorkdir(id), { recursive: true })
   }
 
+  // Point the context repos at the personal-declared kn/notes remotes and
+  // connect with the user's vault key (personal repo is self-describing).
+  await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
+    (e: any) => console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`),
+  )
   await ensureContextMounts(id, effectiveDriver(meta))
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta
