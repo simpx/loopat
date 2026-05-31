@@ -334,10 +334,7 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
  */
 export async function ensureUserContext(user: string, vault: string = "default"): Promise<void> {
   const cfg = await loadPersonalConfig(user, vault)
-  const keyPath = join(personalVaultDir(user, vault), "mounts", "home", ".ssh", "id")
-  const sshEnv = existsSyncBase(keyPath)
-    ? { ...process.env, GIT_SSH_COMMAND: `ssh -i ${keyPath} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new` }
-    : process.env
+  const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
   const layers: Array<[string, string | undefined]> = [
     [workspaceKnowledgeDir(), cfg.knowledge?.git],
     [workspaceNotesDir(), cfg.notes?.git],
@@ -377,7 +374,7 @@ async function writeReposManifest(specs: RepoSpec[]) {
  * Clone a single registered repo if it isn't present yet. Returns whether the
  * repo dir exists afterwards. Used by loop creation and any on-demand path.
  */
-async function ensureRepoCloned(name: string): Promise<boolean> {
+async function ensureRepoCloned(name: string, sshCommand?: string): Promise<boolean> {
   const dir = workspaceRepoDir(name)
   if (existsSyncBase(dir)) return true
   const cfg = await loadConfig()
@@ -385,7 +382,8 @@ async function ensureRepoCloned(name: string): Promise<boolean> {
   if (!spec?.git) return false
   try {
     await mkdir(workspaceReposDir(), { recursive: true })
-    await execFileP("git", ["clone", "--", spec.git, dir])
+    const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
+    await execFileP("git", ["clone", "--", spec.git, dir], { env })
     console.log(`[loopat] cloned on demand ${spec.git} → ${dir}`)
     return true
   } catch (e: any) {
@@ -751,8 +749,17 @@ export async function importPersonalFromRepo(
   return { ok: true, autoInitialized: true, cryptKey: init.cryptKey }
 }
 
-function sshCommandForUser(userId: string): string {
-  const priv = hostDeployKeyPath(userId)
+/**
+ * The ssh command a server-side git op uses to act AS the user. Prefers the
+ * user's OWN key from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`),
+ * available once the personal repo is cloned + decrypted. Falls back to the
+ * host-managed deploy-key for BOOTSTRAP only — the first clone/decrypt of the
+ * personal repo itself, before any vault key exists. After that, every git op
+ * (kn/notes/repos/personal sync, promote, pull) authenticates as the user.
+ */
+function sshCommandForUser(userId: string, vault: string = "default"): string {
+  const vaultKey = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh", "id")
+  const priv = existsSyncBase(vaultKey) ? vaultKey : hostDeployKeyPath(userId)
   return `ssh -i ${priv} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
 }
 
@@ -1310,13 +1317,16 @@ export async function syncUiNotes(user: string): Promise<PersonalPushResult> {
   const branch = await remoteDefaultBranch(dir)
   const c = await commitLocalChanges(dir, "loopat: edit notes")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, branch)
+  const userSsh = sshCommandForUser(user)
+  const reb = await rebaseOntoOrigin(dir, branch, userSsh)
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
   }
   try {
-    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`])
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
+      env: { ...process.env, GIT_SSH_COMMAND: userSsh },
+    })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
     return { ok: false, error: `push failed: ${stderr || e?.message || e}`, needsPull: true }
@@ -1337,7 +1347,7 @@ export async function ffUpdateUiNotes(
   const branch = await remoteDefaultBranch(dir)
   try {
     await execFileP("git", ["-C", dir, "fetch", "origin"], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: sshCommandForUser(user) }, timeout: 30_000,
     })
   } catch (e: any) {
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
@@ -1369,7 +1379,7 @@ export async function notesBehind(user: string): Promise<number> {
   const branch = await remoteDefaultBranch(dir)
   try {
     await execFileP("git", ["-C", dir, "fetch", "origin"], {
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_SSH_COMMAND: sshCommandForUser(user) }, timeout: 30_000,
     })
   } catch {
     return 0
@@ -1408,7 +1418,7 @@ export type RepoSyncResult =
  * failures are tolerated (offline / auth glitch) — status still reflects
  * last-known remote state.
  */
-export async function inspectRepoSync(dir: string): Promise<RepoSyncStatus> {
+export async function inspectRepoSync(dir: string, user?: string): Promise<RepoSyncStatus> {
   if (!existsSyncBase(dir) || !existsSyncBase(join(dir, ".git"))) {
     return { isGitRepo: false, hasRemote: false, branch: "", ahead: 0, behind: 0, uncommitted: 0 }
   }
@@ -1427,7 +1437,8 @@ export async function inspectRepoSync(dir: string): Promise<RepoSyncStatus> {
 
   if (hasRemote) {
     try {
-      await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { timeout: 15_000 })
+      const env = user ? { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user) } : process.env
+      await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env, timeout: 15_000 })
     } catch {}
   }
 
@@ -1457,7 +1468,7 @@ export async function inspectRepoSync(dir: string): Promise<RepoSyncStatus> {
  * changes (we don't auto-stash workspace repos — caller decides) and on
  * any non-ff condition.
  */
-export async function pullRepoFromRemote(dir: string): Promise<RepoSyncResult> {
+export async function pullRepoFromRemote(dir: string, user?: string): Promise<RepoSyncResult> {
   if (!existsSyncBase(join(dir, ".git"))) {
     return { ok: false, error: "not a git repo" }
   }
@@ -1486,7 +1497,8 @@ export async function pullRepoFromRemote(dir: string): Promise<RepoSyncResult> {
   }
 
   try {
-    await execFileP("git", ["-C", dir, "fetch", "origin"], { timeout: 30_000 })
+    const env = user ? { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user) } : process.env
+    await execFileP("git", ["-C", dir, "fetch", "origin"], { env, timeout: 30_000 })
   } catch (e: any) {
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
   }
@@ -1506,7 +1518,7 @@ export async function pullRepoFromRemote(dir: string): Promise<RepoSyncResult> {
  * non-ff by default, which is exactly the abort-on-conflict behavior we
  * want. Caller pulls first if rejected.
  */
-export async function pushRepoToRemote(dir: string): Promise<RepoSyncResult> {
+export async function pushRepoToRemote(dir: string, user?: string): Promise<RepoSyncResult> {
   if (!existsSyncBase(join(dir, ".git"))) {
     return { ok: false, error: "not a git repo" }
   }
@@ -1526,7 +1538,8 @@ export async function pushRepoToRemote(dir: string): Promise<RepoSyncResult> {
   if (!branch) return { ok: false, error: "HEAD is detached" }
 
   try {
-    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`])
+    const env = user ? { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user) } : process.env
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], { env })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
     return { ok: false, error: `push failed: ${stderr || e?.message || e}` }
@@ -1728,14 +1741,15 @@ async function remoteDefaultBranch(dir: string): Promise<string> {
   return "main"
 }
 
-async function remoteStartPoint(repo: string): Promise<string | null> {
+async function remoteStartPoint(repo: string, sshCommand?: string): Promise<string | null> {
   try {
     await execFileP("git", ["-C", repo, "remote", "get-url", "origin"])
   } catch {
     return null
   }
   try {
-    await execFileP("git", ["-C", repo, "fetch", "--quiet", "origin"], { timeout: 15_000 })
+    const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
+    await execFileP("git", ["-C", repo, "fetch", "--quiet", "origin"], { env, timeout: 15_000 })
   } catch {}
   const branch = await remoteDefaultBranch(repo)
   try {
@@ -1831,8 +1845,10 @@ export async function createLoop(opts: {
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {
+    // clone + fetch as the user (their vault key), not the host's ssh.
+    const userSsh = sshCommandForUser(opts.createdBy, opts.vault ?? "default")
     // clone-on-demand: pull the repo down only now that a loop actually needs it
-    if (!(await ensureRepoCloned(opts.repo))) {
+    if (!(await ensureRepoCloned(opts.repo, userSsh))) {
       throw new Error(`repo "${opts.repo}" not found / clone failed`)
     }
     const repoPath = workspaceRepoDir(opts.repo)
@@ -1841,7 +1857,7 @@ export async function createLoop(opts: {
       // ① pull (docs/context-flow.md): base the workdir branch on origin/main
       // (best-effort fetch) so it starts from latest consensus; fall back to
       // local HEAD when there's no remote / no origin/main.
-      const start = await remoteStartPoint(repoPath)
+      const start = await remoteStartPoint(repoPath, userSsh)
       const wtArgs = ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
       if (start) wtArgs.push(start)
       await execFileP("git", wtArgs)

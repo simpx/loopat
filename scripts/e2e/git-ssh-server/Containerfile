@@ -1,0 +1,18 @@
+# Minimal git-over-ssh server for e2e tests. Key-only auth; the test's public
+# key is injected at run time via $AUTHORIZED_KEY (so each run uses a fresh
+# keypair). Hosts one bare repo at /srv/git/repo.git.
+FROM alpine:3.20
+RUN apk add --no-cache openssh git \
+ && adduser -D -s /bin/sh git \
+ && mkdir -p /home/git/.ssh /srv/git \
+ && chmod 700 /home/git/.ssh \
+ && chown -R git:git /home/git /srv/git \
+ && ssh-keygen -A \
+ && su git -c "git init --bare -b main /srv/git/repo.git" \
+ && sed -i 's/#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+ && sed -i 's/#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+ && sed -i 's/^git:!:/git::/' /etc/shadow
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+EXPOSE 22
+ENTRYPOINT ["/entrypoint.sh"]

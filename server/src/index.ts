@@ -1416,23 +1416,23 @@ function syncDirFor(resource: string, name?: string): string | null {
   return null
 }
 
-app.get("/api/sync/knowledge/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceKnowledgeDir())))
+app.get("/api/sync/knowledge/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceKnowledgeDir(), c.get("userId") as string)))
 app.post("/api/sync/knowledge/pull", requireAuth, async (c) => {
-  const r = await pullRepoFromRemote(workspaceKnowledgeDir())
+  const r = await pullRepoFromRemote(workspaceKnowledgeDir(), c.get("userId") as string)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 app.post("/api/sync/knowledge/push", requireAuth, async (c) => {
-  const r = await pushRepoToRemote(workspaceKnowledgeDir())
+  const r = await pushRepoToRemote(workspaceKnowledgeDir(), c.get("userId") as string)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
-app.get("/api/sync/notes/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceNotesDir())))
+app.get("/api/sync/notes/status", requireAuth, async (c) => c.json(await inspectRepoSync(workspaceNotesDir(), c.get("userId") as string)))
 app.post("/api/sync/notes/pull", requireAuth, async (c) => {
-  const r = await pullRepoFromRemote(workspaceNotesDir())
+  const r = await pullRepoFromRemote(workspaceNotesDir(), c.get("userId") as string)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 app.post("/api/sync/notes/push", requireAuth, async (c) => {
-  const r = await pushRepoToRemote(workspaceNotesDir())
+  const r = await pushRepoToRemote(workspaceNotesDir(), c.get("userId") as string)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
@@ -1454,12 +1454,12 @@ app.get("/api/sync/repos", requireAuth, async (c) => {
 app.get("/api/sync/repos/:name/status", requireAuth, async (c) => {
   const dir = syncDirFor("repos", c.req.param("name"))
   if (!dir) return c.json({ error: "repo not found" }, 404)
-  return c.json(await inspectRepoSync(dir))
+  return c.json(await inspectRepoSync(dir, c.get("userId") as string))
 })
 app.post("/api/sync/repos/:name/pull", requireAuth, async (c) => {
   const dir = syncDirFor("repos", c.req.param("name"))
   if (!dir) return c.json({ error: "repo not found" }, 404)
-  const r = await pullRepoFromRemote(dir)
+  const r = await pullRepoFromRemote(dir, c.get("userId") as string)
   return r.ok ? c.json(r) : c.json({ error: r.error }, 400)
 })
 
