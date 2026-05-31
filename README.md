@@ -85,19 +85,30 @@ sessions or teammates.
 ## Quick start
 
 ```sh
+npx loopat
+```
+
+Open <http://localhost:10001>. The first run bootstraps `~/.loopat/`,
+prints a checklist, and prompts you to set your API key in
+`~/.loopat/config.json`. Restart — done.
+
+> **Needs:** [Node][node] to launch — the [Bun][bun] runtime is fetched
+> automatically, so you don't install it yourself. The terminal / chat
+> sandbox additionally needs a Linux host with [podman][podman]. Change
+> the port with `PORT=8080 npx loopat`. macOS / Windows is via Docker
+> (see below).
+
+### From source (for development)
+
+```sh
 git clone https://github.com/simpx/loopat.git
 cd loopat && bun install
 bun run dev
 ```
 
-Open <http://localhost:7787>. The first run bootstraps `~/.loopat/`,
-prints a checklist, and prompts you to set your API key in
-`~/.loopat/config.json`. Restart — done.
-
-> **Needs:** Linux + [bubblewrap][bwrap] + [mise][mise] + [bun][bun] on
-> the host. macOS / Windows is via Docker (see below). For team setups
-> with shared knowledge/notes git repos and full bootstrap details, see
-> the [installation guide](docs/install.md).
+> Needs [bun][bun] + [bubblewrap][bwrap] + [mise][mise] on the host. For
+> team setups with shared knowledge/notes git repos and full bootstrap
+> details, see the [installation guide](docs/install.md).
 
 ### Setup guides
 
@@ -113,6 +124,8 @@ Loopat splits configuration along role lines — read whichever applies:
 [bwrap]: https://github.com/containers/bubblewrap
 [mise]: https://mise.jdx.dev/
 [bun]: https://bun.sh/
+[node]: https://nodejs.org/
+[podman]: https://podman.io/
 
 ## Deployment
 
@@ -122,7 +135,7 @@ Loopat splits configuration along role lines — read whichever applies:
 docker compose up -d
 ```
 
-Open <http://localhost:17787> (note: **17787**, not 7787 — the host
+Open <http://localhost:20001> (note: **20001**, not 10001 — the host
 port is remapped to avoid collision with a local dev server; see
 [`docker-compose.yml`](docker-compose.yml)). Workspace persists in
 the `loopat-data` volume. Needs `SYS_ADMIN` + unconfined AppArmor for
@@ -132,7 +145,7 @@ bwrap mount namespaces.
 
 ```sh
 bun run build                     # installs deps + builds frontend → web/dist/
-PORT=7787 bun run server/src/index.ts
+PORT=10001 bun run server/src/index.ts
 ```
 
 Single Hono process serves API + static SPA + websocket on one port.

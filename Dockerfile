@@ -47,7 +47,7 @@ RUN chown -R loopat:loopat /app
 
 USER loopat
 
-EXPOSE 7787 7788
+EXPOSE 10001 7788
 
 VOLUME ["/home/loopat/.loopat"]
 

@@ -3145,7 +3145,7 @@ app.get("*", async (c, next) => {
   })
 })
 
-const port = Number(process.env.PORT ?? 7787)
+const port = Number(process.env.PORT ?? 10001)
 const hostname = process.env.HOST ?? "127.0.0.1"
 
 // Fast, serve-critical init only — keep this short so the port opens quickly.

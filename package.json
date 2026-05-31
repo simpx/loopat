@@ -1,7 +1,26 @@
 {
-  "name": "loopat-loop",
-  "private": true,
+  "name": "loopat",
+  "version": "0.1.1",
+  "description": "Self-hosted AI workspace built around context management — works solo, scales to teams",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/simpx/loopat",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/simpx/loopat.git"
+  },
   "type": "module",
+  "bin": {
+    "loopat": "bin/loopat.mjs"
+  },
+  "files": [
+    "bin/",
+    "server/src/",
+    "!server/src/serve-rs",
+    "!server/src/port-proxy-rs",
+    "server/templates/",
+    "server/package.json",
+    "web/dist/"
+  ],
   "workspaces": [
     "server",
     "web"
@@ -13,8 +32,19 @@
     "dev:web": "bun --cwd web run dev",
     "dev:serve": "bun --cwd server run serve",
     "build": "bun install && (cd web && bun run build)",
+    "build:web": "cd web && bunx tsc -b && bunx vite build",
+    "prepublishOnly": "bun install && bun run build:web",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.150",
+    "@anthropic-ai/sandbox-runtime": "^0.0.52",
+    "@scalar/hono-api-reference": "^0.10.19",
+    "bun": "^1.3.14",
+    "bun-pty": "^0.4.8",
+    "hono": "^4.12.18",
+    "smol-toml": "^1.6.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"

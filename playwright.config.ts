@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 
-// ── pick free ports (far from dev defaults 5173/7787) ──
+// ── pick free ports (far from dev defaults 5173/10001) ──
 function tryPort(port: number): boolean {
   try {
     const s = createServer();

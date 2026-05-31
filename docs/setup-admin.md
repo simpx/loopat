@@ -217,7 +217,7 @@ in their personal config — see [setup-user.md](setup-user.md).
 When a new member registers, they land as `status: pending` and can't
 log in until you activate them.
 
-Open `http://<your-host>:7787/admin` (admin-only route) and flip the
+Open `http://<your-host>:10001/admin` (admin-only route) and flip the
 status to `active`. The user can now log in and start their own
 [user setup flow](setup-user.md).
 
@@ -240,7 +240,7 @@ After the dust settles, the banner should be all green:
   ✓  config: /home/admin/.loopat/config.json
   ✓  bwrap (sandbox)
   ✓  claude binary (…/claude)
-  ready. open http://localhost:7787
+  ready. open http://localhost:10001
 ```
 
 Share the URL with your team and point them at

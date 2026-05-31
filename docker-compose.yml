@@ -4,7 +4,7 @@ services:
     image: loopat:latest
     privileged: true
     ports:
-      - "17787:7787"
+      - "20001:10001"
       - "17788:7788"
     volumes:
       - loopat-data:/home/loopat/.loopat
