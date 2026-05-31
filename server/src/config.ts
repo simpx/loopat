@@ -210,6 +210,11 @@ export type PersonalConfigDisk = {
   shell?: string
   /** Optional. Missing = "fresh" (user hasn't started or dismissed yet). */
   onboarding?: OnboardingState
+  /** Authoritative kn/notes remotes — the personal repo is self-describing.
+   *  host config.json's knowledge/notes are a display mirror; these are what a
+   *  loop actually connects to (with the user's vault key). */
+  knowledge?: RemoteSpec
+  notes?: RemoteSpec
 }
 
 export type PersonalConfig = {
@@ -224,6 +229,9 @@ export type PersonalConfig = {
   vaultEnvs: Record<string, string>
   shell?: string
   onboarding?: OnboardingState
+  /** Authoritative kn/notes remotes (self-describing personal repo). */
+  knowledge?: RemoteSpec
+  notes?: RemoteSpec
 }
 
 /**
@@ -443,6 +451,8 @@ export async function loadPersonalConfig(
     vaultEnvs,
     ...(disk.shell ? { shell: disk.shell } : {}),
     ...(disk.onboarding ? { onboarding: disk.onboarding } : {}),
+    ...(disk.knowledge ? { knowledge: disk.knowledge } : {}),
+    ...(disk.notes ? { notes: disk.notes } : {}),
   }
   personalCache.set(cacheKey, { cfg, configMtimeMs, envsDirMtimeMs })
   return cfg
