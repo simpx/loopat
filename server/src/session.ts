@@ -1157,7 +1157,18 @@ class LoopSession {
       this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
       return
     }
-    await this._pushUserMessage(text, permissionMode)
+    // _pushUserMessage can throw BEFORE the query starts (e.g. ensureStarted's
+    // "no provider with a valid apiKey" when the user hasn't set an AI key) —
+    // in which case `consume` never runs and never broadcasts. Catch it here so
+    // the frontend gets a visible error instead of hanging on "Reasoning…".
+    try {
+      await this._pushUserMessage(text, permissionMode)
+    } catch (e: any) {
+      this.generating = false
+      const message = e?.message ?? String(e)
+      console.error(`[loopat] sendUserText failed for ${this.id}: ${message}`)
+      this.broadcast({ type: "error", message })
+    }
   }
 
   isBusy(): boolean {
