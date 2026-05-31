@@ -21,3 +21,13 @@
 ## 共享测试基建
 
 - `scripts/e2e/git-ssh-server/` — 最小 key-only git-over-ssh 服务器(podman),用于真测 ssh 凭证。
+
+## 环境前提 / 部署注意
+
+- podman:本机 rootless,或 macOS 的 `podman machine`(applehv VM)。
+- **公司内网 macOS 的坑**:podman VM 只能访问内网,拉不到公网 docker.io —— 主机的
+  VPN/加速(`/etc/hosts` → 公网加速 IP)**不被 VM 继承**。sandbox base 是 `ubuntu:24.04`
+  (docker.io),所以 VM 必须有**内网可达的 docker mirror**(registries.conf 配 mirror +
+  可能 `podman login`),否则沙箱建不起来 —— **loopat 本身在这种 mac 上也跑不了沙箱**,
+  与测试无关。配好内网 mirror 后,case 1/2/3 才能在 mac 上双平台跑。
+- 真 AI 的 case(03)还需 idealab API key(`IDEALAB_KEY`)。
