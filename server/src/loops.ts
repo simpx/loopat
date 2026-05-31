@@ -373,9 +373,11 @@ export async function ensureUserContext(user: string, vault: string = "default")
         await execFileP("git", ["clone", "--", url, dir], { env: sshEnv, timeout: 60_000 })
         console.log(`[loopat] cloned per-user context ${url} → ${dir}`)
       } catch (e: any) {
-        // Concise reason (last non-empty stderr line — e.g. "Permission denied
-        // (publickey)") for the loop-creation warning surfaced in the UI.
-        const reason = (e?.stderr ?? e?.message ?? String(e)).toString().trim().split("\n").filter(Boolean).pop() ?? "clone failed"
+        // Concise reason for the UI warning: prefer the meaningful failure line
+        // (e.g. "Permission denied (publickey)") over git's trailing boilerplate
+        // ("…and the repository exists."), which reads as a false all-clear.
+        const lines = (e?.stderr ?? e?.message ?? String(e)).toString().split("\n").map((s: string) => s.trim()).filter(Boolean)
+        const reason = lines.find((l: string) => /permission denied|fatal:|not found|could not read|access denied|authentication failed|host key/i.test(l)) ?? lines.pop() ?? "clone failed"
         console.warn(`[loopat] per-user context clone failed (${url}): ${e?.stderr ?? e?.message ?? e}`)
         errors.push(`${label}: couldn't clone ${url} — ${reason}`)
         return false
