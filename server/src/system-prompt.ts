@@ -20,7 +20,7 @@ import { readFile } from "node:fs/promises"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { effectiveDriver, type LoopMeta } from "./loops"
-import { bundledDoctrinePath, workspaceNotesDir, workspaceKnowledgeDir } from "./paths"
+import { bundledDoctrinePath, personalNotesDir, personalKnowledgeDir } from "./paths"
 
 const execFileP = promisify(execFile)
 
@@ -47,9 +47,10 @@ async function detectTrunkBranch(repoDir: string): Promise<string> {
 
 async function buildRuntimeBlock(loop: LoopMeta): Promise<string> {
   const repoLine = loop.repo ? `${loop.repo} (branch ${loop.branch ?? "main"})` : "(no repo bound — empty workdir)"
+  const driver = effectiveDriver(loop)
   const [notesTrunk, knowledgeTrunk] = await Promise.all([
-    detectTrunkBranch(workspaceNotesDir()),
-    detectTrunkBranch(workspaceKnowledgeDir()),
+    detectTrunkBranch(personalNotesDir(driver)),
+    detectTrunkBranch(personalKnowledgeDir(driver)),
   ])
   const lines = [
     `## Runtime context (this loop)`,

@@ -9,6 +9,8 @@ import {
   personalVaultEnvPath,
   personalVaultEnvsDir,
   workspaceDir,
+  workspaceLoopatRoot,
+  personalKnowledgeLoopatRoot,
   personalSettingsPath,
 } from "./paths"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -109,6 +111,55 @@ export type RepoSpec = {
   git: string
 }
 
+/**
+ * Config living INSIDE the knowledge repo at <knowledge>/.loopat/config.json.
+ * The knowledge repo is the SoT for the team's notes remote + the repo roster;
+ * workspace/personal config only hold the `knowledge` entry pointer. To read
+ * it the knowledge repo must already be cloned (its url comes from
+ * personal/workspace config), so this is loaded AFTER the knowledge clone.
+ */
+export type KnowledgeConfig = {
+  notes?: RemoteSpec
+  repos?: RepoSpec[]
+}
+
+const KNOWLEDGE_CONFIG_TEMPLATE: KnowledgeConfig = { notes: { git: "" }, repos: [] }
+
+/** The .loopat root holding the knowledge config. With a user → that user's
+ *  per-user knowledge repo; without → the workspace-default knowledge repo
+ *  (used only for the bootstrap banner, never to drive a loop). */
+function knowledgeLoopatRoot(user?: string): string {
+  return user ? personalKnowledgeLoopatRoot(user) : workspaceLoopatRoot()
+}
+
+/** Read the knowledge repo's .loopat/config.json. Missing/malformed → empty.
+ *  Pass `user` for the per-user knowledge repo (what a loop uses); omit for the
+ *  workspace-default (bootstrap display only). */
+export async function loadKnowledgeConfig(user?: string): Promise<KnowledgeConfig> {
+  const path = join(knowledgeLoopatRoot(user), "config.json")
+  if (!existsSync(path)) return JSON.parse(JSON.stringify(KNOWLEDGE_CONFIG_TEMPLATE))
+  try {
+    const disk = JSON.parse(await readFile(path, "utf8")) as KnowledgeConfig
+    return { notes: disk.notes, repos: Array.isArray(disk.repos) ? disk.repos : [] }
+  } catch (e: any) {
+    console.warn(`[loopat] knowledge config: ${path} malformed (${e?.message ?? e}), treating as empty`)
+    return JSON.parse(JSON.stringify(KNOWLEDGE_CONFIG_TEMPLATE))
+  }
+}
+
+/** Merge-write a knowledge repo's .loopat/config.json. Caller is responsible
+ *  for committing/promoting the change (knowledge is gated). */
+export async function saveKnowledgeConfig(user: string | undefined, patch: KnowledgeConfig): Promise<void> {
+  const cur = await loadKnowledgeConfig(user)
+  const next: KnowledgeConfig = {
+    notes: patch.notes !== undefined ? patch.notes : cur.notes,
+    repos: patch.repos !== undefined ? patch.repos : cur.repos,
+  }
+  const dir = knowledgeLoopatRoot(user)
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, "config.json"), JSON.stringify(next, null, 2) + "\n")
+}
+
 /** Operator-side mount (workspace config). src is always a literal host path.
  *  Operator owns the host, so any path under `~/...`, `$HOME/...`, or `/...`
  *  is allowed (modulo `..` traversal). Used for cross-user shared caches
@@ -128,9 +179,11 @@ export type OperatorMount = {
  * personal/<user>/.loopat/config.json — see PersonalConfig.
  */
 export type WorkspaceConfig = {
+  /** Workspace-default entry pointer to the knowledge repo. The notes remote
+   *  and the repo roster now live INSIDE the knowledge repo's
+   *  .loopat/config.json (KnowledgeConfig) — see loadKnowledgeConfig. A
+   *  per-user override lives in personal config. */
   knowledge?: RemoteSpec
-  notes?: RemoteSpec
-  repos?: RepoSpec[]
   providers?: Record<string, ProviderConfig>
   default?: string
   /** Platform-level git host for personal onboarding. `provider` is a
@@ -192,11 +245,10 @@ export type WorkspaceConfig = {
 export type PersonalConfigDisk = {
   /** Mixed: "default" key is a string, all other keys are providers. */
   providers: Record<string, ProviderConfigDisk | string>
-  /** Authoritative kn/notes remotes — the personal repo is self-describing.
-   *  host config.json's knowledge/notes are a display mirror; these are what a
-   *  loop actually connects to (with the user's vault key). */
+  /** Per-user entry pointer to the knowledge repo (authoritative over the
+   *  workspace default). The notes remote + repo roster live inside the
+   *  knowledge repo's own .loopat/config.json, not here. */
   knowledge?: RemoteSpec
-  notes?: RemoteSpec
 }
 
 export type PersonalConfig = {
@@ -209,9 +261,9 @@ export type PersonalConfig = {
    * in mcpServers works, and (b) substitute `${VAR}` in provider.apiKey.
    */
   vaultEnvs: Record<string, string>
-  /** Authoritative kn/notes remotes (self-describing personal repo). */
+  /** Per-user entry pointer to the knowledge repo (notes/repos live in the
+   *  knowledge repo's own .loopat/config.json). */
   knowledge?: RemoteSpec
-  notes?: RemoteSpec
 }
 
 /**
@@ -252,10 +304,6 @@ function buildPresetProviders(): Record<string, ProviderConfig> {
 
 const WORKSPACE_TEMPLATE: WorkspaceConfig = {
   knowledge: { git: "" },
-  notes: { git: "" },
-  repos: [
-    { name: "loopat", git: "git@github.com:simpx/loopat.git" },
-  ],
   providers: buildPresetProviders(),
 }
 
@@ -430,7 +478,6 @@ export async function loadPersonalConfig(
     providers,
     vaultEnvs,
     ...(disk.knowledge ? { knowledge: disk.knowledge } : {}),
-    ...(disk.notes ? { notes: disk.notes } : {}),
   }
   personalCache.set(cacheKey, { cfg, configMtimeMs, envsDirMtimeMs })
   return cfg
@@ -747,8 +794,6 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   }
   if (cfg.default !== undefined) merged.default = cfg.default
   if (cfg.knowledge !== undefined) merged.knowledge = cfg.knowledge
-  if (cfg.notes !== undefined) merged.notes = cfg.notes
-  if (cfg.repos !== undefined) merged.repos = cfg.repos
   if (cfg.serveDomain !== undefined) merged.serveDomain = cfg.serveDomain
   if (cfg.serveWithPort !== undefined) merged.serveWithPort = cfg.serveWithPort
   if (cfg.serveHttps !== undefined) merged.serveHttps = cfg.serveHttps

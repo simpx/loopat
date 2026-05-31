@@ -7,7 +7,7 @@ import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { resolveClaudeBinary } from "./claude-binary"
-import { configPath, type WorkspaceConfig } from "./config"
+import { configPath, loadKnowledgeConfig, type WorkspaceConfig, type KnowledgeConfig } from "./config"
 import {
   WORKSPACE,
   usersPath,
@@ -104,8 +104,8 @@ function describeRemote(dir: string, url: string | undefined): string {
   return "local-only (no remote)"
 }
 
-function describeRepos(cfg: WorkspaceConfig): Check {
-  const specs = cfg.repos ?? []
+function describeRepos(kcfg: KnowledgeConfig): Check {
+  const specs = kcfg.repos ?? []
   if (specs.length === 0) return { ok: true, label: `repos:     (none configured)` }
   // Repos are clone-on-demand (cloned only when a loop selects one), so a repo
   // that isn't cloned yet is NORMAL, not a failure. Report cloned vs on-demand;
@@ -132,12 +132,14 @@ async function checkUsers(): Promise<Check> {
 }
 
 export async function printBootstrapBanner(cfg: WorkspaceConfig) {
+  // notes + repos are declared inside the knowledge repo's .loopat/config.json.
+  const kcfg = await loadKnowledgeConfig()
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
     { ok: true, label: `team .claude/CLAUDE.md (${existsSync(workspaceTeamClaudeMdPath()) ? "present" : "absent"})` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
-    { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), cfg.notes?.git || undefined)}` },
-    describeRepos(cfg),
+    { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), kcfg.notes?.git || undefined)}` },
+    describeRepos(kcfg),
     await checkUsers(),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkPodman(),

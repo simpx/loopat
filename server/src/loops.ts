@@ -24,6 +24,10 @@ import {
   workspaceOriginsDir,
   workspaceOriginPath,
   personalDir,
+  personalKnowledgeDir,
+  personalNotesDir,
+  personalReposDir,
+  personalRepoDir,
   personalVaultDir,
   uiNotesDir,
   personalMemoryDir,
@@ -36,7 +40,7 @@ import {
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
-import { loadConfig, loadPersonalConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadKnowledgeConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider } from "./git-host"
@@ -335,28 +339,48 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
 export async function ensureUserContext(user: string, vault: string = "default"): Promise<void> {
   const cfg = await loadPersonalConfig(user, vault)
   const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
-  const layers: Array<[string, string | undefined]> = [
-    [workspaceKnowledgeDir(), cfg.knowledge?.git],
-    [workspaceNotesDir(), cfg.notes?.git],
-  ]
-  for (const [dir, url] of layers) {
-    if (!url) continue // personal didn't declare one → keep the host/local origin
-    if (!existsSyncBase(join(dir, ".git"))) continue // not initialized yet (startup hasn't run)
-    const has = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
-    await execFileP("git", ["-C", dir, "remote", has ? "set-url" : "add", "origin", url]).catch(() => {})
-    // Sandbox-side promote: persist core.sshCommand pointing at the vault key's
-    // SANDBOX path (/loopat/home/<user>/.ssh/id, where the vault home-mount
-    // lands) with accept-new, so the AI's `git push` inside the sandbox
-    // authenticates as the user without an interactive host-key prompt. Host-
-    // side ops override this with GIT_SSH_COMMAND (env beats config), so the
-    // sandbox path is never used server-side.
-    const sandboxKey = `/loopat/home/${user}/.ssh/id`
+  // Sandbox-side promote: core.sshCommand points at the vault key's SANDBOX path
+  // (/loopat/home/<user>/.ssh/id, where the vault home-mount lands) with
+  // accept-new, so the AI's `git push` inside the sandbox authenticates as the
+  // user without an interactive host-key prompt. Host-side ops override this
+  // with GIT_SSH_COMMAND (env beats config), so the sandbox path is never used
+  // server-side.
+  const sandboxKey = `/loopat/home/${user}/.ssh/id`
+  // Clone-or-sync a PER-USER context main repo from `url` with the vault key.
+  // STRICT, per the context model: personal wins even when empty — an empty url
+  // means the dir is REMOVED so the loop sees nothing (no fallback to any
+  // workspace default). Returns whether the repo exists afterwards.
+  const ensurePerUserRepo = async (dir: string, url: string | undefined): Promise<boolean> => {
+    if (!url) {
+      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      return false
+    }
+    if (existsSyncBase(join(dir, ".git"))) {
+      const has = await execFileP("git", ["-C", dir, "remote", "get-url", "origin"]).then(() => true).catch(() => false)
+      await execFileP("git", ["-C", dir, "remote", has ? "set-url" : "add", "origin", url]).catch(() => {})
+    } else {
+      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      await mkdir(join(dir, ".."), { recursive: true })
+      try {
+        await execFileP("git", ["clone", "--", url, dir], { env: sshEnv, timeout: 60_000 })
+        console.log(`[loopat] cloned per-user context ${url} → ${dir}`)
+      } catch (e: any) {
+        console.warn(`[loopat] per-user context clone failed (${url}): ${e?.stderr ?? e?.message ?? e}`)
+        return false
+      }
+    }
     await execFileP("git", ["-C", dir, "config", "core.sshCommand",
       `ssh -i ${sandboxKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`]).catch(() => {})
-    // validate connectivity + populate origin/* with the user's key (transient,
-    // server-side only).
-    await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 20_000 }).catch(() => {})
+    await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 30_000 }).catch(() => {})
+    return true
   }
+  // knowledge is the entry pointer (personal-declared url); clone it first, then
+  // read ITS .loopat/config.json for the notes remote + repo roster — notes and
+  // repos now live inside the per-user knowledge repo, not in personal config.
+  const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), cfg.knowledge?.git)
+  const kcfg = hasKnowledge ? await loadKnowledgeConfig(user) : { notes: undefined, repos: [] as RepoSpec[] }
+  await ensurePerUserRepo(personalNotesDir(user), kcfg.notes?.git)
+  await writeReposManifest(personalReposDir(user), kcfg.repos ?? [])
 }
 
 /**
@@ -365,8 +389,8 @@ export async function ensureUserContext(user: string, vault: string = "default")
  * clone a repo only when it's actually needed. Per docs/context-flow.md the AI
  * can also clone any listed repo by hand into context/repos/<name>.
  */
-async function writeReposManifest(specs: RepoSpec[]) {
-  await mkdir(workspaceReposDir(), { recursive: true })
+async function writeReposManifest(reposDir: string, specs: RepoSpec[]) {
+  await mkdir(reposDir, { recursive: true })
   const body = [
     "# repos — clone on demand",
     "",
@@ -376,21 +400,22 @@ async function writeReposManifest(specs: RepoSpec[]) {
     ...specs.filter((r) => r?.name && r?.git).map((r) => `- **${r.name}** — \`${r.git}\``),
     "",
   ].join("\n")
-  await writeFile(join(workspaceReposDir(), "REPOS.md"), body)
+  await writeFile(join(reposDir, "REPOS.md"), body)
 }
 
 /**
  * Clone a single registered repo if it isn't present yet. Returns whether the
  * repo dir exists afterwards. Used by loop creation and any on-demand path.
  */
-async function ensureRepoCloned(name: string, sshCommand?: string): Promise<boolean> {
-  const dir = workspaceRepoDir(name)
+async function ensureRepoCloned(user: string, name: string, sshCommand?: string): Promise<boolean> {
+  const dir = personalRepoDir(user, name)
   if (existsSyncBase(dir)) return true
-  const cfg = await loadConfig()
-  const spec = cfg.repos?.find((r) => r.name === name)
+  // The roster lives in the user's OWN knowledge repo (per-user, no fallback).
+  const kcfg = await loadKnowledgeConfig(user)
+  const spec = kcfg.repos?.find((r) => r.name === name)
   if (!spec?.git) return false
   try {
-    await mkdir(workspaceReposDir(), { recursive: true })
+    await mkdir(personalReposDir(user), { recursive: true })
     const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
     await execFileP("git", ["clone", "--", spec.git, dir], { env })
     console.log(`[loopat] cloned on demand ${spec.git} → ${dir}`)
@@ -406,11 +431,14 @@ export async function ensureWorkspaceDirs() {
   await mkdir(loopsDir(), { recursive: true })
   await mkdir(workspaceReposDir(), { recursive: true })
 
-  // knowledge / notes / repos: clone from config'd remote if present
+  // WORKSPACE-DEFAULT clone (bootstrap display + seed source only — loops use the
+  // per-user knowledge/notes, see ensureUserContext). knowledge is the entry
+  // pointer; clone it, then read its .loopat/config.json for notes + repo roster.
   const cfg = await loadConfig()
   await ensureContextRepo(workspaceKnowledgeDir(), "knowledge", cfg.knowledge?.git || undefined)
-  await ensureContextRepo(workspaceNotesDir(), "notes", cfg.notes?.git || undefined)
-  await writeReposManifest(cfg.repos ?? [])
+  const kcfg = await loadKnowledgeConfig()
+  await ensureContextRepo(workspaceNotesDir(), "notes", kcfg.notes?.git || undefined)
+  await writeReposManifest(workspaceReposDir(), kcfg.repos ?? [])
 
   // workspace memory dir + stub
   const tm = workspaceMemoryDir()
@@ -1327,7 +1355,10 @@ export async function pushPersonalToRemote(
  * rebuilt from origin if missing.
  */
 export async function ensureUiNotesWorktree(user: string): Promise<void> {
-  await ensureContextWorktree(workspaceNotesDir(), uiNotesDir(user), `ui/${user}`)
+  // Ensure the user's per-user notes main repo is cloned from their declared
+  // remote first (notes is per-user now), then open the UI worktree from it.
+  await ensureUserContext(user).catch(() => {})
+  await ensurePerUserContextWorktree(personalNotesDir(user), uiNotesDir(user), `ui/${user}`)
 }
 
 /**
@@ -1803,15 +1834,34 @@ async function remoteStartPoint(repo: string, sshCommand?: string): Promise<stri
   }
 }
 
+/**
+ * Worktree from a PER-USER context main repo. When the main repo is absent (the
+ * user declared no remote for this context — see ensureUserContext's strict
+ * rule), the loop gets an EMPTY dir, never a fallback to a workspace default.
+ */
+async function ensurePerUserContextWorktree(repo: string, path: string, branch: string) {
+  if (!existsSyncBase(join(repo, ".git"))) {
+    try { await rm(path, { recursive: true, force: true }) } catch {}
+    await mkdir(path, { recursive: true })
+    return
+  }
+  await ensureContextWorktree(repo, path, branch)
+}
+
 export async function ensureContextMounts(id: string, createdBy: string) {
   await mkdir(loopContextDir(id), { recursive: true })
-  await ensureContextWorktree(workspaceKnowledgeDir(), loopContextKnowledge(id), `loop/${id}`)
-  await ensureContextWorktree(workspaceNotesDir(), loopContextNotes(id), `loop/${id}`)
-  // personal is also a per-loop worktree (docs/context-flow.md) — same shape as
-  // notes, just wired to the user's private remote. ensureContextWorktree falls
-  // back to a symlink when personal/ isn't a git repo yet.
+  // knowledge / notes are per-user (cloned by ensureUserContext from the user's
+  // personal-declared remotes). Each worktree opens from origin/main — a fresh
+  // pull of consensus; the local main repo is just the fetch cache + worktree
+  // host (docs/context-flow.md). Empty when the user declared no remote.
+  await ensurePerUserContextWorktree(personalKnowledgeDir(createdBy), loopContextKnowledge(id), `loop/${id}`)
+  await ensurePerUserContextWorktree(personalNotesDir(createdBy), loopContextNotes(id), `loop/${id}`)
+  // personal is also a per-loop worktree — same shape, wired to the user's
+  // private remote. ensureContextWorktree falls back to a symlink when
+  // personal/ isn't a git repo yet.
   await ensureContextWorktree(personalDir(createdBy), loopContextPersonal(id), `loop/${id}`)
-  await ensureSymlink(loopContextRepos(id), workspaceReposDir())
+  await mkdir(personalReposDir(createdBy), { recursive: true })
+  await ensureSymlink(loopContextRepos(id), personalReposDir(createdBy))
 }
 
 export async function listLoops(): Promise<LoopMeta[]> {
@@ -1886,15 +1936,22 @@ export async function createLoop(opts: {
   await composeLoopClaudeConfig(id, opts.createdBy, opts.profiles)
   await writeLoopSettings(id)
 
+  // Pull the per-user knowledge/notes FIRST: clones the user's knowledge repo
+  // (from personal.knowledge) and reads its .loopat/config.json for the notes
+  // remote + repo roster — which the workdir clone-on-demand below depends on.
+  await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
+    (e: any) => console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`),
+  )
+
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {
     // clone + fetch as the user (their vault key), not the host's ssh.
     const userSsh = sshCommandForUser(opts.createdBy, opts.vault ?? "default")
     // clone-on-demand: pull the repo down only now that a loop actually needs it
-    if (!(await ensureRepoCloned(opts.repo, userSsh))) {
+    if (!(await ensureRepoCloned(opts.createdBy, opts.repo, userSsh))) {
       throw new Error(`repo "${opts.repo}" not found / clone failed`)
     }
-    const repoPath = workspaceRepoDir(opts.repo)
+    const repoPath = personalRepoDir(opts.createdBy, opts.repo)
     const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
     try {
       // ① pull (docs/context-flow.md): base the workdir branch on origin/main
@@ -1915,11 +1972,7 @@ export async function createLoop(opts: {
     await mkdir(loopWorkdir(id), { recursive: true })
   }
 
-  // Point the context repos at the personal-declared kn/notes remotes and
-  // connect with the user's vault key (personal repo is self-describing).
-  await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
-    (e: any) => console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`),
-  )
+  // (ensureUserContext already ran above, before the workdir clone.)
   await ensureContextMounts(id, effectiveDriver(meta))
   await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
   return meta

@@ -11,10 +11,13 @@ import { promisify } from "node:util"
 import { homedir } from "node:os"
 import { join, normalize, relative, resolve as resolvePath, sep, dirname } from "node:path"
 import {
-  workspaceKnowledgeDir,
-  workspaceReposDir,
+  personalKnowledgeDir,
+  personalReposDir,
   personalDir,
   uiNotesDir,
+  // workspace-level repos admin (addRepo/listRepos/...) — superseded by the
+  // per-user knowledge-config repo roster in batch4b; kept until then.
+  workspaceReposDir,
 } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -31,7 +34,7 @@ export type VaultEntry = {
 export function vaultRoot(vault: VaultId, user: string): string {
   switch (vault) {
     case "knowledge":
-      return workspaceKnowledgeDir()
+      return personalKnowledgeDir(user)
     case "notes":
       // notes is edited via a per-user UI-loop worktree (opened from origin/main);
       // the endpoint ensures the worktree exists before this resolves.
@@ -39,7 +42,7 @@ export function vaultRoot(vault: VaultId, user: string): string {
     case "personal":
       return personalDir(user)
     case "repos":
-      return workspaceReposDir()
+      return personalReposDir(user)
   }
 }
 
