@@ -264,8 +264,13 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
         </label>
         <button
           type="button"
-          onClick={() => {
+          onClick={async () => {
             if (!backupAck) return
+            // Refresh our own status first so `imported` flips true and we land
+            // on ImportedPanel — otherwise we'd fall back to the stale wizard
+            // (still on step "confirm") because onDone only refreshes the parent.
+            const fresh = await getPersonalStatus()
+            setStatus(fresh)
             setBackupKey(null)
             if (onDone) onDone()
           }}
