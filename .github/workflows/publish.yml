@@ -1,0 +1,35 @@
+name: Publish to npm
+
+# Publish loopat to npm when a version tag is pushed.
+#
+# Release flow:
+#   npm version patch          # bumps package.json, commits, tags vX.Y.Z
+#   git push origin main --tags
+#
+# Setup (one time): add the npm Automation token (bypasses 2FA) as a repo
+# secret named NPM_TOKEN — Settings -> Secrets and variables -> Actions.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bun is needed to build web/dist (vite) during prepublishOnly.
+      - uses: oven-sh/setup-bun@v2
+
+      # Node provides npm and wires NODE_AUTH_TOKEN into the registry.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      # prepublishOnly runs `bun install && bun run build:web` for us.
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
