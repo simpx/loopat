@@ -38,7 +38,7 @@ import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, dirname } from "node:path"
 import { promisify } from "node:util"
 import {
   WORKSPACE,
@@ -60,6 +60,7 @@ import {
 import { loadConfig } from "./config"
 import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
 import { hostExecDir, writeHostShims } from "./host-exec"
+import { resolveClaudeBinary } from "./claude-binary"
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml"
 
 const execFileP = promisify(execFile)
@@ -213,6 +214,18 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
 
   // LOOPAT_INSTALL_DIR ro (claude binary + builtin plugins).
   mounts.push({ src: LOOPAT_INSTALL_DIR, dst: LOOPAT_INSTALL_DIR, ro: true })
+
+  // The claude binary may live OUTSIDE LOOPAT_INSTALL_DIR: under npx, loopat is
+  // at _npx/<hash>/node_modules/loopat while claude is a sibling at
+  // _npx/<hash>/node_modules/@anthropic-ai/claude-agent-sdk-<plat>/. The
+  // sandbox exec's it by its host path, so bind that path in (ro) when it isn't
+  // already covered by the install-dir mount — otherwise the AI is code 127.
+  try {
+    const claudeDir = dirname(resolveClaudeBinary())
+    if (existsSync(claudeDir) && !claudeDir.startsWith(LOOPAT_INSTALL_DIR)) {
+      mounts.push({ src: claudeDir, dst: claudeDir, ro: true })
+    }
+  } catch {}
 
   // ~/.claude/plugins/ ro-bind under the sandbox $HOME so the SDK's plugin
   // resolution (which reads from ~/.claude/plugins/) finds the same set the
