@@ -100,7 +100,12 @@ const LABEL_CONFIG_HASH = "loopat.config-hash"
 
 // Image used as the base for every loop container. Built locally from
 // server/templates/sandbox/Containerfile via ensureSandboxImage().
-export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || "loopat-sandbox:latest"
+// Per-workspace image name so multiple LOOPAT_HOMEs on one host don't share
+// (and can't accidentally delete) each other's images. `uninstall` finds them
+// by the loopat.workspace label, not this name — the name only prevents tag
+// collisions. Same-Containerfile builds still share overlay layers, so the
+// per-workspace tags don't multiply disk usage.
+export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || `loopat-sandbox-${WORKSPACE}:latest`
 
 // Container name: prefix with workspace to avoid collisions between loopat
 // instances running on the same host with different LOOPAT_HOME. Loop UUIDs
@@ -369,7 +374,7 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     "--device", "/dev/fuse",
     // Shared bridge network so the serve container can reach loop
     // containers by name (aardvark-dns). Outbound API calls via NAT.
-    "--network", "loopat",
+    "--network", LOOPAT_NETWORK,
     "--hostname", `loop-${opts.loopId.slice(0, 8)}`,
     // Container cwd at creation; per-exec we override with -w.
     "--workdir", V_LOOP_WORKDIR(opts.loopId),
@@ -554,7 +559,7 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
 
     // Hash the Containerfile so the base image auto-rebuilds when it changes.
     const hash = await baseContainerfileHash()
-    const hashTag = `loopat-sandbox-${hash}:latest`
+    const hashTag = `loopat-sandbox-${WORKSPACE}-${hash}:latest`
 
     const present = await runPodman(["image", "exists", hashTag], { allowFail: true })
     if (present.code === 0) {
@@ -571,7 +576,7 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
     const buildDir = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox")
     let lastStep = ""
     const r = await runPodman(
-      ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "-f", containerfile, buildDir],
+      ["build", "-t", SANDBOX_IMAGE, "-t", hashTag, "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`, "-f", containerfile, buildDir],
       {
         onLine: (line) => {
           const m = line.match(/^STEP\s+(\d+)\/(\d+):\s+(.+)/)
@@ -660,7 +665,7 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
   // after the nested-podman base change shipped).
   const baseHash = await baseContainerfileHash()
   const hash = createHash("sha256").update(`base:${baseHash}\n`).update(content).digest("hex").slice(0, 16)
-  const tag = `loopat-sandbox-${hash}:latest`
+  const tag = `loopat-sandbox-${WORKSPACE}-${hash}:latest`
 
   const existing = _loopImageInFlight.get(tag)
   if (existing) return existing
@@ -717,7 +722,7 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
       await writeFile(join(buildDir, "Containerfile"), childContainerfile)
 
       const r = await runPodman(
-        ["build", "-t", tag, "-f", join(buildDir, "Containerfile"), buildDir],
+        ["build", "-t", tag, "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`, "-f", join(buildDir, "Containerfile"), buildDir],
         {
           allowFail: true,
           onLine: (line) => {
@@ -823,7 +828,9 @@ export async function getEphemeralHostPort(
   return Number.isFinite(port) && port > 0 ? port : null
 }
 
-const LOOPAT_NETWORK = "loopat"
+// Per-workspace network (+ loopat.workspace label) so parallel LOOPAT_HOMEs
+// stay isolated and `uninstall` removes only its own.
+const LOOPAT_NETWORK = `loopat-${WORKSPACE}`
 const SERVE_CONTAINER = `loopat-${WORKSPACE}-serve`
 
 let _networkReady = false
@@ -835,7 +842,7 @@ export async function ensureLoopatNetwork(): Promise<void> {
   const r = await runPodman(["network", "exists", LOOPAT_NETWORK], { allowFail: true })
   if (r.code !== 0) {
     console.log(`[podman] creating network ${LOOPAT_NETWORK}`)
-    const create = await runPodman(["network", "create", LOOPAT_NETWORK])
+    const create = await runPodman(["network", "create", "--label", `${LABEL_WORKSPACE}=${WORKSPACE}`, LOOPAT_NETWORK])
     if (create.code !== 0) {
       throw new Error(`Failed to create podman network ${LOOPAT_NETWORK}: ${create.stderr}`)
     }
