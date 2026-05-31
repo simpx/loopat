@@ -674,7 +674,9 @@ export async function importPersonalFromRepo(
   // Clone into a tmp dir. ssh uses the deploy key (StrictHostKeyChecking=
   // accept-new, no pre-populated known_hosts on first run); https auths via url.
   const tmp = await mkdtemp(join(tmpdir(), `loopat-import-${userId}-`))
-  const cloneEnv = isHttps ? { ...process.env } : { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) }
+  // Bootstrap: first clone of the personal repo uses the host deploy-key (no
+  // vault key exists yet). Every later op uses the user's vault key.
+  const cloneEnv = isHttps ? { ...process.env } : { ...process.env, GIT_SSH_COMMAND: bootstrapSshCommand(userId) }
   try {
     await execFileP("git", ["clone", "--", repoUrl, tmp], { env: cloneEnv })
   } catch (e: any) {
@@ -750,17 +752,24 @@ export async function importPersonalFromRepo(
 }
 
 /**
- * The ssh command a server-side git op uses to act AS the user. Prefers the
- * user's OWN key from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`),
- * available once the personal repo is cloned + decrypted. Falls back to the
- * host-managed deploy-key for BOOTSTRAP only — the first clone/decrypt of the
- * personal repo itself, before any vault key exists. After that, every git op
- * (kn/notes/repos/personal sync, promote, pull) authenticates as the user.
+ * The ssh command a server-side git op uses to act AS the user — its OWN key
+ * from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`). If the key
+ * isn't there the op simply fails: we deliberately do NOT fall back to the host
+ * deploy-key, so a loop never borrows the host's access. Authorization tracks
+ * the personal repo, not the host (see behavior/02-personal-permissions.md).
  */
 function sshCommandForUser(userId: string, vault: string = "default"): string {
   const vaultKey = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh", "id")
-  const priv = existsSyncBase(vaultKey) ? vaultKey : hostDeployKeyPath(userId)
-  return `ssh -i ${priv} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+  return `ssh -i ${vaultKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+}
+
+/**
+ * Bootstrap ONLY: the first clone/decrypt of the personal repo itself, before
+ * any vault key exists. Uses the host-managed deploy-key — the one credential
+ * the host legitimately holds to unlock a personal repo.
+ */
+function bootstrapSshCommand(userId: string): string {
+  return `ssh -i ${hostDeployKeyPath(userId)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
 }
 
 async function swapPersonalDir(
