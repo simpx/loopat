@@ -16,12 +16,8 @@
 import { execFile } from "node:child_process"
 import { mkdir, writeFile, chmod, readFile } from "node:fs/promises"
 import { existsSync, rmSync } from "node:fs"
-import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
+import { join } from "node:path"
 import { loopDir } from "./paths"
-
-/** The forwarder script shipped in the package (sandbox-side `loopat-host`). */
-const FORWARDER_TEMPLATE = join(dirname(fileURLToPath(import.meta.url)), "..", "templates", "sandbox", "loopat-host")
 
 /** A per-loop host workdir — the host-side mirror of the loop's own workdir. */
 export function hostWorkdir(loopId: string): string {
@@ -87,10 +83,8 @@ export async function runHostCli(opts: {
  */
 export async function writeHostShims(binDir: string, clis: string[]): Promise<void> {
   await mkdir(binDir, { recursive: true })
-  // the forwarder the shims hand off to
-  const forwarder = join(binDir, "loopat-host")
-  await writeFile(forwarder, await readFile(FORWARDER_TEMPLATE, "utf8"))
-  await chmod(forwarder, 0o755)
+  // The `loopat-host` forwarder is baked into the sandbox image; here we only
+  // emit the per-cli shims — each just hands off to it.
   for (const cli of clis) {
     const p = join(binDir, cli)
     await writeFile(p, `#!/bin/sh\n# loopat host-cli shim — forwards "${cli}" to the host\nexec loopat-host "${cli}" "$@"\n`)
