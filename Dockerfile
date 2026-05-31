@@ -20,16 +20,13 @@ RUN curl -fsSL https://mise.run | MISE_INSTALL_DIR=/usr/local/bin sh
 
 WORKDIR /app
 
-FROM base AS deps
-COPY package.json bun.lock* ./
-COPY server/package.json server/
-COPY web/package.json web/
-RUN bun install --frozen-lockfile
-
 FROM base AS build
-COPY --from=deps /app/node_modules node_modules
 COPY . .
-RUN bun --cwd web run build
+# Full workspace install so web/node_modules (vite, the pinned TypeScript)
+# is in place — build:web's `bunx tsc/vite` must resolve the project's
+# tools, not download newer ones.
+RUN bun install --frozen-lockfile
+RUN bun run build:web
 
 FROM base AS release
 COPY package.json bun.lock* ./
@@ -44,6 +41,10 @@ ENV HOST=0.0.0.0
 ENV LOOPAT_SERVE_HOST=0.0.0.0
 
 RUN chown -R loopat:loopat /app
+
+# Pre-create the data dir owned by loopat so the VOLUME (and any named
+# volume mounted onto it) initializes writable by the non-root user.
+RUN mkdir -p /home/loopat/.loopat && chown loopat:loopat /home/loopat/.loopat
 
 USER loopat
 

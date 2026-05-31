@@ -1,7 +1,7 @@
 services:
   loopat:
     build: .
-    image: loopat:latest
+    image: ghcr.io/simpx/loopat:latest
     privileged: true
     ports:
       - "20001:10001"

@@ -131,6 +131,14 @@ Loopat splits configuration along role lines — read whichever applies:
 
 ### Docker (recommended)
 
+Pull the prebuilt image from GHCR:
+
+```sh
+docker run -d --privileged -p 20001:10001 ghcr.io/simpx/loopat:latest
+```
+
+Or, to build from source and persist the workspace in a named volume:
+
 ```sh
 docker compose up -d
 ```
