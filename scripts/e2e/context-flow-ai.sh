@@ -52,6 +52,8 @@ podman exec "$CTR" sh -c "echo '$(cat "$H/vault.pub")' >> /home/git/.ssh/authori
 podman exec "$CTR" su git -c "git init --bare -q -b main /srv/git/notes.git"
 
 HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' | head -1)
+[ -z "$HOST_IP" ] && HOST_IP=$(ipconfig getifaddr en0 2>/dev/null)   # macOS
+[ -z "$HOST_IP" ] && { echo "FAIL: could not determine host ip"; exit 1; }
 HOST_URL="ssh://git@$HOST_IP:$PORT/srv/git/notes.git"      # host-reachable (published port)
 CTR_URL="ssh://git@$CTR/srv/git/notes.git"                 # sandbox-reachable (container name)
 
