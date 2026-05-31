@@ -31,3 +31,12 @@
   可能 `podman login`),否则沙箱建不起来 —— **loopat 本身在这种 mac 上也跑不了沙箱**,
   与测试无关。配好内网 mirror 后,case 1/2/3 才能在 mac 上双平台跑。
 - 真 AI 的 case(03)还需 idealab API key(`IDEALAB_KEY`)。
+
+## mac 双平台实测结论(0.1.15,2026-06-01)
+
+- **沙箱 image blocker 可绕过**:本机 `podman build` → `podman save` → scp → VM `podman load`;loopat 检测 hashTag(`loopat-sandbox-<ws>-<containerfile-hash>`)存在即跳过 build。两机 Containerfile hash 一致。VM ping 公网加速 IP 通但 443 refused,模仿 `/etc/hosts` 无效——只能 load。
+- **LOOPAT_HOME 必须在 `$HOME` 下**:podman machine 只挂 `$HOME`,`/tmp` 不挂 → bind workdir `statfs … no such file`。e2e 默认 `/tmp/...` 在 mac 不适用。
+- **01** ✅ mac PASS(零残留 + label 隔离),与本机一致。
+- **02** 🟡 mac 与本机逐字一致;stage3 失败是脚本过时(Model B/per-user:personal 走 deploy key),非 mac、非 loopat bug。
+- **03** ❌ mac blocked:沙箱 linux 需 linux claude,npx 只装 darwin claude → `Exec format error`。要在 darwin host 上备一份 linux claude 给沙箱。
+- e2e 在 mac 跑的适配:rsync repo + `npm i -g bun` + 预 load image + 给临时 workspace `podman build FROM <loaded> --label loopat.workspace=<ws>`(无网络)注入带 label 的 base,让 setup 跳过 build。
