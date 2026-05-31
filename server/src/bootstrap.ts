@@ -22,16 +22,33 @@ import { listUsers } from "./auth"
 type Check = { ok: boolean; label: string; hint?: string }
 
 function checkPodman(): Check {
+  const isMac = process.platform === "darwin"
+  let version: string
   try {
-    const out = execFileSync("podman", ["--version"], { stdio: "pipe" }).toString().trim()
-    return { ok: true, label: `podman (sandbox): ${out}` }
+    version = execFileSync("podman", ["--version"], { stdio: "pipe" }).toString().trim()
   } catch {
     return {
       ok: false,
       label: "podman (sandbox)",
-      hint: "install with: sudo apt install podman uidmap fuse-overlayfs   (Linux only)",
+      hint: isMac
+        ? "brew install podman, then: podman machine init && podman machine start"
+        : "sudo apt install podman uidmap fuse-overlayfs   (Linux)",
     }
   }
+  // On macOS podman runs inside a Linux VM ("machine"). `--version` succeeds even
+  // when the machine is stopped — `podman info` is what actually needs the VM up.
+  if (isMac) {
+    try {
+      execFileSync("podman", ["info"], { stdio: "pipe", timeout: 8000 })
+    } catch {
+      return {
+        ok: false,
+        label: `podman (sandbox): ${version}`,
+        hint: "podman machine isn't running — start it: podman machine start   (run `podman machine init` first if you never have)",
+      }
+    }
+  }
+  return { ok: true, label: `podman (sandbox): ${version}` }
 }
 
 function checkClaudeBinary(): Check {
@@ -43,6 +60,21 @@ function checkClaudeBinary(): Check {
       ok: false,
       label: "claude binary",
       hint: "run `bun install` in the loopat repo root — SDK ships the binary as a platform-specific package",
+    }
+  }
+}
+
+function checkGitCrypt(): Check {
+  try {
+    const out = execFileSync("git-crypt", ["--version"], { stdio: "pipe" }).toString().trim()
+    return { ok: true, label: `git-crypt (personal vault): ${out}` }
+  } catch {
+    return {
+      ok: false,
+      label: "git-crypt (personal vault)",
+      hint: process.platform === "darwin"
+        ? "brew install git-crypt   (encrypts your personal vault)"
+        : "sudo apt install git-crypt   (encrypts your personal vault)",
     }
   }
 }
@@ -92,6 +124,7 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkPodman(),
     checkClaudeBinary(),
+    checkGitCrypt(),
   ]
 
   const bar = "─".repeat(60)

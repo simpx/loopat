@@ -883,17 +883,26 @@ let _portProxyReady: Promise<void> | null = null
  */
 function findOccupiedPorts(lo: number, hi: number): Set<number> {
   const ports = new Set<number>()
+  const { execFileSync } = require("node:child_process")
+  const add = (port: number) => { if (port >= lo && port <= hi) ports.add(port) }
+  // Linux: ss reads /proc/net/tcp (every listening socket).
   try {
-    const { execFileSync } = require("node:child_process")
     const out = execFileSync("ss", ["-tlnH"], { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] }) as string
     for (const line of out.split("\n")) {
       const parts = line.trim().split(/\s+/)
       if (parts.length < 4) continue
-      const addr = parts[3] // e.g. "0.0.0.0:8080" or "[::]:8080" or "127.0.0.1:8080"
+      const addr = parts[3] // "0.0.0.0:8080" | "[::]:8080" | "127.0.0.1:8080"
       const colonIdx = addr.lastIndexOf(":")
-      if (colonIdx === -1) continue
-      const port = Number(addr.slice(colonIdx + 1))
-      if (port >= lo && port <= hi) ports.add(port)
+      if (colonIdx !== -1) add(Number(addr.slice(colonIdx + 1)))
+    }
+    return ports
+  } catch {}
+  // macOS (no ss): lsof. NAME column looks like "*:8080" or "127.0.0.1:8080 (LISTEN)".
+  try {
+    const out = execFileSync("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN"], { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] }) as string
+    for (const line of out.split("\n")) {
+      const m = line.match(/:(\d+)\s*\(LISTEN\)/)
+      if (m) add(Number(m[1]))
     }
   } catch {}
   return ports
