@@ -12,6 +12,19 @@ RUN apk add --no-cache openssh git \
  && sed -i 's/#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
  && sed -i 's/#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
  && sed -i 's/^git:!:/git::/' /etc/shadow
+# Extra per-repo accounts for the permissions case (02): each is its own ssh
+# principal with its own (initially empty) authorized_keys + bare repo, so a
+# key can be authorized PER REPO (kn / notes / personal independently).
+RUN for u in git-kn git-notes git-personal; do \
+      adduser -D -s /bin/sh "$u" \
+   && mkdir -p "/home/$u/.ssh" "/srv/$u" \
+   && chmod 700 "/home/$u/.ssh" \
+   && touch "/home/$u/.ssh/authorized_keys" \
+   && chmod 600 "/home/$u/.ssh/authorized_keys" \
+   && chown -R "$u:$u" "/home/$u" "/srv/$u" \
+   && su "$u" -c "git init --bare -b main /srv/$u/repo.git" \
+   && sed -i "s/^$u:!:/$u::/" /etc/shadow ; \
+    done
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 22

@@ -30,12 +30,11 @@ loop 的每个 git 操作只认 personal 自己的 vault key,没有就失败 —
 
 ## 实现
 
-`scripts/e2e/...`(待实现)。难点:需要 **per-repo 授权**的 ssh fixture(多账号 / 多 server /
-gitolite 三选一),以区分"kn/notes 已授权、personal 未授权"。
+`scripts/e2e/personal-permissions.ts` + 多账号 `git-ssh-server`(三个 ssh 账号
+`git-kn`/`git-notes`/`git-personal`,各自 authorized_keys + bare repo → per-repo 授权)。
+进程默认 ssh 故意设成 host key,以证明 loop 工作仍只认 vault key(不蹭 host)。
 
 ## 状态
 
-⬜ 待实现。
-- ① fallback 语义收紧 → **已完成**:`sshCommandForUser` 改为 vault-key-only,host deploy-key
-  仅 `bootstrapSshCommand`(首次 clone personal)使用。
-- ② per-repo 授权 ssh fixture → 待做。
+✅ 已自动化 — 三档 PASS:空 personal 全失败 → 授权 kn/notes(personal 仍失败)→ 全授权成功。
+- `sshCommandForUser` 已收紧为 vault-key-only;host deploy-key 仅 `bootstrapSshCommand` 用。

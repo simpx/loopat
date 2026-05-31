@@ -15,7 +15,7 @@
 | # | case | 证明 | 状态 |
 |---|------|------|------|
 | 01 | install / uninstall | 装完能清干净、零残留;workspace 之间隔离 | ✅ |
-| 02 | personal 权限 | 权限跟着 personal 走,与 host 无关 | ⬜ 待实现(fallback 已收紧) |
+| 02 | personal 权限 | 权限跟着 personal 走,与 host 无关 | ✅ |
 | 03 | context flow | loop 内改动→外部可见,外部改动→新 loop 可见(三层) | ⬜ 待实现(真 AI) |
 
 ## 共享测试基建
