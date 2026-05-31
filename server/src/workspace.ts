@@ -12,9 +12,9 @@ import { homedir } from "node:os"
 import { join, normalize, relative, resolve as resolvePath, sep, dirname } from "node:path"
 import {
   workspaceKnowledgeDir,
-  workspaceNotesDir,
   workspaceReposDir,
   personalDir,
+  uiNotesDir,
 } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -33,7 +33,9 @@ export function vaultRoot(vault: VaultId, user: string): string {
     case "knowledge":
       return workspaceKnowledgeDir()
     case "notes":
-      return workspaceNotesDir()
+      // notes is edited via a per-user UI-loop worktree (opened from origin/main);
+      // the endpoint ensures the worktree exists before this resolves.
+      return uiNotesDir(user)
     case "personal":
       return personalDir(user)
     case "repos":

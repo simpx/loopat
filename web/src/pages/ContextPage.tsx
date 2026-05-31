@@ -14,6 +14,7 @@ import {
   vaultFlatList,
   vaultRead,
   vaultWrite,
+  saveNotes,
   vaultCreateFile,
   vaultCreateFolder,
   vaultDeleteFile,
@@ -684,6 +685,18 @@ function DocView({
         onSaved()
         // refresh backlinks (links may have changed)
         vaultBacklinks(vault, path).then(setBacklinks)
+        // notes lives on a shared remote — push the save (ff-only; a real
+        // conflict is held back, the local edit is kept).
+        if (vault === "notes") {
+          const sync = await saveNotes()
+          if (!sync.ok) {
+            if (sync.conflict) {
+              alert(`Saved locally, but it conflicts with the remote (${(sync.files ?? []).join(", ")}). Your edit is kept — resolve by taking the remote, or in a loop.`)
+            } else {
+              alert(`Saved locally, but push to remote failed: ${sync.error ?? "unknown"}`)
+            }
+          }
+        }
       } else {
         alert(`save failed: ${r.error}`)
       }
