@@ -19,6 +19,17 @@ const here = dirname(fileURLToPath(import.meta.url))
 const pkgRoot = join(here, "..")
 const serverEntry = join(pkgRoot, "server", "src", "index.ts")
 
+// Subcommand routing. `loopat uninstall` runs a standalone cleanup entry (never
+// boots the server); everything else starts the server. Kept here in the Node
+// shim so the uninstall path doesn't pull in any server-side init.
+const SUBCOMMANDS = {
+  uninstall: join(pkgRoot, "server", "src", "uninstall.ts"),
+}
+const sub = process.argv[2]
+const subEntry = Object.prototype.hasOwnProperty.call(SUBCOMMANDS, sub) ? SUBCOMMANDS[sub] : null
+const entry = subEntry ?? serverEntry
+const forwardArgs = subEntry ? process.argv.slice(3) : process.argv.slice(2)
+
 function resolveBun() {
   // 1. Explicit override.
   if (process.env.LOOPAT_BUN && existsSync(process.env.LOOPAT_BUN)) {
@@ -49,7 +60,7 @@ function resolveBun() {
 }
 
 const bun = resolveBun()
-const child = spawn(bun, [serverEntry, ...process.argv.slice(2)], {
+const child = spawn(bun, [entry, ...forwardArgs], {
   stdio: "inherit",
   env: process.env,
 })
