@@ -3172,7 +3172,18 @@ const server = Bun.serve({
   websocket,
 })
 console.log(`[loopat] server listening on http://${hostname}:${port}`)
-console.log(`[loopat] workspace serve starting via podman container (port ${process.env.LOOPAT_SERVE_PORT ?? "7788"})`)
+// The serve container (share / external-port proxy) needs the serve-rs Rust
+// binary, which the npm package doesn't ship — so it's unavailable under npx.
+// Only claim it's starting when the binary is actually present; otherwise say
+// so plainly instead of printing a port nothing is listening on.
+{
+  const serveBinary = pathJoin(LOOPAT_INSTALL_DIR, "server", "src", "serve-rs", "target", "release", "loopat-serve")
+  if (existsSync(serveBinary)) {
+    console.log(`[loopat] workspace serve starting via podman container (port ${process.env.LOOPAT_SERVE_PORT ?? "7788"})`)
+  } else {
+    console.log(`[loopat] workspace serve unavailable — serve binary not built (share / external-port off; the workspace runs fine without it)`)
+  }
+}
 
 await printBootstrapBanner(cfg)
 const backfilled = await backfillAllMounts()

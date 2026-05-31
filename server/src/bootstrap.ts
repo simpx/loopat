@@ -91,12 +91,14 @@ function describeRemote(dir: string, url: string | undefined): string {
 function describeRepos(cfg: WorkspaceConfig): Check {
   const specs = cfg.repos ?? []
   if (specs.length === 0) return { ok: true, label: `repos:     (none configured)` }
+  // Repos are clone-on-demand (cloned only when a loop selects one), so a repo
+  // that isn't cloned yet is NORMAL, not a failure. Report cloned vs on-demand;
+  // never a blocker.
   const parts = specs.map((r) => {
     const present = existsSync(workspaceRepoDir(r.name))
-    return `${present ? "" : "✗"}${r.name}`
+    return present ? r.name : `${r.name} (on demand)`
   })
-  const allOk = specs.every((r) => existsSync(workspaceRepoDir(r.name)))
-  return { ok: allOk, label: `repos:     ${parts.join(", ")}` }
+  return { ok: true, label: `repos:     ${parts.join(", ")}` }
 }
 
 async function checkUsers(): Promise<Check> {
@@ -127,20 +129,25 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
     checkGitCrypt(),
   ]
 
-  const bar = "─".repeat(60)
+  // Colorize only on a TTY (not when piped/redirected) and unless NO_COLOR is set.
+  const color = !!process.stdout.isTTY && process.env.NO_COLOR === undefined
+  const wrap = (code: string) => (s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s)
+  const green = wrap("32"), red = wrap("31"), yellow = wrap("33"), dim = wrap("2"), bold = wrap("1"), cyan = wrap("36")
+
+  const bar = dim("─".repeat(60))
   console.log(`\n${bar}`)
-  console.log(`  loopat bootstrap — ${WORKSPACE}`)
+  console.log(`  ${bold(cyan(`loopat bootstrap`))} ${dim("—")} ${bold(WORKSPACE)}`)
   console.log(bar)
   for (const c of checks) {
-    const mark = c.ok ? "✓" : "✗"
-    console.log(`  ${mark}  ${c.label}`)
-    if (!c.ok && c.hint) console.log(`     → ${c.hint}`)
+    const mark = c.ok ? green("✓") : red("✗")
+    console.log(`  ${mark}  ${c.ok ? c.label : bold(c.label)}`)
+    if (!c.ok && c.hint) console.log(`     ${yellow("→ " + c.hint)}`)
   }
   console.log(bar)
   const blockers = checks.filter((c) => !c.ok)
   if (blockers.length === 0) {
-    console.log(`  ready. open http://localhost:${process.env.PORT ?? 10001}\n`)
+    console.log(`  ${green("ready.")} open ${cyan(`http://localhost:${process.env.PORT ?? 10001}`)}\n`)
   } else {
-    console.log(`  ${blockers.length} thing(s) to fix before chat will work — see hints above.\n`)
+    console.log(`  ${yellow(`${blockers.length} thing(s) to fix`)} before chat will work — see hints above.\n`)
   }
 }
