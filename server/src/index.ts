@@ -55,6 +55,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
+import { runHostCli, readDeclaredHostClis, hostWorkdir } from "./host-exec"
 import {
   createUser,
   findUser,
@@ -2247,6 +2248,28 @@ app.post("/api/notes/refresh", requireAuth, async (c) => {
   const r = await ffUpdateUiNotes(userId)
   if (!r.ok) return c.json({ ok: false, diverged: r.diverged ?? false, error: r.error }, r.diverged ? 200 : 400)
   return c.json({ ok: true })
+})
+
+// host-cli proxy (POC): run a whitelisted host-cli on behalf of a loop, in the
+// loop's per-loop host workdir. Whitelist = the loop's declared host-clis.
+// NOTE: POC trusts the loopId in the body; production must authenticate the
+// caller as that loop (a sandbox-issued token).
+app.post("/api/host-exec", async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const loopId = typeof body.loopId === "string" ? body.loopId : ""
+  const cli = typeof body.cli === "string" ? body.cli : ""
+  const args = Array.isArray(body.args) ? body.args.map(String) : []
+  if (!loopId || !cli) return c.json({ ok: false, error: "loopId + cli required" }, 400)
+  if (!(await loopExists(loopId))) return c.json({ ok: false, error: "unknown loop" }, 404)
+  const allowed = await readDeclaredHostClis(loopId)
+  const r = await runHostCli({
+    cli,
+    args,
+    cwd: hostWorkdir(loopId),
+    allowed,
+    stdin: typeof body.stdin === "string" ? body.stdin : undefined,
+  })
+  return c.json(r)
 })
 
 app.delete("/api/workspace/file", requireAuth, async (c) => {
