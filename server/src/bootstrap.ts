@@ -106,7 +106,7 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   console.log(bar)
   const blockers = checks.filter((c) => !c.ok)
   if (blockers.length === 0) {
-    console.log(`  ready. open http://localhost:${process.env.PORT ?? 7787}\n`)
+    console.log(`  ready. open http://localhost:${process.env.PORT ?? 10001}\n`)
   } else {
     console.log(`  ${blockers.length} thing(s) to fix before chat will work — see hints above.\n`)
   }

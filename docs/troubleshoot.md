@@ -131,9 +131,9 @@ rmdir ~/.loopat/context/knowledge   # or notes
 
 ## 3. Web UI issues
 
-### "ECONNREFUSED 127.0.0.1:7787" in vite log
+### "ECONNREFUSED 127.0.0.1:10001" in vite log
 
-Startup race — vite (5173) is up, server (7787) is still booting. Errors stop within 1–2 seconds. Refresh the page. See "Why" in the README.
+Startup race — vite (5173) is up, server (10001) is still booting. Errors stop within 1–2 seconds. Refresh the page. See "Why" in the README.
 
 ### Loops list is empty after upgrading
 

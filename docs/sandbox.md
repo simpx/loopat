@@ -21,7 +21,7 @@ status: draft (review before promoting to knowledge/)
 
 ```
 host
-└── loopat server (Bun, port 7787)              ← 1 个，全员共用
+└── loopat server (Bun, port 10001)              ← 1 个，全员共用
     │   ├── Hono HTTP/WS router
     │   │     /api/loops/...        REST
     │   │     /ws/loop/:id          chat ws
@@ -52,7 +52,7 @@ PTY 和 Claude SDK 走**同一个** `buildBwrapArgs(loopId)`，所以两者**视
 |---|---|---|
 | host machine | 1 | 全员 |
 | loopat server 进程（Bun） | 1 | 全员 |
-| port 7787（HTTP+WS） | 1 | 全员 |
+| port 10001（HTTP+WS） | 1 | 全员 |
 | workspace `loopat` | 1（MVP）| workspace member |
 | LoopSession 内存对象 | N（每 loop 一个）| 同 loop 所有 ws subscriber |
 | Claude CLI 进程 | 0 或 1 / loop | 同 loop 全员 |
@@ -86,9 +86,9 @@ PTY 和 Claude SDK 走**同一个** `buildBwrapArgs(loopId)`，所以两者**视
 
 ```
 [Browser Tab]                                                         
-     │ ws://host:7787/ws/loop/<id>/term                              
+     │ ws://host:10001/ws/loop/<id>/term                              
      ▼                                                                
-[Hono router @ 7787]                                                  
+[Hono router @ 10001]                                                  
      │  matches /ws/loop/:id/term → 提取 id                           
      ▼                                                                
 [ws handler]   ← 闭包捕获 id；这个连接的所有事件都带这个 id            

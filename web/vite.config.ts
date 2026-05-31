@@ -32,9 +32,9 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [".ngrok-free.app"],
     proxy: {
-      "/api": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 7787}` },
+      "/api": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
       "/ws": {
-        target: `ws://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 7787}`,
+        target: `ws://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}`,
         ws: true,
       },
     },

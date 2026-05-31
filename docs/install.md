@@ -76,7 +76,7 @@ Open `config.json`, fill in your key, optionally set `knowledge.git` /
 `config.json` to a clean machine and bootstrap reconstructs the same
 workspace.
 
-When the banner ends with `ready.`, open <http://localhost:7787> and create
+When the banner ends with `ready.`, open <http://localhost:10001> and create
 your first loop.
 
 ## Team setup — shared knowledge and notes
@@ -106,12 +106,12 @@ to the shared repos (separate `personal/` git initialized locally).
 | `LOOPAT_HOME` | `~/.loopat` | workspace directory. Single workspace per loopat instance — to run a second workspace, start another loopat with a different `LOOPAT_HOME`. URL/display name = basename minus leading dots (`~/.loopat` → `loopat`). |
 | `LOOPAT_USER` | `$USER` | active driver name; also where `personal/` lives |
 | `HOST` | `127.0.0.1` | server bind address. Set to `0.0.0.0` to accept connections from LAN / ngrok. Also passed to Vite dev server. |
-| `PORT` | `7787` | server port |
+| `PORT` | `10001` | server port |
 
 ## Verifying it works
 
 1. Banner ends with `ready.`
-2. <http://localhost:7787> loads
+2. <http://localhost:10001> loads
 3. Create a loop, send a message, see the agent respond
 4. Check `$LOOPAT_HOME/context/repos/<name>/` — the loop's branch should
    exist with auto-commits

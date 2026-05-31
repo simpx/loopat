@@ -25,7 +25,7 @@ If you're the admin standing up loopat, start with
 
 ## 1. Register
 
-Open `http://<workspace-host>:7787` and click **Register**:
+Open `http://<workspace-host>:10001` and click **Register**:
 
 - **Username** — lowercase, `[a-z0-9_-]`, 1–32 chars
 - **Password**
