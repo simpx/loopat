@@ -6,7 +6,6 @@ import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
-import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
 import {
@@ -688,38 +687,6 @@ app.post("/api/settings/personal/value", requireAuth, async (c) => {
   if (!name) return c.json({ error: "name required" }, 400)
   const r = await writeVaultEnv(userId, vault, name, value)
   if (!r.ok) return c.json({ error: r.error }, 400)
-  return c.json({ ok: true })
-})
-
-// ── onboarding (auth required) ──
-// Welcome-card state machine for new users. See server/src/onboarding.ts.
-
-app.get("/api/onboarding", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  const status = await getOnboardingStatus(userId)
-  // If state says "started" but the loop has since been deleted, fall back to
-  // "fresh" so the user can re-start instead of staring at a dead link.
-  if (status.state === "started" && status.loopId) {
-    if (!(await loopExists(status.loopId))) {
-      return c.json({ state: "fresh" })
-    }
-  }
-  return c.json(status)
-})
-
-app.post("/api/onboarding/start", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  try {
-    const r = await startOnboardingLoop(userId)
-    return c.json({ ok: true, loopId: r.loopId })
-  } catch (e: any) {
-    return c.json({ error: e?.message ?? "start failed" }, 500)
-  }
-})
-
-app.post("/api/onboarding/done", requireAuth, async (c) => {
-  const userId = c.get("userId") as string
-  await markOnboardingDone(userId)
   return c.json({ ok: true })
 })
 

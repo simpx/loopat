@@ -52,12 +52,11 @@ function providerEnvVarName(providerName: string): string {
   return `${sanitized || "PROVIDER"}_API_KEY`
 }
 
-type TabId = "personal-repo" | "providers" | "shell" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-presets"
+type TabId = "personal-repo" | "providers" | "claude-config" | "mise-config" | "token-usage" | "api-tokens" | "admin-users" | "admin-workspace" | "admin-serve" | "admin-presets"
 
 const TABS: { id: TabId; label: string; gated: boolean; description: string; icon: typeof User }[] = [
   { id: "personal-repo", label: "Personal Repo",          gated: false, description: "Your private repo carrying credentials + dotfiles.", icon: User },
   { id: "providers",     label: "AI Providers",           gated: true,  description: "Models, base URLs, API keys. Pick a default.",     icon: Cpu },
-  { id: "shell",         label: "Terminal Shell",         gated: true,  description: "PTY shell binary used in loop terminals.",         icon: Terminal },
   { id: "claude-config", label: "Claude Config",          gated: true,  description: "Compose your .claude/ tiers — plugins, MCP servers, settings per tier.", icon: Layers },
   { id: "mise-config",   label: "Mise Config",            gated: true,  description: "Configure mise toolchain tools per tier — mise.toml for each tier.", icon: Wrench },
   { id: "token-usage",   label: "Token Usage",            gated: false, description: "Token consumption across models, loops, and time.",icon: BarChart3 },
@@ -306,9 +305,6 @@ export function SettingsPage() {
                   )}
                   {active === "providers" && (
                     <ProvidersSection disk={disk} refExists={refExists} onChanged={refresh} disabled={isGatedAndLocked} />
-                  )}
-                  {active === "shell" && (
-                    <ShellSection disk={disk} onChanged={refresh} disabled={isGatedAndLocked} />
                   )}
                   {active === "claude-config" && (
                     <ClaudeConfigPanel disabled={isGatedAndLocked} />
@@ -908,109 +904,6 @@ const SHELL_PRESETS: Array<{ value: string; label: string; description: string }
   { value: "fish",              label: "fish",                description: "Friendly interactive shell with autosuggestions" },
   { value: "zsh",               label: "zsh",                 description: "Common default on macOS-style setups" },
 ]
-
-function ShellSection({ disk, onChanged, disabled }: {
-  disk: PersonalConfigDisk | null
-  onChanged: () => void
-  disabled?: boolean
-}) {
-  const [val, setVal] = useState("")
-  const [customMode, setCustomMode] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
-
-  useEffect(() => {
-    const v = disk?.shell ?? ""
-    setVal(v)
-    setCustomMode(!!v && !SHELL_PRESETS.some((p) => p.value === v))
-  }, [disk])
-
-  const save = async () => {
-    setSaving(true)
-    setErr(null)
-    setSaved(false)
-    const r = await savePersonalDisk({ shell: val })
-    if (!r.ok) { setSaving(false); setErr(r.error ?? "save failed"); return }
-    // Write-through to the personal remote (best-effort — see providers save).
-    const pushRes = await pushPersonalVault()
-    setSaving(false)
-    if (!pushRes.ok) {
-      setErr(pushRes.conflict
-        ? "Saved locally, but it conflicts with the remote — your edit is kept, not lost. Resolve it in Settings → Personal repo (take remote, or in a loop)."
-        : pushRes.needsPull
-          ? "Saved locally — remote moved while pushing. Save again to retry."
-          : `Saved locally, but push to remote failed: ${pushRes.error ?? "unknown"}`)
-    }
-    setSaved(true)
-    onChanged()
-  }
-
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white overflow-hidden p-4 flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        {SHELL_PRESETS.map((p) => (
-          <label
-            key={p.value || "default"}
-            className={
-              "flex items-start gap-2 px-3 py-2 rounded border " +
-              (!customMode && val === p.value ? "border-gray-900 bg-gray-50" : "border-gray-200 hover:bg-gray-50")
-            }
-          >
-            <input
-              type="radio"
-              name="shell-preset"
-              checked={!customMode && val === p.value}
-              onChange={() => { setVal(p.value); setCustomMode(false); setSaved(false) }}
-              className="mt-0.5"
-            />
-            <div className="flex-1 min-w-0">
-              <div className="text-[13px] text-gray-900">{p.label}</div>
-              <div className="text-[11.5px] text-gray-500">{p.description}</div>
-            </div>
-          </label>
-        ))}
-        <label
-          className={
-            "flex items-start gap-2 px-3 py-2 rounded border " +
-            (customMode ? "border-gray-900 bg-gray-50" : "border-gray-200 hover:bg-gray-50")
-          }
-        >
-          <input
-            type="radio"
-            name="shell-preset"
-            checked={customMode}
-            onChange={() => { setCustomMode(true); setSaved(false) }}
-            className="mt-0.5"
-          />
-          <div className="flex-1 min-w-0">
-            <div className="text-[13px] text-gray-900">Custom</div>
-            <div className="text-[11.5px] text-gray-500 mb-1">Binary name in sandbox PATH or absolute path</div>
-            {customMode && (
-              <input
-                value={val}
-                onChange={(e) => { setVal(e.target.value); setSaved(false) }}
-                placeholder="/usr/bin/nushell"
-                className={cn(inputClass, "font-mono")}
-              />
-            )}
-          </div>
-        </label>
-      </div>
-      <div className="flex items-center justify-end gap-2 p-3 border-t border-gray-100">
-        {err && <span className="text-xs text-red-600">{err}</span>}
-        {saved && !err && <span className="text-xs text-emerald-700 flex items-center gap-1"><Check size={12} /> saved</span>}
-        <Button size="sm" onClick={save} disabled={saving || disabled}>
-          {saving ? "saving…" : "save shell"}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Gateway Tokens
-// ────────────────────────────────────────────────────────────────────────────
 
 function ApiTokensSection() {
   const [tokens, setTokens] = useState<ApiTokenEntry[]>([])

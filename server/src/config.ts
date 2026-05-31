@@ -189,27 +189,9 @@ export type WorkspaceConfig = {
  *     `vault/mounts/home/<rel>/...` is auto-bound at $HOME/<rel>/...
  *     There is no `envs` or `mounts` field — filesystem layout IS the spec.
  */
-/**
- * Onboarding state per user. Used by the Welcome card on Loops list to
- * decide whether to show "start onboarding" / "continue" / nothing.
- *
- *   - `started`: a loop was spawned, but the user hasn't marked finished
- *     (`loopId` points at the in-progress onboarding loop).
- *   - `done`: user clicked skip/complete OR finished naturally. Card hides.
- */
-export type OnboardingState = {
-  status: "started" | "done"
-  loopId?: string
-  at: string
-}
-
 export type PersonalConfigDisk = {
   /** Mixed: "default" key is a string, all other keys are providers. */
   providers: Record<string, ProviderConfigDisk | string>
-  /** PTY shell override (highest precedence). */
-  shell?: string
-  /** Optional. Missing = "fresh" (user hasn't started or dismissed yet). */
-  onboarding?: OnboardingState
   /** Authoritative kn/notes remotes — the personal repo is self-describing.
    *  host config.json's knowledge/notes are a display mirror; these are what a
    *  loop actually connects to (with the user's vault key). */
@@ -227,8 +209,6 @@ export type PersonalConfig = {
    * in mcpServers works, and (b) substitute `${VAR}` in provider.apiKey.
    */
   vaultEnvs: Record<string, string>
-  shell?: string
-  onboarding?: OnboardingState
   /** Authoritative kn/notes remotes (self-describing personal repo). */
   knowledge?: RemoteSpec
   notes?: RemoteSpec
@@ -449,8 +429,6 @@ export async function loadPersonalConfig(
     default: defaultProviderName && providers[defaultProviderName] ? rawDefault : "",
     providers,
     vaultEnvs,
-    ...(disk.shell ? { shell: disk.shell } : {}),
-    ...(disk.onboarding ? { onboarding: disk.onboarding } : {}),
     ...(disk.knowledge ? { knowledge: disk.knowledge } : {}),
     ...(disk.notes ? { notes: disk.notes } : {}),
   }
@@ -608,10 +586,6 @@ export async function savePersonalDisk(
       }
     }
     disk.providers = patch.providers
-  }
-  if (patch.shell !== undefined) {
-    if (typeof patch.shell !== "string") return { ok: false, error: `shell must be a string` }
-    disk.shell = patch.shell || undefined
   }
 
   await mkdir(personalLoopatDir(user), { recursive: true })

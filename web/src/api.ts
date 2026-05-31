@@ -1617,28 +1617,6 @@ export async function spawnLoopFromThread(
   return { loopId: j.loopId, seedPrompt: j.seedPrompt, messageCount: j.messageCount }
 }
 
-// ── onboarding ──
-
-export type OnboardingStatus = { state: "fresh" | "started" | "done"; loopId?: string }
-
-export async function getOnboarding(): Promise<OnboardingStatus> {
-  const r = await apiFetch("/api/onboarding")
-  if (!r.ok) return { state: "fresh" }
-  return (await r.json()) as OnboardingStatus
-}
-
-export async function startOnboarding(): Promise<{ loopId?: string; error?: string }> {
-  const r = await apiFetch("/api/onboarding/start", { method: "POST" })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { error: j.error ?? "start failed" }
-  return { loopId: j.loopId }
-}
-
-export async function markOnboardingDone(): Promise<boolean> {
-  const r = await apiFetch("/api/onboarding/done", { method: "POST" })
-  return r.ok
-}
-
 // ── MCP servers ──
 
 /**

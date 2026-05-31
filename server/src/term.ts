@@ -37,11 +37,9 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     const driver = effectiveDriver(meta)
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
 
-    // Shell resolution (highest precedence first):
-    //   1. personal config `shell` — user's per-user override
-    //   2. /bin/bash — POSIX-guaranteed fallback
-    let innerShell = personalCfg.shell
-    if (!innerShell) innerShell = "/bin/bash"
+    // Inner shell: fish, baked into the sandbox image — no per-user override
+    // (the base image ships a good interactive shell so users don't configure it).
+    const innerShell = "fish"
     // `script -qfc "<shell> -i" /dev/null` gives the inner shell a fresh
     // controlling tty so prompt + job control work cleanly. PATH (incl.
     // the mise shims dir) is baked into the per-loop image's ENV, so the

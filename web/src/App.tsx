@@ -22,9 +22,8 @@ import { SettingsPage } from "./pages/SettingsPage"
 import { AdminSystemPage } from "./pages/AdminSystemPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
-import { WelcomeCard } from "./components/WelcomeCard"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
-import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getOnboarding, getPersonalStatus, type OnboardingStatus, type PersonalStatus } from "./api"
+import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, type PersonalStatus } from "./api"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 import { ThemeProvider, useTheme } from "./theme"
 
@@ -330,22 +329,17 @@ function LoopRedirect() {
   // first render. With the context, authLoading is already false (Layout
   // gates Shell on it) so currentUser is final when this mounts.
   const ws = useWorkspace()
-  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
   const [personal, setPersonal] = useState<PersonalStatus | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!ws.currentUser) return
-    Promise.all([getOnboarding(), getPersonalStatus()]).then(([o, p]) => {
-      setOnboarding(o)
-      setPersonal(p)
-    })
+    getPersonalStatus().then((p) => setPersonal(p))
   }, [ws.currentUser, reloadKey])
 
-  // For logged-in users, wait until both fetches resolve before deciding the
-  // route. Otherwise the very first render (currentUser set, fetches pending)
-  // falls through to Navigate(/loop/<first>) and we never see the Welcome card.
-  if (ws.currentUser && (onboarding === null || personal === null)) {
+  // For logged-in users, wait until the personal fetch resolves before deciding
+  // the route, so the first render doesn't fall through to a loop redirect.
+  if (ws.currentUser && personal === null) {
     return null
   }
 
@@ -361,20 +355,6 @@ function LoopRedirect() {
     !isSetupPersonalRepoDismissed()
   ) {
     return <SetupPersonalRepoCard onDismiss={() => setReloadKey((k) => k + 1)} />
-  }
-
-  if (
-    ws.currentUser &&
-    onboarding &&
-    onboarding.state !== "done" &&
-    personal?.imported
-  ) {
-    return (
-      <WelcomeCard
-        status={onboarding}
-        onChange={() => setReloadKey((k) => k + 1)}
-      />
-    )
   }
 
   if (ws.loops.length === 0) {
