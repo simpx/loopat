@@ -685,7 +685,7 @@ export async function importPersonalFromRepo(
   const tmp = await mkdtemp(join(tmpdir(), `loopat-import-${userId}-`))
   // Bootstrap: first clone of the personal repo uses the host deploy-key (no
   // vault key exists yet). Every later op uses the user's vault key.
-  const cloneEnv = isHttps ? { ...process.env } : { ...process.env, GIT_SSH_COMMAND: bootstrapSshCommand(userId) }
+  const cloneEnv = isHttps ? { ...process.env } : { ...process.env, GIT_SSH_COMMAND: personalSshCommand(userId) }
   try {
     await execFileP("git", ["clone", "--", repoUrl, tmp], { env: cloneEnv })
   } catch (e: any) {
@@ -761,11 +761,13 @@ export async function importPersonalFromRepo(
 }
 
 /**
- * The ssh command a server-side git op uses to act AS the user — its OWN key
- * from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`). If the key
- * isn't there the op simply fails: we deliberately do NOT fall back to the host
- * deploy-key, so a loop never borrows the host's access. Authorization tracks
- * the personal repo, not the host (see behavior/02-personal-permissions.md).
+ * TEAM key: the ssh command a git op uses to reach SHARED context — knowledge /
+ * notes / repos — as the user, with their OWN key from the selected vault
+ * (`vaults/<vault>/mounts/home/.ssh/id`). If the key isn't there the op simply
+ * fails: we deliberately do NOT fall back to the host deploy-key, so a loop
+ * never borrows access it wasn't granted. Authorization tracks the personal
+ * repo (which declares the team it connects to), not the host
+ * (see behavior/02-personal-permissions.md).
  */
 function sshCommandForUser(userId: string, vault: string = "default"): string {
   const vaultKey = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh", "id")
@@ -773,11 +775,15 @@ function sshCommandForUser(userId: string, vault: string = "default"): string {
 }
 
 /**
- * Bootstrap ONLY: the first clone/decrypt of the personal repo itself, before
- * any vault key exists. Uses the host-managed deploy-key — the one credential
- * the host legitimately holds to unlock a personal repo.
+ * PERSONAL key: reaching the user's OWN personal repo (clone / pull / push) uses
+ * the host-managed per-user deploy-key — permanently, not just at bootstrap.
+ * personal access is a separate concern from the vault key (which reaches the
+ * team): the deploy-key + git-crypt key are the two external credentials that
+ * unlock a personal repo, both held in host-secrets/<user>; the vault key lives
+ * INSIDE the (now-unlocked) personal repo and only reaches the team. This avoids
+ * the recursion of "use a key stored in the repo to reach the repo itself".
  */
-function bootstrapSshCommand(userId: string): string {
+function personalSshCommand(userId: string): string {
   return `ssh -i ${hostDeployKeyPath(userId)} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
 }
 
@@ -941,7 +947,7 @@ async function autoInitGitCrypt(
 
   try {
     await execFileP("git", ["-C", repoDir, "push", "origin", `HEAD:${branch}`], {
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+      env: { ...process.env, GIT_SSH_COMMAND: personalSshCommand(userId) },
     })
   } catch (e: any) {
     await rollbackSavedKey(userId)
@@ -1024,7 +1030,7 @@ export async function inspectPersonalDirty(userId: string): Promise<PersonalDirt
   if (hasRemote) {
     try {
       await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], {
-        env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+        env: { ...process.env, GIT_SSH_COMMAND: personalSshCommand(userId) },
         timeout: 15_000,
       })
     } catch {}
@@ -1128,7 +1134,7 @@ export async function syncPersonalToRemote(
 
   try {
     await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+      env: { ...process.env, GIT_SSH_COMMAND: personalSshCommand(userId) },
     })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
@@ -1247,7 +1253,7 @@ export async function pullPersonalFromRemote(
       try { await execFileP("git", ["-C", dir, "rebase", "--abort"], { env: silent }) } catch {}
       try { await execFileP("git", ["-C", dir, "merge", "--abort"], { env: silent }) } catch {}
       await execFileP("git", ["-C", dir, "fetch", "origin"], {
-        env: { ...silent, GIT_SSH_COMMAND: sshCommandForUser(userId) }, timeout: 30_000,
+        env: { ...silent, GIT_SSH_COMMAND: personalSshCommand(userId) }, timeout: 30_000,
       })
       await execFileP("git", ["-C", dir, "reset", "--hard", `origin/${branch}`], { env: silent })
       await execFileP("git", ["-C", dir, "clean", "-fd"], { env: silent })
@@ -1260,7 +1266,7 @@ export async function pullPersonalFromRemote(
   // Normal pull: commit local edits so the tree is clean, then rebase onto origin.
   const c = await commitLocalChanges(dir, "loopat: local personal edits")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, branch, sshCommandForUser(userId))
+  const reb = await rebaseOntoOrigin(dir, branch, personalSshCommand(userId))
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
@@ -1297,14 +1303,14 @@ export async function pushPersonalToRemote(
 
   const c = await commitLocalChanges(dir, "loopat: sync personal vault")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, branch, sshCommandForUser(userId))
+  const reb = await rebaseOntoOrigin(dir, branch, personalSshCommand(userId))
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
   }
   try {
     await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`], {
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId) },
+      env: { ...process.env, GIT_SSH_COMMAND: personalSshCommand(userId) },
     })
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
@@ -1732,9 +1738,28 @@ async function ensureContextWorktree(repo: string, path: string, branchName: str
   const start = await remoteStartPoint(repo)
   // -B (not -b): reset the branch if it lingers from a removed worktree, so a
   // rebuild always re-opens cleanly from the start point.
-  const args = ["-C", repo, "worktree", "add", "-B", branchName, path]
-  if (start) args.push(start)
-  await execFileP("git", args)
+  const tail = ["-B", branchName, path]
+  if (start) tail.push(start)
+
+  // git-crypt + worktree: the git-crypt key lives in the MAIN repo's
+  // `.git/git-crypt`, but a worktree's gitdir is separate and has no key — so a
+  // normal `worktree add` checkout runs the smudge filter, can't find the key,
+  // and fails ("Unable to open key file"). For a git-crypt repo, add WITHOUT
+  // checkout, then `git-crypt unlock` the worktree with the host key: that
+  // installs the key into the worktree's gitdir AND decrypts the working tree.
+  if (existsSyncBase(join(repo, ".git", "git-crypt"))) {
+    // git-crypt + worktree: a worktree's gitdir has no git-crypt key, so the
+    // checkout's smudge filter crashes ("Unable to open key file") — and
+    // git-crypt doesn't support worktrees anyway (it wants a `.git` dir). We
+    // don't NEED the worktree's vaults decrypted: the sandbox's vault mounts
+    // read the MAIN repo's already-unlocked `personal/.loopat/vaults`. So
+    // neutralize the smudge filter (`smudge=cat`, `required=false`) — the
+    // git-crypt'd files (vaults/**) land encrypted-as-is, everything else
+    // (memory, etc.) checks out plainly.
+    await execFileP("git", ["-C", repo, "-c", "filter.git-crypt.smudge=cat", "-c", "filter.git-crypt.required=false", "worktree", "add", ...tail])
+  } else {
+    await execFileP("git", ["-C", repo, "worktree", "add", ...tail])
+  }
 }
 
 /**

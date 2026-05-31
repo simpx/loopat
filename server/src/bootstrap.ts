@@ -21,6 +21,22 @@ import { listUsers } from "./auth"
 
 type Check = { ok: boolean; label: string; hint?: string }
 
+/** The host to print in the "open …" url. HOST=0.0.0.0/:: means "all
+ *  interfaces" — localhost works locally but isn't reachable from other
+ *  machines, so resolve a real LAN ip instead. */
+function accessHost(): string {
+  const h = process.env.HOST
+  if (!h || h === "127.0.0.1" || h === "localhost") return "localhost"
+  if (h !== "0.0.0.0" && h !== "::") return h
+  try {
+    const ip = execFileSync(
+      "sh", ["-c", "ip route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}' || ipconfig getifaddr en0 2>/dev/null"],
+      { stdio: "pipe" },
+    ).toString().trim()
+    return ip || "localhost"
+  } catch { return "localhost" }
+}
+
 function checkPodman(): Check {
   const isMac = process.platform === "darwin"
   let version: string
@@ -146,7 +162,7 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   console.log(bar)
   const blockers = checks.filter((c) => !c.ok)
   if (blockers.length === 0) {
-    console.log(`  ${green("ready.")} open ${cyan(`http://localhost:${process.env.PORT ?? 10001}`)}\n`)
+    console.log(`  ${green("ready.")} open ${cyan(`http://${accessHost()}:${process.env.PORT ?? 10001}`)}\n`)
   } else {
     console.log(`  ${yellow(`${blockers.length} thing(s) to fix`)} before chat will work — see hints above.\n`)
   }
