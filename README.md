@@ -3,6 +3,12 @@
 > **Self-hosted AI workspace built around context management — works solo, scales to teams**
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/loopat"><img src="https://img.shields.io/npm/v/loopat?logo=npm&color=cb3837" alt="npm version"></a>
+  <a href="https://github.com/simpx/loopat/pkgs/container/loopat"><img src="https://img.shields.io/badge/ghcr.io-simpx%2Floopat-2496ED?logo=docker&logoColor=white" alt="GHCR image"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-green" alt="License"></a>
+</p>
+
+<p align="center">
   <img src="docs/screenshot.png" alt="loopat — Loop view with chat, workdir, terminal, and team DM" width="100%">
 </p>
 

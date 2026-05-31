@@ -9,6 +9,10 @@ name: Publish to npm
 # Setup (one time): add the npm Automation token (bypasses 2FA) as a repo
 # secret named NPM_TOKEN — Settings -> Secrets and variables -> Actions.
 
+# Opt all JS actions into the Node 24 runtime (Node 20 is deprecated).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     tags:
@@ -19,15 +23,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Bun is needed to build web/dist (vite) during prepublishOnly.
       - uses: oven-sh/setup-bun@v2
 
       # Node provides npm and wires NODE_AUTH_TOKEN into the registry.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       # prepublishOnly runs `bun install && bun run build:web` for us.
