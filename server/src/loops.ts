@@ -1270,15 +1270,16 @@ export async function ensureUiNotesWorktree(user: string): Promise<void> {
 export async function syncUiNotes(user: string): Promise<PersonalPushResult> {
   const dir = uiNotesDir(user)
   await ensureUiNotesWorktree(user)
+  const branch = await remoteDefaultBranch(dir)
   const c = await commitLocalChanges(dir, "loopat: edit notes")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, "main")
+  const reb = await rebaseOntoOrigin(dir, branch)
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
   }
   try {
-    await execFileP("git", ["-C", dir, "push", "origin", "HEAD:main"])
+    await execFileP("git", ["-C", dir, "push", "origin", `HEAD:${branch}`])
   } catch (e: any) {
     const stderr = (e?.stderr ?? "").toString().trim()
     return { ok: false, error: `push failed: ${stderr || e?.message || e}`, needsPull: true }
@@ -1296,6 +1297,7 @@ export async function ffUpdateUiNotes(
 ): Promise<{ ok: true } | { ok: false; diverged?: boolean; error: string }> {
   const dir = uiNotesDir(user)
   await ensureUiNotesWorktree(user)
+  const branch = await remoteDefaultBranch(dir)
   try {
     await execFileP("git", ["-C", dir, "fetch", "origin"], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
@@ -1305,12 +1307,12 @@ export async function ffUpdateUiNotes(
   }
   // No upstream yet → nothing to pull.
   try {
-    await execFileP("git", ["-C", dir, "rev-parse", "--verify", "--quiet", "origin/main"])
+    await execFileP("git", ["-C", dir, "rev-parse", "--verify", "--quiet", `origin/${branch}`])
   } catch {
     return { ok: true }
   }
   try {
-    await execFileP("git", ["-C", dir, "merge", "--ff-only", "origin/main"], {
+    await execFileP("git", ["-C", dir, "merge", "--ff-only", `origin/${branch}`], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     })
     return { ok: true }
@@ -1327,6 +1329,7 @@ export async function ffUpdateUiNotes(
 export async function notesBehind(user: string): Promise<number> {
   const dir = uiNotesDir(user)
   await ensureUiNotesWorktree(user)
+  const branch = await remoteDefaultBranch(dir)
   try {
     await execFileP("git", ["-C", dir, "fetch", "origin"], {
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
@@ -1335,7 +1338,7 @@ export async function notesBehind(user: string): Promise<number> {
     return 0
   }
   try {
-    const { stdout } = await execFileP("git", ["-C", dir, "rev-list", "--count", "HEAD..origin/main"])
+    const { stdout } = await execFileP("git", ["-C", dir, "rev-list", "--count", `HEAD..origin/${branch}`])
     return parseInt(stdout.trim(), 10) || 0
   } catch {
     return 0
@@ -1669,6 +1672,22 @@ async function ensureContextWorktree(repo: string, path: string, branchName: str
  * loop opens from the latest shared state. Returns null to fall back to local
  * HEAD (solo / offline / no remote / no origin/main yet).
  */
+/** The remote's default branch (origin/HEAD) — e.g. main or master. Falls back
+ *  to "main". loopat must NOT assume "main": team repos are often on "master". */
+async function remoteDefaultBranch(dir: string): Promise<string> {
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])
+    const b = stdout.trim().replace(/^origin\//, "")
+    if (b) return b
+  } catch {}
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "ls-remote", "--symref", "origin", "HEAD"])
+    const m = stdout.match(/ref:\s+refs\/heads\/(\S+)\s+HEAD/)
+    if (m?.[1]) return m[1]
+  } catch {}
+  return "main"
+}
+
 async function remoteStartPoint(repo: string): Promise<string | null> {
   try {
     await execFileP("git", ["-C", repo, "remote", "get-url", "origin"])
@@ -1678,9 +1697,10 @@ async function remoteStartPoint(repo: string): Promise<string | null> {
   try {
     await execFileP("git", ["-C", repo, "fetch", "--quiet", "origin"], { timeout: 15_000 })
   } catch {}
+  const branch = await remoteDefaultBranch(repo)
   try {
-    await execFileP("git", ["-C", repo, "rev-parse", "--verify", "--quiet", "origin/main^{commit}"])
-    return "origin/main"
+    await execFileP("git", ["-C", repo, "rev-parse", "--verify", "--quiet", `origin/${branch}^{commit}`])
+    return `origin/${branch}`
   } catch {
     return null
   }
