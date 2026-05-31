@@ -6,55 +6,56 @@
  *   sandbox:  `aone foo`  →  shim  →  loopat-host (forwarder)  →
  *   server :  POST /api/host-exec  →  execFile("aone", ["foo"]) on the host
  *
- * Boundaries (matches the "pure remote-talking CLI" assumption):
- *   - runs with HOST user permissions (intentionally relaxed)
- *   - cwd is a per-loop host workdir (mirrors the loop's own workdir); the cli
- *     cannot see anything inside the sandbox
- *   - whitelist: ONLY clis the loop declared (host-clis.json, later from mise)
- *   - execFile, never a shell — argv is an array, no injection
+ * Trust model (deliberately simple): mounting the socket into a sandbox IS the
+ * trust decision — a host that turns on host-cli for a loop already trusts that
+ * loop, so there is NO whitelist. The loop may run any host cli (it can call the
+ * forwarder directly with a hand-built command).
+ *
+ * The mise-generated shims aren't a whitelist either — they're the declarative
+ * ENTRY POINT. "Which clis did the loop declare in `[host].clis`" shows up as
+ * "which shim binaries exist on PATH"; that's a UX convention (what the AI can
+ * conveniently reach), not a security boundary. The only boundary is whether
+ * the socket is mounted at all.
+ *
+ *   - runs with HOST user permissions
+ *   - cwd is a per-loop host workdir (mirrors the loop's workdir); the cli
+ *     cannot see inside the sandbox
+ *   - execFile, never a shell — argv is an array
  */
 import { execFile } from "node:child_process"
-import { mkdir, writeFile, chmod, readFile } from "node:fs/promises"
-import { existsSync, rmSync } from "node:fs"
+import { mkdir, writeFile, chmod } from "node:fs/promises"
+import { existsSync, rmSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { loopDir } from "./paths"
+import { loopDir, LOOPAT_HOME } from "./paths"
 
 /** A per-loop host workdir — the host-side mirror of the loop's own workdir. */
 export function hostWorkdir(loopId: string): string {
   return join(loopDir(loopId), "host-workdir")
 }
 
-/** The loop's declared host-clis (the whitelist). POC reads a json file next to
- *  the loop; later this is generated from the loop's mise `host:` backend. */
-export async function readDeclaredHostClis(loopId: string): Promise<string[]> {
-  try {
-    const raw = await readFile(join(loopDir(loopId), "host-clis.json"), "utf8")
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []
-  } catch {
-    return []
-  }
+/** The dir that holds the host-exec unix socket. We mount the DIR (not the
+ *  socket file) into sandboxes so a server restart — which recreates the
+ *  socket inode — stays visible to already-running containers. */
+export function hostExecDir(): string {
+  return join(LOOPAT_HOME, "host-exec")
+}
+export function hostExecSocketPath(): string {
+  return join(hostExecDir(), "host-exec.sock")
 }
 
 export type HostExecResult =
   | { ok: true; exitCode: number; stdout: string; stderr: string }
   | { ok: false; error: string }
 
-/**
- * Run a whitelisted host-cli in the loop's host workdir, with host permissions.
- * Pure function — the caller supplies the whitelist + cwd so it's easy to test.
- */
+/** Run a host-cli in the loop's host workdir, with host permissions. No
+ *  whitelist — mounting the socket into the sandbox is the trust decision. */
 export async function runHostCli(opts: {
   cli: string
   args: string[]
   cwd: string
-  allowed: string[]
   stdin?: string
   timeoutMs?: number
 }): Promise<HostExecResult> {
-  if (!opts.allowed.includes(opts.cli)) {
-    return { ok: false, error: `host-cli not allowed: '${opts.cli}' — declare it in host-clis.json` }
-  }
   await mkdir(opts.cwd, { recursive: true })
   return new Promise((resolve) => {
     const child = execFile(
@@ -93,13 +94,14 @@ export async function writeHostShims(binDir: string, clis: string[]): Promise<vo
 }
 
 /**
- * Unix-socket server that runs whitelisted host-clis for loops. The sandbox's
+ * Unix-socket server that runs host-clis for loops. The sandbox's
  * forwarder connects over the *mounted* socket — no TCP, no exposed port, and
  * only a container that has the socket mounted can reach it (the mount itself
  * is a layer of isolation). Reuses runHostCli. stdout/stderr come back base64
  * so the sh forwarder can pull them out of the JSON without escaping pain.
  */
 export function serveHostExec(socketPath: string, deps: { loopExists: (id: string) => Promise<boolean> }) {
+  try { mkdirSync(hostExecDir(), { recursive: true }) } catch {}
   try { if (existsSync(socketPath)) rmSync(socketPath) } catch {}
   return Bun.serve({
     unix: socketPath,
@@ -112,9 +114,8 @@ export function serveHostExec(socketPath: string, deps: { loopExists: (id: strin
       const args = Array.isArray(b.args) ? b.args.map(String) : []
       if (!loopId || !cli) return Response.json({ error: "loopId + cli required" })
       if (!(await deps.loopExists(loopId))) return Response.json({ error: "unknown loop" })
-      const allowed = await readDeclaredHostClis(loopId)
       const r = await runHostCli({
-        cli, args, cwd: hostWorkdir(loopId), allowed,
+        cli, args, cwd: hostWorkdir(loopId),
         stdin: typeof b.stdin === "string" ? b.stdin : undefined,
       })
       if (!r.ok) return Response.json({ error: r.error })

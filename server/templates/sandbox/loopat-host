@@ -5,7 +5,7 @@
 #
 # Injected into the sandbox:
 #   LOOPAT_HOST_SOCK  — path to the mounted host-exec socket
-#   LOOPAT_LOOP_ID    — this loop's id (server uses it for whitelist + workdir)
+#   LOOPAT_LOOP_ID    — this loop's id (server uses it to pick the host workdir)
 #
 # POC notes: args are JSON-encoded naively (assumes no embedded quotes /
 # backslashes); stdout/stderr come back base64 so they're safe to pull out of
