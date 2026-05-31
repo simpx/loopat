@@ -104,6 +104,15 @@ RUN mkdir -p /opt/loopat-mise/shims /opt/loopat-mise/config /opt/loopat-mise/cac
  && chown -R loopat:loopat /opt/loopat-mise \
  && chmod -R 755 /opt/loopat-mise
 
+# Native host-cli forwarder. The sandbox's built-in way to run a host-only cli
+# (macOS-only, or a machine-bound company cli) on behalf of the loop:
+#   shim(<cli>) → loopat-host → mounted unix socket → host execFile
+# This forwarder is generic (same for every loop), so it's baked into the image.
+# Per-cli shims are generated per-loop (mise `host:` backend) into the mise shims
+# dir, which is already first on PATH — no extra mount or PATH wiring needed.
+COPY loopat-host /usr/local/bin/loopat-host
+RUN chmod 0755 /usr/local/bin/loopat-host
+
 # Switch to loopat. mise install (per-loop child build) and runtime
 # exec'd processes all run as this user.
 USER loopat

@@ -508,12 +508,17 @@ export async function probePodman(): Promise<PodmanProbeResult> {
  *  through and invalidate stale child images.
  */
 export async function baseContainerfileHash(): Promise<string> {
-  const containerfile = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox", "Containerfile")
+  const dir = join(LOOPAT_INSTALL_DIR, "server", "templates", "sandbox")
+  const containerfile = join(dir, "Containerfile")
   if (!existsSync(containerfile)) {
     throw new Error(`Containerfile not found at ${containerfile}`)
   }
-  const content = await readFile(containerfile, "utf8")
-  return createHash("sha256").update(content).digest("hex").slice(0, 16)
+  const h = createHash("sha256").update(await readFile(containerfile, "utf8"))
+  // Files COPY'd by the Containerfile also affect the image — hash them too so
+  // editing the forwarder rebuilds the base image.
+  const forwarder = join(dir, "loopat-host")
+  if (existsSync(forwarder)) h.update(await readFile(forwarder, "utf8"))
+  return h.digest("hex").slice(0, 16)
 }
 
 let _imageBuildInFlight: Promise<void> | null = null
