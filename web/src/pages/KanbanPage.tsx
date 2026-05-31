@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { KanbanBoard, type KanbanBoardHandle } from "../components/kanban/KanbanBoard"
 import { CardDetailDialog } from "../components/kanban/CardDetailDialog"
-import { moveKanbanCard, createKanbanColumn, listBoards, createBoard, renameBoard, type KanbanCard } from "../api"
+import { moveKanbanCard, createKanbanColumn, listBoards, createBoard, renameBoard, saveNotes, notesBehind, refreshNotes, type KanbanCard } from "../api"
 
 type UndoState = { cid: string; card: KanbanCard; fromFile: string; toFile: string } | null
 const ARCHIVE_FILE = "archived.md"
@@ -22,6 +22,33 @@ export function KanbanPage() {
   const boardRef = useRef<KanbanBoardHandle>(null)
 
   const refresh = useCallback(() => boardRef.current?.refresh(), [])
+
+  // notes/kanban share the user's notes worktree. Poll how far behind origin we
+  // are every 5s (a hint), pull on Refresh, push on Save.
+  const [behind, setBehind] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+  useEffect(() => {
+    const tick = () => notesBehind().then(setBehind).catch(() => {})
+    tick()
+    const id = setInterval(tick, 5000)
+    return () => clearInterval(id)
+  }, [])
+  const doRefresh = useCallback(async () => {
+    setSyncing(true)
+    await refreshNotes().catch(() => {})
+    setSyncing(false)
+    setBehind(0)
+    boardRef.current?.refresh()
+  }, [])
+  const doSave = useCallback(async () => {
+    setSyncing(true)
+    const r = await saveNotes()
+    setSyncing(false)
+    if (!r.ok) {
+      if (r.conflict) alert(`保存了本地，但和远端冲突 (${(r.files ?? []).join(", ")})。本地保留——去 Notes 里 take remote 或手动解决。`)
+      else alert(`推送到远端失败：${r.error ?? "unknown"}`)
+    }
+  }, [])
 
   useEffect(() => {
     listBoards().then(setBoards)
@@ -115,9 +142,19 @@ export function KanbanPage() {
           >+</button>
         )}
         <div className="flex-1" />
-        <button onClick={refresh}
-          className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
-          title="Refresh board">
+        <button onClick={doSave} disabled={syncing}
+          className="shrink-0 text-[11px] px-2 py-0.5 rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 transition-colors"
+          title="保存并推送到远端">
+          {syncing ? "…" : "保存"}
+        </button>
+        {behind > 0 && (
+          <span className="shrink-0 text-[11px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="远端有更新，点 ↻ 拉取">
+            远端 +{behind}
+          </span>
+        )}
+        <button onClick={doRefresh} disabled={syncing}
+          className="shrink-0 text-[11px] px-2 py-0.5 rounded border border-gray-200 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50"
+          title="拉取远端最新并刷新">
           ↻
         </button>
         <button onClick={() => setShowArchived((v) => !v)}

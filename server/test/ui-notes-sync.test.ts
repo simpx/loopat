@@ -92,6 +92,21 @@ test("refresh (ffUpdateUiNotes) ff-pulls and clears behind", async () => {
   expect(await loops.notesBehind(user)).toBe(0)
 })
 
+test("kanban writes land in the user's worktree and push to origin", async () => {
+  const kanban = await import("../src/kanban.ts")
+  await kanban.kanbanUserCtx.run(user, async () => {
+    await kanban.addCard("default", "todo.md", { text: "hello-kanban" })
+  })
+  // written into the per-user notes worktree, under focus/boards/
+  expect(existsSync(join(wt, "focus", "boards", "default", "todo.md"))).toBe(true)
+  // pushed by the explicit notes save, like any edit
+  const r = await loops.syncUiNotes(user)
+  expect(r.ok).toBe(true)
+  await g(["fetch", "origin"], other)
+  await g(["reset", "--hard", "origin/main"], other)
+  expect(existsSync(join(other, "focus", "boards", "default", "todo.md"))).toBe(true)
+})
+
 test("real conflict held back; the local edit is NOT lost", async () => {
   await remoteEdit("seed.md", "seed-remote\n", "remote edits seed")
   await writeFile(join(wt, "seed.md"), "seed-local\n")

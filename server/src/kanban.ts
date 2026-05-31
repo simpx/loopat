@@ -3,16 +3,30 @@ import { join, basename } from "node:path"
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { workspaceNotesDir } from "./paths"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { uiNotesDir } from "./paths"
 import { createLoop, patchLoopMeta, type LoopMeta } from "./loops"
 
 const execFileP = promisify(execFile)
+
+// Kanban writes land in the editing user's notes UI-loop worktree (uiNotesDir) —
+// the same per-user worktree as notes files. The user is carried per-request via
+// AsyncLocalStorage, so the existing function signatures stay untouched. Changes
+// reach origin through the explicit notes save (syncUiNotes), like any edit.
+export const kanbanUserCtx = new AsyncLocalStorage<string>()
+function userNotesDir(): string {
+  const u = kanbanUserCtx.getStore()
+  if (!u) throw new Error("kanban: missing user context")
+  return uiNotesDir(u)
+}
 
 // Auto-commit kanban writes so loop-worktree pushes don't silently wipe
 // them via the post-receive reset --hard hook. Scoped to focus/ to avoid
 // racing with vaultWrite's own commits on other paths under notes/.
 async function commitFocus(msg: string): Promise<void> {
-  const dir = workspaceNotesDir()
+  // Commit into the user's worktree so refresh (ff-only) isn't blocked by a
+  // dirty tree. Pushed to origin later by the explicit notes save.
+  const dir = userNotesDir()
   if (!existsSync(join(dir, ".git"))) return
   const env = {
     ...process.env,
@@ -51,7 +65,7 @@ export type KanbanColumn = {
 // ── board path helpers ──
 
 function boardsRoot(): string {
-  return join(workspaceNotesDir(), "focus", "boards")
+  return join(userNotesDir(), "focus", "boards")
 }
 
 function boardDir(board: string): string {

@@ -53,7 +53,7 @@ import {
   loopsDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
-import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard } from "./kanban"
+import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import {
   createUser,
@@ -2322,6 +2322,14 @@ app.post("/api/workspace/repo/:name/pull", requireAuth, async (c) => {
 // ── topics ──
 
 // ── kanban: focus boards (one directory per board, one .md file per column) ──
+// Kanban edits go through the editing user's notes worktree (a per-user UI
+// loop): carry the user via AsyncLocalStorage + ensure the worktree exists.
+// Changes reach origin through the explicit notes save (/api/notes/save).
+app.use("/api/kanban/*", requireAuth, async (c, next) => {
+  const userId = c.get("userId") as string
+  await ensureUiNotesWorktree(userId)
+  return kanbanUserCtx.run(userId, () => next())
+})
 
 // Board management
 app.get("/api/kanban/boards", requireAuth, async (c) => {
