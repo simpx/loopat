@@ -710,7 +710,7 @@ export function PersonalRepoPanel({ onDone }: { onDone?: () => void } = {}) {
  *     three independent acknowledgements that data will be lost.
  */
 function ImportedPanel({ status }: { status: PersonalStatus }) {
-  type Action = null | "export" | "delete" | "pull" | "push"
+  type Action = null | "export" | "delete" | "pull" | "push" | "showkey"
   const [action, setAction] = useState<Action>(null)
   const [pullResult, setPullResult] = useState<{ ok: boolean; error?: string; conflict?: boolean; files?: string[]; needsStash?: boolean } | null>(null)
   const [pushResult, setPushResult] = useState<{ ok: boolean; error?: string; conflict?: boolean; files?: string[]; needsPull?: boolean } | null>(null)
@@ -760,6 +760,8 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
           onDone={() => setAction(null)}
           onRetry={handlePush}
         />
+      ) : action === "showkey" ? (
+        <ShowPublicKeyFlow publicKey={status.publicKey} onDone={() => setAction(null)} />
       ) : (
         <div className="flex flex-col gap-2">
           {/* Pull/Push buttons */}
@@ -781,6 +783,15 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
               Push
             </button>
           </div>
+          {status.publicKey && (
+            <button
+              type="button"
+              onClick={() => setAction("showkey")}
+              className="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-700 border border-gray-200 rounded hover:bg-gray-50"
+            >
+              Show SSH public key (deploy key)
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setAction("export")}
@@ -975,6 +986,52 @@ function PullPushResultFlow({
           Close
         </button>
       </div>
+    </div>
+  )
+}
+
+/** Reveal the personal repo's SSH *public* (deploy) key for re-pasting into the
+ *  git host. The public key is non-secret — no password gate, unlike the
+ *  git-crypt private key export. */
+function ShowPublicKeyFlow({ publicKey, onDone }: { publicKey: string | null; onDone: () => void }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    if (!publicKey) return
+    if (await copyText(publicKey)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2 border border-gray-200 rounded p-2.5">
+      <div className="text-xs font-semibold text-gray-900">SSH public key (deploy key)</div>
+      <div className="relative">
+        <textarea
+          readOnly
+          value={publicKey ?? ""}
+          rows={3}
+          className="w-full text-[11px] font-mono text-gray-800 bg-gray-50 border border-gray-200 rounded p-2 outline-none resize-none break-all"
+          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+        />
+        <button
+          type="button"
+          onClick={copy}
+          className="absolute top-1.5 right-1.5 px-2 py-0.5 text-[11px] rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+        >
+          {copied ? "copied" : "copy"}
+        </button>
+      </div>
+      <div className="text-[11px] text-gray-500 leading-relaxed">
+        Add this as a deploy key on your personal repo (with write access) if you
+        ever need to re-authorize this host. It's a public key — safe to share.
+      </div>
+      <button
+        type="button"
+        onClick={onDone}
+        className="self-end px-3 h-8 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+      >
+        Close
+      </button>
     </div>
   )
 }
