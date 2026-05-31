@@ -656,6 +656,21 @@ export async function saveNotes(): Promise<{
   return { ok: true, message: j.message }
 }
 
+// How many commits notes is behind origin (drives the "remote updated" hint).
+export async function notesBehind(): Promise<number> {
+  const r = await apiFetch("/api/notes/behind")
+  const j = await r.json().catch(() => ({}) as any)
+  return typeof j.behind === "number" ? j.behind : 0
+}
+
+// Refresh = ff-pull origin into the notes worktree. `diverged` means you have
+// unsaved local edits — the client keeps its draft and just re-reads.
+export async function refreshNotes(): Promise<{ ok: boolean; diverged?: boolean; error?: string }> {
+  const r = await apiFetch("/api/notes/refresh", { method: "POST" })
+  const j = await r.json().catch(() => ({}) as any)
+  return { ok: !!j.ok, diverged: j.diverged, error: j.error }
+}
+
 export async function vaultCreateFile(vault: VaultId, path: string): Promise<{ ok: boolean; error?: string }> {
   const r = await apiFetch(`/api/workspace/file?vault=${vault}`, {
     method: "POST",

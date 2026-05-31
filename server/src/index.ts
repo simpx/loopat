@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -2231,6 +2231,22 @@ app.post("/api/notes/save", requireAuth, async (c) => {
     return c.json(status, (r.conflict || r.needsPull) ? 409 : 400)
   }
   return c.json({ ok: true, message: r.message })
+})
+
+// How many commits the user's notes are behind origin (drives the "remote
+// updated" hint). Polled lightly by the client; no push.
+app.get("/api/notes/behind", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  return c.json({ behind: await notesBehind(userId) })
+})
+
+// Refresh = ff-pull origin/main into the user's notes worktree. Diverged (local
+// unsaved edits) is not an error — the client just keeps its draft.
+app.post("/api/notes/refresh", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const r = await ffUpdateUiNotes(userId)
+  if (!r.ok) return c.json({ ok: false, diverged: r.diverged ?? false, error: r.error }, r.diverged ? 200 : 400)
+  return c.json({ ok: true })
 })
 
 app.delete("/api/workspace/file", requireAuth, async (c) => {

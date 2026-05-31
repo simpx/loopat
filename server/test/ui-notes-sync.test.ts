@@ -80,6 +80,18 @@ test("remote moved elsewhere → rebase keeps local note AND pulls remote", asyn
   expect(existsSync(join(wt, "remote.md"))).toBe(true)
 })
 
+test("notesBehind detects a remote update", async () => {
+  await remoteEdit("hint.md", "h\n", "remote update for behind")
+  expect(await loops.notesBehind(user)).toBeGreaterThan(0)
+})
+
+test("refresh (ffUpdateUiNotes) ff-pulls and clears behind", async () => {
+  const r = await loops.ffUpdateUiNotes(user)
+  expect(r.ok).toBe(true)
+  expect(existsSync(join(wt, "hint.md"))).toBe(true)
+  expect(await loops.notesBehind(user)).toBe(0)
+})
+
 test("real conflict held back; the local edit is NOT lost", async () => {
   await remoteEdit("seed.md", "seed-remote\n", "remote edits seed")
   await writeFile(join(wt, "seed.md"), "seed-local\n")

@@ -15,6 +15,8 @@ import {
   vaultRead,
   vaultWrite,
   saveNotes,
+  notesBehind,
+  refreshNotes,
   vaultCreateFile,
   vaultCreateFolder,
   vaultDeleteFile,
@@ -180,6 +182,68 @@ function SyncWidget({ resource, canPush = true }: { resource: SyncResource; canP
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// notes is edited through a per-user UI-loop worktree. This bar polls how far
+// behind origin you are (every 5s — a hint, never an auto-refresh) and offers a
+// manual Refresh (ff-pull). On open it pulls once to start from the latest.
+function NotesSyncBar({ onRefreshed }: { onRefreshed: () => void }) {
+  const [behind, setBehind] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const onRefreshedRef = useRef(onRefreshed)
+  onRefreshedRef.current = onRefreshed
+
+  const doRefresh = useCallback(async () => {
+    setBusy(true); setMsg(null)
+    const r = await refreshNotes()
+    setBusy(false)
+    if (r.ok) { setBehind(0); onRefreshedRef.current() }
+    else if (r.diverged) setMsg("你有未保存的编辑，先保存再刷新")
+    else setMsg(r.error ?? "refresh failed")
+  }, [])
+
+  // On open: pull once to start from the latest.
+  useEffect(() => { void doRefresh() }, [doRefresh])
+
+  // Poll how far behind origin we are, every 5s. No auto-refresh — just the hint.
+  useEffect(() => {
+    const tick = () => notesBehind().then(setBehind).catch(() => {})
+    tick()
+    const id = setInterval(tick, 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <div className="px-3 py-2 border-t border-gray-200 flex flex-col gap-1.5 text-[11px]">
+      {behind > 0 ? (
+        <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-amber-800">
+          <span>远端已更新 {behind} 个改动</span>
+          <button
+            type="button"
+            onClick={doRefresh}
+            disabled={busy}
+            className="px-2 py-0.5 rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+          >
+            {busy ? "刷新中…" : "刷新"}
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 text-gray-400">
+          <span>已是最新</span>
+          <button
+            type="button"
+            onClick={doRefresh}
+            disabled={busy}
+            className="text-gray-500 hover:text-gray-900 underline disabled:opacity-50"
+          >
+            {busy ? "刷新中…" : "刷新"}
+          </button>
+        </div>
+      )}
+      {msg && <div className="text-amber-700">{msg}</div>}
     </div>
   )
 }
@@ -419,9 +483,8 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
       <div className="px-3 h-9 border-t border-gray-200 flex items-center text-[11px] text-gray-500">
         {VAULT_TAGLINE[vault]}
       </div>
-      {(vault === "knowledge" || vault === "notes") && (
-        <SyncWidget resource={vault} />
-      )}
+      {vault === "knowledge" && <SyncWidget resource={vault} />}
+      {vault === "notes" && <NotesSyncBar onRefreshed={() => setReloadKey((k) => k + 1)} />}
     </aside>
   )
 

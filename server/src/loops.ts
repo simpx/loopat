@@ -1286,6 +1286,62 @@ export async function syncUiNotes(user: string): Promise<PersonalPushResult> {
   return { ok: true, message: c.committed ? "saved & pushed" : "pushed" }
 }
 
+/**
+ * Refresh = the pull half of the notes UI loop: fetch + ff-only merge
+ * origin/main into the user's worktree. Skips silently if the worktree has
+ * diverged (committed-but-unpushed local edits) — those reconcile on save.
+ */
+export async function ffUpdateUiNotes(
+  user: string,
+): Promise<{ ok: true } | { ok: false; diverged?: boolean; error: string }> {
+  const dir = uiNotesDir(user)
+  await ensureUiNotesWorktree(user)
+  try {
+    await execFileP("git", ["-C", dir, "fetch", "origin"], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
+    })
+  } catch (e: any) {
+    return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+  // No upstream yet → nothing to pull.
+  try {
+    await execFileP("git", ["-C", dir, "rev-parse", "--verify", "--quiet", "origin/main"])
+  } catch {
+    return { ok: true }
+  }
+  try {
+    await execFileP("git", ["-C", dir, "merge", "--ff-only", "origin/main"], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    })
+    return { ok: true }
+  } catch {
+    // Not ff (local unpushed commits). Leave it; the next save rebases.
+    return { ok: false, diverged: true, error: "diverged — save your edits first" }
+  }
+}
+
+/**
+ * How many commits the user's notes worktree is behind origin/main (after a
+ * fetch). Drives the "remote updated" hint. 0 = up to date.
+ */
+export async function notesBehind(user: string): Promise<number> {
+  const dir = uiNotesDir(user)
+  await ensureUiNotesWorktree(user)
+  try {
+    await execFileP("git", ["-C", dir, "fetch", "origin"], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, timeout: 30_000,
+    })
+  } catch {
+    return 0
+  }
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "rev-list", "--count", "HEAD..origin/main"])
+    return parseInt(stdout.trim(), 10) || 0
+  } catch {
+    return 0
+  }
+}
+
 // ── Generic repo sync (knowledge / notes / repos) ─────────────────────
 //
 // Distinct from personal sync above: these workspace-level repos use the
