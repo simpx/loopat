@@ -1,0 +1,28 @@
+#!/bin/sh
+# loopat-host <cli> [args...] — run <cli> on the HOST, on behalf of this loop,
+# via the mounted unix socket. The sandbox can't run host-only clis (macOS
+# tools, machine-bound company clis), so a shim hands off to this forwarder.
+#
+# Injected into the sandbox:
+#   LOOPAT_HOST_SOCK  — path to the mounted host-exec socket
+#   LOOPAT_LOOP_ID    — this loop's id (server uses it for whitelist + workdir)
+#
+# POC notes: args are JSON-encoded naively (assumes no embedded quotes /
+# backslashes); stdout/stderr come back base64 so they're safe to pull out of
+# the JSON with grep. A hardened version would stream and length-prefix.
+cli="$1"; shift
+args=""
+for a in "$@"; do args="$args\"$a\","; done
+body="{\"loopId\":\"$LOOPAT_LOOP_ID\",\"cli\":\"$cli\",\"args\":[${args%,}]}"
+
+resp=$(curl -fsS --unix-socket "$LOOPAT_HOST_SOCK" -X POST http://localhost/host-exec \
+  -H "content-type: application/json" -d "$body") \
+  || { echo "loopat-host: cannot reach host socket" >&2; exit 127; }
+
+printf '%s' "$resp" | grep -o '"stdout_b64":"[^"]*"' | sed 's/.*"stdout_b64":"//; s/"$//' | base64 -d 2>/dev/null
+printf '%s' "$resp" | grep -o '"stderr_b64":"[^"]*"' | sed 's/.*"stderr_b64":"//; s/"$//' | base64 -d 2>/dev/null >&2
+
+err=$(printf '%s' "$resp" | grep -o '"error":"[^"]*"' | sed 's/.*"error":"//; s/"$//')
+if [ -n "$err" ]; then echo "loopat-host: $err" >&2; exit 126; fi
+
+exit "$(printf '%s' "$resp" | grep -o '"exitCode":[0-9]*' | grep -o '[0-9]*' || echo 0)"

@@ -15,8 +15,13 @@
  */
 import { execFile } from "node:child_process"
 import { mkdir, writeFile, chmod, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { existsSync, rmSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { loopDir } from "./paths"
+
+/** The forwarder script shipped in the package (sandbox-side `loopat-host`). */
+const FORWARDER_TEMPLATE = join(dirname(fileURLToPath(import.meta.url)), "..", "templates", "sandbox", "loopat-host")
 
 /** A per-loop host workdir — the host-side mirror of the loop's own workdir. */
 export function hostWorkdir(loopId: string): string {
@@ -82,6 +87,10 @@ export async function runHostCli(opts: {
  */
 export async function writeHostShims(binDir: string, clis: string[]): Promise<void> {
   await mkdir(binDir, { recursive: true })
+  // the forwarder the shims hand off to
+  const forwarder = join(binDir, "loopat-host")
+  await writeFile(forwarder, await readFile(FORWARDER_TEMPLATE, "utf8"))
+  await chmod(forwarder, 0o755)
   for (const cli of clis) {
     const p = join(binDir, cli)
     await writeFile(p, `#!/bin/sh\n# loopat host-cli shim — forwards "${cli}" to the host\nexec loopat-host "${cli}" "$@"\n`)
@@ -90,23 +99,36 @@ export async function writeHostShims(binDir: string, clis: string[]): Promise<vo
 }
 
 /**
- * The forwarder (`loopat-host`) that lives in the sandbox. POC version in POSIX
- * sh + curl: reads stdin, POSTs {loopId, cli, args} to the server, prints back
- * stdout, and exits with the cli's exit code. (A hardened version would stream
- * and separate stdout/stderr; this is enough to prove the path.)
+ * Unix-socket server that runs whitelisted host-clis for loops. The sandbox's
+ * forwarder connects over the *mounted* socket — no TCP, no exposed port, and
+ * only a container that has the socket mounted can reach it (the mount itself
+ * is a layer of isolation). Reuses runHostCli. stdout/stderr come back base64
+ * so the sh forwarder can pull them out of the JSON without escaping pain.
  */
-export const LOOPAT_HOST_FORWARDER = `#!/bin/sh
-# loopat-host <cli> [args...] — run <cli> on the host via the loopat server.
-# Env (injected into the sandbox): LOOPAT_SERVER, LOOPAT_LOOP_ID, LOOPAT_TOKEN
-cli="$1"; shift
-args_json=$(for a in "$@"; do printf '%s' "$a" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g; s/^/"/; s/$/",/'; done)
-args_json="[$(printf '%s' "$args_json" | sed 's/,$//')]"
-body=$(printf '{"loopId":"%s","cli":"%s","args":%s}' "$LOOPAT_LOOP_ID" "$cli" "$args_json")
-resp=$(curl -fsS -X POST "$LOOPAT_SERVER/api/host-exec" \\
-  -H "content-type: application/json" \\
-  -H "authorization: Bearer $LOOPAT_TOKEN" \\
-  -d "$body") || { echo "loopat-host: server error" >&2; exit 127; }
-# resp is {ok, exitCode, stdout, stderr}; print and propagate exit code.
-printf '%s' "$resp" | grep -o '"stdout":"[^"]*"' | sed 's/^"stdout":"//; s/"$//'
-exit $(printf '%s' "$resp" | grep -o '"exitCode":[0-9]*' | grep -o '[0-9]*')
-`
+export function serveHostExec(socketPath: string, deps: { loopExists: (id: string) => Promise<boolean> }) {
+  try { if (existsSync(socketPath)) rmSync(socketPath) } catch {}
+  return Bun.serve({
+    unix: socketPath,
+    async fetch(req) {
+      const url = new URL(req.url)
+      if (url.pathname !== "/host-exec" || req.method !== "POST") return new Response("not found", { status: 404 })
+      const b: any = await req.json().catch(() => ({}))
+      const loopId = typeof b.loopId === "string" ? b.loopId : ""
+      const cli = typeof b.cli === "string" ? b.cli : ""
+      const args = Array.isArray(b.args) ? b.args.map(String) : []
+      if (!loopId || !cli) return Response.json({ error: "loopId + cli required" })
+      if (!(await deps.loopExists(loopId))) return Response.json({ error: "unknown loop" })
+      const allowed = await readDeclaredHostClis(loopId)
+      const r = await runHostCli({
+        cli, args, cwd: hostWorkdir(loopId), allowed,
+        stdin: typeof b.stdin === "string" ? b.stdin : undefined,
+      })
+      if (!r.ok) return Response.json({ error: r.error })
+      return Response.json({
+        exitCode: r.exitCode,
+        stdout_b64: Buffer.from(r.stdout).toString("base64"),
+        stderr_b64: Buffer.from(r.stderr).toString("base64"),
+      })
+    },
+  })
+}
