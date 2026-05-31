@@ -45,6 +45,12 @@ export const loopContextPersonal = (id: string) => join(loopContextDir(id), "per
 export const loopContextRepos = (id: string) => join(loopContextDir(id), "repos")
 export const loopContextChatDir = (id: string) => join(loopContextDir(id), "chat")
 export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
+
+// UI loop checkouts — a per-user worktree for editing team context (notes) from
+// outside any AI loop (a "no-AI UI loop", see docs/context-flow.md). Disposable:
+// opened from origin/main, synced back ff-only.
+export const uiDir = (user: string) => join(LOOPAT_HOME, "ui", user)
+export const uiNotesDir = (user: string) => join(uiDir(user), "notes")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
 export const loopChatHistoryPath = (id: string) => join(loopDir(id), "chat_history.jsonl")
 

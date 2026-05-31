@@ -640,6 +640,22 @@ export async function vaultWrite(vault: VaultId, path: string, content: string):
   return (await r.json()) as { ok: boolean; commit?: string; error?: string }
 }
 
+// Save notes to the shared remote (the no-AI UI loop): commit + rebase onto
+// origin/main + ff-push. A real conflict is held back (local edit kept).
+export async function saveNotes(): Promise<{
+  ok: boolean
+  conflict?: boolean
+  files?: string[]
+  needsPull?: boolean
+  error?: string
+  message?: string
+}> {
+  const r = await apiFetch("/api/notes/save", { method: "POST" })
+  const j = await r.json().catch(() => ({}) as any)
+  if (!r.ok) return { ok: false, conflict: j.conflict, files: j.files, needsPull: j.needsPull, error: j.error ?? `save failed (${r.status})` }
+  return { ok: true, message: j.message }
+}
+
 export async function vaultCreateFile(vault: VaultId, path: string): Promise<{ ok: boolean; error?: string }> {
   const r = await apiFetch(`/api/workspace/file?vault=${vault}`, {
     method: "POST",

@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { getOnboardingStatus, startOnboardingLoop, markOnboardingDone } from "./onboarding"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
@@ -2163,11 +2163,18 @@ app.post("/api/loops/:id/git-discard", requireAuth, async (c) => {
 // Workspace vault APIs (Context tab)
 const VAULTS = new Set(["knowledge", "notes", "personal", "repos"])
 
+// notes is edited through a per-user UI-loop worktree (a no-AI UI loop); make
+// sure it exists (opened from origin/main) before any read/write resolves it.
+async function ensureVaultReady(vault: string, user: string): Promise<void> {
+  if (vault === "notes") await ensureUiNotesWorktree(user)
+}
+
 app.get("/api/workspace/files", requireAuth, async (c) => {
   const vault = c.req.query("vault") ?? ""
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
   const userId = c.get("userId") as string
   const path = c.req.query("path") ?? ""
+  await ensureVaultReady(vault, userId)
   if (c.req.query("flat") === "1") {
     return c.json({ entries: await vaultFlatList(vault as VaultId, userId) })
   }
@@ -2180,6 +2187,7 @@ app.get("/api/workspace/file", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
+  await ensureVaultReady(vault, userId)
   const r = await vaultRead(vault as VaultId, path, userId)
   if (!r) return c.json({ error: "not a file" }, 404)
   return c.json(r)
@@ -2193,6 +2201,7 @@ app.put("/api/workspace/file", requireAuth, async (c) => {
   if (!path) return c.json({ error: "path required" }, 400)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.content !== "string") return c.json({ error: "content required" }, 400)
+  await ensureVaultReady(vault, userId)
   const r = await vaultWrite(vault as VaultId, path, body.content, userId)
   if (!r.ok) return c.json({ error: r.error }, 500)
   return c.json(r)
@@ -2204,9 +2213,24 @@ app.post("/api/workspace/file", requireAuth, async (c) => {
   if (!VAULTS.has(vault)) return c.json({ error: "invalid vault" }, 400)
   const body = await c.req.json().catch(() => ({}))
   if (typeof body.path !== "string" || !body.path) return c.json({ error: "path required" }, 400)
+  await ensureVaultReady(vault, userId)
   const r = await vaultCreateFile(vault as VaultId, body.path, userId)
   if (!r.ok) return c.json({ error: r.error }, r.error === "exists" ? 409 : 500)
   return c.json({ ok: true })
+})
+
+// Save = land this user's notes edits on origin/main (the no-AI UI loop).
+// Explicit: the user clicks save. ff-only + rebase; a real conflict is held back.
+app.post("/api/notes/save", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const r = await syncUiNotes(userId)
+  if (!r.ok) {
+    const status: Record<string, unknown> = { error: r.error }
+    if (r.conflict) { status.conflict = true; status.files = r.files }
+    if (r.needsPull) status.needsPull = true
+    return c.json(status, (r.conflict || r.needsPull) ? 409 : 400)
+  }
+  return c.json({ ok: true, message: r.message })
 })
 
 app.delete("/api/workspace/file", requireAuth, async (c) => {

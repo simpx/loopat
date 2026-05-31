@@ -24,6 +24,7 @@ import {
   workspaceOriginsDir,
   workspaceOriginPath,
   personalDir,
+  uiNotesDir,
   personalMemoryDir,
   workspaceMemoryDir,
   hostDeployKeyPath,
@@ -1084,14 +1085,13 @@ export async function syncPersonalToRemote(
  */
 async function rebaseOntoOrigin(
   dir: string,
-  userId: string,
   branch: string,
+  sshCommand?: string,
 ): Promise<{ ok: true } | { ok: false; error: string } | { ok: false; conflict: true; files: string[] }> {
+  const fetchEnv: Record<string, string> = { ...process.env, GIT_TERMINAL_PROMPT: "0" }
+  if (sshCommand) fetchEnv.GIT_SSH_COMMAND = sshCommand
   try {
-    await execFileP("git", ["-C", dir, "fetch", "origin"], {
-      env: { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(userId), GIT_TERMINAL_PROMPT: "0" },
-      timeout: 30_000,
-    })
+    await execFileP("git", ["-C", dir, "fetch", "origin"], { env: fetchEnv, timeout: 30_000 })
   } catch (e: any) {
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
   }
@@ -1198,7 +1198,7 @@ export async function pullPersonalFromRemote(
   // Normal pull: commit local edits so the tree is clean, then rebase onto origin.
   const c = await commitLocalChanges(dir, "loopat: local personal edits")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, userId, branch)
+  const reb = await rebaseOntoOrigin(dir, branch, sshCommandForUser(userId))
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
@@ -1235,7 +1235,7 @@ export async function pushPersonalToRemote(
 
   const c = await commitLocalChanges(dir, "loopat: sync personal vault")
   if (!c.ok) return { ok: false, error: c.error }
-  const reb = await rebaseOntoOrigin(dir, userId, branch)
+  const reb = await rebaseOntoOrigin(dir, branch, sshCommandForUser(userId))
   if (!reb.ok) {
     if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
     return { ok: false, error: reb.error }
@@ -1251,6 +1251,39 @@ export async function pushPersonalToRemote(
     return { ok: false, error: `push failed: ${stderr || e?.message || e}`, needsPull: true }
   }
   return { ok: true, message: c.committed ? "committed and pushed" : "pushed" }
+}
+
+/**
+ * UI-loop notes worktree: a per-user checkout of notes, opened from origin/main,
+ * for editing team notes outside any AI loop (the no-AI "UI loop"). Disposable —
+ * rebuilt from origin if missing.
+ */
+export async function ensureUiNotesWorktree(user: string): Promise<void> {
+  await ensureContextWorktree(workspaceNotesDir(), uiNotesDir(user), `ui/${user}`)
+}
+
+/**
+ * Save = land this user's notes edits on origin/main (the SoT). Commits, rebases
+ * onto origin/main (held back on a real conflict), ff-pushes HEAD:main. notes
+ * uses the host's default git auth (team origin), not a personal deploy key.
+ */
+export async function syncUiNotes(user: string): Promise<PersonalPushResult> {
+  const dir = uiNotesDir(user)
+  await ensureUiNotesWorktree(user)
+  const c = await commitLocalChanges(dir, "loopat: edit notes")
+  if (!c.ok) return { ok: false, error: c.error }
+  const reb = await rebaseOntoOrigin(dir, "main")
+  if (!reb.ok) {
+    if ("conflict" in reb) return { ok: false, error: "conflict with remote", conflict: true, files: reb.files }
+    return { ok: false, error: reb.error }
+  }
+  try {
+    await execFileP("git", ["-C", dir, "push", "origin", "HEAD:main"])
+  } catch (e: any) {
+    const stderr = (e?.stderr ?? "").toString().trim()
+    return { ok: false, error: `push failed: ${stderr || e?.message || e}`, needsPull: true }
+  }
+  return { ok: true, message: c.committed ? "saved & pushed" : "pushed" }
 }
 
 // ── Generic repo sync (knowledge / notes / repos) ─────────────────────
