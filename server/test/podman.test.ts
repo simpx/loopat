@@ -160,21 +160,20 @@ describe("buildPodmanCreateArgs — container shape", () => {
     expect(containerName(LOOP_ID)).toBe(`loopat-${WORKSPACE}-${LOOP_ID}`)
   })
 
-  test("uses loopat-sandbox:latest image (locally built, no docker hub at runtime)", async () => {
+  test("uses the per-workspace loopat-sandbox image (locally built, no docker hub at runtime)", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
-    // The image name appears between the last label/env/volume and the
-    // entrypoint command. We assert it's present at the tail-of-args position.
-    expect(args).toContain("loopat-sandbox:latest")
+    // Per-workspace name so parallel LOOPAT_HOMEs don't collide; see podman.ts.
+    expect(args).toContain(`loopat-sandbox-${WORKSPACE}:latest`)
   })
 
-  test("includes --userns keep-id:uid=2000,gid=2000, --init, --network loopat", async () => {
+  test("includes --userns keep-id:uid=2000,gid=2000, --init, --network loopat-<ws>", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
     const usernsIdx = args.indexOf("--userns")
     // Fixed loopat user at uid 2000 inside; see Containerfile + podman.ts.
     expect(args[usernsIdx + 1]).toBe("keep-id:uid=2000,gid=2000")
     expect(args).toContain("--init")
     const netIdx = args.indexOf("--network")
-    expect(args[netIdx + 1]).toBe("loopat")
+    expect(args[netIdx + 1]).toBe(`loopat-${WORKSPACE}`)
   })
 
   test("workdir defaults to V_LOOP_WORKDIR", async () => {
@@ -186,7 +185,7 @@ describe("buildPodmanCreateArgs — container shape", () => {
 
   test("ends with <image> /bin/sleep infinity as the entrypoint", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
-    expect(args.slice(-3)).toEqual(["loopat-sandbox:latest", "/bin/sleep", "infinity"])
+    expect(args.slice(-3)).toEqual([`loopat-sandbox-${WORKSPACE}:latest`, "/bin/sleep", "infinity"])
   })
 
   test("each volume mount becomes a --volume src:dst[:ro] arg", async () => {
