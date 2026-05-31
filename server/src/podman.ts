@@ -36,7 +36,7 @@
 import { execFile, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
@@ -59,6 +59,8 @@ import {
 } from "./paths"
 import { loadConfig } from "./config"
 import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
+import { hostExecDir, writeHostShims } from "./host-exec"
+import { parse as tomlParse, stringify as tomlStringify } from "smol-toml"
 
 const execFileP = promisify(execFile)
 
@@ -74,6 +76,13 @@ export const V_CONTEXT_PERSONAL = "/loopat/context/personal"
 export const V_CONTEXT_PERSONAL_MEMORY = "/loopat/context/personal/memory"
 export const V_CONTEXT_REPOS = "/loopat/context/repos"
 export const V_CONTEXT_CHAT = "/loopat/context/chat"
+
+// host-cli proxy: the dir holding the host-exec unix socket, mounted in so the
+// loop's `loopat-host` forwarder can reach the host. Mount the DIR (not the
+// socket file) so a server restart that recreates the socket inode stays
+// visible inside running containers.
+export const V_HOST_EXEC_DIR = "/loopat/host-exec"
+export const V_HOST_EXEC_SOCK = "/loopat/host-exec/host-exec.sock"
 
 // $HOME inside the container. Deliberately NOT host's homedir — if we bound
 // host's $HOME at its real path, podman would auto-create parent dirs for
@@ -247,6 +256,15 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
     mounts.push({ src: chatDir, dst: V_CONTEXT_CHAT, ro: true })
   }
 
+  // host-cli proxy: mount the host-exec socket dir so the loop's `loopat-host`
+  // forwarder can reach the host. Mounting the socket IS the trust decision —
+  // a loop with this mount may run any host cli (see host-exec.ts). The dir is
+  // created by serveHostExec at boot; mount if present (bind-try semantics).
+  const hostExec = hostExecDir()
+  if (existsSync(hostExec)) {
+    mounts.push({ src: hostExec, dst: V_HOST_EXEC_DIR })
+  }
+
   // All-loops ro view (admin-gated): expose LOOPAT_HOME/loops/ at /loopat/loops.
   if (mountAllLoops) {
     mounts.push({ src: loopsDir(), dst: V_ALL_LOOPS, ro: true })
@@ -292,6 +310,10 @@ export async function buildContainerEnv(opts: ContainerOptions): Promise<Record<
   const out: Record<string, string> = {}
   // Sandbox $HOME is /loopat/home/<user> (see V_HOME comment).
   out.HOME = V_HOME(opts.createdBy)
+  // host-cli proxy: tell the loop's `loopat-host` forwarder where the mounted
+  // socket is and which loop it speaks for (server uses it for the workdir).
+  out.LOOPAT_HOST_SOCK = V_HOST_EXEC_SOCK
+  out.LOOPAT_LOOP_ID = opts.loopId
   for (const [k, v] of Object.entries(opts.extraEnv ?? {})) {
     out[k] = v
   }
@@ -654,19 +676,44 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
     opts?.onProgress?.("Installing tools from mise.toml…")
     const buildDir = await mkdtemp(join(tmpdir(), "loopat-img-"))
     try {
-      await copyFile(miseTomlPath, join(buildDir, "mise.toml"))
+      // A loopat-native `[host]` table declares host-only clis (macOS /
+      // machine-bound) the sandbox can't run natively. We bake a forwarding
+      // shim per cli into the image's mise shims dir (already first on PATH),
+      // and strip the table before mise sees it — mise would reject the
+      // unknown table. The shim just hands off to `loopat-host` (in the base
+      // image) → mounted socket → host execFile. See host-exec.ts.
+      let hostClis: string[] = []
+      let miseConfig = content
+      try {
+        const parsed: any = tomlParse(content)
+        if (parsed && Array.isArray(parsed.host?.clis)) {
+          hostClis = parsed.host.clis.filter((x: unknown): x is string => typeof x === "string" && !!x)
+        }
+        if (parsed && "host" in parsed) {
+          const { host: _host, ...rest } = parsed
+          miseConfig = tomlStringify(rest)
+        }
+      } catch {}
+      await writeFile(join(buildDir, "mise.toml"), miseConfig)
       // Override `mise trust` interactively by marking the config path
       // trusted via env. `mise install -y` installs everything in
       // mise.toml; `mise reshim` ensures /opt/loopat-mise/shims/ has a
       // shim for every tool.
-      const childContainerfile = [
+      const lines = [
         `FROM ${SANDBOX_IMAGE}`,
         `COPY mise.toml /opt/loopat-mise/config/config.toml`,
         `RUN MISE_TRUSTED_CONFIG_PATHS=/opt/loopat-mise/config/config.toml \\`,
         `    mise install -y \\`,
         ` && MISE_TRUSTED_CONFIG_PATHS=/opt/loopat-mise/config/config.toml \\`,
         `    mise reshim`,
-      ].join("\n") + "\n"
+      ]
+      if (hostClis.length) {
+        // Generate the shims into the build context, then COPY them in AFTER
+        // reshim so mise's own reshim can't clobber them.
+        await writeHostShims(join(buildDir, "host-bin"), hostClis)
+        lines.push(`COPY host-bin/ /opt/loopat-mise/shims/`)
+      }
+      const childContainerfile = lines.join("\n") + "\n"
       await writeFile(join(buildDir, "Containerfile"), childContainerfile)
 
       const r = await runPodman(

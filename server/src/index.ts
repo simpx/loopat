@@ -55,7 +55,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
-import { serveHostExec } from "./host-exec"
+import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
   createUser,
   findUser,
@@ -3181,7 +3181,7 @@ if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfil
 // host-cli proxy: a unix socket the loop sandboxes mount + forward to, so
 // host-only clis (macOS / machine-bound) run on the host on behalf of a loop.
 try {
-  const sock = join(LOOPAT_HOME, "host-exec.sock")
+  const sock = hostExecSocketPath()
   serveHostExec(sock, { loopExists })
   console.log(`[loopat] host-exec socket: ${sock}`)
 } catch (e: any) {
