@@ -1573,6 +1573,15 @@ export async function pullRepoFromRemote(dir: string, user?: string): Promise<Re
     return { ok: false, error: `fetch failed: ${e?.stderr ?? e?.message ?? e}` }
   }
 
+  // Nothing new on origin → report "already up to date" so callers (e.g. the
+  // background sync on entering a vault) can skip a needless refetch/redraw.
+  let behind = 0
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "rev-list", "--count", `HEAD..origin/${branch}`])
+    behind = parseInt(stdout.trim(), 10) || 0
+  } catch {}
+  if (behind === 0) return { ok: true, message: "already up to date" }
+
   try {
     await execFileP("git", ["-C", dir, "merge", "--ff-only", `origin/${branch}`])
   } catch (e: any) {
@@ -1580,7 +1589,7 @@ export async function pullRepoFromRemote(dir: string, user?: string): Promise<Re
     return { ok: false, error: `merge --ff-only failed (diverged from origin/${branch}?): ${stderr || e?.message || e}` }
   }
 
-  return { ok: true, message: `pulled origin/${branch}` }
+  return { ok: true, message: `pulled origin/${branch} (${behind} commit${behind > 1 ? "s" : ""})` }
 }
 
 /**
