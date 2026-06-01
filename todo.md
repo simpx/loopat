@@ -56,8 +56,10 @@ mac:`ssh simpx@30.221.161.254`,podman machine(applehv linux VM),npx loopat@0.1.1
 
 ## 新 blocker(loopat 真实问题,非测试环境)
 
-- [ ] **mac 上沙箱 AI 需要 linux claude binary,但 npx 按 host 平台只装 darwin claude**
-  > 沙箱是 linux VM,loopat 把 host 的 `@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` bind 进沙箱 → `Exec format error`。要在 darwin host 上也准备一份 linux-arm64 claude 给沙箱用(额外依赖,或沙箱内自带)。03 真 AI 在 mac 因此跑不通。
+- [x] **mac 上沙箱 AI 需要 linux claude binary(已解决,0.1.22)**
+  > 沙箱是 linux VM,但 npx 按 host(darwin)只装 darwin claude,bind 进沙箱 `Exec format error`。
+  > 解决:`ensureSandboxClaudeBinary` 在 loopat **启动时**(npx 不跑 postinstall)`npm install --force @anthropic-ai/claude-agent-sdk-linux-<arch>` 到 `<loopat>/sandbox-claude`(首次 ~18s 后台、之后跳过);`resolveSandboxClaudeBinary` 让 podman/session 用它。mac 实测:沙箱 exec → `2.1.159 (Claude Code)`,通过。
+  > 剩:03 真 AI 完整跑通还需 anthropic key(mac 上配)+ 沙箱内网可达 anthropic。
 
 - [ ] **02 脚本 + md 需更新到 Model B / per-user 模型**
   > 现 stage3 假设 personal repo 用 vault key,实际走 deploy key(`personalSshCommand`);且 notes 已从 personal config 移进 knowledge config。脚本与断言要重写。本机/ mac 都在 stage3 失败(行为一致,只是脚本过时)。
