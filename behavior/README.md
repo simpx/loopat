@@ -38,5 +38,5 @@
 - **LOOPAT_HOME 必须在 `$HOME` 下**:podman machine 只挂 `$HOME`,`/tmp` 不挂 → bind workdir `statfs … no such file`。e2e 默认 `/tmp/...` 在 mac 不适用。
 - **01** ✅ mac PASS(零残留 + label 隔离),与本机一致。
 - **02** 🟡 mac 与本机逐字一致;stage3 失败是脚本过时(Model B/per-user:personal 走 deploy key),非 mac、非 loopat bug。
-- **03** ❌ mac blocked:沙箱 linux 需 linux claude,npx 只装 darwin claude → `Exec format error`。要在 darwin host 上备一份 linux claude 给沙箱。
+- **03** ✅ mac 真 AI 跑通(0.1.22):沙箱内 linux claude(2.1.159)调 idealab → 回复 "hello from mac"。linux claude 由 loopat **启动时** `--force` 自动装(npx 不跑 postinstall);docker base image 用 save/load;idealab key 手动配。
 - e2e 在 mac 跑的适配:rsync repo + `npm i -g bun` + 预 load image + 给临时 workspace `podman build FROM <loaded> --label loopat.workspace=<ws>`(无网络)注入带 label 的 base,让 setup 跳过 build。

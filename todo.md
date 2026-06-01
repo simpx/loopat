@@ -46,7 +46,7 @@ mac:`ssh simpx@30.221.161.254`,podman machine(applehv linux VM),npx loopat@0.1.1
   > docker.io blocker 绕过方案(已验证可行):**本机 build sandbox image → `podman save` → scp → VM `podman load`**;loopat 的 `ensureSandboxImage` 检测 hashTag(`loopat-sandbox-<ws>-<containerfile-hash>`)存在即跳过 build。两机 Containerfile hash 一致(`4cd6b540132396f7`)。VM ping 公网加速 IP 通但 443 refused → 模仿 /etc/hosts 无效,只能 load。
 - ✅ **01 install/uninstall** — mac PASS,零残留 + label 隔离(含 prefix 歧义)全过,与本机一致。
 - 🟡 **02 personal-permissions** — mac 与本机**逐字一致**(stage1/2 ✓,stage3 ✗)。stage3 失败是 **02 脚本过时**(Model B + per-user 后 personal 走 deploy key,脚本仍授权 vault key 到 personal repo),**非 mac 问题、非 loopat bug**;本机同样失败。→ 见下「02 脚本需更新」。
-- ❌ **03 context-flow 真 AI** — mac **blocked**:沙箱是 linux,但 mac npx 只装 `claude-agent-sdk-darwin-arm64`,bind 进沙箱 `Exec format error`。见下新 blocker。
+- ✅ **03 context-flow 真 AI** — mac **跑通**(0.1.22):create loop → 沙箱 → linux claude(2.1.159) → idealab(claude-opus-4-7) → 回复 "hello from mac"。linux claude 启动时 `--force` 自动装、沙箱内 exec 通;idealab key 手动配进 mactest vault。整条链端到端验证 OK。
 
 ### mac 部署注意(新发现)
 
