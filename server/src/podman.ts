@@ -60,7 +60,7 @@ import {
 import { loadConfig } from "./config"
 import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
 import { hostExecDir, writeHostShims } from "./host-exec"
-import { resolveClaudeBinary } from "./claude-binary"
+import { resolveSandboxClaudeBinary } from "./claude-binary"
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml"
 
 const execFileP = promisify(execFile)
@@ -221,7 +221,7 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
   // sandbox exec's it by its host path, so bind that path in (ro) when it isn't
   // already covered by the install-dir mount — otherwise the AI is code 127.
   try {
-    const claudeDir = dirname(resolveClaudeBinary())
+    const claudeDir = dirname(resolveSandboxClaudeBinary())
     if (existsSync(claudeDir) && !claudeDir.startsWith(LOOPAT_INSTALL_DIR)) {
       mounts.push({ src: claudeDir, dst: claudeDir, ro: true })
     }

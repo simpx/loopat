@@ -66,3 +66,22 @@ export function resolveClaudeBinary(): string {
   }
   throw new Error(`claude binary not found; tried:\n${candidates.join("\n")}`)
 }
+
+/**
+ * The claude binary the SANDBOX runs (the AI executes inside a linux podman
+ * container). On a linux host that's just the host claude. On a non-linux host
+ * npm only installed the host (e.g. darwin) binary, so postinstall fetched the
+ * linux-<arch> one into <loopat>/sandbox-claude — bind THAT into the sandbox,
+ * not the host binary (otherwise: "Exec format error").
+ */
+export function resolveSandboxClaudeBinary(): string {
+  if (process.platform === "linux") return resolveClaudeBinary()
+  const arch = process.arch
+  const installDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..")
+  const candidate = join(installDir, "sandbox-claude", "node_modules", "@anthropic-ai", `claude-agent-sdk-linux-${arch}`, "claude")
+  if (existsSync(candidate)) return candidate
+  throw new Error(
+    `sandbox (linux) claude not found at ${candidate}; postinstall may have failed. Fix: ` +
+      `npm install --prefix "${join(installDir, "sandbox-claude")}" --no-save --os=linux --cpu=${arch} @anthropic-ai/claude-agent-sdk-linux-${arch}`,
+  )
+}

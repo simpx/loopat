@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
-import { resolveClaudeBinary } from "./claude-binary"
+import { resolveSandboxClaudeBinary } from "./claude-binary"
 import { configPath, loadKnowledgeConfig, type WorkspaceConfig, type KnowledgeConfig } from "./config"
 import {
   WORKSPACE,
@@ -68,14 +68,19 @@ function checkPodman(): Check {
 }
 
 function checkClaudeBinary(): Check {
+  // The AI runs in the linux sandbox, so what matters is the SANDBOX claude.
   try {
-    const p = resolveClaudeBinary()
-    return { ok: true, label: `claude binary (${p.split("/").slice(-3).join("/")})` }
-  } catch (e: any) {
+    const p = resolveSandboxClaudeBinary()
+    const tag = process.platform === "linux" ? "" : " [linux, for sandbox]"
+    return { ok: true, label: `claude binary${tag} (${p.split("/").slice(-3).join("/")})` }
+  } catch {
     return {
       ok: false,
-      label: "claude binary",
-      hint: "run `bun install` in the loopat repo root — SDK ships the binary as a platform-specific package",
+      label: "claude binary (sandbox/linux)",
+      hint:
+        process.platform === "linux"
+          ? "run `bun install` in the loopat repo root — SDK ships the binary as a platform-specific package"
+          : "the linux claude for the sandbox wasn't fetched (postinstall). Reinstall loopat, or run the `npm install --os=linux ...` command from the resolve error",
     }
   }
 }

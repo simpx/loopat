@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync, existsSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
-import { resolveClaudeBinary } from "./claude-binary"
+import { resolveSandboxClaudeBinary } from "./claude-binary"
 import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
@@ -21,8 +21,11 @@ import { updateLoopStatus } from "./loop-status"
 // Resolved lazily — each spawn re-reads the env var so the full-suite test
 // run, where module load order isn't guaranteed, sees the test's override
 // even if session.ts was imported earlier with the env var unset.
+// The AI runs inside the linux sandbox, so it needs the linux claude binary
+// (resolveSandboxClaudeBinary) — on a linux host that's the host claude; on a
+// darwin/win host it's the linux binary postinstall fetched into sandbox-claude.
 function getClaudeBinary(): string {
-  return process.env.LOOPAT_CLAUDE_BIN || resolveClaudeBinary()
+  return process.env.LOOPAT_CLAUDE_BIN || resolveSandboxClaudeBinary()
 }
 const DEBUG = !!process.env.LOOPAT_DEBUG || !!process.env.LOOPAT_DEBUG_SPAWN
 
