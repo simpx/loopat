@@ -58,6 +58,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
+import { ensureSandboxClaudeBinary } from "./claude-binary"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
   createUser,
@@ -3169,6 +3170,13 @@ console.log(`[loopat] server listening on http://${hostname}:${port}`)
     console.log(`[loopat] workspace serve unavailable — serve binary not built (share / external-port off; the workspace runs fine without it)`)
   }
 }
+
+// On a non-linux host the sandbox needs a linux claude that npm/npx didn't
+// install (npx skips postinstall scripts) — fetch it in the background on first
+// boot (~18s, doesn't block the port; skipped once present / on a linux host).
+ensureSandboxClaudeBinary((m) => console.log(`[loopat] ${m}`)).catch((e) =>
+  console.warn(`[loopat] sandbox claude fetch failed: ${e?.message ?? e}; sandbox AI won't run until fixed`),
+)
 
 await printBootstrapBanner(cfg)
 const backfilled = await backfillAllMounts()

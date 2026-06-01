@@ -38,11 +38,9 @@ try {
   const spec = version ? `${pkg}@${version}` : pkg
   mkdirSync(dest, { recursive: true })
   console.log(`[loopat] host is ${process.platform}/${arch}; fetching linux claude for the sandbox (${spec})…`)
-  execFileSync(
-    "npm",
-    ["install", "--prefix", dest, "--no-save", "--os=linux", `--cpu=${arch}`, spec],
-    { stdio: "inherit" },
-  )
+  // The platform binary declares os=linux, so `--os=linux --cpu` hits
+  // EBADPLATFORM on a darwin host — `--force` is what actually fetches it.
+  execFileSync("npm", ["install", "--prefix", dest, "--no-save", "--force", spec], { stdio: "inherit" })
   if (existsSync(binary)) console.log(`[loopat] sandbox claude ready at ${binary}`)
   else console.warn(`[loopat] sandbox claude install finished but ${binary} is missing`)
 } catch (e) {
