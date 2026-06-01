@@ -17,6 +17,7 @@ import {
   saveNotes,
   notesBehind,
   refreshNotes,
+  pullPersonalVault,
   vaultCreateFile,
   vaultCreateFolder,
   vaultDeleteFile,
@@ -305,20 +306,32 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     setQuery("")
   }, [vault, reloadKey])
 
-  // Background sync on entering the knowledge vault: the point-open shows the
-  // local cache instantly (above), then we pull latest from origin and, if it
-  // changed, bump reloadKey once so the tree refetches with the new content.
-  // Depends on [vault] only (NOT reloadKey) so it fires on entry, not in a loop.
-  // notes already opens fresh via its UI-loop worktree; personal is private;
-  // repos is a roster, not a file tree — so only knowledge needs this.
+  // Background sync on entering a vault: the point-open shows the local cache
+  // instantly (above), then we sync from origin in the background and, only if
+  // something changed, bump reloadKey once so the tree refetches. Depends on
+  // [vault] only (NOT reloadKey) so it fires on entry, not in a loop. Same UX
+  // for all three; the mechanism differs by structure:
+  //   - knowledge / personal: fetch+ff the main repo
+  //   - notes: ff the UI-loop worktree to origin/main (check `behind` first)
+  // (repos is a roster, not a file tree — handled by ReposPane.)
   useEffect(() => {
-    if (vault !== "knowledge") return
     let cancelled = false
-    syncPull("knowledge").then((r) => {
-      if (!cancelled && r.ok && (r.message ?? "").toLowerCase() !== "already up to date") {
-        setReloadKey((k) => k + 1)
-      }
-    })
+    const bump = () => { if (!cancelled) setReloadKey((k) => k + 1) }
+    if (vault === "knowledge") {
+      syncPull("knowledge").then((r) => {
+        if (r.ok && (r.message ?? "").toLowerCase() !== "already up to date") bump()
+      })
+    } else if (vault === "notes") {
+      notesBehind().then((n) => {
+        if (n > 0) refreshNotes().then((r) => { if (r.ok) bump() })
+      })
+    } else if (vault === "personal") {
+      // Clean ff only — if the pull would conflict / needs a stash (local edits),
+      // stay on the local copy silently rather than disrupt the user.
+      pullPersonalVault().then((r) => {
+        if (r.ok && (r.files?.length ?? 0) > 0) bump()
+      })
+    }
     return () => { cancelled = true }
   }, [vault])
 

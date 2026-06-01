@@ -1370,8 +1370,12 @@ export async function pushPersonalToRemote(
  * rebuilt from origin if missing.
  */
 export async function ensureUiNotesWorktree(user: string): Promise<void> {
-  // Ensure the user's per-user notes main repo is cloned from their declared
-  // remote first (notes is per-user now), then open the UI worktree from it.
+  // Only BUILD the worktree when it's missing. Do NOT re-clone/fetch on every
+  // read — that made every notes file-open run ensureUserContext (2 gitlab
+  // fetches) + a worktree rebuild, which was noticeably laggy. Keeping notes
+  // fresh is the UI's background-sync job (POST /api/notes/refresh), same as
+  // knowledge's background pull — not this per-read setup.
+  if (existsSyncBase(join(uiNotesDir(user), ".git"))) return
   await ensureUserContext(user).catch(() => {})
   await ensurePerUserContextWorktree(personalNotesDir(user), uiNotesDir(user), `ui/${user}`)
 }
