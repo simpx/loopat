@@ -1639,6 +1639,31 @@ export async function promoteKnowledgeConfig(user: string): Promise<RepoSyncResu
 }
 
 /**
+ * The user's per-vault SSH public keys — the keys a loop authenticates to TEAM
+ * repos with (knowledge / notes / repos), one per vault. This is what the user
+ * must register on the team git host. Distinct from the deploy key (host-
+ * secrets, personal-repo only). Reads vaults/<v>/mounts/home/.ssh/id.pub, or
+ * derives it from the private key.
+ */
+export async function listVaultPublicKeys(user: string): Promise<{ vault: string; publicKey: string }[]> {
+  const { listVaults } = await import("./vaults")
+  const out: { vault: string; publicKey: string }[] = []
+  for (const vault of listVaults(user)) {
+    const sshDir = join(personalVaultDir(user, vault), "mounts", "home", ".ssh")
+    const pubPath = join(sshDir, "id.pub")
+    const keyPath = join(sshDir, "id")
+    let pub = ""
+    if (existsSyncBase(pubPath)) {
+      pub = (await readFile(pubPath, "utf8")).trim()
+    } else if (existsSyncBase(keyPath)) {
+      try { const { stdout } = await execFileP("ssh-keygen", ["-y", "-f", keyPath]); pub = stdout.trim() } catch {}
+    }
+    if (pub) out.push({ vault, publicKey: pub })
+  }
+  return out
+}
+
+/**
  * Wipe personal/<user>/ AND the saved git-crypt key. Deploy keypair stays
  * (it's the SSH identity, reusable for the next import). Re-scaffolds an
  * empty git-init'd personal/<user>/ so workspace bind paths still resolve.

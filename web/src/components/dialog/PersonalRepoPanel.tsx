@@ -766,7 +766,7 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
           onRetry={handlePush}
         />
       ) : action === "showkey" ? (
-        <ShowPublicKeyFlow publicKey={status.publicKey} onDone={() => setAction(null)} />
+        <ShowPublicKeyFlow vaultKeys={status.vaultKeys ?? []} onDone={() => setAction(null)} />
       ) : (
         <div className="flex flex-col gap-2">
           {/* Pull/Push buttons */}
@@ -788,13 +788,13 @@ function ImportedPanel({ status }: { status: PersonalStatus }) {
               Push
             </button>
           </div>
-          {status.publicKey && (
+          {(status.vaultKeys?.length ?? 0) > 0 && (
             <button
               type="button"
               onClick={() => setAction("showkey")}
               className="w-full text-left px-2.5 py-1.5 text-[11px] text-gray-700 border border-gray-200 rounded hover:bg-gray-50"
             >
-              Show SSH public key (deploy key)
+              Show vault SSH keys (for team repos)
             </button>
           )}
           <button
@@ -998,38 +998,44 @@ function PullPushResultFlow({
 /** Reveal the personal repo's SSH *public* (deploy) key for re-pasting into the
  *  git host. The public key is non-secret — no password gate, unlike the
  *  git-crypt private key export. */
-function ShowPublicKeyFlow({ publicKey, onDone }: { publicKey: string | null; onDone: () => void }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    if (!publicKey) return
-    if (await copyText(publicKey)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+function ShowPublicKeyFlow({ vaultKeys, onDone }: { vaultKeys: { vault: string; publicKey: string }[]; onDone: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null)
+  const copy = async (vault: string, pub: string) => {
+    if (await copyText(pub)) {
+      setCopied(vault)
+      setTimeout(() => setCopied(null), 1500)
     }
   }
   return (
     <div className="flex flex-col gap-2 border border-gray-200 rounded p-2.5">
-      <div className="text-xs font-semibold text-gray-900">SSH public key (deploy key)</div>
-      <div className="relative">
-        <textarea
-          readOnly
-          value={publicKey ?? ""}
-          rows={3}
-          className="w-full text-[11px] font-mono text-gray-800 bg-gray-50 border border-gray-200 rounded p-2 outline-none resize-none break-all"
-          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-        />
-        <button
-          type="button"
-          onClick={copy}
-          className="absolute top-1.5 right-1.5 px-2 py-0.5 text-[11px] rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
-        >
-          {copied ? "copied" : "copy"}
-        </button>
-      </div>
+      <div className="text-xs font-semibold text-gray-900">Vault SSH keys — for team repos</div>
       <div className="text-[11px] text-gray-500 leading-relaxed">
-        Add this as a deploy key on your personal repo (with write access) if you
-        ever need to re-authorize this host. It's a public key — safe to share.
+        Register these on the git host that hosts your <b>team</b> repos (knowledge / notes /
+        repos). A loop authenticates with its vault's key — one per vault. Public keys, safe to
+        share. (The deploy key is separate — it's for your <i>personal</i> repo only.)
       </div>
+      {vaultKeys.length === 0 && <div className="text-[11px] text-gray-400">No vault keys yet.</div>}
+      {vaultKeys.map((vk) => (
+        <div key={vk.vault} className="flex flex-col gap-1">
+          <div className="text-[11px] text-gray-600 font-medium">vault: {vk.vault}</div>
+          <div className="relative">
+            <textarea
+              readOnly
+              value={vk.publicKey}
+              rows={3}
+              className="w-full text-[11px] font-mono text-gray-800 bg-gray-50 border border-gray-200 rounded p-2 outline-none resize-none break-all"
+              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+            />
+            <button
+              type="button"
+              onClick={() => copy(vk.vault, vk.publicKey)}
+              className="absolute top-1.5 right-1.5 px-2 py-0.5 text-[11px] rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+            >
+              {copied === vk.vault ? "copied" : "copy"}
+            </button>
+          </div>
+        </div>
+      ))}
       <button
         type="button"
         onClick={onDone}

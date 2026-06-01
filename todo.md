@@ -9,6 +9,11 @@
   > 现象:simpx 的 vault key 没注册到 gitlab,新建 loop 时 `clone dashscope/knowledge` → `Permission denied (publickey)`,knowledge 空。
   > 现在已优雅处理(loop 顶部黄色 banner 提示 contextWarnings),但缺一个把 vault 公钥注册到 git 平台的流程/引导 → 应并入批5 stage2。
 
+- [ ] **UX 缺陷:UI 只暴露 deploy key,不暴露 team 用的 vault key**
+  > Model B 有两把 key:deploy key(host-secrets,personal repo 用,comment `loopat:<user>`)+ vault key(vaults/default,knowledge/notes/team repos 用,comment `loopat:<provider-login>`)。
+  > `/settings/personal-repo` 的 "Show SSH public key" 只显示 **deploy key**,用户自然以为注册那把就够 → 注册后 knowledge 仍 `Permission denied`(team 用的是 vault key,没暴露/没注册)。实测踩坑(simpx)。
+  > 修:在 personal-repo 页 / `/context/repos` / 批5 stage2 同时显示 **vault key**(team key)并验证它能 `git ls-remote` kn/notes。两把 key comment 还不一致(deploy=user id、vault=provider login),也易混。
+
 - [ ] **serve-rs binary 没编译进 npx 包** → Share Artifact 不可用
   > 启动日志:`serve container failed: serve binary not found at …/serve-rs/target/release/loopat-serve`。
   > 非核心功能;要么 CI 编译进包,要么 UI 显式标注不可用。

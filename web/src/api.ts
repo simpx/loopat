@@ -132,7 +132,12 @@ export async function register(input: {
 export type PersonalStatus = {
   userId: string
   personalRepo: string | null
+  /** Deploy key (host-secrets) — for the personal repo only. */
   publicKey: string | null
+  /** Per-vault SSH public keys — the keys a loop uses for TEAM repos
+   *  (knowledge / notes / repos). One per vault; this is what to register on
+   *  the team git host. */
+  vaultKeys?: { vault: string; publicKey: string }[]
   imported: boolean
   gitHost?: { provider: string; baseUrl: string | null; defaultRepo?: string; tokenHelp?: string | null }
 }

@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -1176,12 +1176,16 @@ app.get("/api/personal/status", requireAuth, async (c) => {
     publicKey = r.publicKey
   }
   const imported = !(await isPersonalFresh(userId))
+  // Per-vault SSH public keys — what the user registers on the TEAM git host
+  // for knowledge/notes/repos. Distinct from the deploy key (publicKey above).
+  const vaultKeys = await listVaultPublicKeys(userId)
   const wcfg = await loadConfig()
   const providerId = wcfg.gitHost?.provider ?? "github"
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
     publicKey,
+    vaultKeys,
     imported,
     gitHost: {
       provider: providerId,
