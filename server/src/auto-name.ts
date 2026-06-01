@@ -67,9 +67,10 @@ async function extractFirstTurn(loopId: string): Promise<{ firstUser: string; fi
   }
 }
 
-/** Mirrors session.ts's resolveProvider precedence: loop config → personal
- *  default → workspace default → first available with apiKey. */
-async function resolveProviderForLoop(meta: { createdBy: string; config?: { default_model?: string; vault?: string } }): Promise<ProviderConfig | null> {
+/** Collect all candidate providers in priority order (loop config → personal
+ *  default → workspace default → remaining). Returns array so callers can
+ *  fall back to the next provider when a key is invalid/expired. */
+async function resolveProvidersForLoop(meta: { createdBy: string; config?: { default_model?: string; vault?: string } }): Promise<ProviderConfig[]> {
   const pCfg = await loadPersonalConfig(meta.createdBy, meta.config?.vault)
   const wCfg = await loadConfig()
   const names = [
@@ -80,13 +81,14 @@ async function resolveProviderForLoop(meta: { createdBy: string; config?: { defa
     ...Object.keys(wCfg.providers ?? {}),
   ].filter(Boolean) as string[]
   const seen = new Set<string>()
+  const result: ProviderConfig[] = []
   for (const name of names) {
     if (seen.has(name)) continue
     seen.add(name)
     const p = pCfg.providers[name] ?? wCfg.providers?.[name]
-    if (p && p.apiKey) return p
+    if (p && p.apiKey) result.push(p)
   }
-  return null
+  return result
 }
 
 const SYSTEM_PROMPT = `You name conversations.
@@ -110,10 +112,11 @@ User's first message:
 ${firstUser}${assistantBlock}`
 }
 
-async function callForTitle(provider: ProviderConfig, userPrompt: string): Promise<string | null> {
-  // Pick model: first enabled, else models[0] — mirrors session.ts pick logic.
+const AUTH_FAILED = Symbol("auth_failed")
+
+async function callForTitle(provider: ProviderConfig, userPrompt: string): Promise<string | null | typeof AUTH_FAILED> {
   const activeModel = provider.models.find((m) => m.enabled !== false) ?? provider.models[0]
-  if (!activeModel?.id) return null
+  if (!activeModel?.id) return AUTH_FAILED
   const url = provider.baseUrl.replace(/\/+$/, "") + "/v1/messages"
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 15000)
@@ -135,6 +138,7 @@ async function callForTitle(provider: ProviderConfig, userPrompt: string): Promi
       }),
       signal: ctrl.signal,
     })
+    if (r.status === 401 || r.status === 403) return AUTH_FAILED
     if (!r.ok) return null
     const j: any = await r.json().catch(() => null)
     if (!j?.content || !Array.isArray(j.content)) return null
@@ -171,10 +175,20 @@ export async function maybeAutoName(loopId: string): Promise<boolean> {
     const topics = await listTopics(allLoops.map((l) => ({ id: l.id, title: l.title })))
     const candidates = topics.slice(0, MAX_TOPICS).map((t) => t.name)
 
-    const provider = await resolveProviderForLoop(meta)
-    if (!provider) return false
+    const providers = await resolveProvidersForLoop(meta)
+    if (providers.length === 0) return false
 
-    const title = await callForTitle(provider, buildUserPrompt(firstUser, firstAssistant, candidates))
+    const prompt = buildUserPrompt(firstUser, firstAssistant, candidates)
+    let title: string | null = null
+    for (const provider of providers) {
+      const result = await callForTitle(provider, prompt)
+      if (result === AUTH_FAILED) {
+        console.warn(`[auto-name] ${loopId.slice(0, 8)} provider ${provider.baseUrl} auth failed, trying next`)
+        continue
+      }
+      if (result) { title = result; break }
+      break
+    }
     if (!title) return false
 
     const fresh = await getLoop(loopId)
