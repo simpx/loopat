@@ -18,6 +18,7 @@ import {
   notesBehind,
   refreshNotes,
   pullPersonalVault,
+  pushPersonalVault,
   vaultCreateFile,
   vaultCreateFolder,
   vaultDeleteFile,
@@ -776,13 +777,24 @@ function DocView({
         onSaved()
         // refresh backlinks (links may have changed)
         vaultBacklinks(vault, path).then(setBacklinks)
-        // notes lives on a shared remote — push the save (ff-only; a real
-        // conflict is held back, the local edit is kept).
+        // notes + personal live on shared remotes and are UNGATED — push the
+        // save right away (ff-only; a real conflict is held back, the local edit
+        // kept). knowledge is GATED (promote via a distill loop), so it only
+        // commits locally here and is pushed via its own promote flow.
         if (vault === "notes") {
           const sync = await saveNotes()
           if (!sync.ok) {
             if (sync.conflict) {
               alert(`Saved locally, but it conflicts with the remote (${(sync.files ?? []).join(", ")}). Your edit is kept — resolve by taking the remote, or in a loop.`)
+            } else {
+              alert(`Saved locally, but push to remote failed: ${sync.error ?? "unknown"}`)
+            }
+          }
+        } else if (vault === "personal") {
+          const sync = await pushPersonalVault()
+          if (!sync.ok) {
+            if (sync.conflict) {
+              alert(`Saved locally, but it conflicts with the remote (${(sync.files ?? []).join(", ")}). Your edit is kept — pull first (re-open Personal) or resolve in a loop.`)
             } else {
               alert(`Saved locally, but push to remote failed: ${sync.error ?? "unknown"}`)
             }
