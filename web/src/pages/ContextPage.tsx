@@ -305,6 +305,23 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     setQuery("")
   }, [vault, reloadKey])
 
+  // Background sync on entering the knowledge vault: the point-open shows the
+  // local cache instantly (above), then we pull latest from origin and, if it
+  // changed, bump reloadKey once so the tree refetches with the new content.
+  // Depends on [vault] only (NOT reloadKey) so it fires on entry, not in a loop.
+  // notes already opens fresh via its UI-loop worktree; personal is private;
+  // repos is a roster, not a file tree — so only knowledge needs this.
+  useEffect(() => {
+    if (vault !== "knowledge") return
+    let cancelled = false
+    syncPull("knowledge").then((r) => {
+      if (!cancelled && r.ok && (r.message ?? "").toLowerCase() !== "already up to date") {
+        setReloadKey((k) => k + 1)
+      }
+    })
+    return () => { cancelled = true }
+  }, [vault])
+
   const onCreate = async (path: string) => {
     const r = await vaultCreateFile(vault, path)
     if (r.ok) {
