@@ -1619,6 +1619,26 @@ export async function pushRepoToRemote(dir: string, user?: string): Promise<Repo
 }
 
 /**
+ * Promote a just-written knowledge `.loopat/config.json` (repos/notes roster)
+ * back to the knowledge repo's origin: stage + commit + push with the vault key.
+ * The config was written by saveKnowledgeConfig(user, …) into the per-user
+ * knowledge clone. "nothing to commit" is success (idempotent save).
+ */
+export async function promoteKnowledgeConfig(user: string): Promise<RepoSyncResult> {
+  const dir = personalKnowledgeDir(user)
+  if (!existsSyncBase(join(dir, ".git"))) return { ok: false, error: "knowledge repo not cloned" }
+  await execFileP("git", ["-C", dir, "add", ".loopat/config.json"]).catch(() => {})
+  try {
+    await execFileP("git", ["-C", dir, "-c", "user.email=loopat@local", "-c", "user.name=loopat",
+      "commit", "-m", "chore(loopat): update .loopat/config.json (repos/notes roster)"])
+  } catch (e: any) {
+    if (/nothing to commit/i.test((e?.stdout ?? e?.stderr ?? "").toString())) return { ok: true, message: "no change" }
+    return { ok: false, error: `commit failed: ${e?.stderr ?? e?.message ?? e}` }
+  }
+  return await pushRepoToRemote(dir, user)
+}
+
+/**
  * Wipe personal/<user>/ AND the saved git-crypt key. Deploy keypair stays
  * (it's the SSH identity, reusable for the next import). Re-scaffolds an
  * empty git-init'd personal/<user>/ so workspace bind paths still resolve.

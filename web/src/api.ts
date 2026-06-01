@@ -708,12 +708,28 @@ export async function vaultBacklinks(vault: VaultId, path: string): Promise<Back
   return (j.backlinks ?? []) as Backlink[]
 }
 
-export type RepoEntry = { name: string; path: string; remote?: string }
-export async function listRepos(): Promise<RepoEntry[]> {
-  const r = await apiFetch(`/api/workspace/repos`)
-  if (!r.ok) return []
+// Context repos roster — DECLARATIVE, lives in the knowledge repo's
+// .loopat/config.json (notes remote + repos[]). Physical clones stay
+// on-demand at loop creation. Edited via the /context/repos page.
+export type ContextRepoSpec = { name: string; git: string }
+export type ContextRepoRoster = { notes: { git: string } | null; repos: ContextRepoSpec[] }
+
+export async function getContextRepos(): Promise<ContextRepoRoster> {
+  const r = await apiFetch(`/api/context/repos`)
+  if (!r.ok) return { notes: null, repos: [] }
   const j = await r.json()
-  return (j.repos ?? []) as RepoEntry[]
+  return { notes: j.notes ?? null, repos: (j.repos ?? []) as ContextRepoSpec[] }
+}
+
+export async function putContextRepos(roster: ContextRepoRoster): Promise<{ ok: boolean; error?: string; savedLocally?: boolean }> {
+  const r = await apiFetch(`/api/context/repos`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(roster),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}`, savedLocally: j.savedLocally }
+  return { ok: true }
 }
 
 // Sandbox API client removed — sandbox concept replaced by profiles
@@ -734,26 +750,6 @@ export async function appendChatHistory(loopId: string, text: string): Promise<v
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text }),
   })
-}
-
-export type RepoDetail = RepoEntry & {
-  branch?: string
-  status: "online" | "offline"
-  readme?: string
-  recentLoops: LoopMeta[]
-}
-
-export async function getRepo(name: string): Promise<RepoDetail | null> {
-  const r = await apiFetch(`/api/workspace/repo/${encodeURIComponent(name)}`)
-  if (!r.ok) return null
-  return (await r.json()) as RepoDetail
-}
-
-export async function pullRepo(name: string): Promise<{ ok: boolean; output?: string; error?: string }> {
-  const r = await apiFetch(`/api/workspace/repo/${encodeURIComponent(name)}/pull`, { method: "POST" })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
-  return { ok: true, output: j.output }
 }
 
 // ── Unified workspace-resource sync (knowledge / notes / repos) ──
@@ -792,17 +788,6 @@ export async function syncPush(r: SyncResource): Promise<{ ok: boolean; message?
   const j = await res.json().catch(() => ({}))
   if (!res.ok) return { ok: false, error: j.error ?? `http ${res.status}` }
   return { ok: true, message: j.message }
-}
-
-export async function addRepo(opts: { name: string; source: string }): Promise<{ ok: boolean; name?: string; kind?: "clone" | "symlink"; error?: string }> {
-  const r = await apiFetch(`/api/workspace/repos`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
-  })
-  const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
-  return { ok: true, name: j.name, kind: j.kind }
 }
 
 // ── kanban ──

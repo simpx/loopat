@@ -21,17 +21,15 @@ import {
   vaultCreateFolder,
   vaultDeleteFile,
   vaultBacklinks,
-  listRepos,
-  getRepo,
-  pullRepo,
-  addRepo,
+  getContextRepos,
+  putContextRepos,
   syncStatus,
   syncPull,
   syncPush,
   type VaultEntry,
   type VaultId,
-  type RepoEntry,
-  type RepoDetail,
+  type ContextRepoSpec,
+  type ContextRepoRoster,
   type Backlink,
   type SyncResource,
   type RepoSyncStatus,
@@ -1139,357 +1137,143 @@ function NewFileDialog({
 }
 
 // ============================================================================
-// ReposPane: list of registered code repos
+// ReposPane: declarative repo roster — the knowledge repo's .loopat/config.json
+// (notes remote + repos[]). Repos are cloned on demand at loop creation; this
+// page just edits the roster. Save commits + pushes back to the knowledge repo.
 // ============================================================================
 
 function ReposPane() {
-  const ws = useWorkspace()
-  const navigate = useNavigate()
-  const [repos, setRepos] = useState<RepoEntry[]>([])
-  const [selectedName, setSelectedName] = useState<string | null>(null)
-  const [detail, setDetail] = useState<RepoDetail | null>(null)
-  const [reloadKey, setReloadKey] = useState(0)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [showAdd, setShowAdd] = useState(false)
-  const isMobile = useIsMobile()
+  const [roster, setRoster] = useState<ContextRepoRoster | null>(null)
+  const [notesGit, setNotesGit] = useState("")
+  const [repos, setRepos] = useState<ContextRepoSpec[]>([])
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
-  const refreshList = useCallback(async () => {
-    const rs = await listRepos()
-    setRepos(rs)
-    return rs
+  const load = useCallback(async () => {
+    const r = await getContextRepos()
+    setRoster(r)
+    setNotesGit(r.notes?.git ?? "")
+    setRepos(r.repos)
   }, [])
+  useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    refreshList().then((rs) => {
-      if (rs.length > 0 && !selectedName) setSelectedName(rs[0].name)
+  const dirty =
+    roster !== null &&
+    (notesGit.trim() !== (roster.notes?.git ?? "") ||
+      JSON.stringify(repos) !== JSON.stringify(roster.repos))
+
+  const addRow = () => setRepos((rs) => [...rs, { name: "", git: "" }])
+  const setRow = (i: number, k: "name" | "git", v: string) =>
+    setRepos((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)))
+  const delRow = (i: number) => setRepos((rs) => rs.filter((_, idx) => idx !== i))
+
+  const save = async () => {
+    setSaving(true)
+    setMsg(null)
+    const cleaned = repos
+      .map((r) => ({ name: r.name.trim(), git: r.git.trim() }))
+      .filter((r) => r.name && r.git)
+    const r = await putContextRepos({
+      notes: notesGit.trim() ? { git: notesGit.trim() } : null,
+      repos: cleaned,
     })
-  }, [refreshList])
-
-  useEffect(() => {
-    if (!selectedName) return
-    getRepo(selectedName).then(setDetail)
-  }, [selectedName, reloadKey])
-
-  const onSpawnLoop = async () => {
-    if (!selectedName) return
-    const m = await ws.createLoop({ title: `${selectedName} loop`, repo: selectedName })
-    navigate(`/loop/${m.id}`)
+    setSaving(false)
+    if (r.ok) {
+      setMsg({ ok: true, text: "Saved + promoted to the knowledge repo." })
+      await load()
+    } else {
+      setMsg({
+        ok: false,
+        text: (r.savedLocally ? "Saved locally but promote failed: " : "Save failed: ") + (r.error ?? ""),
+      })
+    }
   }
 
-  const repoList = (
-    <aside className="w-64 shrink-0 border-r border-gray-200 bg-white flex flex-col h-full">
-      <div className="px-3 h-9 flex items-center justify-between border-b border-gray-200">
-        {isMobile ? (
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="text-gray-500 hover:text-gray-900 px-1 rounded hover:bg-gray-100"
-            title="close repos"
-          >
-            <PanelLeftClose size={14} />
-          </button>
-        ) : (
-          <span className="text-[11px] uppercase tracking-wide text-gray-500 font-medium">repos</span>
-        )}
-        <span className="text-[11px] text-gray-400 ml-auto">{repos.length}</span>
-      </div>
-      <div className="flex-1 min-h-0 overflow-auto py-2">
-        {repos.map((r) => {
-          const sel = selectedName === r.name
-          return (
-            <button
-              key={r.name}
-              type="button"
-              onClick={() => {
-                setSelectedName(r.name)
-                if (isMobile) setSidebarOpen(false)
-              }}
-              className={
-                sel
-                  ? "w-full px-3 py-2 flex items-center gap-2 text-left bg-gray-100"
-                  : "w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-gray-50"
-              }
-            >
-              <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500" />
-              <span className="text-[13px] text-gray-900 flex-1 min-w-0 truncate">{r.name}</span>
-            </button>
-          )
-        })}
-        {repos.length === 0 && (
-          <div className="px-3 py-4 text-[12px] text-gray-400 italic">
-            none yet · click "add repo" below
-          </div>
-        )}
-      </div>
-      <button
-        type="button"
-        onClick={() => setShowAdd(true)}
-        className="m-3 px-2 py-1.5 rounded border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2"
-        title="clone a remote URL or symlink a local directory"
-      >
-        <span>+</span>
-        <span>add repo</span>
-      </button>
-    </aside>
-  )
+  if (!roster) return <div className="p-6 text-sm text-gray-400">loading…</div>
 
   return (
-    <div className="flex h-full w-full">
-      {isMobile ? (
-        <>
-          {sidebarOpen ? (
-            <div className="fixed inset-0 z-30" onClick={() => setSidebarOpen(false)}>
-              <div className="absolute inset-0 bg-black/30" />
-              <div className="absolute left-0 top-0 bottom-0 w-64 max-w-[80vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
-                {repoList}
-              </div>
-            </div>
-          ) : (
-            <aside className="w-9 shrink-0 border-r border-gray-200 bg-white flex flex-col items-center pt-2">
+    <article className="flex-1 min-w-0 overflow-auto p-5">
+      <div className="max-w-2xl flex flex-col gap-5">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Repo roster</h2>
+          <p className="text-[12px] text-gray-500 leading-relaxed mt-1">
+            Declared in the knowledge repo's{" "}
+            <code className="bg-gray-100 px-1 rounded text-[11px]">.loopat/config.json</code>. Repos are
+            cloned on demand when a loop selects one. Saving commits + pushes back to the knowledge repo
+            (needs your key to have write access).
+          </p>
+        </div>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-gray-700">notes remote</span>
+          <input
+            value={notesGit}
+            onChange={(e) => setNotesGit(e.target.value)}
+            placeholder="git@…/notes.git"
+            className="px-2 py-1.5 text-sm font-mono border border-gray-300 rounded outline-none focus:border-gray-500"
+          />
+        </label>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-[12px] font-medium text-gray-700">repos</span>
+          {repos.length === 0 && <div className="text-[12px] text-gray-400">No repos yet.</div>}
+          {repos.map((r, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                value={r.name}
+                onChange={(e) => setRow(i, "name", e.target.value)}
+                placeholder="name"
+                className="w-40 px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+              />
+              <input
+                value={r.git}
+                onChange={(e) => setRow(i, "git", e.target.value)}
+                placeholder="git@…/repo.git"
+                className="flex-1 px-2 py-1.5 text-sm font-mono border border-gray-300 rounded outline-none focus:border-gray-500"
+              />
               <button
                 type="button"
-                onClick={() => setSidebarOpen(true)}
-                className="w-7 h-7 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded"
-                title="open repos list"
+                onClick={() => delRow(i)}
+                className="px-2 py-1.5 text-gray-400 hover:text-red-600"
+                title="remove"
               >
-                <PanelLeftOpen size={16} />
+                ✕
               </button>
-            </aside>
-          )}
-        </>
-      ) : (
-        repoList
-      )}
-      <main className="flex-1 min-w-0 flex flex-col bg-white min-h-0">
-        {detail ? (
-          <RepoView
-            key={detail.name}
-            repo={detail}
-            onSpawnLoop={onSpawnLoop}
-            onPulled={() => setReloadKey((k) => k + 1)}
-          />
-        ) : (
-          <div className="flex-1 flex items-center justify-center text-[13px] text-gray-400 italic">
-            select a repo
-          </div>
-        )}
-      </main>
-      {showAdd && (
-        <AddRepoDialog
-          existingNames={repos.map((r) => r.name)}
-          onClose={() => setShowAdd(false)}
-          onAdded={async (name) => {
-            setShowAdd(false)
-            await refreshList()
-            setSelectedName(name)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
-
-function deriveRepoName(source: string): string {
-  let s = source.trim().replace(/[?#].*$/, "")
-  s = s.replace(/\/+$/, "").replace(/\.git$/i, "")
-  const m = s.match(/[/:]([^/:]+)$/)
-  return (m ? m[1] : s).trim()
-}
-
-function AddRepoDialog({
-  existingNames,
-  onClose,
-  onAdded,
-}: {
-  existingNames: string[]
-  onClose: () => void
-  onAdded: (name: string) => void
-}) {
-  const [source, setSource] = useState("")
-  const [name, setName] = useState("")
-  const [nameTouched, setNameTouched] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const derived = deriveRepoName(source)
-  const effectiveName = nameTouched ? name : derived
-  const isUrl = /:\/\//.test(source.trim()) || /^git@/.test(source.trim())
-
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault()
-    const finalName = effectiveName.trim()
-    if (!source.trim()) { setErr("source required"); return }
-    if (!REPO_NAME_RE.test(finalName)) {
-      setErr("invalid name (letters/digits/_.-, max 64, must start with alnum)")
-      return
-    }
-    if (existingNames.includes(finalName)) {
-      setErr("name already exists")
-      return
-    }
-    setErr(null)
-    setBusy(true)
-    const r = await addRepo({ name: finalName, source: source.trim() })
-    setBusy(false)
-    if (!r.ok) { setErr(r.error ?? "add failed"); return }
-    onAdded(finalName)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center" onClick={onClose}>
-      <div
-        className="w-full max-w-[480px] mx-4 bg-white rounded-md shadow-xl border border-gray-200 p-4 md:p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="text-base font-semibold text-gray-900 mb-4">Add repo</div>
-        <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-700 font-medium">Source</span>
-            <input
-              autoFocus
-              type="text"
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              placeholder="git@github.com:user/repo.git  or  ~/code/myrepo"
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
-            />
-            <span className="text-[11px] text-gray-400">
-              {source.trim() === "" ? "git URL (clone) or local path (symlink)" : isUrl ? "→ git clone into context/repos/" : "→ symlink into context/repos/"}
-            </span>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-700 font-medium">Name</span>
-            <input
-              type="text"
-              value={effectiveName}
-              onChange={(e) => { setName(e.target.value); setNameTouched(true) }}
-              placeholder="repo-name"
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
-            />
-            <span className="text-[11px] text-gray-400">directory name under context/repos/</span>
-          </label>
-          {err && <div className="text-[11px] text-red-600 break-words">{err}</div>}
-          <div className="flex justify-end gap-2 mt-2 pt-3 border-t border-gray-100">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={busy}
-              className="px-3 h-8 text-sm rounded text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-            >
-              cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy || !source.trim() || !effectiveName.trim()}
-              className="px-3 h-8 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50"
-            >
-              {busy ? "adding…" : "add"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-function RepoView({ repo, onSpawnLoop, onPulled }: { repo: RepoDetail; onSpawnLoop: () => void; onPulled: () => void }) {
-  const navigate = useNavigate()
-  const [pulling, setPulling] = useState(false)
-  const [pullMsg, setPullMsg] = useState<{ ok: boolean; text: string } | null>(null)
-
-  const onPull = async () => {
-    if (pulling) return
-    setPulling(true)
-    setPullMsg(null)
-    const r = await pullRepo(repo.name)
-    setPulling(false)
-    if (r.ok) {
-      setPullMsg({ ok: true, text: r.output?.split("\n").pop() || "up to date" })
-      onPulled()
-    } else {
-      setPullMsg({ ok: false, text: r.error ?? "pull failed" })
-    }
-  }
-
-  return (
-    <>
-      <header className="px-5 h-10 shrink-0 border-b border-gray-200 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-[13px] min-w-0">
-          <span
-            className={
-              repo.status === "online"
-                ? "w-2 h-2 rounded-full bg-emerald-500 shrink-0"
-                : "w-2 h-2 rounded-full bg-gray-300 shrink-0"
-            }
-          />
-          <span className="text-gray-900 font-medium truncate">{repo.name}</span>
-          {repo.remote && <span className="text-gray-500 truncate">· {repo.remote}</span>}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          {pullMsg && (
-            <span className={"text-[11px] truncate max-w-[260px] " + (pullMsg.ok ? "text-emerald-700" : "text-red-600")} title={pullMsg.text}>
-              {pullMsg.text}
-            </span>
-          )}
-          <span className="text-xs text-gray-500">default branch: {repo.branch ?? "—"}</span>
+            </div>
+          ))}
           <button
-            onClick={onPull}
-            disabled={pulling || repo.status !== "online"}
-            className="px-2.5 h-7 rounded text-xs border border-gray-200 hover:bg-gray-100 text-gray-900 flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="git pull --ff-only from origin"
+            type="button"
+            onClick={addRow}
+            className="self-start text-[12px] text-gray-600 hover:text-gray-900 border border-gray-200 rounded px-2 py-1"
           >
-            <RefreshCw size={12} className={pulling ? "animate-spin" : ""} />
-            <span>{pulling ? "syncing…" : "sync"}</span>
+            + add repo
           </button>
         </div>
-      </header>
-      <article className="flex-1 min-h-0 overflow-auto px-4 md:px-8 py-4 md:py-6">
-        <div className="max-w-[820px]">
-          <section className="mb-6">
-            <h3 className="text-[13px] font-medium text-gray-900 mb-2">Recent loops on this repo</h3>
-            {repo.recentLoops.length > 0 ? (
-              <ul className="flex flex-col gap-1">
-                {repo.recentLoops.map((loop) => (
-                  <li key={loop.id}>
-                    <button
-                      onClick={() => navigate(`/loop/${loop.id}`)}
-                      className="w-full px-3 py-2 rounded hover:bg-gray-100 flex items-center gap-3 text-[13px] text-left"
-                    >
-                      <span className="text-gray-500">⑂</span>
-                      <span className="text-gray-900">{loop.title}</span>
-                      <span className="text-gray-500 font-mono text-[11px]">{loop.branch ?? "main"}</span>
-                      <span className="text-gray-500 ml-auto text-[11px]">
-                        {new Date(loop.createdAt).toLocaleString()}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-[13px] text-gray-500">No active loops yet.</p>
-            )}
-            <button
-              onClick={onSpawnLoop}
-              className="mt-3 px-3 py-1.5 rounded bg-gray-900 text-white text-xs hover:bg-gray-700 flex items-center gap-2"
-            >
-              <span>+</span>
-              <span>spawn new loop on a branch</span>
-            </button>
-          </section>
-          <section>
-            <h3 className="text-[13px] font-medium text-gray-900 mb-2">README</h3>
-            <div className="max-w-[760px]">
-              {repo.readme ? (
-                <Suspense fallback={<div className="text-gray-400 text-sm">Loading...</div>}><Markdown text={repo.readme} /></Suspense>
-              ) : (
-                <p className="text-[13px] text-gray-500 italic">No README found at repo root.</p>
-              )}
-            </div>
-          </section>
+
+        {msg && (
+          <div
+            className={`text-[12px] rounded px-2 py-1.5 border ${
+              msg.ok
+                ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                : "text-red-700 bg-red-50 border-red-200"
+            }`}
+          >
+            {msg.text}
+          </div>
+        )}
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={save}
+            disabled={!dirty || saving}
+            className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save + promote"}
+          </button>
+          {dirty && <span className="text-[11px] text-amber-600">unsaved changes</span>}
         </div>
-      </article>
-    </>
+      </div>
+    </article>
   )
 }
-

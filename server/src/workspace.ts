@@ -15,9 +15,6 @@ import {
   personalReposDir,
   personalDir,
   uiNotesDir,
-  // workspace-level repos admin (addRepo/listRepos/...) — superseded by the
-  // per-user knowledge-config repo roster in batch4b; kept until then.
-  workspaceReposDir,
 } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -247,12 +244,6 @@ export async function vaultDelete(vault: VaultId, relPath: string, user: string)
   return { ok: true }
 }
 
-export type RepoEntry = {
-  name: string
-  path: string
-  remote?: string
-}
-
 export type Backlink = {
   path: string  // file path that links to the target
   preview: string  // first line of context around the link
@@ -354,151 +345,3 @@ export async function listTopics(loopTitles: { id: string; title: string }[]): P
   })
 }
 
-export type RepoDetail = RepoEntry & {
-  branch?: string
-  status: "online" | "offline"
-  readme?: string
-}
-
-export async function readRepoDetail(name: string): Promise<RepoDetail | null> {
-  const path = join(workspaceReposDir(), name)
-  try {
-    const s = await stat(path)
-    if (!s.isDirectory()) return null
-  } catch {
-    return null
-  }
-  let remote: string | undefined
-  let branch: string | undefined
-  let online: "online" | "offline" = "online"
-  try {
-    const { stdout } = await execFileP("git", ["-C", path, "remote", "get-url", "origin"])
-    remote = stdout.trim()
-  } catch {
-    online = "offline"
-  }
-  try {
-    const { stdout } = await execFileP("git", ["-C", path, "symbolic-ref", "--short", "HEAD"])
-    branch = stdout.trim()
-  } catch {}
-  let readme: string | undefined
-  for (const candidate of ["README.md", "readme.md", "README", "Readme.md"]) {
-    try {
-      const buf = await readFile(join(path, candidate), "utf8")
-      readme = buf
-      break
-    } catch {}
-  }
-  return { name, path, remote, branch, status: online, readme }
-}
-
-const REPO_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/
-
-function isRepoUrl(source: string): boolean {
-  return /:\/\//.test(source) || /^git@/.test(source)
-}
-
-function expandHome(p: string): string {
-  if (p === "~") return homedir()
-  if (p.startsWith("~/")) return join(homedir(), p.slice(2))
-  return p
-}
-
-export function deriveRepoName(source: string): string {
-  let s = source.trim().replace(/[?#].*$/, "")
-  s = s.replace(/\/+$/, "").replace(/\.git$/i, "")
-  const m = s.match(/[/:]([^/:]+)$/)
-  return (m ? m[1] : s).trim()
-}
-
-/**
- * Register a repo under workspaceReposDir(). Source can be either:
- *   - a git URL (http/https/ssh/git@) → `git clone` into the target
- *   - a local filesystem path → symlink into the target
- * Symlinks are preferred for local working trees so edits in the source
- * tree show up in loops without re-cloning.
- */
-export async function addRepo(opts: { name: string; source: string }): Promise<{ ok: boolean; name?: string; kind?: "clone" | "symlink"; error?: string }> {
-  const source = (opts.source || "").trim()
-  if (!source) return { ok: false, error: "source required" }
-  const name = (opts.name || "").trim()
-  if (!REPO_NAME_RE.test(name)) {
-    return { ok: false, error: "invalid name (letters/digits/_.-, max 64, must start with alnum)" }
-  }
-  const root = workspaceReposDir()
-  const target = join(root, name)
-  try {
-    await lstat(target)
-    return { ok: false, error: "already exists" }
-  } catch {}
-  await mkdir(root, { recursive: true })
-  if (isRepoUrl(source)) {
-    try {
-      await execFileP("git", ["clone", source, target], { timeout: 300_000 })
-      return { ok: true, name, kind: "clone" }
-    } catch (e: any) {
-      const msg = (e?.stderr || e?.stdout || e?.message || "clone failed").toString().trim()
-      return { ok: false, error: msg }
-    }
-  }
-  const abs = resolvePath(expandHome(source))
-  try {
-    const s = await stat(abs)
-    if (!s.isDirectory()) return { ok: false, error: "source path is not a directory" }
-  } catch {
-    return { ok: false, error: "source path does not exist" }
-  }
-  try {
-    await symlink(abs, target)
-    return { ok: true, name, kind: "symlink" }
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "symlink failed" }
-  }
-}
-
-export async function pullRepo(name: string): Promise<{ ok: boolean; output?: string; error?: string }> {
-  const path = join(workspaceReposDir(), name)
-  try {
-    const s = await stat(path)
-    if (!s.isDirectory()) return { ok: false, error: "not found" }
-  } catch {
-    return { ok: false, error: "not found" }
-  }
-  if (!existsSync(join(path, ".git"))) return { ok: false, error: "not a git repo" }
-  try {
-    const { stdout, stderr } = await execFileP("git", ["-C", path, "pull", "--ff-only"], { timeout: 60_000 })
-    return { ok: true, output: `${stdout}${stderr}`.trim() }
-  } catch (e: any) {
-    const msg = (e?.stderr || e?.stdout || e?.message || "pull failed").toString().trim()
-    return { ok: false, error: msg }
-  }
-}
-
-export async function listRepos(): Promise<RepoEntry[]> {
-  const root = workspaceReposDir()
-  let names: string[] = []
-  try {
-    names = await readdir(root)
-  } catch {
-    return []
-  }
-  const out: RepoEntry[] = []
-  for (const name of names) {
-    const p = join(root, name)
-    let target = p
-    try {
-      const s = await stat(p)
-      if (!s.isDirectory()) continue
-      target = p
-    } catch {
-      continue
-    }
-    let remote: string | undefined
-    try {
-      const { stdout } = await execFileP("git", ["-C", target, "remote", "get-url", "origin"])
-      remote = stdout.trim()
-    } catch {}
-    out.push({ name, path: target, remote })
-  }
-  return out
-}

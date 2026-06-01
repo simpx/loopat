@@ -6,7 +6,7 @@
  * See docs/composition.md for the model.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { getDefaultProfiles, getLoopStats, listProfiles, listRepos, listVaults, type LoopStats, type ProfileEntry, type RepoEntry } from "../../api"
+import { getDefaultProfiles, getLoopStats, listProfiles, getContextRepos, listVaults, type LoopStats, type ProfileEntry, type ContextRepoSpec } from "../../api"
 
 export function NewLoopDialog({
   onClose,
@@ -22,7 +22,7 @@ export function NewLoopDialog({
   const [selectedProfiles, setSelectedProfiles] = useState<Set<string>>(new Set())
   const [defaultProfileNames, setDefaultProfileNames] = useState<string[]>([])
   const [vault, setVault] = useState("default")
-  const [repos, setRepos] = useState<RepoEntry[]>([])
+  const [repos, setRepos] = useState<ContextRepoSpec[]>([])
   const [profiles, setProfiles] = useState<ProfileEntry[]>([])
   const [vaults, setVaults] = useState<string[]>([])
   const [stats, setStats] = useState<LoopStats | null>(null)
@@ -31,7 +31,7 @@ export function NewLoopDialog({
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    listRepos().then(setRepos)
+    getContextRepos().then((r) => setRepos(r.repos))
     // Pre-check the user's default_profiles from personal config (diff style:
     // dialog opens with the user's typical setup, they add/remove from there).
     Promise.all([listProfiles(), getDefaultProfiles()]).then(([allProfiles, defaults]) => {
@@ -123,13 +123,13 @@ export function NewLoopDialog({
               {repos.map((r) => (
                 <option key={r.name} value={r.name}>
                   {r.name}
-                  {r.remote ? ` · ${r.remote}` : ""}
+                  {r.git ? ` · ${r.git}` : ""}
                 </option>
               ))}
             </select>
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
-                No repos registered. Run `git clone` into context/repos/&lt;name&gt;/.
+                No repos in the roster. Add them on the Context → Repos page.
               </div>
             )}
           </DialogField>

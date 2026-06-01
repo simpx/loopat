@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig } from "./loops"
 import { getEphemeralHostPort } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -30,7 +30,7 @@ import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // keep both callable without import-order-dependent shadowing.
 import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot } from "./session"
 import { listDir, listDirRecursive, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
-import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listRepos, readRepoDetail, pullRepo, addRepo, listTopics, type VaultId } from "./workspace"
+import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listTopics, type VaultId } from "./workspace"
 // sandboxes module removed — no /api/sandboxes/* routes in the profile model.
 // Use /api/profiles + /api/personal/default-profiles instead.
 import { attachTerm, detachTerm, writeTerm, resizeTerm, killTerm } from "./term"
@@ -55,7 +55,7 @@ import {
   personalReposDir,
   loopsDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, type ProviderConfig, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner } from "./bootstrap"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
@@ -2259,43 +2259,33 @@ app.get("/api/workspace/backlinks", requireAuth, async (c) => {
   return c.json({ backlinks: await vaultBacklinks(vault as VaultId, path, userId) })
 })
 
-app.get("/api/workspace/repos", requireAuth, async (c) => {
-  return c.json({ repos: await listRepos() })
+// Context repos roster — DECLARATIVE, lives in the per-user knowledge repo's
+// .loopat/config.json (notes remote + repos[]). Physical clones are still
+// on-demand at loop creation (ensureRepoCloned). GET returns the roster; PUT
+// rewrites it and promotes (commit + push) back to the knowledge repo.
+app.get("/api/context/repos", requireAuth, async (c) => {
+  const u = c.get("userId") as string
+  const kcfg = await loadKnowledgeConfig(u)
+  return c.json({ notes: kcfg.notes ?? null, repos: kcfg.repos ?? [] })
 })
 
-// Register a new repo. Body: { name, source } where source is a git URL
-// (cloned) or a local path (symlinked).
-app.post("/api/workspace/repos", requireAuth, async (c) => {
+app.put("/api/context/repos", requireAuth, async (c) => {
+  const u = c.get("userId") as string
   const body = await c.req.json().catch(() => ({}))
-  const source = typeof body.source === "string" ? body.source : ""
-  const name = typeof body.name === "string" ? body.name : ""
-  const r = await addRepo({ name, source })
-  if (!r.ok) return c.json({ error: r.error }, 400)
-  return c.json({ ok: true, name: r.name, kind: r.kind })
-})
-
-// /api/sandboxes/* routes removed — sandbox concept replaced by profiles
-// (post-2026-05). Profile management uses /api/profiles + per-profile
-// .claude/settings.json edited via CC's own commands (cd .loopat/profiles/<n>
-// && claude plugin install --scope=project ...).
-
-app.get("/api/workspace/repo/:name", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  const detail = await readRepoDetail(name)
-  if (!detail) return c.json({ error: "not found" }, 404)
-  // recent loops on this repo
-  const loops = await listLoops()
-  const recent = loops.filter((l) => (l as any).repo === name).slice(0, 8)
-  return c.json({ ...detail, recentLoops: recent })
-})
-
-// `git pull --ff-only` in the repo. Fast-forward only — diverged branches
-// surface as an error so the user resolves them in their own checkout.
-app.post("/api/workspace/repo/:name/pull", requireAuth, async (c) => {
-  const name = c.req.param("name") ?? ""
-  const r = await pullRepo(name)
-  if (!r.ok) return c.json({ error: r.error }, 400)
-  return c.json({ ok: true, output: r.output })
+  const repos = Array.isArray(body.repos)
+    ? body.repos.filter((r: any) => r?.name && r?.git).map((r: any) => ({ name: String(r.name).trim(), git: String(r.git).trim() }))
+    : []
+  const notes = body?.notes?.git ? { git: String(body.notes.git).trim() } : undefined
+  // Need the per-user knowledge repo present to write + promote. Best-effort
+  // clone it first (from personal.knowledge).
+  await ensureUserContext(u).catch(() => {})
+  if (!existsSync(join(personalKnowledgeDir(u), ".git"))) {
+    return c.json({ error: "knowledge repo not available — set personal.knowledge and make sure your key can clone it" }, 400)
+  }
+  await saveKnowledgeConfig(u, { notes, repos })
+  const r = await promoteKnowledgeConfig(u)
+  if (!r.ok) return c.json({ error: r.error, savedLocally: true }, 400)
+  return c.json({ ok: true, notes: notes ?? null, repos })
 })
 
 // ── topics ──
