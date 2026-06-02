@@ -52,6 +52,7 @@ import {
   personalKnowledgeDir,
   personalNotesDir,
   personalReposDir,
+  personalRepoCacheDir,
   LOOPAT_INSTALL_DIR,
   loopHomeUpper,
   workspaceHomeSkelDir,
@@ -128,6 +129,11 @@ export type ContainerOptions = {
   vaultName?: string
   knowledgeRw?: boolean
   mountAllLoops?: boolean
+  /** Source roster repo for this loop's workdir (meta.repo). The workdir is a
+   *  `git worktree add` off this repo's bare mirror (repo-cache/<repo>), so its
+   *  .git gitdir points into that mirror. When set, the mirror is bind-mounted
+   *  at its host path (src=dst, rw) so the worktree resolves inside the sandbox. */
+  repo?: string
   /** Extra env vars to pre-bake into the container at create time. */
   extraEnv?: Record<string, string>
   /** Image to create the container from. Defaults to SANDBOX_IMAGE.
@@ -190,7 +196,7 @@ export type VolumeMount = {
  */
 export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeMount[]> {
   const hostHome = homedir()
-  const { loopId, createdBy, vaultName, knowledgeRw, mountAllLoops } = opts
+  const { loopId, createdBy, vaultName, knowledgeRw, mountAllLoops, repo } = opts
   const virtualHome = V_HOME(createdBy)
   const mounts: VolumeMount[] = []
 
@@ -204,6 +210,17 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
 
   // Virtual mount points for AI / user:
   mounts.push({ src: loopWorkdir(loopId), dst: V_LOOP_WORKDIR(loopId) })
+
+  // Workdir built from a roster repo is a `git worktree add` off the repo's
+  // bare mirror (repo-cache/<repo>); the workdir's .git is a gitdir pointer INTO
+  // that mirror. Bind the mirror at its host path (src=dst) so the worktree's
+  // objects/refs/worktree-metadata resolve inside the sandbox — otherwise
+  // `git status` in the workdir is "fatal: not a git repository". rw because git
+  // writes the worktree's index/HEAD/logs under <mirror>/worktrees/<wt>/.
+  if (repo) {
+    const cache = personalRepoCacheDir(createdBy, repo)
+    mounts.push({ src: cache, dst: cache })
+  }
   mounts.push({ src: loopClaudeDir(loopId), dst: V_LOOP_CLAUDE(loopId) })
   mounts.push({
     src: loopContextKnowledge(loopId),
