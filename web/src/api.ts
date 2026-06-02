@@ -768,27 +768,27 @@ export async function vaultBacklinks(vault: VaultId, path: string): Promise<Back
   return (j.backlinks ?? []) as Backlink[]
 }
 
-// Context repos roster — DECLARATIVE, lives in the knowledge repo's
-// .loopat/config.json (notes remote + repos[]). Physical clones stay
-// on-demand at loop creation. Edited via the /context/repos page.
+// Context repos roster — PERSONAL: lives in the user's own
+// personal/<user>/.loopat/config.json. Physical clones stay on-demand at loop
+// creation. Edited via the /context/repos page.
 export type ContextRepoSpec = { name: string; git: string }
-export type ContextRepoRoster = { notes: { git: string } | null; repos: ContextRepoSpec[] }
+export type ContextRepoRoster = { repos: ContextRepoSpec[] }
 
 export async function getContextRepos(): Promise<ContextRepoRoster> {
   const r = await apiFetch(`/api/context/repos`)
-  if (!r.ok) return { notes: null, repos: [] }
+  if (!r.ok) return { repos: [] }
   const j = await r.json()
-  return { notes: j.notes ?? null, repos: (j.repos ?? []) as ContextRepoSpec[] }
+  return { repos: (j.repos ?? []) as ContextRepoSpec[] }
 }
 
-export async function putContextRepos(roster: ContextRepoRoster): Promise<{ ok: boolean; error?: string; savedLocally?: boolean }> {
+export async function putContextRepos(roster: ContextRepoRoster): Promise<{ ok: boolean; error?: string }> {
   const r = await apiFetch(`/api/context/repos`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(roster),
   })
   const j = await r.json().catch(() => ({}))
-  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}`, savedLocally: j.savedLocally }
+  if (!r.ok) return { ok: false, error: j.error ?? `http ${r.status}` }
   return { ok: true }
 }
 

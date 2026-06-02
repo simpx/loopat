@@ -7,14 +7,13 @@ import { existsSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import { join } from "node:path"
 import { resolveSandboxClaudeBinary } from "./claude-binary"
-import { configPath, loadKnowledgeConfig, type WorkspaceConfig, type KnowledgeConfig } from "./config"
+import { configPath, loadKnowledgeConfig, type WorkspaceConfig } from "./config"
 import {
   WORKSPACE,
   usersPath,
   workspaceDir,
   workspaceKnowledgeDir,
   workspaceNotesDir,
-  workspaceRepoDir,
   workspaceTeamClaudeMdPath,
 } from "./paths"
 import { listUsers } from "./auth"
@@ -109,19 +108,6 @@ function describeRemote(dir: string, url: string | undefined): string {
   return "local-only (no remote)"
 }
 
-function describeRepos(kcfg: KnowledgeConfig): Check {
-  const specs = kcfg.repos ?? []
-  if (specs.length === 0) return { ok: true, label: `repos:     (none configured)` }
-  // Repos are clone-on-demand (cloned only when a loop selects one), so a repo
-  // that isn't cloned yet is NORMAL, not a failure. Report cloned vs on-demand;
-  // never a blocker.
-  const parts = specs.map((r) => {
-    const present = existsSync(workspaceRepoDir(r.name))
-    return present ? r.name : `${r.name} (on demand)`
-  })
-  return { ok: true, label: `repos:     ${parts.join(", ")}` }
-}
-
 async function checkUsers(): Promise<Check> {
   const path = usersPath()
   if (!existsSync(path)) {
@@ -137,14 +123,15 @@ async function checkUsers(): Promise<Check> {
 }
 
 export async function printBootstrapBanner(cfg: WorkspaceConfig) {
-  // notes + repos are declared inside the knowledge repo's .loopat/config.json.
+  // notes is declared inside the knowledge repo's .loopat/config.json. The repo
+  // roster is per-user (personal config), so the workspace banner can't list it.
   const kcfg = await loadKnowledgeConfig()
   const checks: Check[] = [
     { ok: true, label: `workspace: ${workspaceDir()}` },
     { ok: true, label: `team .claude/CLAUDE.md (${existsSync(workspaceTeamClaudeMdPath()) ? "present" : "absent"})` },
     { ok: existsSync(workspaceKnowledgeDir()), label: `knowledge: ${describeRemote(workspaceKnowledgeDir(), cfg.knowledge?.git || undefined)}` },
     { ok: existsSync(workspaceNotesDir()), label: `notes:     ${describeRemote(workspaceNotesDir(), kcfg.notes?.git || undefined)}` },
-    describeRepos(kcfg),
+    { ok: true, label: `repos:     (per-user, in personal config)` },
     await checkUsers(),
     { ok: existsSync(configPath()), label: `config: ${configPath()}` },
     checkPodman(),

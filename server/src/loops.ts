@@ -349,7 +349,7 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
 /**
  * The personal repo is self-describing: its `.loopat/config.json` declares the
  * authoritative kn/notes remotes, and a loop connects to them with the user's
- * OWN key from the selected vault (`vaults/<vault>/mounts/home/.ssh/id`), not
+ * OWN key from the selected vault (`vaults/<vault>/mounts/home/.ssh/id_ed25519`), not
  * the host's ssh. Called at loop creation, which has the user + vault in hand.
  *
  * The startup clone (driven by host config.json) stays as a display mirror;
@@ -370,13 +370,6 @@ async function _ensureUserContext(user: string, vault: string): Promise<string[]
   const errors: string[] = []
   const cfg = await loadPersonalConfig(user, vault)
   const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
-  // Sandbox-side promote: core.sshCommand points at the vault key's SANDBOX path
-  // (/loopat/home/<user>/.ssh/id, where the vault home-mount lands) with
-  // accept-new, so the AI's `git push` inside the sandbox authenticates as the
-  // user without an interactive host-key prompt. Host-side ops override this
-  // with GIT_SSH_COMMAND (env beats config), so the sandbox path is never used
-  // server-side.
-  const sandboxKey = `/loopat/home/${user}/.ssh/id`
   // Clone-or-sync a PER-USER context main repo from `url` with the vault key.
   // STRICT, per the context model: personal wins even when empty — an empty url
   // means the dir is REMOVED so the loop sees nothing (no fallback to any
@@ -406,18 +399,20 @@ async function _ensureUserContext(user: string, vault: string): Promise<string[]
         return false
       }
     }
-    await execFileP("git", ["-C", dir, "config", "core.sshCommand",
-      `ssh -i ${sandboxKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`]).catch(() => {})
+    // No core.sshCommand override: inside the sandbox the vault's .ssh is mounted
+    // at $HOME/.ssh, so the AI's `git push` resolves the standard-named key +
+    // config on its own (follow ssh standard, don't special-case). Host-side ops
+    // here use GIT_SSH_COMMAND (sshEnv).
     await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 30_000 }).catch(() => {})
     return true
   }
   // knowledge is the entry pointer (personal-declared url); clone it first, then
-  // read ITS .loopat/config.json for the notes remote + repo roster — notes and
-  // repos now live inside the per-user knowledge repo, not in personal config.
+  // read ITS .loopat/config.json for the notes remote. The repo roster is
+  // personal (cfg.repos), no longer inside the knowledge repo.
   const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), cfg.knowledge?.git, "knowledge")
-  const kcfg = hasKnowledge ? await loadKnowledgeConfig(user) : { notes: undefined, repos: [] as RepoSpec[] }
+  const kcfg = hasKnowledge ? await loadKnowledgeConfig(user) : { notes: undefined }
   await ensurePerUserRepo(personalNotesDir(user), kcfg.notes?.git, "notes")
-  await writeReposManifest(personalReposDir(user), kcfg.repos ?? [])
+  await writeReposManifest(personalReposDir(user), cfg.repos ?? [])
   return errors
 }
 
@@ -446,9 +441,9 @@ async function writeReposManifest(reposDir: string, specs: RepoSpec[]) {
  * repo dir exists afterwards. Used by loop creation and any on-demand path.
  */
 async function ensureRepoMirror(user: string, name: string, sshCommand?: string): Promise<string | null> {
-  // The roster lives in the user's OWN knowledge repo (per-user, no fallback).
-  const kcfg = await loadKnowledgeConfig(user)
-  const spec = kcfg.repos?.find((r) => r.name === name)
+  // The roster lives in the user's OWN personal config (per-user, no fallback).
+  const pcfg = await loadPersonalConfig(user)
+  const spec = pcfg.repos?.find((r) => r.name === name)
   if (!spec?.git) return null
   const dir = personalRepoCacheDir(user, name)
   const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
@@ -500,7 +495,9 @@ export async function ensureWorkspaceDirs() {
   await ensureContextRepo(workspaceKnowledgeDir(), "knowledge", cfg.knowledge?.git || undefined)
   const kcfg = await loadKnowledgeConfig()
   await ensureContextRepo(workspaceNotesDir(), "notes", kcfg.notes?.git || undefined)
-  await writeReposManifest(workspaceReposDir(), kcfg.repos ?? [])
+  // The repo roster is per-user (PersonalConfig.repos); there is no
+  // workspace-default roster, so the workspace repos manifest is empty.
+  await writeReposManifest(workspaceReposDir(), [])
 
   // workspace memory dir + stub
   const tm = workspaceMemoryDir()
@@ -938,23 +935,29 @@ export async function importPersonalFromRepo(
 }
 
 /**
- * TEAM key: the ssh command a git op uses to reach SHARED context — knowledge /
- * notes / repos — as the user, with their OWN key from the selected vault
- * (`vaults/<vault>/mounts/home/.ssh/id`). If the key isn't there the op simply
- * fails: we deliberately do NOT fall back to the host deploy-key, so a loop
- * never borrows access it wasn't granted. Authorization tracks the personal
- * repo (which declares the team it connects to), not the host
+ * TEAM key: the ssh command a host-side git op uses to reach SHARED context —
+ * knowledge / notes / repos — as the user, with their OWN vault. We just point
+ * ssh at the vault's `.ssh` and let it follow the standard: the standard-named
+ * key (`id_ed25519`, via `-i` because on the host `~` isn't the vault) and the
+ * vault's own `config` (via `-F`, so the user's Host / known-hosts / strict-
+ * checking choices apply). No `IdentitiesOnly` / `UserKnownHostsFile` overrides
+ * — loopat doesn't special-case the key, it follows ssh's standard resolution.
+ * If the key isn't there the op simply fails: we deliberately do NOT fall back
+ * to the host deploy-key, so a loop never borrows access it wasn't granted
  * (see behavior/02-personal-permissions.md).
  */
 function sshCommandForUser(userId: string, vault: string = "default"): string {
-  const vaultKey = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh", "id")
+  const sshDir = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh")
+  const vaultKey = join(sshDir, "id_ed25519")
+  const vaultConfig = join(sshDir, "config")
   // git can't persist 0600 — it only tracks the exec bit — so a fresh checkout
   // of the git-crypt vault lands the key at the umask default (0664 under a 002
   // umask), and ssh refuses it ("permissions too open"). Force 0600 at point of
   // use: this fixes every host-side git op AND the file the sandbox bind-mounts
   // into $HOME, regardless of how/when it was checked out. Cheap + idempotent.
   try { chmodSync(vaultKey, 0o600) } catch {}
-  return `ssh -i ${vaultKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+  const f = existsSyncBase(vaultConfig) ? `-F ${vaultConfig} ` : ""
+  return `ssh ${f}-i ${vaultKey}`
 }
 
 /**
@@ -1795,7 +1798,7 @@ export async function promoteKnowledgeConfig(user: string): Promise<RepoSyncResu
  * The user's per-vault SSH public keys — the keys a loop authenticates to TEAM
  * repos with (knowledge / notes / repos), one per vault. This is what the user
  * must register on the team git host. Distinct from the deploy key (host-
- * secrets, personal-repo only). Reads vaults/<v>/mounts/home/.ssh/id.pub, or
+ * secrets, personal-repo only). Reads vaults/<v>/mounts/home/.ssh/id_ed25519.pub, or
  * derives it from the private key.
  */
 export async function listVaultPublicKeys(user: string): Promise<{ vault: string; publicKey: string }[]> {
@@ -1803,8 +1806,8 @@ export async function listVaultPublicKeys(user: string): Promise<{ vault: string
   const out: { vault: string; publicKey: string }[] = []
   for (const vault of listVaults(user)) {
     const sshDir = join(personalVaultDir(user, vault), "mounts", "home", ".ssh")
-    const pubPath = join(sshDir, "id.pub")
-    const keyPath = join(sshDir, "id")
+    const pubPath = join(sshDir, "id_ed25519.pub")
+    const keyPath = join(sshDir, "id_ed25519")
     let pub = ""
     if (existsSyncBase(pubPath)) {
       pub = (await readFile(pubPath, "utf8")).trim()
@@ -1932,7 +1935,7 @@ async function unlockWithCryptKey(
     // The just-decrypted vault ssh key lands at the umask default (often 0664);
     // git can't carry 0600, so lock it down now — before the sandbox bind-mounts
     // it into $HOME — so both host git ops and in-container ssh accept it.
-    await chmod(join(repoDir, ".loopat", "vaults", "default", "mounts", "home", ".ssh", "id"), 0o600).catch(() => {})
+    await chmod(join(repoDir, ".loopat", "vaults", "default", "mounts", "home", ".ssh", "id_ed25519"), 0o600).catch(() => {})
     return { ok: true }
   } catch (e: any) {
     if (await gitCryptKeyExists(userId)) {

@@ -113,17 +113,17 @@ export type RepoSpec = {
 
 /**
  * Config living INSIDE the knowledge repo at <knowledge>/.loopat/config.json.
- * The knowledge repo is the SoT for the team's notes remote + the repo roster;
- * workspace/personal config only hold the `knowledge` entry pointer. To read
- * it the knowledge repo must already be cloned (its url comes from
- * personal/workspace config), so this is loaded AFTER the knowledge clone.
+ * The knowledge repo is the SoT for the team's notes remote; workspace/personal
+ * config only hold the `knowledge` entry pointer. To read it the knowledge repo
+ * must already be cloned (its url comes from personal/workspace config), so this
+ * is loaded AFTER the knowledge clone. (The repo roster is NO LONGER here — it
+ * moved to personal config; see PersonalConfig.repos.)
  */
 export type KnowledgeConfig = {
   notes?: RemoteSpec
-  repos?: RepoSpec[]
 }
 
-const KNOWLEDGE_CONFIG_TEMPLATE: KnowledgeConfig = { notes: { git: "" }, repos: [] }
+const KNOWLEDGE_CONFIG_TEMPLATE: KnowledgeConfig = { notes: { git: "" } }
 
 /** The .loopat root holding the knowledge config. With a user → that user's
  *  per-user knowledge repo; without → the workspace-default knowledge repo
@@ -140,7 +140,7 @@ export async function loadKnowledgeConfig(user?: string): Promise<KnowledgeConfi
   if (!existsSync(path)) return JSON.parse(JSON.stringify(KNOWLEDGE_CONFIG_TEMPLATE))
   try {
     const disk = JSON.parse(await readFile(path, "utf8")) as KnowledgeConfig
-    return { notes: disk.notes, repos: Array.isArray(disk.repos) ? disk.repos : [] }
+    return { notes: disk.notes }
   } catch (e: any) {
     console.warn(`[loopat] knowledge config: ${path} malformed (${e?.message ?? e}), treating as empty`)
     return JSON.parse(JSON.stringify(KNOWLEDGE_CONFIG_TEMPLATE))
@@ -153,7 +153,6 @@ export async function saveKnowledgeConfig(user: string | undefined, patch: Knowl
   const cur = await loadKnowledgeConfig(user)
   const next: KnowledgeConfig = {
     notes: patch.notes !== undefined ? patch.notes : cur.notes,
-    repos: patch.repos !== undefined ? patch.repos : cur.repos,
   }
   const dir = knowledgeLoopatRoot(user)
   await mkdir(dir, { recursive: true })
@@ -180,9 +179,9 @@ export type OperatorMount = {
  */
 export type WorkspaceConfig = {
   /** Workspace-default entry pointer to the knowledge repo. The notes remote
-   *  and the repo roster now live INSIDE the knowledge repo's
-   *  .loopat/config.json (KnowledgeConfig) — see loadKnowledgeConfig. A
-   *  per-user override lives in personal config. */
+   *  lives INSIDE the knowledge repo's .loopat/config.json (KnowledgeConfig) —
+   *  see loadKnowledgeConfig. The repo roster is per-user (PersonalConfig.repos).
+   *  A per-user knowledge override lives in personal config. */
   knowledge?: RemoteSpec
   providers?: Record<string, ProviderConfig>
   default?: string
@@ -246,9 +245,12 @@ export type PersonalConfigDisk = {
   /** Mixed: "default" key is a string, all other keys are providers. */
   providers: Record<string, ProviderConfigDisk | string>
   /** Per-user entry pointer to the knowledge repo (authoritative over the
-   *  workspace default). The notes remote + repo roster live inside the
-   *  knowledge repo's own .loopat/config.json, not here. */
+   *  workspace default). The notes remote lives inside the knowledge repo's
+   *  own .loopat/config.json, not here. */
   knowledge?: RemoteSpec
+  /** Per-user repo roster — clone-on-demand at loop creation. Personal, not
+   *  team-shared (moved here from the knowledge repo). Edited via /context/repos. */
+  repos?: RepoSpec[]
 }
 
 export type PersonalConfig = {
@@ -261,9 +263,11 @@ export type PersonalConfig = {
    * in mcpServers works, and (b) substitute `${VAR}` in provider.apiKey.
    */
   vaultEnvs: Record<string, string>
-  /** Per-user entry pointer to the knowledge repo (notes/repos live in the
+  /** Per-user entry pointer to the knowledge repo (notes lives in the
    *  knowledge repo's own .loopat/config.json). */
   knowledge?: RemoteSpec
+  /** Per-user repo roster — clone-on-demand at loop creation. */
+  repos: RepoSpec[]
 }
 
 /**
@@ -311,6 +315,7 @@ const PERSONAL_TEMPLATE: PersonalConfig = {
   default: PROVIDER_PRESETS[0] ? `${PROVIDER_PRESETS[0].name}/${PROVIDER_PRESETS[0].models[0]}` : "",
   providers: buildPresetProviders(),
   vaultEnvs: {},
+  repos: [],
 }
 
 /** On-disk shape used when a config.json is missing or malformed. Seeded
@@ -477,6 +482,7 @@ export async function loadPersonalConfig(
     default: defaultProviderName && providers[defaultProviderName] ? rawDefault : "",
     providers,
     vaultEnvs,
+    repos: Array.isArray(disk.repos) ? disk.repos : [],
     ...(disk.knowledge ? { knowledge: disk.knowledge } : {}),
   }
   personalCache.set(cacheKey, { cfg, configMtimeMs, envsDirMtimeMs })
@@ -665,6 +671,13 @@ export async function savePersonalDisk(
       }
     }
     disk.providers = patch.providers
+  }
+
+  if (patch.repos !== undefined) {
+    disk.repos = patch.repos
+      .filter((r) => r && typeof r.name === "string" && typeof r.git === "string")
+      .map((r) => ({ name: r.name.trim(), git: r.git.trim() }))
+      .filter((r) => r.name && r.git)
   }
 
   await mkdir(personalLoopatDir(user), { recursive: true })

@@ -1179,14 +1179,13 @@ function NewFileDialog({
 }
 
 // ============================================================================
-// ReposPane: declarative repo roster — the knowledge repo's .loopat/config.json
-// (notes remote + repos[]). Repos are cloned on demand at loop creation; this
-// page just edits the roster. Save commits + pushes back to the knowledge repo.
+// ReposPane: the repo roster — PERSONAL, in personal/<user>/.loopat/config.json.
+// Repos are cloned on demand at loop creation; this page just edits the roster.
+// Saving writes straight to the user's own config.json.
 // ============================================================================
 
 function ReposPane() {
   const [roster, setRoster] = useState<ContextRepoRoster | null>(null)
-  const [notesGit, setNotesGit] = useState("")
   const [repos, setRepos] = useState<ContextRepoSpec[]>([])
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
@@ -1194,15 +1193,12 @@ function ReposPane() {
   const load = useCallback(async () => {
     const r = await getContextRepos()
     setRoster(r)
-    setNotesGit(r.notes?.git ?? "")
     setRepos(r.repos)
   }, [])
   useEffect(() => { load() }, [load])
 
   const dirty =
-    roster !== null &&
-    (notesGit.trim() !== (roster.notes?.git ?? "") ||
-      JSON.stringify(repos) !== JSON.stringify(roster.repos))
+    roster !== null && JSON.stringify(repos) !== JSON.stringify(roster.repos)
 
   const addRow = () => setRepos((rs) => [...rs, { name: "", git: "" }])
   const setRow = (i: number, k: "name" | "git", v: string) =>
@@ -1215,19 +1211,13 @@ function ReposPane() {
     const cleaned = repos
       .map((r) => ({ name: r.name.trim(), git: r.git.trim() }))
       .filter((r) => r.name && r.git)
-    const r = await putContextRepos({
-      notes: notesGit.trim() ? { git: notesGit.trim() } : null,
-      repos: cleaned,
-    })
+    const r = await putContextRepos({ repos: cleaned })
     setSaving(false)
     if (r.ok) {
-      setMsg({ ok: true, text: "Saved + promoted to the knowledge repo." })
+      setMsg({ ok: true, text: "Saved." })
       await load()
     } else {
-      setMsg({
-        ok: false,
-        text: (r.savedLocally ? "Saved locally but promote failed: " : "Save failed: ") + (r.error ?? ""),
-      })
+      setMsg({ ok: false, text: "Save failed: " + (r.error ?? "") })
     }
   }
 
@@ -1239,22 +1229,11 @@ function ReposPane() {
         <div>
           <h2 className="text-sm font-semibold text-gray-900">Repo roster</h2>
           <p className="text-[12px] text-gray-500 leading-relaxed mt-1">
-            Declared in the knowledge repo's{" "}
+            Personal — saved straight to your own{" "}
             <code className="bg-gray-100 px-1 rounded text-[11px]">.loopat/config.json</code>. Repos are
-            cloned on demand when a loop selects one. Saving commits + pushes back to the knowledge repo
-            (needs your key to have write access).
+            cloned on demand when a loop selects one.
           </p>
         </div>
-
-        <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-gray-700">notes remote</span>
-          <input
-            value={notesGit}
-            onChange={(e) => setNotesGit(e.target.value)}
-            placeholder="git@…/notes.git"
-            className="px-2 py-1.5 text-sm font-mono border border-gray-300 rounded outline-none focus:border-gray-500"
-          />
-        </label>
 
         <div className="flex flex-col gap-2">
           <span className="text-[12px] font-medium text-gray-700">repos</span>
@@ -1311,7 +1290,7 @@ function ReposPane() {
             disabled={!dirty || saving}
             className="px-3 h-9 text-sm rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40"
           >
-            {saving ? "Saving…" : "Save + promote"}
+            {saving ? "Saving…" : "Save"}
           </button>
           {dirty && <span className="text-[11px] text-amber-600">unsaved changes</span>}
         </div>

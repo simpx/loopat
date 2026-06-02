@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys, userOnboarding, submitOnboarding } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, listVaultPublicKeys, userOnboarding, submitOnboarding } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, mcpRequiredEnvs, parseTemplateVars, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -55,7 +55,7 @@ import {
   personalReposDir,
   loopsDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, loadA2AConfig, saveA2AConfig, type ProviderConfig, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadA2AConfig, saveA2AConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner, printReadyLine } from "./bootstrap"
@@ -2423,14 +2423,14 @@ app.get("/api/workspace/backlinks", requireAuth, async (c) => {
   return c.json({ backlinks: await vaultBacklinks(vault as VaultId, path, userId) })
 })
 
-// Context repos roster — DECLARATIVE, lives in the per-user knowledge repo's
-// .loopat/config.json (notes remote + repos[]). Physical clones are still
-// on-demand at loop creation (ensureRepoCloned). GET returns the roster; PUT
-// rewrites it and promotes (commit + push) back to the knowledge repo.
+// Context repos roster — PERSONAL: lives in the user's own
+// personal/<user>/.loopat/config.json. Physical clones stay on-demand at loop
+// creation. GET returns the roster; PUT writes it straight to personal config
+// (no git promote — personal config syncs through the personal-repo path).
 app.get("/api/context/repos", requireAuth, async (c) => {
   const u = c.get("userId") as string
-  const kcfg = await loadKnowledgeConfig(u)
-  return c.json({ notes: kcfg.notes ?? null, repos: kcfg.repos ?? [] })
+  const pcfg = await loadPersonalConfig(u)
+  return c.json({ repos: pcfg.repos ?? [] })
 })
 
 app.put("/api/context/repos", requireAuth, async (c) => {
@@ -2439,17 +2439,9 @@ app.put("/api/context/repos", requireAuth, async (c) => {
   const repos = Array.isArray(body.repos)
     ? body.repos.filter((r: any) => r?.name && r?.git).map((r: any) => ({ name: String(r.name).trim(), git: String(r.git).trim() }))
     : []
-  const notes = body?.notes?.git ? { git: String(body.notes.git).trim() } : undefined
-  // Need the per-user knowledge repo present to write + promote. Best-effort
-  // clone it first (from personal.knowledge).
-  await ensureUserContext(u).catch(() => {})
-  if (!existsSync(join(personalKnowledgeDir(u), ".git"))) {
-    return c.json({ error: "knowledge repo not available — set personal.knowledge and make sure your key can clone it" }, 400)
-  }
-  await saveKnowledgeConfig(u, { notes, repos })
-  const r = await promoteKnowledgeConfig(u)
-  if (!r.ok) return c.json({ error: r.error, savedLocally: true }, 400)
-  return c.json({ ok: true, notes: notes ?? null, repos })
+  const sp = await savePersonalDisk(u, { repos })
+  if (!sp.ok) return c.json({ error: sp.error }, 400)
+  return c.json({ ok: true, repos })
 })
 
 // ── topics ──
