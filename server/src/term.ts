@@ -3,7 +3,7 @@ import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, getLoopWarning } from "./podman"
-import { updateLoopStatus } from "./loop-status"
+import { updateLoopStatus, setLoopPhase } from "./loop-status"
 import { effectiveDriver, getLoop, loopEphemeralPorts } from "./loops"
 import { loadPersonalConfig } from "./config"
 
@@ -57,6 +57,10 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     await mkdir(fishRuntime, { recursive: true })
     await chmod(fishRuntime, 0o700).catch(() => {})
 
+    // Only flips `preparing` on once a build/pull actually emits progress —
+    // a warm loop (image cached) never fires onProgress, so the UI shows no
+    // gate. After ensureContainer returns we clear it back to `ready`.
+    let building = false
     await ensureContainer({
       loopId,
       createdBy: driver,
@@ -66,8 +70,12 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       extraEnv: personalCfg.vaultEnvs,
       ephemeralPorts: loopEphemeralPorts(meta),
     }, {
-      onProgress: (msg) => updateLoopStatus(loopId, msg),
+      onProgress: (msg) => {
+        if (!building) { building = true; setLoopPhase(loopId, "preparing") }
+        updateLoopStatus(loopId, msg)
+      },
     })
+    if (building) setLoopPhase(loopId, "ready")
     markActive(loopId, "pty")
     updateLoopStatus(loopId, "Ready")
 

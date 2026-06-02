@@ -301,6 +301,16 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
   }
   const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "", openFile)
+
+  // Sandbox-prep gate: on first use, the per-loop image builds (mise toolchain
+  // install / base-image pull). While it runs, terminal + chat aren't usable —
+  // block them behind an overlay so the user doesn't type into a shell that
+  // isn't there or fire a chat turn that just queues. Driven by the loop-status
+  // `phase` the server sets around ensureContainer.
+  const statusIds = useMemo(() => [meta.id], [meta.id])
+  const loopStatus = useLoopStatus(statusIds)
+  const preparing = loopStatus[meta.id]?.phase === "preparing"
+  const prepDetail = loopStatus[meta.id]?.status
   useEffect(() => {
     getContext(meta.id).then(setMounts)
     markLoopViewed(meta.id)
@@ -427,6 +437,8 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           </ul>
         </div>
       )}
+      <div className="relative flex-1 min-h-0 flex flex-col">
+      {preparing && <PreparingOverlay detail={prepDetail} />}
       {isMobile ? (
         <div className="flex-1 min-h-0">
           <LoopRuntimeProvider extra={extra}>
@@ -549,6 +561,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
           </LoopRuntimeProvider>
         </div>
       )}
+      </div>
       {hasPanels && isMobile && openPanels.map((mode) => (
         <Fragment key={mode}>
           {renderPanel(mode)}
@@ -925,6 +938,33 @@ function DriveToggle({ meta }: { meta: LoopMeta }) {
       <Hand size={11} />
       Request For Drive
     </button>
+  )
+}
+
+/**
+ * Blocking overlay shown while the loop's sandbox image is building on first
+ * use (mise toolchain install / base-image pull). Covers the chat + panels and
+ * captures pointer events so the user can't type into a not-yet-ready terminal
+ * or fire a chat turn that would just queue. Clears as soon as the server flips
+ * the loop's status `phase` back to "ready".
+ */
+function PreparingOverlay({ detail }: { detail?: string }) {
+  return (
+    <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/70 backdrop-blur-sm">
+      <div className="max-w-md mx-6 px-6 py-5 rounded-xl border border-blue-200 bg-white shadow-lg text-center">
+        <div className="flex items-center justify-center gap-2 mb-2">
+          <span className="inline-block w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+          <span className="text-sm font-medium text-gray-900">Preparing this loop’s sandbox…</span>
+        </div>
+        <p className="text-[12px] text-gray-600 leading-relaxed">
+          Installing the toolchain from <code className="font-mono text-[11px] bg-gray-100 px-1 rounded">mise.toml</code>.
+          Terminal and chat are paused until tools are ready — this only happens the first time.
+        </p>
+        {detail && detail !== "Ready" && (
+          <p className="mt-2 text-[11px] font-mono text-blue-700 break-words">{detail}</p>
+        )}
+      </div>
+    </div>
   )
 }
 

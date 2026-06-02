@@ -13,7 +13,7 @@ import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLU
 import { effectiveDriver, getLoop, loopEphemeralPorts, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
-import { updateLoopStatus } from "./loop-status"
+import { updateLoopStatus, setLoopPhase } from "./loop-status"
 
 // Tests override LOOPAT_CLAUDE_BIN to point at a mock binary (a script that
 // reads stream-json from stdin and writes canned messages back) so we can
@@ -490,6 +490,9 @@ class LoopSession {
     // this SDK driver AND the PTY (term.ts) call ensureContainer with the
     // same options, so they end up sharing one container (same PID / Mount /
     // IPC namespace) — that's the whole point of the podman refactor.
+    // Mirrors term.ts: only raise the `preparing` gate once a build/pull
+    // actually emits progress; clear it to `ready` once the container is up.
+    let building = false
     await ensureContainer({
       loopId,
       createdBy: driver,
@@ -499,8 +502,12 @@ class LoopSession {
       extraEnv,
       ephemeralPorts: loopEphemeralPorts(meta),
     }, {
-      onProgress: (msg) => updateLoopStatus(loopId, msg),
+      onProgress: (msg) => {
+        if (!building) { building = true; setLoopPhase(loopId, "preparing") }
+        updateLoopStatus(loopId, msg)
+      },
     })
+    if (building) setLoopPhase(loopId, "ready")
     updateLoopStatus(loopId, "Ready")
     // Tell the container lifecycle scheduler that this loop has an active
     // SDK source. Released in destroy() via markInactive(loopId, "sdk").

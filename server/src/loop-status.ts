@@ -2,7 +2,21 @@ import { join } from "node:path"
 import { existsSync, readFileSync, writeFileSync, watch } from "node:fs"
 import { LOOPAT_HOME } from "./paths"
 
-export type LoopStatusEntry = { status: string; updated: string; viewed?: boolean }
+export type LoopStatusEntry = {
+  status: string
+  updated: string
+  viewed?: boolean
+  /**
+   * Runtime-readiness phase, set around ensureContainer (term.ts / session.ts):
+   *  - "preparing": the per-loop sandbox image is being built (mise toolchain
+   *    install / base-image pull). Terminal + chat are not yet usable — the UI
+   *    shows a blocking "installing tools" overlay so the user doesn't type into
+   *    a shell that isn't there or fire a chat turn that just queues.
+   *  - "ready": the container is up; normal use.
+   * Absent on loops that never needed a build (image already cached).
+   */
+  phase?: "preparing" | "ready"
+}
 export type LoopStatusMap = Record<string, LoopStatusEntry>
 
 const STATUS_FILE = join(LOOPAT_HOME, "loop-status.json")
@@ -33,6 +47,24 @@ export function updateLoopStatus(loopId: string, status: string) {
   save()
 
   // Immediately notify watchers without waiting for file system event
+  for (const fn of watchers) {
+    fn(cache, prev)
+  }
+}
+
+/**
+ * Set a loop's runtime-readiness phase (see LoopStatusEntry.phase). Bumps
+ * `updated` so the loop-status WS hub broadcasts the change to subscribers.
+ * Kept separate from updateLoopStatus so the human-readable build-progress
+ * string (used by the kanban + the overlay) and the gate flag move independently.
+ */
+export function setLoopPhase(loopId: string, phase: "preparing" | "ready") {
+  const prev = { ...cache }
+  const entry = cache[loopId] || { status: "", updated: "", viewed: false }
+  entry.phase = phase
+  entry.updated = new Date().toISOString()
+  cache[loopId] = entry
+  save()
   for (const fn of watchers) {
     fn(cache, prev)
   }

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react"
 
-type StatusMap = Record<string, { status: string; updated: string; viewed?: boolean }>
+type StatusMap = Record<string, { status: string; updated: string; viewed?: boolean; phase?: "preparing" | "ready" }>
 
 export function useLoopStatus(loopIds: string[]) {
   const [statusMap, setStatusMap] = useState<StatusMap>({})
