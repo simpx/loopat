@@ -35,6 +35,14 @@ RUN userdel -r ubuntu 2>/dev/null || true \
  && groupadd -g 2000 loopat \
  && useradd -m -u 2000 -g 2000 -s /bin/bash loopat
 
+# The AC2 base ships apt sources pointing at mirrors.cloud.aliyuncs.com
+# (100.100.x.x — Aliyun *intranet* only, unreachable outside ECS). Repoint to
+# the public mirrors.aliyun.com; the per-arch path (ubuntu / ubuntu-ports) is
+# preserved, so this works on both amd64 and arm64.
+RUN sed -i 's|mirrors.cloud.aliyuncs.com|mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true \
+ && printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-loopat-retries
+
 # Full-stack system layer. Everything a dev reflexively reaches for.
 # podman/uidmap/fuse-overlayfs/slirp4netns: nested rootless podman support
 # — every sandbox can run podman without per-loop opt-in. The sandbox's

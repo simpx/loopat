@@ -5,7 +5,7 @@ import { existsSync } from "node:fs"
 import { execSync, execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
-import { getEphemeralHostPort } from "./podman"
+import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
 import {
@@ -3135,7 +3135,7 @@ app.get("*", async (c, next) => {
 const port = Number(process.env.PORT ?? 10001)
 const hostname = process.env.HOST ?? "127.0.0.1"
 
-// Fast, serve-critical init only — keep this short so the port opens quickly.
+// Fast, serve-critical init (must precede everything else).
 await ensureWorkspaceDirs()
 const cfg = await loadConfig()
 // Initialise chat DB. bootstrap user = first admin (if one exists) — only used
@@ -3148,9 +3148,44 @@ try {
 } catch {}
 initChat(chatSeed)
 
-// Open the port NOW, before the slow boot work below (mount backfill, podman
-// probe, container prewarm). Otherwise the vite dev proxy hits ECONNREFUSED
-// during the seconds those awaits run. The rest boots while we're listening.
+// === Prepare the runtime BEFORE opening the port =========================
+// The end-user experience we want: loopat checks its dependencies and builds
+// the sandbox base image up front — with visible progress — and only starts
+// listening once everything is ready. That way creating the first loop is
+// instant, instead of silently triggering a multi-minute image build when the
+// user least expects it. When the image is already built (steady state, and
+// `bun --hot` dev), these steps return immediately.
+await printBootstrapBanner(cfg)
+
+const podmanProbe = await probePodman()
+if (podmanProbe.ok) {
+  console.log(`[loopat] sandbox runtime: ${podmanProbe.version}`)
+} else {
+  console.warn(`[loopat] sandbox runtime: NOT AVAILABLE — ${podmanProbe.hint}`)
+  console.warn(`[loopat] podman is required — install it, then restart loopat (chat / terminal need it).`)
+}
+
+if (podmanProbe.ok) {
+  // On a non-linux host the sandbox needs a linux claude that npm/npx didn't
+  // install (npx skips postinstall scripts) — fetch it now (skipped once
+  // present / on a linux host).
+  try {
+    await ensureSandboxClaudeBinary((m) => console.log(`[loopat] ${m}`))
+  } catch (e: any) {
+    console.warn(`[loopat] sandbox claude fetch failed: ${e?.message ?? e}; sandbox AI won't run until fixed`)
+  }
+  // Build the sandbox base image now so the first loop opens instantly. Skips
+  // immediately when the image for this Containerfile already exists.
+  try {
+    console.log(`[loopat] preparing sandbox base image…`)
+    await ensureSandboxImage({ onProgress: (m) => console.log(`[loopat] ${m}`) })
+    console.log(`[loopat] sandbox base image ready`)
+  } catch (e: any) {
+    console.warn(`[loopat] sandbox image build failed: ${e?.message ?? e}; loopat will retry when you open a loop`)
+  }
+}
+
+// === Everything ready — open the port ====================================
 const server = Bun.serve({
   port,
   hostname,
@@ -3171,14 +3206,6 @@ console.log(`[loopat] server listening on http://${hostname}:${port}`)
   }
 }
 
-// On a non-linux host the sandbox needs a linux claude that npm/npx didn't
-// install (npx skips postinstall scripts) — fetch it in the background on first
-// boot (~18s, doesn't block the port; skipped once present / on a linux host).
-ensureSandboxClaudeBinary((m) => console.log(`[loopat] ${m}`)).catch((e) =>
-  console.warn(`[loopat] sandbox claude fetch failed: ${e?.message ?? e}; sandbox AI won't run until fixed`),
-)
-
-await printBootstrapBanner(cfg)
 const backfilled = await backfillAllMounts()
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
 
@@ -3207,22 +3234,16 @@ void (async () => {
   }
 })()
 
-// Probe podman availability up front so misconfigured hosts fail loudly on
-// boot rather than mid-session.
-import { probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer } from "./podman"
-const podmanProbe = await probePodman()
+// Start workspace serve + port-proxy containers on the shared bridge network.
+// podman was already probed (and the base image built) before we opened the
+// port — see the preparation phase above.
 if (podmanProbe.ok) {
-  console.log(`[loopat] sandbox runtime: ${podmanProbe.version}`)
-  // Start workspace serve in a container on the shared bridge network.
   ensureServeContainer().catch((e) => {
     console.warn(`[loopat] serve container failed: ${e?.message ?? e}`)
   })
   ensurePortProxyContainer().catch((e) => {
     console.warn(`[loopat] port-proxy container failed: ${e?.message ?? e}`)
   })
-} else {
-  console.warn(`[loopat] sandbox runtime: NOT AVAILABLE — ${podmanProbe.hint}`)
-  console.warn(`[loopat] chat / terminal will fail until podman is installed.`)
 }
 
 // On graceful shutdown, stop every loopat-managed container so the host
