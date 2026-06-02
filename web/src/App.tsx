@@ -25,6 +25,7 @@ import { FloatingDm } from "./components/FloatingDm"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, getOnboarding, type PersonalStatus, type OnboardingStatus } from "./api"
 import { OnboardingForm } from "./components/OnboardingForm"
+import { OnboardingInfo } from "./components/OnboardingInfo"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 import { ThemeProvider, useTheme } from "./theme"
 
@@ -336,6 +337,10 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           // the real page; while there we poll so the gate advances when they're done.
           if (ob.show.kind === "route") {
             return location.pathname === ob.show.path ? <Outlet /> : <Navigate to={ob.show.path} replace />
+          }
+          // Provider wants to show instructions → render them with a re-check button.
+          if (ob.show.kind === "info") {
+            return <OnboardingInfo show={ob.show} onAdvance={setOnboarding} />
           }
           // Provider wants a form → render it; on submit we get the next view.
           return <OnboardingForm form={ob.show} onAdvance={setOnboarding} />
