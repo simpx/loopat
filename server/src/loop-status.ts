@@ -37,9 +37,14 @@ function save() {
 
 export function updateLoopStatus(loopId: string, status: string) {
   const prev = { ...cache }
-  const entry = cache[loopId] || { status: "", updated: "", viewed: false }
-  entry.status = status
-  entry.updated = new Date().toISOString()
+  // Build a NEW entry object rather than mutating the existing one in place:
+  // `prev` is a shallow copy, so prev[loopId] aliases the live cache entry.
+  // Mutating it would also change prev[loopId].updated, making the WS hub's
+  // `curr.updated !== prev.updated` diff a no-op → connected clients never get
+  // the update (only fresh subscribers, which read lastSnapshot). Preserve
+  // phase + viewed via spread.
+  const old = cache[loopId] || { status: "", updated: "", viewed: false }
+  const entry = { ...old, status, updated: new Date().toISOString() }
   if (status === "Done") {
     entry.viewed = false
   }
@@ -60,9 +65,10 @@ export function updateLoopStatus(loopId: string, status: string) {
  */
 export function setLoopPhase(loopId: string, phase: "preparing" | "ready") {
   const prev = { ...cache }
-  const entry = cache[loopId] || { status: "", updated: "", viewed: false }
-  entry.phase = phase
-  entry.updated = new Date().toISOString()
+  // New object, not in-place mutation — see updateLoopStatus for why (the
+  // prev-aliasing that silently drops the WS broadcast).
+  const old = cache[loopId] || { status: "", updated: "", viewed: false }
+  const entry = { ...old, phase, updated: new Date().toISOString() }
   cache[loopId] = entry
   save()
   for (const fn of watchers) {
