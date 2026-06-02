@@ -86,14 +86,20 @@ export const V_CONTEXT_CHAT = "/loopat/context/chat"
 export const V_HOST_EXEC_DIR = "/loopat/host-exec"
 export const V_HOST_EXEC_SOCK = "/loopat/host-exec/host-exec.sock"
 
-// $HOME inside the container. Deliberately NOT host's homedir — if we bound
-// host's $HOME at its real path, podman would auto-create parent dirs for
-// every nested bind (LOOPAT_HOME, LOOPAT_INSTALL_DIR, etc. all live under
-// host $HOME in typical installs), and those intermediate dirs end up owned
-// by a subuid that the user can't delete from the host. With $HOME under
-// /loopat/ — outside the host's homedir tree — every host-absolute bind
-// sits beside it, never inside.
-export const V_HOME = (user: string) => `/loopat/home/${user}`
+// $HOME inside the container. MUST equal the sandbox user's /etc/passwd home,
+// otherwise ssh/git resolve `~` (e.g. ~/.ssh) via getpwuid (= passwd home), NOT
+// $HOME — so a vault mounted at $HOME/.ssh is invisible to ssh and every
+// sandbox-side `git push`/clone fails "Host key verification failed" / can't
+// find the key. The image's `loopat` user (uid 2000) has passwd home
+// /home/loopat, so we use exactly that.
+//
+// Still NOT the host's homedir: binding host $HOME at its real path makes podman
+// auto-create nested-bind parent dirs owned by a subuid the host can't delete.
+// /home/loopat is a CONTAINER-internal path — host-absolute binds sit outside
+// it, and it vanishes with the container, so there's no host residue. (Per-user
+// distinction is unnecessary: each loop has its own isolated container + home
+// overlay; the home path inside need not encode the user.)
+export const V_HOME = (_user: string) => `/home/loopat`
 
 // Label keys for podman inspect.
 const LABEL_LOOP = "loopat.loop-id"

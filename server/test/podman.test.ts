@@ -87,7 +87,7 @@ describe("buildVolumeMounts — core loop visibility", () => {
     expect(m!.ro).toBe(true)
   })
 
-  test("$HOME is bound under /loopat/home/<user> (not host's homedir — see V_HOME comment)", async () => {
+  test("$HOME is bound at V_HOME (= image passwd home, not host's homedir — see V_HOME comment)", async () => {
     const mounts = await buildVolumeMounts({ loopId: LOOP_ID, createdBy: USER })
     const m = mounts.find((m) => m.dst === V_HOME(USER))
     expect(m).toBeDefined()
@@ -160,10 +160,11 @@ describe("buildPodmanCreateArgs — container shape", () => {
     expect(containerName(LOOP_ID)).toBe(`loopat-${WORKSPACE}-${LOOP_ID}`)
   })
 
-  test("uses the per-workspace loopat-sandbox image (locally built, no docker hub at runtime)", async () => {
+  test("uses the content-hash loopat-sandbox image (locally built, no docker hub at runtime)", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
-    // Per-workspace name so parallel LOOPAT_HOMEs don't collide; see podman.ts.
-    expect(args).toContain(`loopat-sandbox-${WORKSPACE}:latest`)
+    // Content-addressed (no workspace prefix) so images are reused across
+    // workspaces instead of rebuilt per workspace; see podman.ts.
+    expect(args).toContain(`loopat-sandbox:latest`)
   })
 
   test("includes --userns keep-id:uid=2000,gid=2000, --init, --network loopat-<ws>", async () => {
@@ -185,7 +186,7 @@ describe("buildPodmanCreateArgs — container shape", () => {
 
   test("ends with <image> /bin/sleep infinity as the entrypoint", async () => {
     const args = await buildPodmanCreateArgs({ loopId: LOOP_ID, createdBy: USER })
-    expect(args.slice(-3)).toEqual([`loopat-sandbox-${WORKSPACE}:latest`, "/bin/sleep", "infinity"])
+    expect(args.slice(-3)).toEqual([`loopat-sandbox:latest`, "/bin/sleep", "infinity"])
   })
 
   test("each volume mount becomes a --volume src:dst[:ro] arg", async () => {
