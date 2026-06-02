@@ -2,7 +2,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, writeFile, 
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { existsSync } from "node:fs"
+import { existsSync, chmodSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import {
@@ -948,6 +948,12 @@ export async function importPersonalFromRepo(
  */
 function sshCommandForUser(userId: string, vault: string = "default"): string {
   const vaultKey = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh", "id")
+  // git can't persist 0600 — it only tracks the exec bit — so a fresh checkout
+  // of the git-crypt vault lands the key at the umask default (0664 under a 002
+  // umask), and ssh refuses it ("permissions too open"). Force 0600 at point of
+  // use: this fixes every host-side git op AND the file the sandbox bind-mounts
+  // into $HOME, regardless of how/when it was checked out. Cheap + idempotent.
+  try { chmodSync(vaultKey, 0o600) } catch {}
   return `ssh -i ${vaultKey} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
 }
 
@@ -1923,6 +1929,10 @@ async function unlockWithCryptKey(
   const keyPath = personalGitCryptKeyPath(userId)
   try {
     await execFileP("git-crypt", ["unlock", keyPath], { cwd: repoDir })
+    // The just-decrypted vault ssh key lands at the umask default (often 0664);
+    // git can't carry 0600, so lock it down now — before the sandbox bind-mounts
+    // it into $HOME — so both host git ops and in-container ssh accept it.
+    await chmod(join(repoDir, ".loopat", "vaults", "default", "mounts", "home", ".ssh", "id"), 0o600).catch(() => {})
     return { ok: true }
   } catch (e: any) {
     if (await gitCryptKeyExists(userId)) {
