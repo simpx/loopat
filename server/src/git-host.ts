@@ -28,6 +28,22 @@ export interface GitHostProvider {
   readonly defaultRepo?: string
 
   /**
+   * Optional onboarding gate. When a provider implements this, loopat treats
+   * onboarding as MANDATORY: until `done`, loop creation is blocked and the UI
+   * shows an onboarding screen. The provider decides what "onboarded" means by
+   * inspecting the user's resolved vault env + personal config, and returns the
+   * still-missing items (each with a help URL) for the UI to render. A provider
+   * that doesn't implement this imposes no gate.
+   */
+  isOnboarded?(ctx: {
+    userId: string
+    login?: string
+    vaultEnvs: Record<string, string>
+    config: Record<string, unknown>
+  }): Promise<{ done: boolean; missing?: { id: string; label: string; help?: string }[] }>
+
+
+  /**
    * How git authenticates clone/push on this platform:
    *  - "ssh-deploy-key": loopat generates an ssh key, the provider registers it
    *    (registerDeployKey), and git uses ssh. (GitHub.)

@@ -44,7 +44,8 @@ import { loadConfig, loadPersonalConfig, loadKnowledgeConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider } from "./git-host"
-import { loadExtensionProviders, resolveProviderId } from "./providers" // also registers built-in providers
+import { loadExtensionProviders, resolveProviderId, resolveProvider } from "./providers" // also registers built-in providers
+import { loadVaultEnvs } from "./vaults"
 
 const execFileP = promisify(execFile)
 
@@ -664,6 +665,46 @@ export async function authenticateViaProvider(opts: {
 export async function providerTokenHelp(providerId?: string): Promise<string | null> {
   await loadExtensionProviders()
   return getProvider(await resolveProviderId(providerId))?.tokenHelp ?? null
+}
+
+export type OnboardingStatus = {
+  /** Does the active provider impose an onboarding gate at all? (false → no gate) */
+  gated: boolean
+  /** Onboarding complete — loop creation allowed. */
+  done: boolean
+  /** First step: the personal repo isn't imported yet (a prerequisite for keys). */
+  needsPersonalRepo: boolean
+  /** Still-missing items (e.g. AI api keys), each with a help URL, for the UI. */
+  missing: { id: string; label: string; help?: string }[]
+}
+
+/**
+ * Active provider's onboarding gate (see GitHostProvider.isOnboarded). The
+ * provider judges completeness from the user's resolved vault env + personal
+ * config; loopat adds the personal-repo-imported prerequisite. No isOnboarded
+ * on the provider → no gate (done:true).
+ */
+export async function userOnboarding(userId: string, vault: string = "default"): Promise<OnboardingStatus> {
+  const provider = await resolveProvider()
+  if (!provider?.isOnboarded) return { gated: false, done: true, needsPersonalRepo: false, missing: [] }
+  const imported = !(await isPersonalFresh(userId))
+  // Vault env (where api keys live) only exists once the repo is imported.
+  const vaultEnvs = imported ? await loadVaultEnvs(userId, vault) : {}
+  const config = imported ? ((await loadPersonalConfig(userId, vault)) as Record<string, unknown>) : {}
+  let keys: { done: boolean; missing?: { id: string; label: string; help?: string }[] }
+  try {
+    keys = await provider.isOnboarded({ userId, vaultEnvs, config })
+  } catch (e: any) {
+    // Fail OPEN: a broken check must not lock the user out of their workspace.
+    console.warn(`[loopat] provider.isOnboarded(${provider.id}) failed: ${e?.message ?? e}`)
+    return { gated: false, done: true, needsPersonalRepo: false, missing: [] }
+  }
+  return {
+    gated: true,
+    done: imported && !!keys.done,
+    needsPersonalRepo: !imported,
+    missing: keys.missing ?? [],
+  }
 }
 
 /**

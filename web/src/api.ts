@@ -164,6 +164,21 @@ export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   return (await r.json()) as PersonalStatus
 }
 
+// Provider-driven onboarding gate. `gated:false` → no gate (the main UI shows
+// normally). Otherwise the app blocks on the onboarding screen until `done`.
+export type OnboardingMissing = { id: string; label: string; help?: string }
+export type OnboardingStatus = {
+  gated: boolean
+  done: boolean
+  needsPersonalRepo: boolean
+  missing: OnboardingMissing[]
+}
+export async function getOnboarding(): Promise<OnboardingStatus | null> {
+  const r = await apiFetch("/api/onboarding")
+  if (!r.ok) return null
+  return (await r.json()) as OnboardingStatus
+}
+
 export async function exportPersonalCryptKey(
   password: string,
 ): Promise<

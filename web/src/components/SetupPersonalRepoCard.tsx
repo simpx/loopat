@@ -24,7 +24,15 @@ export function isSetupPersonalRepoDismissed(): boolean {
   }
 }
 
-export function SetupPersonalRepoCard({ onDismiss }: { onDismiss: () => void }) {
+export function SetupPersonalRepoCard({
+  onDismiss,
+  hideSkip,
+}: {
+  onDismiss: () => void
+  // Hard-gate mode (provider requires onboarding): no "skip" — the personal
+  // repo is mandatory because the required keys live in its vault.
+  hideSkip?: boolean
+}) {
   const navigate = useNavigate()
 
   const dismiss = () => {
@@ -56,12 +64,14 @@ export function SetupPersonalRepoCard({ onDismiss }: { onDismiss: () => void }) 
         >
           去配置个人仓库 →
         </button>
-        <button
-          onClick={dismiss}
-          className="text-xs text-gray-500 hover:text-gray-700"
-        >
-          跳过（先用 workspace 的 key）
-        </button>
+        {!hideSkip && (
+          <button
+            onClick={dismiss}
+            className="text-xs text-gray-500 hover:text-gray-700"
+          >
+            跳过（先用 workspace 的 key）
+          </button>
+        )}
       </div>
       <p className="mt-4 text-[11px] text-gray-400 leading-relaxed">
         跳过后这个提示就不再出现。但 loopat 的核心安全模型依赖你的个人仓库 ——

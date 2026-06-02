@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys, userOnboarding } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -1204,6 +1204,13 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   })
 })
 
+// Onboarding gate status for the active provider (see userOnboarding). The web
+// app blocks the main UI on this until `done`. `gated:false` → no provider gate.
+app.get("/api/onboarding", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  return c.json(await userOnboarding(userId))
+})
+
 // Export the user's git-crypt key (base64). Behind a fresh password check
 // to prevent walk-up attacks on an unattended browser. The key decrypts
 // .loopat/vaults/** on any host that holds it, so we don't want a stolen
@@ -1567,6 +1574,10 @@ app.get("/api/profiles", requireAuth, async (c) => {
 
 app.post("/api/loops", requireAuth, async (c) => {
   const userId = c.get("userId") as string
+  // Onboarding gate: when the active provider requires onboarding, block loop
+  // creation until it's complete (see userOnboarding / GitHostProvider.isOnboarded).
+  const ob = await userOnboarding(userId)
+  if (ob.gated && !ob.done) return c.json({ error: "onboarding incomplete", onboarding: ob }, 403)
   const body = await c.req.json().catch(() => ({}))
   const title = typeof body.title === "string" ? body.title : "untitled"
   const repo = typeof body.repo === "string" && body.repo.trim() ? body.repo.trim() : undefined
@@ -2700,6 +2711,9 @@ app.post("/api/chat/threads/:msgId/spawn-loop", requireAuth, async (c) => {
   const title = typeof body.title === "string" && body.title.trim()
     ? body.title.trim()
     : defaultTitle
+  // Onboarding gate (same as POST /api/loops).
+  const ob = await userOnboarding(userId)
+  if (ob.gated && !ob.done) return c.json({ error: "onboarding incomplete", onboarding: ob }, 403)
   let meta
   try {
     meta = await createLoop({ title, createdBy: userId })

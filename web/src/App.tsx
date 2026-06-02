@@ -23,7 +23,8 @@ import { AdminSystemPage } from "./pages/AdminSystemPage"
 import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
-import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, type PersonalStatus } from "./api"
+import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, getOnboarding, type PersonalStatus, type OnboardingStatus } from "./api"
+import { OnboardingKeysCard } from "./components/OnboardingKeysCard"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 import { ThemeProvider, useTheme } from "./theme"
 
@@ -114,6 +115,16 @@ function Shell({ ws }: { ws: WorkspaceState }) {
       )
     })
   }, [shareMode])
+
+  // Hard onboarding gate (provider-driven). Re-fetched on navigation so the
+  // gate clears as soon as the user finishes a step (e.g. sets up the personal
+  // repo on the exempt route below, then navigates back).
+  const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
+  const [onboardReload, setOnboardReload] = useState(0)
+  useEffect(() => {
+    if (!loggedIn || shareMode) { setOnboarding(null); return }
+    getOnboarding().then(setOnboarding)
+  }, [loggedIn, shareMode, onboardReload, location.pathname])
 
   if (shareMode) {
     return (
@@ -310,7 +321,17 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         </div>
       )}
       <main className="flex-1 min-h-0 min-w-0 overflow-hidden">
-        <Outlet />
+        {loggedIn && onboarding?.gated && !onboarding.done && location.pathname !== "/settings/personal-repo" ? (
+          // Provider requires onboarding — block the whole UI until it's done.
+          // /settings/personal-repo is exempt so the repo step is reachable.
+          onboarding.needsPersonalRepo ? (
+            <SetupPersonalRepoCard hideSkip onDismiss={() => setOnboardReload((k) => k + 1)} />
+          ) : (
+            <OnboardingKeysCard missing={onboarding.missing} onSaved={() => setOnboardReload((k) => k + 1)} />
+          )
+        ) : (
+          <Outlet />
+        )}
       </main>
       {ws.newLoopDialogOpen && (
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />
@@ -346,8 +367,10 @@ function LoopRedirect() {
   // Wait for loops to load before checking length or redirecting
   if (ws.loopsLoading) return null
 
-  // Pre-onboarding: no personal repo yet. Skip is a localStorage flag — the
-  // user can fall through to operate loopat with workspace-shared keys.
+  // Pre-onboarding (non-gated providers): no personal repo yet. Skip is a
+  // localStorage flag — the user can fall through to operate loopat with
+  // workspace-shared keys. (The HARD onboarding gate for providers that require
+  // it lives in Shell, blocking the whole UI.)
   if (
     ws.currentUser &&
     personal &&
