@@ -33,6 +33,10 @@ export default defineConfig({
     allowedHosts: [".ngrok-free.app"],
     proxy: {
       "/api": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
+      // A2A endpoints live at root paths (not under /api): proxy them to the
+      // bun server so the agent card + JSON-RPC work in vite-dev-served envs.
+      "/a2a": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
+      "/.well-known": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
       "/ws": {
         target: `ws://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}`,
         ws: true,
