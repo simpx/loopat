@@ -1,0 +1,12 @@
+# fixture git server: sshd + git, bare repos under /srv/git.
+# loop containers (host network) ssh in as user `git` with the vault id_ed25519.
+FROM alpine:3.20
+RUN apk add --no-cache openssh git && \
+    adduser -D -s /bin/sh git && passwd -d git && \
+    mkdir -p /srv/git /home/git/.ssh && \
+    chown -R git:git /srv/git /home/git/.ssh && chmod 700 /home/git/.ssh && \
+    ssh-keygen -A
+COPY seed.sh /seed.sh
+RUN chmod +x /seed.sh
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]
