@@ -57,6 +57,11 @@
 - [ ] **Step 1:** podman/IDEALAB_API_KEY 缺 → `throw`(非 skip)。
 - [ ] **Step 2:** `package.json` 加 `"dogfood": "playwright test --config dogfood/playwright.config.ts"`。提交。
 
+## Task 1 实地发现(已验证,务必照做)
+- podman 不支持 `-p 127.0.0.1:0:22`(报 "got 0")→ setup.ts 必须 pickPort 拿空闲端口再 `-p 127.0.0.1:PORT:22`。
+- alpine `adduser -D` 锁账号 → pubkey 全拒;Containerfile 已加 `passwd -d git`。
+- 已验证:build → run → seed.sh "$pubkey" → `ssh -p PORT git@127.0.0.1` clone roster1.git 成功。
+
 ## Self-Review
 - 覆盖:fixture✓ 跳onboarding✓ 建loop✓ UI发消息✓ terminal git✓ 真AI✓ 假绿即红✓
 - 待实现时确认:chat/terminal 的真实 selector、dev vault key 复制路径。
