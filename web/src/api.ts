@@ -188,6 +188,13 @@ export type OnboardingForm = {
 export type OnboardingShow =
   | ({ kind: "form" } & OnboardingForm)
   | { kind: "route"; path: string; title?: string; description?: string }
+  | {
+      kind: "info"
+      title: string
+      description?: string
+      values?: { label: string; value: string }[]
+      help?: { label: string; url: string }[]
+    }
 export type OnboardingStatus =
   | { gated: boolean; done: true }
   | { gated: boolean; done: false; show: OnboardingShow }

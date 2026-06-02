@@ -51,6 +51,10 @@ export type OnboardingForm = {
  *              settings page, or an MCP auth page). loopat shows the real page and
  *              re-asks onboarding() once the user is done — the provider's next
  *              check decides whether to advance.
+ *   - "info":  instructions the user must act on OUTSIDE loopat (e.g. register an
+ *              ssh key, request repo access). loopat shows the text + any
+ *              copyable values + help links + a "re-check" button that re-runs
+ *              onboarding() — the provider's next check decides whether to advance.
  */
 export type OnboardingView =
   | { done: true }
@@ -59,6 +63,15 @@ export type OnboardingView =
       show:
         | ({ kind: "form" } & OnboardingForm)
         | { kind: "route"; path: string; title?: string; description?: string }
+        | {
+            kind: "info"
+            title: string
+            description?: string
+            /** Copyable key/values to show (e.g. the user's ssh public key). */
+            values?: { label: string; value: string }[]
+            /** External help links (e.g. where to register the key). */
+            help?: { label: string; url: string }[]
+          }
     }
 
 export interface GitHostProvider {
