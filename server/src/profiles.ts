@@ -22,9 +22,9 @@ import {
   personalClaudeDir,
   personalLoopatConfigPath,
   personalVaultDir,
-  workspaceProfileClaudeDir,
-  workspaceProfilesDir,
-  workspaceTeamClaudeDir,
+  personalKnowledgeProfileClaudeDir,
+  personalKnowledgeProfilesDir,
+  personalKnowledgeTeamClaudeDir,
 } from "./paths"
 
 /** personal/<u>/.loopat/config.json fields relevant to profile resolution. */
@@ -114,13 +114,13 @@ export async function resolveLoopPlan(input: ResolveInput): Promise<LoopPlan> {
   const cfg = await readPersonalConfig(user)
   const activeNames = computeActiveProfiles(cfg, cliAdded, cliRemoved, overrideProfiles)
 
-  // Validate
-  const profilesRoot = workspaceProfilesDir()
+  // Validate — profiles live in the user's PER-USER knowledge repo.
+  const profilesRoot = personalKnowledgeProfilesDir(user)
   if (activeNames.length > 0 && !existsSync(profilesRoot)) {
-    throw new Error(`workspace profiles dir not found: ${profilesRoot}`)
+    throw new Error(`profiles dir not found: ${profilesRoot}`)
   }
   for (const name of activeNames) {
-    const cdir = workspaceProfileClaudeDir(name)
+    const cdir = personalKnowledgeProfileClaudeDir(user, name)
     if (!existsSync(cdir)) {
       throw new Error(`profile "${name}" has no .claude/ dir at ${cdir}`)
     }
@@ -128,12 +128,12 @@ export async function resolveLoopPlan(input: ResolveInput): Promise<LoopPlan> {
 
   // Build claudeSources in merge order
   const claudeSources: LoopPlan["claudeSources"] = []
-  const teamDir = workspaceTeamClaudeDir()
+  const teamDir = personalKnowledgeTeamClaudeDir(user)
   if (existsSync(teamDir)) {
     claudeSources.push({ source: "team", dir: teamDir })
   }
   for (const name of activeNames) {
-    claudeSources.push({ source: `profile:${name}`, dir: workspaceProfileClaudeDir(name) })
+    claudeSources.push({ source: `profile:${name}`, dir: personalKnowledgeProfileClaudeDir(user, name) })
   }
   // Personal `.claude/` — 4th layer. Same CC-native shape as workspace + profile.
   const personalCdir = personalClaudeDir(user)
@@ -162,15 +162,16 @@ export async function resolveLoopPlan(input: ResolveInput): Promise<LoopPlan> {
   }
 }
 
-/** List available profile names = direct subdirs of profiles/ that contain `.claude/`. */
-export async function listProfiles(): Promise<string[]> {
-  const root = workspaceProfilesDir()
+/** List a user's available profile names = direct subdirs of THEIR per-user
+ *  knowledge `profiles/` that contain `.claude/`. */
+export async function listProfiles(user: string): Promise<string[]> {
+  const root = personalKnowledgeProfilesDir(user)
   if (!existsSync(root)) return []
   const entries = await readdir(root, { withFileTypes: true })
   const out: string[] = []
   for (const e of entries) {
     if (!e.isDirectory() || e.name.startsWith(".")) continue
-    if (!existsSync(workspaceProfileClaudeDir(e.name))) continue
+    if (!existsSync(personalKnowledgeProfileClaudeDir(user, e.name))) continue
     out.push(e.name)
   }
   return out.sort()

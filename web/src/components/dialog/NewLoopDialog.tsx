@@ -186,9 +186,9 @@ export function NewLoopDialog({
               })}
               {nonBase.length === 0 && !baseEntry && (
                 <div className="text-[11px] text-gray-400 p-1.5">
-                  No profiles in workspace. Create directories under{" "}
-                  <code className="bg-gray-100 px-1 rounded">context/profiles/&lt;name&gt;/</code> with a
-                  profile.json.
+                  No profiles yet. Add them under{" "}
+                  <code className="bg-gray-100 px-1 rounded">knowledge/.loopat/profiles/&lt;name&gt;/.claude/</code>{" "}
+                  in your knowledge repo.
                 </div>
               )}
             </div>

@@ -1569,14 +1569,15 @@ app.get("/api/profiles", requireAuth, async (c) => {
   // No loopat-invented metadata file: `description` is pulled from the
   // profile's CLAUDE.md frontmatter `description:` field (preferred) or
   // its first heading (legacy fallback) — see extractProfileDescription.
+  const userId = c.get("userId") as string
   const { listProfiles } = await import("./profiles")
   const { extractProfileDescription } = await import("./tiers")
-  const { workspaceProfileClaudeMdPath } = await import("./paths")
+  const { personalKnowledgeProfileClaudeMdPath } = await import("./paths")
   const { existsSync } = await import("node:fs")
   const { readFile } = await import("node:fs/promises")
-  const names = await listProfiles()
+  const names = await listProfiles(userId)
   const profiles = await Promise.all(names.map(async (name) => {
-    const mdPath = workspaceProfileClaudeMdPath(name)
+    const mdPath = personalKnowledgeProfileClaudeMdPath(userId, name)
     const md = existsSync(mdPath) ? await readFile(mdPath, "utf8").catch(() => null) : null
     return { name, description: extractProfileDescription(md) ?? undefined }
   }))

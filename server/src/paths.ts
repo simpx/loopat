@@ -192,6 +192,20 @@ export const workspaceProfileClaudeDir = (name: string) =>
   join(workspaceProfileDir(name), ".claude")
 export const workspaceProfileSettingsPath = (name: string) =>
   join(workspaceProfileClaudeDir(name), "settings.json")
+
+// Per-user equivalents: a loop sources team .claude / profiles from the loop
+// creator's PER-USER knowledge repo (context/users/<user>/knowledge), not the
+// workspace-default one. Mirrors the per-user notes/repos model.
+export const personalKnowledgeTeamClaudeDir = (user: string) =>
+  join(personalKnowledgeLoopatRoot(user), ".claude")
+export const personalKnowledgeProfilesDir = (user: string) =>
+  join(personalKnowledgeLoopatRoot(user), "profiles")
+export const personalKnowledgeProfileDir = (user: string, name: string) =>
+  join(personalKnowledgeProfilesDir(user), name)
+export const personalKnowledgeProfileClaudeDir = (user: string, name: string) =>
+  join(personalKnowledgeProfileDir(user, name), ".claude")
+export const personalKnowledgeProfileClaudeMdPath = (user: string, name: string) =>
+  join(personalKnowledgeProfileClaudeDir(user, name), "CLAUDE.md")
 export const workspaceProfileClaudeMdPath = (name: string) =>
   join(workspaceProfileClaudeDir(name), "CLAUDE.md")
 export const workspaceProfileSkillsDir = (name: string) =>
