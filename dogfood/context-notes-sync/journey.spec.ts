@@ -85,11 +85,35 @@ async function runInTerminal(page: Page, cmd: string, settleMs = 1_500): Promise
   await page.waitForTimeout(settleMs);
 }
 
+/** Best-effort remove this loop's sandbox container so loops/containers don't
+ *  accumulate in the shared LOOPAT_HOME across the serial suite. Never throws. */
+function cleanupLoopContainer(loopId: string): void {
+  if (!loopId) return;
+  try {
+    const ids = execFileSync("podman", [
+      "ps", "-a",
+      "--filter", `label=loopat.loop-id=${loopId}`,
+      "--format", "{{.ID}}",
+    ]).toString().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (ids.length) execFileSync("podman", ["rm", "-f", ...ids]);
+  } catch {
+    // best-effort teardown — never fail the suite on cleanup.
+  }
+}
+
+// The loop this case created, so afterEach can reap its container.
+let createdLoopId = "";
+
 test.beforeEach(async ({ page }) => {
+  createdLoopId = "";
   // Bypass the "Setup Personal Repo" card for the (preconfigured) account.
   await page.addInitScript(() => {
     localStorage.setItem("loopat:setupPersonalRepoDismissed", "1");
   });
+});
+
+test.afterEach(() => {
+  cleanupLoopContainer(createdLoopId);
 });
 
 test("context sync: loop edits its notes worktree and pushes back to the fixture notes origin", async ({ page }) => {
@@ -100,8 +124,12 @@ test("context sync: loop edits its notes worktree and pushes back to the fixture
   ).toBeVisible({ timeout: 15_000 });
 
   const loopTitle = `dogfood-notes-${Date.now()}`;
-  const createReq = page.waitForRequest(
-    (req) => req.url().includes("/api/v1/loops") && req.method() === "POST",
+  // Capture the create RESPONSE so we learn THIS loop's id authoritatively. The
+  // suite shares one LOOPAT_HOME and loops accumulate across cases, so reading
+  // the id from the browser URL right after the click can return a STALE loop's
+  // id; the create response is the only authoritative source.
+  const createResp = page.waitForResponse(
+    (resp) => resp.url().includes("/api/v1/loops") && resp.request().method() === "POST",
     { timeout: 15_000 },
   );
 
@@ -111,12 +139,15 @@ test("context sync: loop edits its notes worktree and pushes back to the fixture
   await page.getByPlaceholder("refactor-gateway").fill(loopTitle);
   await page.getByRole("button", { name: "create", exact: true }).click();
 
-  const req = await createReq;
-  expect(req.postDataJSON().title).toBe(loopTitle);
+  const resp = await createResp;
+  expect(resp.request().postDataJSON().title).toBe(loopTitle);
+  const respBody = await resp.json();
+  // The v1 API ids carry a `loop_` prefix; the loop URL uses the raw uuid.
+  const loopId = String(respBody.id ?? respBody.loop?.id ?? "").replace(/^loop_/, "");
+  expect(loopId, `create response should carry the new loop id: ${JSON.stringify(respBody)}`).toMatch(/^[a-f0-9-]+$/);
+  createdLoopId = loopId;
 
-  await expect(page).toHaveURL(/\/loop\/[a-f0-9-]+/, { timeout: 15_000 });
-  const loopId = page.url().split("/loop/")[1].split(/[?#]/)[0];
-  expect(loopId).toMatch(/^[a-f0-9-]+$/);
+  await expect(page).toHaveURL(new RegExp(`/loop/${loopId}`), { timeout: 15_000 });
 
   const sidebar = page.locator("aside").first();
   await expect(sidebar).toBeVisible({ timeout: 15_000 });

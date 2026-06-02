@@ -1996,8 +1996,14 @@ async function _ensureContextWorktree(repo: string, path: string, branchName: st
   const start = await remoteStartPoint(repo)
   // -B (not -b): reset the branch if it lingers from a removed worktree, so a
   // rebuild always re-opens cleanly from the start point.
-  const tail = ["-B", branchName, path]
-  if (start) tail.push(start)
+  // No start point → `worktree add -B <branch> <path>` tries to seed the new
+  // branch from the main repo's HEAD. For an EMPTY context remote (e.g. a notes
+  // repo with no commits) the clone's HEAD is an unborn ref (`ref: main`); once
+  // the repo later gains an unrelated branch (master, pushed by another loop)
+  // git no longer infers `--orphan` and dies with `fatal: invalid reference:
+  // HEAD`. Pass `--orphan` ourselves so a startless worktree never depends on a
+  // resolvable HEAD — it opens an empty branch the loop can commit onto.
+  const tail = start ? ["-B", branchName, path, start] : ["--orphan", "-B", branchName, path]
 
   // git-crypt + worktree: the git-crypt key lives in the MAIN repo's
   // `.git/git-crypt`, but a worktree's gitdir is separate and has no key — so a

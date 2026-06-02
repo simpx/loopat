@@ -149,6 +149,7 @@ async function createLoop(page: Page, repo: string, title: string): Promise<stri
   // The v1 API ids carry a `loop_` prefix; the loop URL uses the raw uuid.
   const loopId = String(respBody.id ?? respBody.loop?.id ?? "").replace(/^loop_/, "");
   expect(loopId, `create response should carry the new loop id: ${JSON.stringify(respBody)}`).toMatch(/^[a-f0-9-]+$/);
+  createdLoopIds.push(loopId);
 
   // Wait until the page has actually navigated to THIS loop.
   await expect(page).toHaveURL(new RegExp(`/loop/${loopId}`), { timeout: 15_000 });
@@ -177,11 +178,35 @@ async function startContainer(page: Page, loopId: string): Promise<void> {
     .not.toEqual([]);
 }
 
+/** Best-effort remove a loop's sandbox container so loops/containers don't
+ *  accumulate in the shared LOOPAT_HOME across the serial suite. Never throws. */
+function cleanupLoopContainer(loopId: string): void {
+  if (!loopId) return;
+  try {
+    const ids = execFileSync("podman", [
+      "ps", "-a",
+      "--filter", `label=loopat.loop-id=${loopId}`,
+      "--format", "{{.ID}}",
+    ]).toString().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (ids.length) execFileSync("podman", ["rm", "-f", ...ids]);
+  } catch {
+    // best-effort teardown — never fail the suite on cleanup.
+  }
+}
+
+// The loops this case created, so afterEach can reap their containers.
+const createdLoopIds: string[] = [];
+
 test.beforeEach(async ({ page }) => {
+  createdLoopIds.length = 0;
   // Bypass the "Setup Personal Repo" card for the (preconfigured) account.
   await page.addInitScript(() => {
     localStorage.setItem("loopat:setupPersonalRepoDismissed", "1");
   });
+});
+
+test.afterEach(() => {
+  for (const id of createdLoopIds) cleanupLoopContainer(id);
 });
 
 test("second loop reuses the first loop's content-addressed sandbox image (no rebuild)", async ({ page }) => {

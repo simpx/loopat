@@ -91,11 +91,35 @@ async function openTerminalAndWait(page: Page, loopId: string): Promise<void> {
   await expect(preparingOverlay).toBeHidden({ timeout: 240_000 });
 }
 
+/** Best-effort remove this loop's sandbox container so loops/containers don't
+ *  accumulate in the shared LOOPAT_HOME across the serial suite. Never throws. */
+function cleanupLoopContainer(loopId: string): void {
+  if (!loopId) return;
+  try {
+    const ids = execFileSync("podman", [
+      "ps", "-a",
+      "--filter", `label=loopat.loop-id=${loopId}`,
+      "--format", "{{.ID}}",
+    ]).toString().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (ids.length) execFileSync("podman", ["rm", "-f", ...ids]);
+  } catch {
+    // best-effort teardown — never fail the suite on cleanup.
+  }
+}
+
+// The loop this case created, so afterEach can reap its container.
+let createdLoopId = "";
+
 test.beforeEach(async ({ page }) => {
+  createdLoopId = "";
   // Bypass the "Setup Personal Repo" card for the (preconfigured) account.
   await page.addInitScript(() => {
     localStorage.setItem("loopat:setupPersonalRepoDismissed", "1");
   });
+});
+
+test.afterEach(() => {
+  cleanupLoopContainer(createdLoopId);
 });
 
 test("attach/detach a loop repeatedly does NOT recreate its container (no config-hash drift)", async ({ page }) => {
@@ -122,6 +146,7 @@ test("attach/detach a loop repeatedly does NOT recreate its container (no config
   const respBody = await resp.json();
   const loopId = String(respBody.id ?? respBody.loop?.id ?? "").replace(/^loop_/, "");
   expect(loopId, `create response should carry the new loop id: ${JSON.stringify(respBody)}`).toMatch(/^[a-f0-9-]+$/);
+  createdLoopId = loopId;
 
   await expect(page).toHaveURL(new RegExp(`/loop/${loopId}`), { timeout: 15_000 });
   const sidebar = page.locator("aside").first();
