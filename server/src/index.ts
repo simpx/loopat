@@ -127,6 +127,11 @@ app.get("/api/version", (c) => {
 import { buildApiV1 } from "./api-v1"
 app.route("/api/v1", buildApiV1())
 
+// A2A (Agent-to-Agent) adapter — Agent Card + JSON-RPC over /a2a. Mounted before
+// the SPA catch-all so /.well-known/agent.json & /a2a resolve.
+import { buildA2A } from "./a2a"
+app.route("/", buildA2A())
+
 // ── workspace serve config ──
 
 function getLocalIp(): string {

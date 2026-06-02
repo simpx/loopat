@@ -1114,6 +1114,41 @@ function ApiTokensSection() {
           The request will run under your identity with your configured providers and API keys.
         </p>
       </div>
+
+      {/* A2A (Agent-to-Agent) usage */}
+      <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 space-y-1.5">
+        <p className="text-[11px] text-gray-700 font-medium">A2A (Agent-to-Agent)</p>
+        <p className="text-[11px] text-gray-500 leading-relaxed">
+          loopat ships a built-in A2A server, so it can act as a sub-agent for any
+          A2A-capable orchestrator (standard JSON-RPC + SSE).
+        </p>
+        <ul className="text-[11px] text-gray-500 leading-relaxed list-disc pl-4 space-y-1">
+          <li>
+            Agent Card:{" "}
+            <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">GET /.well-known/agent.json</code>
+          </li>
+          <li>
+            Endpoint:{" "}
+            <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">POST /a2a</code>{" "}
+            (JSON-RPC: <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">message/send</code> and streaming{" "}
+            <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">message/stream</code>)
+          </li>
+          <li>
+            Use one of the tokens above as the service-account credential: write{" "}
+            <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">$LOOPAT_HOME/a2a.json</code>{" "}
+            (<code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">{"{ \"token\": \"<token>\", \"publicUrl\": \"https://<host>\" }"}</code>)
+            or set <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">LOOPAT_A2A_TOKEN</code>.
+            A2A calls then run under that token's identity, with its providers/keys.
+          </li>
+          <li>
+            Register the Agent Card URL (the{" "}
+            <code className="bg-white border border-gray-200 rounded px-1 py-0.5 text-[10px]">url</code> field of agent.json) with your orchestrator.
+          </li>
+        </ul>
+        <p className="text-[11px] text-gray-400 leading-relaxed">
+          A2A calls use a single service-account token (not a per-caller token); each turn runs with bypassPermissions.
+        </p>
+      </div>
     </div>
   )
 }
