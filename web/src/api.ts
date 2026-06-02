@@ -164,19 +164,52 @@ export async function getPersonalStatus(): Promise<PersonalStatus | null> {
   return (await r.json()) as PersonalStatus
 }
 
-// Provider-driven onboarding gate. `gated:false` → no gate (the main UI shows
-// normally). Otherwise the app blocks on the onboarding screen until `done`.
-export type OnboardingMissing = { id: string; label: string; help?: string }
-export type OnboardingStatus = {
-  gated: boolean
-  done: boolean
-  needsPersonalRepo: boolean
-  missing: OnboardingMissing[]
+// Provider-driven onboarding. `gated:false` → no gate. Otherwise the app blocks
+// on the onboarding screen until `done`. The provider fully owns the flow: when
+// not done it returns the next FORM to render; the UI submits the values and
+// re-renders whatever comes back.
+export type OnboardingField = {
+  name: string
+  label: string
+  type?: "password" | "text"
+  help?: string
+  placeholder?: string
+  action: "vault-env" | "personal-repo-token"
 }
+export type OnboardingForm = {
+  title: string
+  description?: string
+  submitLabel?: string
+  require?: "all" | "any"
+  fields: OnboardingField[]
+}
+// The provider either reports done, or tells the UI what to show next: a form,
+// or an existing loopat page (route) to send the user to.
+export type OnboardingShow =
+  | ({ kind: "form" } & OnboardingForm)
+  | { kind: "route"; path: string; title?: string; description?: string }
+export type OnboardingStatus =
+  | { gated: boolean; done: true }
+  | { gated: boolean; done: false; show: OnboardingShow }
+
 export async function getOnboarding(): Promise<OnboardingStatus | null> {
   const r = await apiFetch("/api/onboarding")
   if (!r.ok) return null
   return (await r.json()) as OnboardingStatus
+}
+
+// Submit one onboarding form; returns the provider's next view (or an error).
+export async function submitOnboarding(
+  values: Record<string, string>,
+): Promise<OnboardingStatus | { error: string }> {
+  const r = await apiFetch("/api/onboarding/submit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ values }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { error: (j as any).error ?? `submit failed (${r.status})` }
+  return j as OnboardingStatus
 }
 
 export async function exportPersonalCryptKey(

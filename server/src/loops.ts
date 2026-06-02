@@ -40,10 +40,10 @@ import {
 } from "./paths"
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
-import { loadConfig, loadPersonalConfig, loadKnowledgeConfig } from "./config"
+import { loadConfig, loadPersonalConfig, loadKnowledgeConfig, writeVaultEnv } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
-import { getProvider } from "./git-host"
+import { getProvider, type OnboardingView } from "./git-host"
 import { loadExtensionProviders, resolveProviderId, resolveProvider } from "./providers" // also registers built-in providers
 import { loadVaultEnvs } from "./vaults"
 
@@ -668,43 +668,73 @@ export async function providerTokenHelp(providerId?: string): Promise<string | n
 }
 
 export type OnboardingStatus = {
-  /** Does the active provider impose an onboarding gate at all? (false → no gate) */
+  /** Does the active provider implement onboarding at all? (false → no gate) */
   gated: boolean
-  /** Onboarding complete — loop creation allowed. */
-  done: boolean
-  /** First step: the personal repo isn't imported yet (a prerequisite for keys). */
-  needsPersonalRepo: boolean
-  /** Still-missing items (e.g. AI api keys), each with a help URL, for the UI. */
-  missing: { id: string; label: string; help?: string }[]
+} & OnboardingView
+
+/** Resolve the active provider's current onboarding view (done, or next form).
+ *  The provider owns the whole flow; loopat just feeds it context. */
+async function onboardingView(userId: string, vault: string): Promise<OnboardingStatus> {
+  const provider = await resolveProvider()
+  if (!provider?.onboarding) return { gated: false, done: true }
+  const personalRepoImported = !(await isPersonalFresh(userId))
+  // Vault env (where api keys live) only exists once the repo is imported.
+  const vaultEnvs = personalRepoImported ? await loadVaultEnvs(userId, vault) : {}
+  const config = personalRepoImported ? ((await loadPersonalConfig(userId, vault)) as Record<string, unknown>) : {}
+  const repoDir = personalRepoImported ? personalDir(userId) : null
+  try {
+    const view = await provider.onboarding({ userId, vaultEnvs, config, personalRepoImported, repoDir })
+    return { gated: true, ...view }
+  } catch (e: any) {
+    // Fail OPEN: a broken onboarding impl must not lock the user out.
+    console.warn(`[loopat] provider.onboarding(${provider.id}) failed: ${e?.message ?? e}`)
+    return { gated: false, done: true }
+  }
+}
+
+export async function userOnboarding(userId: string, vault: string = "default"): Promise<OnboardingStatus> {
+  return onboardingView(userId, vault)
 }
 
 /**
- * Active provider's onboarding gate (see GitHostProvider.isOnboarded). The
- * provider judges completeness from the user's resolved vault env + personal
- * config; loopat adds the personal-repo-imported prerequisite. No isOnboarded
- * on the provider → no gate (done:true).
+ * Run one onboarding form submission. Fetches the provider's CURRENT form (to
+ * learn each field's action), then executes the submitted values:
+ *  - "vault-env":           write the value to the vault under the field name.
+ *  - "personal-repo-token": provision + import the personal repo with the token.
+ * Returns the next onboarding view. loopat provides exactly these two
+ * primitives; the provider composes them into whatever flow it wants.
  */
-export async function userOnboarding(userId: string, vault: string = "default"): Promise<OnboardingStatus> {
+export async function submitOnboarding(
+  userId: string,
+  values: Record<string, string>,
+  vault: string = "default",
+): Promise<{ ok: true; next: OnboardingStatus } | { ok: false; error: string }> {
   const provider = await resolveProvider()
-  if (!provider?.isOnboarded) return { gated: false, done: true, needsPersonalRepo: false, missing: [] }
-  const imported = !(await isPersonalFresh(userId))
-  // Vault env (where api keys live) only exists once the repo is imported.
-  const vaultEnvs = imported ? await loadVaultEnvs(userId, vault) : {}
-  const config = imported ? ((await loadPersonalConfig(userId, vault)) as Record<string, unknown>) : {}
-  let keys: { done: boolean; missing?: { id: string; label: string; help?: string }[] }
-  try {
-    keys = await provider.isOnboarded({ userId, vaultEnvs, config })
-  } catch (e: any) {
-    // Fail OPEN: a broken check must not lock the user out of their workspace.
-    console.warn(`[loopat] provider.isOnboarded(${provider.id}) failed: ${e?.message ?? e}`)
-    return { gated: false, done: true, needsPersonalRepo: false, missing: [] }
+  if (!provider?.onboarding) return { ok: false, error: "no onboarding for this provider" }
+  const cur = await onboardingView(userId, vault)
+  if (cur.done) return { ok: true, next: cur }
+  // Only "form" remediations have values to run; "route" ones are handled by the
+  // user acting on the real page, then onboarding() re-checks.
+  if (cur.show.kind !== "form") return { ok: true, next: cur }
+  for (const field of cur.show.fields) {
+    const raw = values[field.name]
+    const value = typeof raw === "string" ? raw.trim() : ""
+    if (!value) continue // skip blanks (the provider's `require` rule is enforced UI-side)
+    if (field.action === "vault-env") {
+      const r = await writeVaultEnv(userId, vault, field.name, value)
+      if (!r.ok) return { ok: false, error: `couldn't save ${field.label}: ${r.error}` }
+    } else if (field.action === "personal-repo-token") {
+      const r = await setupPersonalViaProvider({
+        userId,
+        provider: provider.id,
+        token: value,
+        baseUrl: provider.baseUrl,
+        repoName: provider.defaultRepo ?? "loopat-personal",
+      })
+      if (!r.ok) return { ok: false, error: r.error }
+    }
   }
-  return {
-    gated: true,
-    done: imported && !!keys.done,
-    needsPersonalRepo: !imported,
-    missing: keys.missing ?? [],
-  }
+  return { ok: true, next: await onboardingView(userId, vault) }
 }
 
 /**

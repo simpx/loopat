@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys, userOnboarding } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys, userOnboarding, submitOnboarding } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -1209,6 +1209,17 @@ app.get("/api/personal/status", requireAuth, async (c) => {
 app.get("/api/onboarding", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   return c.json(await userOnboarding(userId))
+})
+
+// Submit one onboarding form. loopat runs each field's action (store in vault /
+// provision the personal repo) and returns the provider's next view.
+app.post("/api/onboarding/submit", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const values = (body && typeof body.values === "object" && body.values) ? body.values as Record<string, string> : {}
+  const r = await submitOnboarding(userId, values)
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.json(r.next)
 })
 
 // Export the user's git-crypt key (base64). Behind a fresh password check

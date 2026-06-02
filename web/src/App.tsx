@@ -24,7 +24,7 @@ import { AuthPage } from "./pages/AuthPage"
 import { FloatingDm } from "./components/FloatingDm"
 import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./components/SetupPersonalRepoCard"
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, getOnboarding, type PersonalStatus, type OnboardingStatus } from "./api"
-import { OnboardingKeysCard } from "./components/OnboardingKeysCard"
+import { OnboardingForm } from "./components/OnboardingForm"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 import { ThemeProvider, useTheme } from "./theme"
 
@@ -116,15 +116,22 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     })
   }, [shareMode])
 
-  // Hard onboarding gate (provider-driven). Re-fetched on navigation so the
-  // gate clears as soon as the user finishes a step (e.g. sets up the personal
-  // repo on the exempt route below, then navigates back).
+  // Hard onboarding gate — the active provider fully owns the flow (see
+  // GitHostProvider.onboarding). loopat just shows what it returns.
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
-  const [onboardReload, setOnboardReload] = useState(0)
   useEffect(() => {
     if (!loggedIn || shareMode) { setOnboarding(null); return }
     getOnboarding().then(setOnboarding)
-  }, [loggedIn, shareMode, onboardReload, location.pathname])
+  }, [loggedIn, shareMode])
+  // While the provider is sending the user to an existing page (a "route"
+  // remediation, e.g. the personal-repo setup), poll so the gate advances on its
+  // own once the user finishes there (no in-page wiring needed).
+  useEffect(() => {
+    if (!loggedIn || shareMode || !onboarding || onboarding.done || !onboarding.gated) return
+    if (onboarding.show.kind !== "route") return
+    const t = setInterval(() => { getOnboarding().then(setOnboarding) }, 3000)
+    return () => clearInterval(t)
+  }, [loggedIn, shareMode, onboarding])
 
   if (shareMode) {
     return (
@@ -321,17 +328,18 @@ function Shell({ ws }: { ws: WorkspaceState }) {
         </div>
       )}
       <main className="flex-1 min-h-0 min-w-0 overflow-hidden">
-        {loggedIn && onboarding?.gated && !onboarding.done && location.pathname !== "/settings/personal-repo" ? (
-          // Provider requires onboarding — block the whole UI until it's done.
-          // /settings/personal-repo is exempt so the repo step is reachable.
-          onboarding.needsPersonalRepo ? (
-            <SetupPersonalRepoCard hideSkip onDismiss={() => setOnboardReload((k) => k + 1)} />
-          ) : (
-            <OnboardingKeysCard missing={onboarding.missing} onSaved={() => setOnboardReload((k) => k + 1)} />
-          )
-        ) : (
-          <Outlet />
-        )}
+        {(() => {
+          const ob = onboarding
+          // No gate (or done / not logged in) → the normal app.
+          if (!(loggedIn && ob && ob.gated && !ob.done)) return <Outlet />
+          // Provider wants the user on an existing page → send them there and show
+          // the real page; while there we poll so the gate advances when they're done.
+          if (ob.show.kind === "route") {
+            return location.pathname === ob.show.path ? <Outlet /> : <Navigate to={ob.show.path} replace />
+          }
+          // Provider wants a form → render it; on submit we get the next view.
+          return <OnboardingForm form={ob.show} onAdvance={setOnboarding} />
+        })()}
       </main>
       {ws.newLoopDialogOpen && (
         <NewLoopDialog onClose={() => ws.setNewLoopDialogOpen(false)} onCreate={handleCreate} initialTitle={ws.newLoopDialogTitle} />

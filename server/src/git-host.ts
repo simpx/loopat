@@ -11,6 +11,56 @@
 export type HostCred = { token: string; baseUrl?: string }
 export type RepoRef = { owner: string; name: string }
 
+/**
+ * Onboarding is fully implemented by the provider (see GitHostProvider.onboarding).
+ * The provider is a state machine: given the current context it either reports
+ * `done`, or returns the next FORM to render. loopat knows nothing about the
+ * flow — it only renders the generic form and, on submit, runs each field's
+ * `action` (the only two primitives it provides).
+ */
+export type OnboardingField = {
+  /** Field key. For action "vault-env" this is ALSO the vault-env name written. */
+  name: string
+  label: string
+  type?: "password" | "text"
+  help?: string
+  placeholder?: string
+  /**
+   *  - "vault-env":           store the submitted value in the vault under `name`.
+   *  - "personal-repo-token": use the submitted value as the git token to
+   *                           provision + import the user's personal repo.
+   */
+  action: "vault-env" | "personal-repo-token"
+}
+
+export type OnboardingForm = {
+  title: string
+  description?: string
+  submitLabel?: string
+  /** "all" (default) = every field required; "any" = at least one. */
+  require?: "all" | "any"
+  fields: OnboardingField[]
+}
+
+/**
+ * What the provider's onboarding() returns: either done, or the next thing to
+ * show. The provider runs its OWN checks (file exists? api/git ok?) and, on
+ * failure, returns a remediation for loopat to display:
+ *   - "form":  a generic form loopat renders + runs (writes vault env / sets up repo).
+ *   - "route": an existing loopat page to send the user to (e.g. the personal-repo
+ *              settings page, or an MCP auth page). loopat shows the real page and
+ *              re-asks onboarding() once the user is done — the provider's next
+ *              check decides whether to advance.
+ */
+export type OnboardingView =
+  | { done: true }
+  | {
+      done: false
+      show:
+        | ({ kind: "form" } & OnboardingForm)
+        | { kind: "route"; path: string; title?: string; description?: string }
+    }
+
 export interface GitHostProvider {
   readonly id: string
   readonly label: string
@@ -28,19 +78,28 @@ export interface GitHostProvider {
   readonly defaultRepo?: string
 
   /**
-   * Optional onboarding gate. When a provider implements this, loopat treats
-   * onboarding as MANDATORY: until `done`, loop creation is blocked and the UI
-   * shows an onboarding screen. The provider decides what "onboarded" means by
-   * inspecting the user's resolved vault env + personal config, and returns the
-   * still-missing items (each with a help URL) for the UI to render. A provider
-   * that doesn't implement this imposes no gate.
+   * Optional onboarding, FULLY implemented by the provider. When present, loopat
+   * treats onboarding as MANDATORY: until it reports `done`, loop creation is
+   * blocked and the UI shows the provider's current form.
+   *
+   * loopat owns NONE of the flow — it calls onboarding(ctx), renders the
+   * returned form, collects the values, runs each field's action, then calls
+   * onboarding() again with fresh context, repeating until `done`. The provider
+   * decides everything: how many forms, their order, what to ask, when it's
+   * complete. A provider without onboarding() imposes no gate.
    */
-  isOnboarded?(ctx: {
+  onboarding?(ctx: {
     userId: string
     login?: string
     vaultEnvs: Record<string, string>
     config: Record<string, unknown>
-  }): Promise<{ done: boolean; missing?: { id: string; label: string; help?: string }[] }>
+    /** Has the user's personal repo been imported yet? */
+    personalRepoImported: boolean
+    /** Path to the user's personal repo working tree (null until imported), so
+     *  the provider can run its own "does this file/dir exist?" checks against
+     *  e.g. `${repoDir}/.loopat/...`. The provider may import node:fs itself. */
+    repoDir: string | null
+  }): Promise<OnboardingView>
 
 
   /**
