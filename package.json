@@ -1,6 +1,6 @@
 {
   "name": "loopat",
-  "version": "0.1.44",
+  "version": "0.1.45",
   "description": "Self-hosted AI workspace built around context management — works solo, scales to teams",
   "license": "Apache-2.0",
   "homepage": "https://github.com/simpx/loopat",
