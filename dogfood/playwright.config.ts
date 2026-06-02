@@ -114,6 +114,10 @@ export default defineConfig({
   // money and is non-deterministic).
   timeout: 300_000,
   retries: 0,
+  // All cases share ONE backend + fixture + vite per run (globalSetup), and the
+  // same isolated LOOPAT_HOME / personal config. Run specs serially so they
+  // don't collide on the shared stack.
+  workers: 1,
   globalSetup: "./setup.ts",
   globalTeardown: "./teardown.ts",
   use: {
