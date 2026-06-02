@@ -44,7 +44,7 @@ import { loadConfig, loadPersonalConfig, loadKnowledgeConfig } from "./config"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider } from "./git-host"
-import { loadExtensionProviders } from "./providers" // also registers built-in providers
+import { loadExtensionProviders, resolveProviderId } from "./providers" // also registers built-in providers
 
 const execFileP = promisify(execFile)
 
@@ -521,7 +521,7 @@ export async function setupPersonalViaProvider(opts: {
   | { ok: false; error: string; needsCryptKey?: boolean }
 > {
   await loadExtensionProviders() // ensure external (internal-platform) providers are registered
-  const provider = getProvider(opts.provider ?? "github")
+  const provider = getProvider(await resolveProviderId(opts.provider))
   if (!provider) return { ok: false, error: `unknown git host provider: ${opts.provider}` }
   const cred = { token: opts.token, baseUrl: opts.baseUrl }
 
@@ -610,7 +610,7 @@ export async function listPersonalReposViaProvider(opts: {
   baseUrl?: string
 }): Promise<{ name: string; path: string }[]> {
   await loadExtensionProviders()
-  const provider = getProvider(opts.provider ?? "github")
+  const provider = getProvider(await resolveProviderId(opts.provider))
   if (!provider?.listRepos) return []
   let repos: { name: string; path: string }[]
   try {
@@ -630,7 +630,7 @@ export async function authenticateViaProvider(opts: {
   baseUrl?: string
 }): Promise<{ ok: true; login: string } | { ok: false; error: string }> {
   await loadExtensionProviders()
-  const provider = getProvider(opts.provider ?? "github")
+  const provider = getProvider(await resolveProviderId(opts.provider))
   if (!provider) return { ok: false, error: `unknown git host provider: ${opts.provider}` }
   try {
     const auth = await provider.authenticate({ token: opts.token, baseUrl: opts.baseUrl })
@@ -643,7 +643,7 @@ export async function authenticateViaProvider(opts: {
 /** The provider's optional token-help hint (URL/text), for the onboarding UI. */
 export async function providerTokenHelp(providerId?: string): Promise<string | null> {
   await loadExtensionProviders()
-  return getProvider(providerId ?? "github")?.tokenHelp ?? null
+  return getProvider(await resolveProviderId(providerId))?.tokenHelp ?? null
 }
 
 /**

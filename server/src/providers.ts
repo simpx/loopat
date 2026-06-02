@@ -18,6 +18,9 @@ import { extensionsProvidersDir } from "./paths"
 import "./github" // built-in, open-source
 
 let extLoaded = false
+// Ids of providers loaded from extension files (NOT the built-in github). A
+// dropped-in extension IS the active provider — see resolveProviderId().
+const extensionProviderIds: string[] = []
 
 /** Idempotently load external provider extensions from the extensions dir. */
 export async function loadExtensionProviders(): Promise<void> {
@@ -34,6 +37,7 @@ export async function loadExtensionProviders(): Promise<void> {
       const p = mod.default ?? mod.provider
       if (p?.id && typeof p.authenticate === "function" && typeof p.ensureRepo === "function") {
         registerProvider(p as GitHostProvider)
+        if (!extensionProviderIds.includes(p.id)) extensionProviderIds.push(p.id)
         console.log(`[loopat] loaded git-host extension: ${p.id}`)
       } else {
         console.warn(`[loopat] ${f}: not a valid GitHostProvider (need id / authenticate / ensureRepo)`)
@@ -42,4 +46,19 @@ export async function loadExtensionProviders(): Promise<void> {
       console.warn(`[loopat] failed to load provider extension ${f}: ${e?.message ?? e}`)
     }
   }
+}
+
+/**
+ * Resolve the active git-host provider id.
+ *
+ * A provider extension dropped into `LOOPAT_HOME/extensions/providers/` IS the
+ * provider: if any extension is present it wins outright — no `config.json`
+ * `gitHost.provider` needed. Multiple extensions → any one of them (undefined
+ * behavior). With no extension present, fall back to the explicitly-requested
+ * id, then the built-in `github`.
+ */
+export async function resolveProviderId(requested?: string): Promise<string> {
+  await loadExtensionProviders()
+  if (extensionProviderIds.length > 0) return extensionProviderIds[0]
+  return requested || "github"
 }

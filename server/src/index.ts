@@ -58,6 +58,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner, printReadyLine } from "./bootstrap"
+import { resolveProviderId } from "./providers"
 import { ensureSandboxClaudeBinary } from "./claude-binary"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
@@ -1186,7 +1187,7 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   // for knowledge/notes/repos. Distinct from the deploy key (publicKey above).
   const vaultKeys = await listVaultPublicKeys(userId)
   const wcfg = await loadConfig()
-  const providerId = wcfg.gitHost?.provider ?? "github"
+  const providerId = await resolveProviderId(wcfg.gitHost?.provider)
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
@@ -1276,7 +1277,7 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || wcfg.gitHost?.defaultRepo || "loopat-personal"
   const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
   const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
-  const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
+  const provider = await resolveProviderId((typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider)
   const r = await setupPersonalViaProvider({ userId, provider, token, baseUrl, repoName, cryptKey })
   if (!r.ok) {
     if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
@@ -1293,7 +1294,7 @@ app.post("/api/personal/repos", requireAuth, async (c) => {
   const token = typeof body.token === "string" ? body.token.trim() : ""
   if (!token) return c.json({ ok: false, repos: [], error: "token required" })
   const wcfg = await loadConfig()
-  const provider = (typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider ?? "github"
+  const provider = await resolveProviderId((typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider)
   const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
   try {
     // Validate the token first so a bad token surfaces as an error in the token
