@@ -10,10 +10,10 @@
  *      the fixture sshd) BEFORE the backend starts so it reads them on boot.
  *   2. Spawn the backend on the picked free port with the isolated LOOPAT_HOME.
  *   3. Register the test user (scaffolds personal/<user>/).
- *   4. Write the user's personal config (anthropic provider, apiKey ${ANTHROPIC_API_KEY})
- *      and copy the dev vault (envs/ANTHROPIC_API_KEY + mounts/home/.ssh/id_ed25519)
- *      so the loop has a working AI key + ssh key. Add a `loopat-fixture` ssh
- *      Host alias -> 127.0.0.1:<sshdPort> so git@loopat-fixture:* resolves.
+ *   4. Write the user's personal config (anthropic provider) and build a
+ *      SELF-CONTAINED vault: a FRESH ssh keypair (generated here, not copied
+ *      from any real vault) + ANTHROPIC_API_KEY taken from the env. Add a
+ *      `loopat-fixture` ssh Host alias -> 127.0.0.1:<sshdPort>.
  *   5. Seed the fixture container's authorized_keys with that vault pubkey and
  *      create the bare repos (seed.sh).
  *   6. Save browser storageState for the spec.
@@ -24,7 +24,7 @@
 import { request } from "@playwright/test";
 import { spawn, execSync, execFileSync } from "node:child_process";
 import {
-  readFileSync, writeFileSync, mkdirSync, cpSync, chmodSync, realpathSync,
+  readFileSync, writeFileSync, mkdirSync, chmodSync, realpathSync,
 } from "node:fs";
 import { join } from "node:path";
 
@@ -52,12 +52,11 @@ type Meta = {
   testServerPort: number;
   vitePort: number;
   sshdPort: number;
-  devVault: string;
 };
 
 async function globalSetup() {
   const meta = JSON.parse(readFileSync(META, "utf8")) as Meta;
-  const { loopatHome, testServerPort, vitePort, sshdPort, devVault } = meta;
+  const { loopatHome, testServerPort, vitePort, sshdPort } = meta;
 
   console.log(`[dogfood:setup] LOOPAT_HOME = ${loopatHome}`);
   console.log(`[dogfood:setup] backend :${testServerPort}  vite :${vitePort}  sshd :${sshdPort}`);
@@ -136,15 +135,19 @@ async function globalSetup() {
   const personalLoopat = join(loopatHome, "personal", userId, ".loopat");
   const vaultDir = join(personalLoopat, "vaults", "default");
 
-  // Copy the dev vault (anthropic key + ssh key + mounts) wholesale, then
-  // overwrite the ssh config with one that knows the fixture host:port.
-  cpSync(devVault, vaultDir, { recursive: true });
-
+  // Self-contained vault — NOTHING copied from any real vault.
+  // (a) fresh ssh keypair for this run; its pubkey goes into the fixture's
+  //     authorized_keys (step 5). Standard name id_ed25519 so ssh auto-resolves.
   const sshDir = join(vaultDir, "mounts", "home", ".ssh");
   mkdirSync(sshDir, { recursive: true });
-  // git can't persist 0600; the server force-chmods at point of use, but set it
-  // here too so the first host-side op is clean.
-  try { chmodSync(join(sshDir, "id_ed25519"), 0o600); } catch {}
+  execFileSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-q", "-C", "dogfood-fixture", "-f", join(sshDir, "id_ed25519")]);
+  chmodSync(join(sshDir, "id_ed25519"), 0o600);
+  // (b) the ONE real secret a fixture can't fake — the provider key — comes from
+  //     the env, written into this temp (git-ignored, teardown-deleted) vault so
+  //     the loop's ${ANTHROPIC_API_KEY} resolves. Never read from disk, never committed.
+  const envsDir = join(vaultDir, "envs");
+  mkdirSync(envsDir, { recursive: true });
+  writeFileSync(join(envsDir, "ANTHROPIC_API_KEY"), (process.env.ANTHROPIC_API_KEY ?? "") + "\n");
   writeFileSync(
     join(sshDir, "config"),
     [
