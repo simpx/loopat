@@ -483,6 +483,38 @@ export async function loadPersonalConfig(
   return cfg
 }
 
+// ── Per-user A2A config ───────────────────────────────────────────────────
+// The user's A2A agent: editable card fields + which profiles/vault loops
+// created by A2A use. No secrets (the credential is the user's API token), so
+// it's plain JSON next to config.json. `$LOOPAT_HOME/personal/<user>/.loopat/a2a.json`.
+export type A2AUserConfig = {
+  card?: { name?: string; description?: string }
+  profiles?: string[]
+  vault?: string
+}
+function a2aConfigPath(user: string): string {
+  return join(personalLoopatDir(user), "a2a.json")
+}
+export async function loadA2AConfig(user: string): Promise<A2AUserConfig> {
+  const p = a2aConfigPath(user)
+  if (!existsSync(p)) return {}
+  try {
+    const j = JSON.parse(await readFile(p, "utf8")) as A2AUserConfig
+    return j && typeof j === "object" ? j : {}
+  } catch { return {} }
+}
+export async function saveA2AConfig(user: string, patch: A2AUserConfig): Promise<void> {
+  const cur = await loadA2AConfig(user)
+  const next: A2AUserConfig = {
+    card: patch.card !== undefined ? patch.card : cur.card,
+    profiles: patch.profiles !== undefined ? patch.profiles : cur.profiles,
+    vault: patch.vault !== undefined ? patch.vault : cur.vault,
+  }
+  const p = a2aConfigPath(user)
+  await mkdir(dirname(p), { recursive: true })
+  await writeFile(p, JSON.stringify(next, null, 2) + "\n")
+}
+
 export function getActiveProvider(cfg: PersonalConfig): { name: string; provider: ProviderConfig } | null {
   const raw = cfg.default
   if (!raw) return null

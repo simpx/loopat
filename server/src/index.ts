@@ -55,7 +55,8 @@ import {
   personalReposDir,
   loopsDir,
 } from "./paths"
-import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
+import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, loadA2AConfig, saveA2AConfig, type ProviderConfig, type ModelEntry } from "./config"
+import { createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner, printReadyLine } from "./bootstrap"
 import { resolveProvider } from "./providers"
@@ -127,8 +128,8 @@ app.get("/api/version", (c) => {
 import { buildApiV1 } from "./api-v1"
 app.route("/api/v1", buildApiV1())
 
-// A2A (Agent-to-Agent) adapter — Agent Card + JSON-RPC over /a2a. Mounted before
-// the SPA catch-all so /.well-known/agent.json & /a2a resolve.
+// A2A (Agent-to-Agent) adapter — per-user Agent Card + JSON-RPC under /a2a/<user>.
+// Mounted before the SPA catch-all so those routes resolve.
 import { buildA2A } from "./a2a"
 app.route("/", buildA2A())
 
@@ -1554,6 +1555,58 @@ app.get("/api/vaults", requireAuth, async (c) => {
   const userId = c.get("userId") as string
   const { listVaults } = await import("./vaults")
   return c.json({ vaults: listVaults(userId) })
+})
+
+// ── A2A settings (per-user agent card + default profiles/vault + key) ──
+const A2A_KEY_LABEL = "a2a"
+function a2aPublicBase(c: any): string {
+  const configured = process.env.LOOPAT_A2A_PUBLIC_URL
+  if (configured) return configured.replace(/\/+$/, "")
+  const proto = c.req.header("x-forwarded-proto") ?? "http"
+  const host = c.req.header("host") ?? `127.0.0.1:${process.env.PORT ?? 10001}`
+  return `${proto}://${host}`
+}
+app.get("/api/a2a", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const cfg = await loadA2AConfig(userId)
+  const { listVaults } = await import("./vaults")
+  const { listProfiles } = await import("./profiles")
+  const tokens = await listApiTokens(userId)
+  const base = a2aPublicBase(c)
+  return c.json({
+    card: { name: cfg.card?.name ?? "", description: cfg.card?.description ?? "" },
+    profiles: cfg.profiles ?? [],
+    vault: cfg.vault ?? "",
+    cardUrl: `${base}/a2a/${encodeURIComponent(userId)}/agent-card.json`,
+    endpoint: `${base}/a2a/${encodeURIComponent(userId)}`,
+    hasKey: tokens.some((t) => t.label === A2A_KEY_LABEL),
+    availableProfiles: await listProfiles(userId),
+    availableVaults: listVaults(userId),
+  })
+})
+app.put("/api/a2a", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const patch: { card?: { name?: string; description?: string }; profiles?: string[]; vault?: string } = {}
+  if (body.card && typeof body.card === "object") {
+    patch.card = {
+      name: typeof body.card.name === "string" ? body.card.name.slice(0, 200) : undefined,
+      description: typeof body.card.description === "string" ? body.card.description.slice(0, 2000) : undefined,
+    }
+  }
+  if (Array.isArray(body.profiles)) patch.profiles = body.profiles.filter((p: unknown): p is string => typeof p === "string")
+  if (typeof body.vault === "string") patch.vault = body.vault
+  await saveA2AConfig(userId, patch)
+  return c.json({ ok: true })
+})
+// Rotate the A2A key: revoke any prior a2a-labelled token, mint a fresh one
+// (returned once — store it in the orchestrator).
+app.post("/api/a2a/key", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const existing = await listApiTokens(userId)
+  for (const t of existing) if (t.label === A2A_KEY_LABEL) await revokeApiToken(userId, t.tokenId)
+  const created = await createApiToken(userId, A2A_KEY_LABEL)
+  return c.json({ token: created.token })
 })
 
 // Return the current user's `default_profiles` from

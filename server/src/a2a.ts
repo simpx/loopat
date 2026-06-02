@@ -1,161 +1,107 @@
 /**
- * A2A (Agent-to-Agent) adapter — in-process.
+ * A2A (Agent-to-Agent) adapter — in-process, standard A2A (Google's Agent2Agent).
  *
- * Exposes loopat as an A2A sub-agent over standard A2A (Google's Agent2Agent):
- *   - GET  /.well-known/agent.json   → Agent Card
- *   - POST /a2a                      → JSON-RPC (message/send | message/stream)
+ * Each loopat account is its own A2A agent:
+ *   - GET  /a2a/<user>/agent-card.json   → that user's Agent Card
+ *   - POST /a2a/<user>                   → JSON-RPC (message/send | message/stream)
  *
- * Design: this adapter does NOT touch loopat's session internals. It drives a
- * turn by calling loopat's own public `/api/v1` over loopback with a
- * service-account token, then translates the `/api/v1` SSE vocabulary into A2A
- * artifact events. Keeping it on the public API means a bug here can't break
- * web or `/api/v1` — see docs/api-v1.md for the upstream contract.
+ * Auth is per-user: the caller presents that user's loopat API token
+ * (`Authorization: Bearer la_…`). We validate the token resolves to <user> and
+ * forward it to loopat's own `/api/v1` over loopback — which already does
+ * per-token-user auth, loop creation, turn execution, and SSE — so this adapter
+ * is a thin protocol translator (A2A ↔ /api/v1 SSE) that can't break web or
+ * /api/v1. The A2A `contextId` (conversation) maps to a loopat loop.
  */
 import { Hono, type Context } from "hono"
 import { streamSSE } from "hono/streaming"
 import { randomBytes } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
-import { LOOPAT_HOME } from "./paths"
+import { resolveApiToken } from "./api-tokens"
+import { loadA2AConfig, type A2AUserConfig } from "./config"
 
-type A2AConfig = { token: string; publicUrl?: string }
-
-function loadConfig(): A2AConfig | null {
-  const envToken = process.env.LOOPAT_A2A_TOKEN
-  const envUrl = process.env.LOOPAT_A2A_PUBLIC_URL
-  if (envToken) return { token: envToken, publicUrl: envUrl }
-  const path = join(LOOPAT_HOME, "a2a.json")
-  if (existsSync(path)) {
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8"))
-      if (parsed && typeof parsed.token === "string" && parsed.token) {
-        return { token: parsed.token, publicUrl: parsed.publicUrl || envUrl }
-      }
-    } catch { /* fall through */ }
-  }
-  return null
-}
-
+const A2A_PROTOCOL_VERSION = "0.3.0"
 const SELF_BASE = `http://127.0.0.1:${process.env.PORT ?? 10001}`
 
+// contextId (A2A conversation) → loopat loopId. In-memory: a restart starts a
+// fresh conversation (acceptable for v1).
 const ctxToLoop = new Map<string, string>()
 
-function agentCard(publicUrl: string) {
-  return {
-    name: "Loopat Agent",
-    description:
-      "Loopat is a self-hosted AI workspace (built on the Claude Agent SDK). This agent runs development tasks in an isolated sandbox: writing code, reading repos, editing files, running commands, and researching. Best for jobs that need an agent to actually do things, not just answer.",
-    url: `${publicUrl}/a2a`,
-    version: "1.0.0",
-    capabilities: { streaming: true, pushNotifications: false },
-    defaultInputModes: ["application/json"],
-    defaultOutputModes: ["text/event-stream"],
-    skills: [
-      {
-        id: "loopat_skill_dev_turn",
-        name: "General development task",
-        description:
-          "Run one development task in a loopat sandbox: write/edit code, read the repo, run commands, research, and return the result. Multi-turn (context continues within a session).",
-        tags: ["coding", "agent", "dev", "sandbox"],
-        examples: [
-          "User: add a health-check endpoint to the repo and make the tests pass\nReply: added /health and the unit tests pass…",
-        ],
-        inputModes: ["application/json"],
-        outputModes: ["text/event-stream"],
-        inputJsonSchema: {
-          type: "object",
-          properties: { message: { type: "string", description: "the user's natural-language instruction" } },
-          required: ["message"],
-        },
-      },
-    ],
-  }
-}
-
-function resolvePublicUrl(c: Context, cfg: A2AConfig | null): string {
-  if (cfg?.publicUrl) return cfg.publicUrl.replace(/\/+$/, "")
+function resolvePublicUrl(c: Context): string {
+  const configured = process.env.LOOPAT_A2A_PUBLIC_URL
+  if (configured) return configured.replace(/\/+$/, "")
   const proto = c.req.header("x-forwarded-proto") ?? "http"
   const host = c.req.header("host") ?? `127.0.0.1:${process.env.PORT ?? 10001}`
   return `${proto}://${host}`
 }
 
-function artifactEvent(opts: {
-  reqId: unknown
-  artifactId: string
-  taskId: string
-  message: string
-  index: number
-  lastChunk: boolean
-  success: boolean
-  errorMsg?: string
-}) {
-  const metadata: Record<string, unknown> = {
-    success: opts.success,
-    forward: true,
-    type: "DEFAULT",
-    taskId: opts.taskId,
-    index: opts.index,
-    append: true,
-    lastChunk: opts.lastChunk,
-  }
-  if (opts.errorMsg) metadata.errorMsg = opts.errorMsg
+function agentCard(user: string, publicUrl: string, cfg: A2AUserConfig) {
+  const name = cfg.card?.name?.trim() || `Loopat Agent (${user})`
+  const description = cfg.card?.description?.trim() ||
+    "Self-hosted AI workspace (Claude Agent SDK). Runs development tasks in an isolated sandbox: writing code, reading repos, editing files, running commands, and researching."
   return {
-    jsonrpc: "2.0",
-    id: opts.reqId,
-    result: {
-      artifact: {
-        artifactId: opts.artifactId,
-        name: "summary",
-        metadata,
-        parts: [{ kind: "data", data: { message: opts.message } }],
-      },
+    protocolVersion: A2A_PROTOCOL_VERSION,
+    name,
+    description,
+    url: `${publicUrl}/a2a/${encodeURIComponent(user)}`,
+    version: "1.0.0",
+    preferredTransport: "JSONRPC",
+    capabilities: { streaming: true, pushNotifications: false, stateTransitionHistory: false },
+    defaultInputModes: ["text/plain", "application/json"],
+    defaultOutputModes: ["text/plain"],
+    securitySchemes: {
+      bearer: { type: "http", scheme: "bearer", description: "A loopat API token belonging to this user." },
     },
+    security: [{ bearer: [] }],
+    skills: [
+      {
+        id: "loopat_dev_turn",
+        name: "General development task",
+        description:
+          "Run one development task in a loopat sandbox: write/edit code, read the repo, run commands, research, and return the result. Multi-turn within a conversation (reuse contextId to continue).",
+        tags: ["coding", "agent", "dev", "sandbox"],
+        examples: ["Add a health-check endpoint to the repo and make the tests pass."],
+        inputModes: ["text/plain", "application/json"],
+        outputModes: ["text/plain"],
+      },
+    ],
   }
 }
 
-function statusEvent(reqId: unknown, state: "completed" | "failed") {
-  return { jsonrpc: "2.0", id: reqId, result: { status: { state } } }
-}
-
-type ParsedMsg = {
-  text: string
-  taskId: string
-  contextId: string | undefined
-  _meta?: any
-}
+type ParsedMsg = { text: string; contextId?: string; taskId?: string }
 
 function parseMessage(params: any): ParsedMsg {
   const message = params?.message ?? {}
-  const meta = message.metadata ?? params?.metadata ?? {}
   let text = ""
   const parts = Array.isArray(message.parts) ? message.parts : []
-  const first = parts[0]
-  if (first) {
-    if (first.kind === "data" && first.data) {
-      text = typeof first.data.message === "string" ? first.data.message
-        : typeof first.data.text === "string" ? first.data.text
-        : typeof first.data === "string" ? first.data : JSON.stringify(first.data)
-    } else if (first.kind === "text" && typeof first.text === "string") {
-      text = first.text
+  for (const p of parts) {
+    if (p?.kind === "text" && typeof p.text === "string") { text += p.text }
+    else if (p?.kind === "data" && p.data) {
+      const d = p.data
+      text += typeof d.message === "string" ? d.message
+        : typeof d.text === "string" ? d.text
+        : typeof d === "string" ? d : ""
     }
   }
-  const taskId = (typeof meta.taskId === "string" && meta.taskId)
-    ? meta.taskId
-    : `task_${randomBytes(8).toString("hex")}`
-  return { text, taskId, contextId: message.contextId ?? params?.contextId, _meta: meta }
+  return {
+    text: text.trim(),
+    contextId: typeof message.contextId === "string" && message.contextId ? message.contextId : undefined,
+    taskId: typeof message.taskId === "string" && message.taskId ? message.taskId : undefined,
+  }
 }
 
-async function getOrCreateLoop(parsed: ParsedMsg, cfg: A2AConfig): Promise<string> {
-  const ctx = parsed.contextId
-  if (ctx && ctxToLoop.has(ctx)) return ctxToLoop.get(ctx)!
+async function getOrCreateLoop(parsed: ParsedMsg, callerAuth: string, cfg: A2AUserConfig): Promise<{ loopId: string; contextId: string }> {
+  let contextId = parsed.contextId
+  if (contextId && ctxToLoop.has(contextId)) return { loopId: ctxToLoop.get(contextId)!, contextId }
+  if (!contextId) contextId = `ctx_${randomBytes(8).toString("hex")}`
 
   const title = parsed.text.slice(0, 60) || "a2a"
   const res = await fetch(`${SELF_BASE}/api/v1/loops`, {
     method: "POST",
-    headers: { authorization: `Bearer ${cfg.token}`, "content-type": "application/json" },
+    headers: { authorization: callerAuth, "content-type": "application/json" },
     body: JSON.stringify({
       title,
-      metadata: { a2a_context_id: ctx ?? "" },
+      profiles: cfg.profiles && cfg.profiles.length ? cfg.profiles : undefined,
+      vault: cfg.vault || undefined,
+      metadata: { a2a_context_id: contextId },
     }),
   })
   if (!res.ok) {
@@ -164,17 +110,17 @@ async function getOrCreateLoop(parsed: ParsedMsg, cfg: A2AConfig): Promise<strin
   }
   const loop = await res.json()
   const loopId = loop.id as string
-  if (ctx) ctxToLoop.set(ctx, loopId)
-  return loopId
+  ctxToLoop.set(contextId, loopId)
+  return { loopId, contextId }
 }
 
 type LoopatEvent = { event: string; data: any }
 
-async function* loopbackTurn(loopId: string, content: string, taskId: string, cfg: A2AConfig): AsyncGenerator<LoopatEvent> {
+async function* loopbackTurn(loopId: string, content: string, taskId: string, callerAuth: string): AsyncGenerator<LoopatEvent> {
   const res = await fetch(`${SELF_BASE}/api/v1/loops/${loopId}/messages`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${cfg.token}`,
+      authorization: callerAuth,
       "content-type": "application/json",
       accept: "text/event-stream",
       "idempotency-key": taskId,
@@ -228,44 +174,53 @@ function resultError(d: any): string | null {
   return null
 }
 
-async function handleStream(c: Context, reqId: unknown, parsed: ParsedMsg, cfg: A2AConfig) {
+// ── Standard A2A streaming event builders ─────────────────────────────────
+function artifactUpdate(reqId: unknown, taskId: string, contextId: string, artifactId: string, text: string, append: boolean, lastChunk: boolean) {
+  return {
+    jsonrpc: "2.0", id: reqId,
+    result: {
+      kind: "artifact-update",
+      taskId, contextId, append, lastChunk,
+      artifact: { artifactId, name: "response", parts: [{ kind: "text", text }] },
+    },
+  }
+}
+function statusUpdate(reqId: unknown, taskId: string, contextId: string, state: "working" | "completed" | "failed", final: boolean, errorText?: string) {
+  const status: Record<string, unknown> = { state }
+  if (errorText) {
+    status.message = {
+      kind: "message", role: "agent", messageId: `msg_${randomBytes(6).toString("hex")}`,
+      parts: [{ kind: "text", text: errorText }], taskId, contextId,
+    }
+  }
+  return { jsonrpc: "2.0", id: reqId, result: { kind: "status-update", taskId, contextId, status, final } }
+}
+
+async function handleStream(c: Context, reqId: unknown, parsed: ParsedMsg, callerAuth: string, cfg: A2AUserConfig) {
   return streamSSE(c, async (stream) => {
     const artifactId = `artifact_${randomBytes(8).toString("hex")}`
-    const index = 1
+    const taskId = parsed.taskId || `task_${randomBytes(8).toString("hex")}`
     try {
-      const loopId = await getOrCreateLoop(parsed, cfg)
+      const { loopId, contextId } = await getOrCreateLoop(parsed, callerAuth, cfg)
+      await stream.writeSSE({ data: JSON.stringify(statusUpdate(reqId, taskId, contextId, "working", false)) })
       let gotDelta = false
       let fallbackText: string | null = null
       let errMsg: string | undefined
       const finish = async () => {
         if (errMsg) {
-          await stream.writeSSE({ data: JSON.stringify(artifactEvent({
-            reqId, artifactId, taskId: parsed.taskId, message: errMsg,
-            index, lastChunk: true, success: false, errorMsg: errMsg,
-          })) })
-          await stream.writeSSE({ data: JSON.stringify(statusEvent(reqId, "failed")) })
+          await stream.writeSSE({ data: JSON.stringify(statusUpdate(reqId, taskId, contextId, "failed", true, errMsg)) })
           return
         }
-        // No streamed deltas but a final assistant block exists → surface it.
         if (!gotDelta && fallbackText) {
-          await stream.writeSSE({ data: JSON.stringify(artifactEvent({
-            reqId, artifactId, taskId: parsed.taskId, message: fallbackText,
-            index, lastChunk: false, success: true,
-          })) })
+          await stream.writeSSE({ data: JSON.stringify(artifactUpdate(reqId, taskId, contextId, artifactId, fallbackText, false, false)) })
         }
-        await stream.writeSSE({ data: JSON.stringify(artifactEvent({
-          reqId, artifactId, taskId: parsed.taskId, message: "",
-          index, lastChunk: true, success: true,
-        })) })
-        await stream.writeSSE({ data: JSON.stringify(statusEvent(reqId, "completed")) })
+        await stream.writeSSE({ data: JSON.stringify(artifactUpdate(reqId, taskId, contextId, artifactId, "", true, true)) })
+        await stream.writeSSE({ data: JSON.stringify(statusUpdate(reqId, taskId, contextId, "completed", true)) })
       }
-      for await (const ev of loopbackTurn(loopId, parsed.text, parsed.taskId, cfg)) {
+      for await (const ev of loopbackTurn(loopId, parsed.text, taskId, callerAuth)) {
         if (ev.event === "assistant_delta" && typeof ev.data?.text === "string") {
+          await stream.writeSSE({ data: JSON.stringify(artifactUpdate(reqId, taskId, contextId, artifactId, ev.data.text, gotDelta, false)) })
           gotDelta = true
-          await stream.writeSSE({ data: JSON.stringify(artifactEvent({
-            reqId, artifactId, taskId: parsed.taskId, message: ev.data.text,
-            index, lastChunk: false, success: true,
-          })) })
         } else if (ev.event === "sdk_message") {
           const t = extractAssistantText(ev.data); if (t) fallbackText = t
           const e = resultError(ev.data); if (e) errMsg = e
@@ -278,25 +233,21 @@ async function handleStream(c: Context, reqId: unknown, parsed: ParsedMsg, cfg: 
       }
       await finish()
     } catch (e: any) {
-      await stream.writeSSE({
-        data: JSON.stringify(artifactEvent({
-          reqId, artifactId, taskId: parsed.taskId, message: "",
-          index, lastChunk: true, success: false, errorMsg: e?.message ?? String(e),
-        })),
-      })
-      await stream.writeSSE({ data: JSON.stringify(statusEvent(reqId, "failed")) })
+      const taskIdSafe = taskId
+      await stream.writeSSE({ data: JSON.stringify(statusUpdate(reqId, taskIdSafe, parsed.contextId ?? "", "failed", true, e?.message ?? String(e))) })
     }
   })
 }
 
-async function handleSend(c: Context, reqId: unknown, parsed: ParsedMsg, cfg: A2AConfig) {
+async function handleSend(c: Context, reqId: unknown, parsed: ParsedMsg, callerAuth: string, cfg: A2AUserConfig) {
   const artifactId = `artifact_${randomBytes(8).toString("hex")}`
+  const taskId = parsed.taskId || `task_${randomBytes(8).toString("hex")}`
   try {
-    const loopId = await getOrCreateLoop(parsed, cfg)
+    const { loopId, contextId } = await getOrCreateLoop(parsed, callerAuth, cfg)
     let full = ""
     let fallbackText: string | null = null
     let errMsg: string | undefined
-    for await (const ev of loopbackTurn(loopId, parsed.text, parsed.taskId, cfg)) {
+    for await (const ev of loopbackTurn(loopId, parsed.text, taskId, callerAuth)) {
       if (ev.event === "assistant_delta" && typeof ev.data?.text === "string") full += ev.data.text
       else if (ev.event === "sdk_message") {
         const t = extractAssistantText(ev.data); if (t) fallbackText = t
@@ -308,22 +259,16 @@ async function handleSend(c: Context, reqId: unknown, parsed: ParsedMsg, cfg: A2
     if (!full && fallbackText) full = fallbackText
     if (errMsg && !full) full = errMsg
     const success = !errMsg
-    const metadata: Record<string, unknown> = {
-      success, forward: true, type: "DEFAULT", taskId: parsed.taskId,
-    }
-    if (errMsg) metadata.errorMsg = errMsg
+    // A2A Task object.
     return c.json({
       jsonrpc: "2.0",
       id: reqId,
       result: {
-        id: parsed.taskId,
+        kind: "task",
+        id: taskId,
+        contextId,
         status: { state: success ? "completed" : "failed" },
-        artifacts: [{
-          artifactId,
-          name: "summary",
-          metadata,
-          parts: [{ kind: "data", data: { message: full } }],
-        }],
+        artifacts: [{ artifactId, name: "response", parts: [{ kind: "text", text: full }] }],
       },
     })
   } catch (e: any) {
@@ -334,30 +279,39 @@ async function handleSend(c: Context, reqId: unknown, parsed: ParsedMsg, cfg: A2
 export function buildA2A() {
   const a = new Hono()
 
-  const cardHandler = (c: Context) => {
-    const cfg = loadConfig()
-    return c.json(agentCard(resolvePublicUrl(c, cfg)))
+  const cardHandler = async (c: Context) => {
+    const user = c.req.param("user")
+    if (!user) return c.json({ error: "not found" }, 404)
+    const cfg = await loadA2AConfig(user)
+    return c.json(agentCard(user, resolvePublicUrl(c), cfg))
   }
-  a.get("/.well-known/agent.json", cardHandler)
-  a.get("/.well-known/agent-card.json", cardHandler)
-  a.get("/a2a/.well-known/agent.json", cardHandler)
+  a.get("/a2a/:user/agent-card.json", cardHandler)
+  a.get("/a2a/:user/.well-known/agent-card.json", cardHandler)
+  a.get("/a2a/:user/agent.json", cardHandler) // legacy filename alias
 
-  a.post("/a2a", async (c) => {
-    const cfg = loadConfig()
+  a.post("/a2a/:user", async (c) => {
+    const user = c.req.param("user")
     const rpc = await c.req.json().catch(() => null)
     const reqId = rpc?.id ?? null
     if (!rpc || typeof rpc.method !== "string") {
       return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32600, message: "invalid request" } }, 400)
     }
-    if (!cfg) {
-      return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32000, message: "a2a not configured (missing service token)" } }, 503)
+    // Per-user auth: the caller must present THIS user's loopat API token.
+    const auth = c.req.header("authorization") ?? null
+    const tokenUser = await resolveApiToken(auth)
+    if (!tokenUser) {
+      return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32000, message: "unauthorized: present a loopat API token" } }, 401)
     }
+    if (tokenUser !== user) {
+      return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32000, message: "token does not belong to this agent" } }, 403)
+    }
+    const cfg = await loadA2AConfig(user)
     const parsed = parseMessage(rpc.params)
     if (!parsed.text) {
       return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32602, message: "empty message" } }, 400)
     }
-    if (rpc.method === "message/stream") return handleStream(c, reqId, parsed, cfg)
-    if (rpc.method === "message/send") return handleSend(c, reqId, parsed, cfg)
+    if (rpc.method === "message/stream") return handleStream(c, reqId, parsed, auth!, cfg)
+    if (rpc.method === "message/send") return handleSend(c, reqId, parsed, auth!, cfg)
     return c.json({ jsonrpc: "2.0", id: reqId, error: { code: -32601, message: `method not found: ${rpc.method}` } }, 404)
   })
 

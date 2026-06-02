@@ -1708,6 +1708,41 @@ export async function parseMcpSetup(
   return { ok: true, set: (j as any).set ?? [] }
 }
 
+// ── A2A (per-user agent) settings ─────────────────────────────────────────
+export type A2ASettings = {
+  card: { name: string; description: string }
+  profiles: string[]
+  vault: string
+  cardUrl: string
+  endpoint: string
+  hasKey: boolean
+  availableProfiles: string[]
+  availableVaults: string[]
+}
+export async function getA2A(): Promise<A2ASettings | null> {
+  const r = await apiFetch("/api/a2a")
+  if (!r.ok) return null
+  return (await r.json()) as A2ASettings
+}
+export async function saveA2A(patch: {
+  card?: { name?: string; description?: string }
+  profiles?: string[]
+  vault?: string
+}): Promise<boolean> {
+  const r = await apiFetch("/api/a2a", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  return r.ok
+}
+export async function regenA2AKey(): Promise<string | null> {
+  const r = await apiFetch("/api/a2a/key", { method: "POST" })
+  if (!r.ok) return null
+  const j = await r.json().catch(() => ({}))
+  return (j as any).token ?? null
+}
+
 export type McpServerInventory = { servers: McpServerEntry[] }
 
 export async function reprobeMcpServers(url?: string): Promise<void> {
