@@ -742,6 +742,7 @@ export async function submitOnboarding(
   // Only "form" remediations have values to run; "route" ones are handled by the
   // user acting on the real page, then onboarding() re-checks.
   if (cur.show.kind !== "form") return { ok: true, next: cur }
+  let wroteVaultEnv = false
   for (const field of cur.show.fields) {
     const raw = values[field.name]
     const value = typeof raw === "string" ? raw.trim() : ""
@@ -749,6 +750,7 @@ export async function submitOnboarding(
     if (field.action === "vault-env") {
       const r = await writeVaultEnv(userId, vault, field.name, value)
       if (!r.ok) return { ok: false, error: `couldn't save ${field.label}: ${r.error}` }
+      wroteVaultEnv = true
     } else if (field.action === "personal-repo-token") {
       const r = await setupPersonalViaProvider({
         userId,
@@ -758,6 +760,16 @@ export async function submitOnboarding(
         repoName: provider.defaultRepo ?? "loopat-personal",
       })
       if (!r.ok) return { ok: false, error: r.error }
+    }
+  }
+  // Persist vault edits (e.g. an api key) to the personal remote — committed but
+  // unpushed secrets are lost on re-import / another machine.
+  if (wroteVaultEnv) {
+    try {
+      const r = await pushPersonalToRemote(userId)
+      if (!r.ok) console.warn(`[loopat] personal push after onboarding key (${userId}): ${r.error}`)
+    } catch (e: any) {
+      console.warn(`[loopat] personal push after onboarding key (${userId}): ${e?.message ?? e}`)
     }
   }
   return { ok: true, next: await onboardingView(userId, vault) }

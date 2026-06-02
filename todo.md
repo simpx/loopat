@@ -1,65 +1,45 @@
 # loopat — todo / 已知问题
 
-> 记录用,先不动手修这些。当前无人值守任务是「mac 跑通 + behavior cases 全跑」。
-> 最后更新:2026-06-01
+> 记录用,先不动手修这些。当前无人值守任务:「mac 版本完整跑通 + behavior cases 全跑」。
+> 最后更新:2026-06-02(session: A2A / per-user repos / onboarding / mcp setup)
 
 ## 已知问题
 
-- [ ] **凭证链:per-user 模型下每个 user 的 vault key 要能访问 team git 平台**
-  > 现象:simpx 的 vault key 没注册到 gitlab,新建 loop 时 `clone example/knowledge` → `Permission denied (publickey)`,knowledge 空。
-  > 现在已优雅处理(loop 顶部黄色 banner 提示 contextWarnings),但缺一个把 vault 公钥注册到 git 平台的流程/引导 → 应并入批5 stage2。
+### 凭证 / onboarding
+- [ ] **per-user vault key 要能访问 team git 平台**:simpx 的 vault key 没注册到 gitlab → 新建 loop `clone example/knowledge` Permission denied,knowledge 空。已优雅处理(loop 顶部 contextWarnings banner),但缺"把 vault 公钥注册到 git 平台"的引导。并入 onboarding。
+- [ ] **UI 两把 key 易混**:deploy key(personal repo 用,comment `loopat:<user>`)vs vault key(team repos 用,comment `loopat:<provider-login>`)。personal-repo 页要同时显示 vault key 并验证能 `git ls-remote`。
+- [ ] **onboarding 后续 check**:code.ts 的 `onboarding()` 现有两步(personal repo + AI key)。可加:vault key 注册验证、mcp 认证、git/api 权限探测(都在 code.ts 里加,平台不动)。
 
-- [ ] **UX 缺陷:UI 只暴露 deploy key,不暴露 team 用的 vault key**
-  > Model B 有两把 key:deploy key(host-secrets,personal repo 用,comment `loopat:<user>`)+ vault key(vaults/default,knowledge/notes/team repos 用,comment `loopat:<provider-login>`)。
-  > `/settings/personal-repo` 的 "Show SSH public key" 只显示 **deploy key**,用户自然以为注册那把就够 → 注册后 knowledge 仍 `Permission denied`(team 用的是 vault key,没暴露/没注册)。实测踩坑(simpx)。
-  > 修:在 personal-repo 页 / `/context/repos` / 批5 stage2 同时显示 **vault key**(team key)并验证它能 `git ls-remote` kn/notes。两把 key comment 还不一致(deploy=user id、vault=provider login),也易混。
+### A2A
+- [ ] **走的是方案 A(loopback)**:a2a adapter loopback 调自己的 `/api/v1`。已确认对外/对用户一致。**计划方案 C**:把 turn 引擎抽成进程内函数,`/api/v1` 和 `/a2a` 各自绑定,去掉 loopback + "对外 API 调对外 API"的怪味。
+- [ ] **A2A `input-required` 未实现**:现在 turn 走 `bypassPermissions` 跳过了"中途要用户输入"。协议两边都支持(A2A input-required ↔ v1 requires_choice),以后做交互式多轮。
+- [ ] **contextId→loop 映射在内存**:重启后新会话重开 loop(v1 可接受)。
+- [ ] **a2a tool_call/thinking 未透出**:现在只透 assistant 文本到 artifact;以后可把工具调用塞进 artifact。
 
-- [ ] **serve-rs binary 没编译进 npx 包** → Share Artifact 不可用
-  > 启动日志:`serve container failed: serve binary not found at …/serve-rs/target/release/loopat-serve`。
-  > 非核心功能;要么 CI 编译进包,要么 UI 显式标注不可用。
+### per-user 重构遗留
+- [ ] **admin profile 管理仍 workspace 级**:`tiers.ts` 的 `listProfilesRich()` / `/api/admin/profiles` 还读 `workspaceProfilesDir`。new-loop 选择器 + 统计已改 per-user(`listProfiles(user)`/`computeLoopStats(user,...)`),admin 那块要统一。
+- [ ] **`/api/sync/repos`(单 repo pull/push)对 bare mirror 是空操作**:code repos 现在是 host-only bare mirror(`repo-cache/<name>`),旧的单 repo sync 端点指向旧 working-tree 路径,找不到 → 空。bare mirror 每次建 loop 自动 fetch,基本不需要手动 sync。要的话补 bare 版 fetch。
+- [ ] **knowledge/notes 还是 working-tree 缓存,不是 bare mirror**:code repos 已改 bare mirror(`--bare --depth=1` 单分支 + worktree)。knowledge/notes 有 git-crypt、是入口指针,改 bare 风险高,暂缓。用户说过"每个 repo 都这样"。
+- [ ] **旧 loops 与 per-user 不兼容**:旧 loops 的 context worktree 派生自 workspace 共享 main repo,沙箱挂载已改 per-user → 旧 loops 打开可能异常。MVP 无迁移,新建即可。
 
-- [ ] **旧 loops 与 per-user 重构不兼容**
-  > per-user 化后,旧 loops 的 context worktree 派生自 workspace 共享 main repo,而沙箱挂载已改 per-user → 旧 loops 打开可能异常。MVP 无迁移,新建 loop 即可。
+### 其它
+- [ ] **serve-rs binary 没编译进 npx 包** → Share Artifact 不可用。CI 编译进包,或 UI 标注不可用。
+- [ ] **fatal: not a git repository 噪音**:已修(0.1.27 把 `/api/version` 的 git 改成 `stdio:["ignore","pipe","ignore"]`)。mac mini 0.1.39+ 实测 0 次。若再现 = 旧版本,升级即可。其余 git 调用都走 `execFileP`(捕获 stderr,不泄露)。
+- [ ] **npmmirror 同步滞后**:每次发版要手动 `curl -X PUT .../syncs?sync_upstream=true`。mac mini 用 npmjs(加 `npm_config_prefer_online=true` 破缓存),siqian mac 用 npmmirror。
+- [ ] **behavior 02 脚本过时**:stage3 假设 personal repo 用 vault key,实际走 deploy key(Model B / per-user);notes 已移进 knowledge config。脚本+断言要重写。
 
-- [ ] **workspace.ts 旧 repos 管理仍是 workspace 级**
-  > `addRepo/listRepos/pullRepo/readRepoDetail` 仍指 `workspaceReposDir`,与 per-user 模型不一致。待批4b 统一到 knowledge config 的 `repos[]`。
+## 准备做的事
+- [ ] A2A 方案 C(共享 turn 引擎,去 loopback)
+- [ ] onboarding 补 vault-key 注册引导 + 更多 check
+- [ ] admin profile 管理统一到 per-user knowledge
+- [ ] behavior 02 脚本更新到 Model B / per-user
+- [ ] (可选)knowledge/notes 也改 bare mirror
 
-- [ ] **reason 文案改进已 commit 未发版**(47b2425)
-  > context warning 抓 "Permission denied" 行而非 git 尾部 boilerplate。攒到下次 `npm version` 一起发。
-
-## 准备做的事(按批次)
-
-- [ ] **批4b — `/context/repos` 可编辑页**
-  > 读写 knowledge repo 的 `.loopat/config.json` 的 `repos[]`(+ notes),编辑后 gated promote 回 knowledge repo。替换 workspace.ts 的旧 repos 管理。
-
-- [ ] **批4b — code provider seed**
-  > 注册/setup personal repo 时,自动写 personal config 的 `knowledge` 指针 + 初始化 knowledge repo 的 `.loopat/config.json`(notes + repos 预置),省去手动 push(这次是我手动 clone+push 进去的)。
-
-- [ ] **批5 — 注册后 3 阶段验证门引导**
-  > ① personal repo(clone/decrypt 通过)② team ssh key(`git ls-remote` kn/notes 通过)③ AI key(真实 API 调用 200)。每阶段 active-verification gate。stage2 顺带解决上面的「vault 公钥注册 git 平台」。
-
-## mac 双平台测试结果(2026-06-01 无人值守跑)
-
-mac:`ssh simpx@30.221.161.254`,podman machine(applehv linux VM),npx loopat@0.1.15。
-
-- ✅ **mac loopat 完整跑通** — 0.1.15 启动 ready、bootstrap 全绿、沙箱容器可运行(fish 3.7 + mise)。
-  > docker.io blocker 绕过方案(已验证可行):**本机 build sandbox image → `podman save` → scp → VM `podman load`**;loopat 的 `ensureSandboxImage` 检测 hashTag(`loopat-sandbox-<ws>-<containerfile-hash>`)存在即跳过 build。两机 Containerfile hash 一致(`4cd6b540132396f7`)。VM ping 公网加速 IP 通但 443 refused → 模仿 /etc/hosts 无效,只能 load。
-- ✅ **01 install/uninstall** — mac PASS,零残留 + label 隔离(含 prefix 歧义)全过,与本机一致。
-- 🟡 **02 personal-permissions** — mac 与本机**逐字一致**(stage1/2 ✓,stage3 ✗)。stage3 失败是 **02 脚本过时**(Model B + per-user 后 personal 走 deploy key,脚本仍授权 vault key 到 personal repo),**非 mac 问题、非 loopat bug**;本机同样失败。→ 见下「02 脚本需更新」。
-- ✅ **03 context-flow 真 AI** — mac **跑通**(0.1.22):create loop → 沙箱 → linux claude(2.1.159) → anthropic(claude-opus-4-7) → 回复 "hello from mac"。linux claude 启动时 `--force` 自动装、沙箱内 exec 通;anthropic key 手动配进 mactest vault。整条链端到端验证 OK。
-
-### mac 部署注意(新发现)
-
-- **LOOPAT_HOME 必须在 `$HOME` 下** — podman machine(applehv)只把 `$HOME` 挂进 VM,`/tmp` 不挂 → bind mount workdir `statfs … no such file`。e2e 脚本默认 `/tmp/loopat-e2e-*` 在 mac 不适用(本机 linux rootless 无此限制)。
-- **git-ssh-server image(02/03 用)同样要 save/load**(alpine `apk` 也需公网)。
-- e2e 在 mac 跑需:rsync repo + `npm i -g bun` + 预 load image + 给临时 workspace 注入带 `loopat.workspace` label 的 base image(`podman build FROM <loaded> --label …`,无网络)让 setup 跳过 build。
-
-## 新 blocker(loopat 真实问题,非测试环境)
-
-- [x] **mac 上沙箱 AI 需要 linux claude binary(已解决,0.1.22)**
-  > 沙箱是 linux VM,但 npx 按 host(darwin)只装 darwin claude,bind 进沙箱 `Exec format error`。
-  > 解决:`ensureSandboxClaudeBinary` 在 loopat **启动时**(npx 不跑 postinstall)`npm install --force @anthropic-ai/claude-agent-sdk-linux-<arch>` 到 `<loopat>/sandbox-claude`(首次 ~18s 后台、之后跳过);`resolveSandboxClaudeBinary` 让 podman/session 用它。mac 实测:沙箱 exec → `2.1.159 (Claude Code)`,通过。
-  > 剩:03 真 AI 完整跑通还需 anthropic key(mac 上配)+ 沙箱内网可达 anthropic。
-
-- [ ] **02 脚本 + md 需更新到 Model B / per-user 模型**
-  > 现 stage3 假设 personal repo 用 vault key,实际走 deploy key(`personalSshCommand`);且 notes 已从 personal config 移进 knowledge config。脚本与断言要重写。本机/ mac 都在 stage3 失败(行为一致,只是脚本过时)。
+## 本 session 已发布(0.1.32 → 0.1.40)
+- 0.1.32 onboarding 完全扩展自管(check→remediation,route/form 两原语)
+- 0.1.33/34 profile 列表+统计改 per-user knowledge
+- 0.1.35/36/37 loop 建仓提速:depth=1 → bare mirror cache + worktree
+- 0.1.38 mcp:通用 authed + 内联 resource + 粘贴 url 解析填值
+- 0.1.39 标准 A2A + per-user agent(`/a2a/<user>/...`)+ 可编辑 card/key
+- 0.1.40 personal repo 导入已加密 repo 时显示 crypt-key 输入框
+- (扩展)code.ts onboarding 判断 AI key 改用 resolved providers(兼容已有 repo)
