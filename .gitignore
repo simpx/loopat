@@ -29,3 +29,9 @@ __pycache__/
 
 # Misc
 *.tmp
+
+# Internal git-host provider extension + its installer — NOT open-source.
+# They carry internal hosts/URLs and are distributed out-of-band (OSS), so they
+# must never land in this repo. (Drop into LOOPAT_HOME/extensions/providers/.)
+/code.ts
+/install.sh
