@@ -53,3 +53,7 @@ dogfood/
 ## 不做
 
 onboarding、`code.ts`、真 gitlab。
+
+## 未来扩展(非当前范围)
+
+**远程/预发测试**(loopat 跑在 mac mini 等目标机,pw/CI 在别处触发):当前 dogfood 把"被测机"和"测试机"绑在一台(setup 在本机起栈、断言直接敲本机 podman/git),刻意从简。要支持远程需引入 **target-host 抽象**——baseURL 指目标机 + 把 podman/git 集成断言改为远程执行(ssh)或走 loopat HTTP API。预发环境验证用,非刚需。
