@@ -107,7 +107,12 @@ const LABEL_CONFIG_HASH = "loopat.config-hash"
 // by the loopat.workspace label, not this name — the name only prevents tag
 // collisions. Same-Containerfile builds still share overlay layers, so the
 // per-workspace tags don't multiply disk usage.
-export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || `loopat-sandbox-${WORKSPACE}:latest`
+// Image tag is content-addressed (no workspace prefix) so the same image is
+// reused across workspaces/LOOPAT_HOMEs instead of rebuilt per workspace. The
+// trade-off (deliberate): deleting a workspace no longer prunes its images —
+// we'd rather leave a residual image than rebuild on every fresh workspace.
+// Containers + their LABEL_WORKSPACE stay workspace-scoped (runtime isolation).
+export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || `loopat-sandbox:latest`
 // Prebuilt multi-arch base image published to GHCR by CI, tagged by the
 // Containerfile content hash. ensureSandboxImage pulls this instead of building
 // locally — a pull is faster and far more reliable than apt-installing ~150
@@ -599,7 +604,7 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
 
     // Hash the Containerfile so the base image auto-rebuilds when it changes.
     const hash = await baseContainerfileHash()
-    const hashTag = `loopat-sandbox-${WORKSPACE}-${hash}:latest`
+    const hashTag = `loopat-sandbox-${hash}:latest`
 
     const present = await runPodman(["image", "exists", hashTag], { allowFail: true })
     if (present.code === 0) {
@@ -721,7 +726,7 @@ export async function ensureLoopImage(loopId: string, opts?: { onProgress?: (msg
   // after the nested-podman base change shipped).
   const baseHash = await baseContainerfileHash()
   const hash = createHash("sha256").update(`base:${baseHash}\n`).update(content).digest("hex").slice(0, 16)
-  const tag = `loopat-sandbox-${WORKSPACE}-${hash}:latest`
+  const tag = `loopat-sandbox-${hash}:latest`
 
   const existing = _loopImageInFlight.get(tag)
   if (existing) return existing
