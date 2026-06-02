@@ -429,7 +429,18 @@ class LoopSession {
     if (existsSync(mergedSettingsPath)) {
       try {
         const merged = JSON.parse(await readFile(mergedSettingsPath, "utf8"))
-        mcpServers = { ...(merged.mcpServers ?? {}) }
+        // Strip loopat-only inline metadata (e.g. `x-loopat-resource`, used by
+        // the MCP setup UI) so the SDK / CC only sees standard MCP fields.
+        mcpServers = Object.fromEntries(
+          Object.entries((merged.mcpServers ?? {}) as Record<string, any>).map(([name, srv]) => {
+            if (srv && typeof srv === "object") {
+              const clean: Record<string, any> = {}
+              for (const [k, v] of Object.entries(srv)) if (!k.startsWith("x-loopat")) clean[k] = v
+              return [name, clean]
+            }
+            return [name, srv]
+          }),
+        )
       } catch (e: any) {
         console.warn(`[session ${loopId.slice(0,8)}] could not read merged mcpServers: ${e?.message ?? e}`)
       }

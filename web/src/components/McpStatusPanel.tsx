@@ -11,12 +11,13 @@
  * indistinguishable from other vault envs (per design).
  */
 import { useCallback, useEffect, useState } from "react"
-import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, RotateCw } from "lucide-react"
+import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, RotateCw, ExternalLink, KeyRound } from "lucide-react"
 import {
   startMcpAuth,
   listMcpServers,
   deleteEnv,
   restartLoopSession,
+  parseMcpSetup,
   type McpServerEntry,
 } from "@/api"
 
@@ -63,6 +64,15 @@ export function McpStatusPanel({
     await deleteEnv(envName)
     setBusyFor(null)
     refresh()
+  }
+
+  // Parse a pasted MCP URL into the server's vault secrets. Returns an error
+  // string on failure, null on success (and refreshes so authed flips).
+  const parseSetup = async (serverName: string, pastedUrl: string): Promise<string | null> => {
+    const r = await parseMcpSetup(serverName, pastedUrl, loopId)
+    if (!r.ok) return r.error
+    await refresh()
+    return null
   }
 
   const reloadSession = async () => {
@@ -122,6 +132,7 @@ export function McpStatusPanel({
               busy={busyFor === s.name || (s.authTokenEnv !== null && busyFor === s.authTokenEnv)}
               onConnect={() => connect(s.name)}
               onForget={s.authTokenEnv ? () => forget(s.authTokenEnv!) : undefined}
+              onParseSetup={(pasted) => parseSetup(s.name, pasted)}
             />
           ))
         )}
@@ -145,18 +156,36 @@ function ServerRow({
   busy,
   onConnect,
   onForget,
+  onParseSetup,
 }: {
   server: McpServerEntry
   busy: boolean
   onConnect: () => void
   onForget?: () => void
+  onParseSetup: (pastedUrl: string) => Promise<string | null>
 }) {
   const isHttp = server.type === "http" || server.type === "sse"
   // Connect is offered only when OAuth via DCR is feasible AND we know which
   // env to write. Servers without a Bearer template don't get a button.
   const connectable = isHttp && server.oauthSupport === "dcr" && !!server.authTokenEnv
+  // Paste-the-URL setup is offered when the server declares a setup resource
+  // (its secrets live in the url/headers as ${VAR}s, parsed from a pasted URL).
+  const hasSetup = !!server.setupResource
+  const [setupOpen, setSetupOpen] = useState(false)
+  const [paste, setPaste] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [setupErr, setSetupErr] = useState<string | null>(null)
+  const saveSetup = async () => {
+    setSaving(true)
+    setSetupErr(null)
+    const e = await onParseSetup(paste.trim())
+    setSaving(false)
+    if (e) setSetupErr(e)
+    else { setSetupOpen(false); setPaste("") }
+  }
 
   return (
+    <div className="border-b border-gray-50 last:border-0">
     <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50">
       <span className="text-[14px] text-gray-300 leading-none">
         {server.authed ? "●" : connectable ? "○" : "·"}
@@ -201,7 +230,21 @@ function ServerRow({
             <Unlink size={10} /> forget
           </button>
         )}
-        {!connectable && !server.authed && isHttp && (
+        {hasSetup && (
+          <button
+            onClick={() => setSetupOpen((o) => !o)}
+            className={`inline-flex items-center gap-1 text-[11px] px-2 h-6 rounded ${
+              server.authed
+                ? "text-gray-600 hover:bg-gray-100 border border-gray-200"
+                : "text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
+            }`}
+            title="Paste your MCP URL from the provider's page to set this server's secrets"
+          >
+            <KeyRound size={10} />
+            {server.authed ? "re-setup" : "setup"}
+          </button>
+        )}
+        {!hasSetup && !connectable && !server.authed && isHttp && (
           server.oauthSupport === "manual" ? (
             <span
               className="text-[11px] text-gray-500 italic"
@@ -228,6 +271,48 @@ function ServerRow({
         )}
         {!isHttp && <span className="text-[11px] text-gray-400">stdio</span>}
       </div>
+    </div>
+    {setupOpen && hasSetup && (
+      <div className="px-3 pb-2.5 pt-0.5 bg-gray-50/60">
+        <div className="text-[11px] text-gray-500 mb-1.5">
+          到{" "}
+          <a
+            href={server.setupResource}
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 hover:text-blue-800 inline-flex items-center gap-0.5"
+          >
+            这个页面 <ExternalLink size={9} />
+          </a>{" "}
+          复制你的 MCP URL,粘贴到下面 —— 会自动解析出{" "}
+          {(server.requiredEnvs ?? []).join("、") || "所需密钥"} 并存进你的 vault。
+        </div>
+        <textarea
+          value={paste}
+          onChange={(e) => setPaste(e.target.value)}
+          placeholder="https://…?key=…"
+          rows={2}
+          spellCheck={false}
+          className="w-full px-2 py-1 rounded border border-gray-300 text-[11px] font-mono focus:outline-none focus:border-gray-500 resize-none"
+        />
+        {setupErr && <div className="text-[11px] text-red-600 mt-1">{setupErr}</div>}
+        <div className="mt-1.5 flex items-center gap-2">
+          <button
+            onClick={saveSetup}
+            disabled={!paste.trim() || saving}
+            className="text-[11px] px-2.5 h-6 rounded bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-40"
+          >
+            {saving ? "解析中…" : "解析并保存"}
+          </button>
+          <button
+            onClick={() => { setSetupOpen(false); setPaste(""); setSetupErr(null) }}
+            className="text-[11px] text-gray-500 hover:text-gray-800"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    )}
     </div>
   )
 }

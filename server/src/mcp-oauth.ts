@@ -78,6 +78,51 @@ export function parseBearerEnvName(server: McpServerConfig | undefined | null): 
   return null
 }
 
+// ${VAR} or ${VAR:-default}, anywhere in a string.
+const ENV_REF_G = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/** Every env-var name referenced via ${VAR} in a server's url + header values.
+ *  Generalizes parseBearerEnvName beyond `Authorization: Bearer ${VAR}` (e.g. a
+ *  key embedded in the url). A server is "authed" when ALL of these are set. */
+export function mcpRequiredEnvs(server: McpServerConfig | undefined | null): string[] {
+  if (!server) return []
+  const out = new Set<string>()
+  const scan = (s: unknown) => {
+    if (typeof s !== "string") return
+    for (const m of s.matchAll(ENV_REF_G)) out.add(m[1])
+  }
+  scan((server as any).url)
+  const headers = (server as any).headers
+  if (headers && typeof headers === "object") for (const v of Object.values(headers)) scan(v)
+  return [...out]
+}
+
+/** Reverse a `${VAR}`-templated string (e.g. the server url) against a concrete
+ *  pasted value, extracting each VAR. Returns null if the paste doesn't match
+ *  the template's shape. Powers the "paste your MCP URL → auto-fill the secrets"
+ *  setup flow. */
+export function parseTemplateVars(template: string, pasted: string): Record<string, string> | null {
+  const names: string[] = []
+  let re = "^"
+  let last = 0
+  for (const m of template.matchAll(ENV_REF_G)) {
+    const idx = m.index ?? 0
+    re += escapeRegex(template.slice(last, idx)) + "(.+?)"
+    names.push(m[1])
+    last = idx + m[0].length
+  }
+  re += escapeRegex(template.slice(last)) + "$"
+  const match = pasted.trim().match(new RegExp(re))
+  if (!match) return null
+  const out: Record<string, string> = {}
+  names.forEach((n, i) => { out[n] = match[i + 1] })
+  return out
+}
+
 const STATE_TTL_MS = 10 * 60 * 1000 // 10 minutes — generous; OAuth flows are slow
 
 type FlowState = {

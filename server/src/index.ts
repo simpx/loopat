@@ -6,7 +6,7 @@ import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys, userOnboarding, submitOnboarding } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
-import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
+import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, mcpRequiredEnvs, parseTemplateVars, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
 import {
   initChat,
@@ -761,7 +761,16 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
       const type = (srv?.type ?? "stdio") as string
       const url = (srv as any)?.url as string | undefined
       const authTokenEnv = parseBearerEnvName(srv)
-      const authed = authTokenEnv ? !!envs[authTokenEnv] : false
+      // Generalized: a server is authed when EVERY ${VAR} it references (in url
+      // or headers) is set in the vault — not just a Bearer header token.
+      const requiredEnvs = mcpRequiredEnvs(srv)
+      const authed = requiredEnvs.length > 0
+        ? requiredEnvs.every((e) => !!envs[e])
+        : (authTokenEnv ? !!envs[authTokenEnv] : false)
+      // Inline loopat metadata (CC never sees it — stripped before the SDK):
+      // a setup page where the user gets their credentials, for the auth flow.
+      const setupResource = typeof (srv as any)?.["x-loopat-resource"] === "string"
+        ? (srv as any)["x-loopat-resource"] as string : undefined
       let oauthSupport: OAuthSupport | undefined
       if (url && (type === "http" || type === "sse")) {
         try {
@@ -770,11 +779,53 @@ app.get("/api/mcp-servers", requireAuth, async (c) => {
           oauthSupport = "unreachable"
         }
       }
-      return { name, type, url, authTokenEnv, authed, oauthSupport }
+      return { name, type, url, authTokenEnv, requiredEnvs, authed, setupResource, oauthSupport }
     }),
   )
 
   return c.json({ servers })
+})
+
+// "I copied my MCP URL from the provider's page" setup flow: reverse the
+// server's ${VAR} url template against the pasted concrete URL and store the
+// extracted secrets in the vault. The template is read server-side (from the
+// loop's merged settings, falling back to team settings) so only the vars the
+// server actually declares can be written.
+app.post("/api/mcp-setup/parse", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const serverName = typeof body.server === "string" ? body.server : ""
+  const pasted = typeof body.pastedUrl === "string" ? body.pastedUrl.trim() : ""
+  const loopId = typeof body.loopId === "string" && body.loopId ? body.loopId : undefined
+  if (!serverName || !pasted) return c.json({ error: "server and pastedUrl required" }, 400)
+
+  // Locate the server's url TEMPLATE (with ${VAR}s).
+  const { readFile: rf } = await import("node:fs/promises")
+  const readMcp = async (p: string): Promise<Record<string, any>> => {
+    if (!existsSync(p)) return {}
+    try { return (JSON.parse(await rf(p, "utf8"))?.mcpServers ?? {}) as Record<string, any> } catch { return {} }
+  }
+  let mcp: Record<string, any> = {}
+  if (loopId) {
+    const { loopClaudeDir } = await import("./paths")
+    mcp = await readMcp(pathJoin(loopClaudeDir(loopId), "settings.json"))
+  }
+  if (!mcp[serverName]) {
+    const { workspaceTeamSettingsPath } = await import("./paths")
+    mcp = { ...(await readMcp(workspaceTeamSettingsPath())), ...mcp }
+  }
+  const template = typeof mcp[serverName]?.url === "string" ? (mcp[serverName].url as string) : ""
+  if (!template) return c.json({ error: `no url template for server "${serverName}"` }, 404)
+
+  const vars = parseTemplateVars(template, pasted)
+  if (!vars || Object.keys(vars).length === 0) {
+    return c.json({ error: "pasted URL doesn't match this server's URL shape" }, 400)
+  }
+  for (const [name, value] of Object.entries(vars)) {
+    const r = await writeVaultEnv(userId, DEFAULT_VAULT, name, value)
+    if (!r.ok) return c.json({ error: `couldn't save ${name}: ${r.error}` }, 400)
+  }
+  return c.json({ ok: true, set: Object.keys(vars) })
 })
 
 // Force re-probe of OAuth support. POST with no body clears entire cache;

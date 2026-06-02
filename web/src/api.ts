@@ -1677,12 +1677,35 @@ export type McpServerEntry = {
    *  null when the server doesn't use a Bearer-template (stdio servers,
    *  static-keyed servers, non-Bearer auth schemes). */
   authTokenEnv: string | null
-  /** True iff a non-empty env file exists at `<personal default vault>/envs/<authTokenEnv>`. */
+  /** Every env var the server references via `${VAR}` (url + headers). */
+  requiredEnvs?: string[]
+  /** True iff all of the server's referenced env vars are set in the vault
+   *  (generalizes the Bearer-token case). */
   authed: boolean
+  /** Inline `x-loopat-resource`: a page where the user obtains their
+   *  credentials (drives the "paste your MCP URL" setup flow). */
+  setupResource?: string
   /** OAuth capability probe result. dcr=loopat can auto-auth; manual=admin
    *  must register an app (loopat can't); none=no OAuth (server is public or
    *  uses non-OAuth auth); unreachable=probe failed. */
   oauthSupport?: "dcr" | "manual" | "none" | "unreachable"
+}
+
+/** Parse a pasted concrete MCP URL against the server's ${VAR} template and
+ *  store the extracted secrets in the vault. */
+export async function parseMcpSetup(
+  server: string,
+  pastedUrl: string,
+  loopId?: string,
+): Promise<{ ok: true; set: string[] } | { ok: false; error: string }> {
+  const r = await apiFetch("/api/mcp-setup/parse", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ server, pastedUrl, loopId }),
+  })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) return { ok: false, error: (j as any).error ?? `failed (${r.status})` }
+  return { ok: true, set: (j as any).set ?? [] }
 }
 
 export type McpServerInventory = { servers: McpServerEntry[] }
