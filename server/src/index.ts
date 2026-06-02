@@ -4,7 +4,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -58,7 +58,7 @@ import {
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner, printReadyLine } from "./bootstrap"
-import { resolveProviderId } from "./providers"
+import { resolveProvider } from "./providers"
 import { ensureSandboxClaudeBinary } from "./claude-binary"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
@@ -1186,8 +1186,9 @@ app.get("/api/personal/status", requireAuth, async (c) => {
   // Per-vault SSH public keys — what the user registers on the TEAM git host
   // for knowledge/notes/repos. Distinct from the deploy key (publicKey above).
   const vaultKeys = await listVaultPublicKeys(userId)
-  const wcfg = await loadConfig()
-  const providerId = await resolveProviderId(wcfg.gitHost?.provider)
+  // The active provider comes from the extensions dir (no config.json needed),
+  // and supplies its own baseUrl / defaultRepo / tokenHelp defaults.
+  const provider = await resolveProvider()
   return c.json({
     userId,
     personalRepo: user.personalRepo ?? null,
@@ -1195,10 +1196,10 @@ app.get("/api/personal/status", requireAuth, async (c) => {
     vaultKeys,
     imported,
     gitHost: {
-      provider: providerId,
-      baseUrl: wcfg.gitHost?.baseUrl ?? null,
-      defaultRepo: wcfg.gitHost?.defaultRepo ?? "loopat-personal",
-      tokenHelp: await providerTokenHelp(providerId),
+      provider: provider?.id ?? "github",
+      baseUrl: provider?.baseUrl ?? null,
+      defaultRepo: provider?.defaultRepo ?? "loopat-personal",
+      tokenHelp: provider?.tokenHelp ?? null,
     },
   })
 })
@@ -1273,11 +1274,13 @@ app.post("/api/personal/github", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const token = typeof body.token === "string" ? body.token.trim() : ""
   if (!token) return c.json({ error: "github token required" }, 400)
-  const wcfg = await loadConfig()
-  const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || wcfg.gitHost?.defaultRepo || "loopat-personal"
-  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
+  // Provider + its baseUrl/defaultRepo come from the extensions dir, not
+  // config.json. A request body may still override any of them.
+  const p = await resolveProvider(typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined)
+  const repoName = (typeof body.repoName === "string" && body.repoName.trim()) || p?.defaultRepo || "loopat-personal"
+  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? p?.baseUrl
   const cryptKey = typeof body.cryptKey === "string" && body.cryptKey.trim() ? body.cryptKey.trim() : undefined
-  const provider = await resolveProviderId((typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider)
+  const provider = p?.id ?? "github"
   const r = await setupPersonalViaProvider({ userId, provider, token, baseUrl, repoName, cryptKey })
   if (!r.ok) {
     if (r.needsCryptKey) return c.json({ error: r.error, needsCryptKey: true }, 409)
@@ -1293,9 +1296,10 @@ app.post("/api/personal/repos", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const token = typeof body.token === "string" ? body.token.trim() : ""
   if (!token) return c.json({ ok: false, repos: [], error: "token required" })
-  const wcfg = await loadConfig()
-  const provider = await resolveProviderId((typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined) ?? wcfg.gitHost?.provider)
-  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? wcfg.gitHost?.baseUrl
+  // Provider + baseUrl from the extensions dir (no config.json), request may override.
+  const p = await resolveProvider(typeof body.provider === "string" && body.provider.trim() ? body.provider.trim() : undefined)
+  const provider = p?.id ?? "github"
+  const baseUrl = (typeof body.baseUrl === "string" && body.baseUrl.trim() ? body.baseUrl.trim() : undefined) ?? p?.baseUrl
   try {
     // Validate the token first so a bad token surfaces as an error in the token
     // step, instead of an empty (misleading "no repos") picker.

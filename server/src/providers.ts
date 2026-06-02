@@ -12,7 +12,7 @@ import { join } from "node:path"
 import { existsSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
-import { registerProvider, type GitHostProvider } from "./git-host"
+import { registerProvider, getProvider, type GitHostProvider } from "./git-host"
 import { extensionsProvidersDir } from "./paths"
 
 import "./github" // built-in, open-source
@@ -61,4 +61,10 @@ export async function resolveProviderId(requested?: string): Promise<string> {
   await loadExtensionProviders()
   if (extensionProviderIds.length > 0) return extensionProviderIds[0]
   return requested || "github"
+}
+
+/** Resolve and return the active provider object (see resolveProviderId). Its
+ *  baseUrl / defaultRepo / tokenHelp let loopat run with no config.json. */
+export async function resolveProvider(requested?: string): Promise<GitHostProvider | undefined> {
+  return getProvider(await resolveProviderId(requested))
 }

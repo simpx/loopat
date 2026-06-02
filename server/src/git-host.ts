@@ -20,6 +20,13 @@ export interface GitHostProvider {
    *  (core stays platform-agnostic). */
   readonly tokenHelp?: string
 
+  /** Optional defaults the provider declares so loopat needs no config.json:
+   *  the git host base URL and the default personal-repo name. A request may
+   *  still override either; absent both, baseUrl falls back to the provider's
+   *  own internal default and defaultRepo to "loopat-personal". */
+  readonly baseUrl?: string
+  readonly defaultRepo?: string
+
   /**
    * How git authenticates clone/push on this platform:
    *  - "ssh-deploy-key": loopat generates an ssh key, the provider registers it
