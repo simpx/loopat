@@ -168,9 +168,24 @@ export async function printBootstrapBanner(cfg: WorkspaceConfig) {
   }
   console.log(bar)
   const blockers = checks.filter((c) => !c.ok)
-  if (blockers.length === 0) {
-    console.log(`  ${green("ready.")} open ${cyan(`http://${accessHost()}:${process.env.PORT ?? 10001}`)}\n`)
-  } else {
+  if (blockers.length > 0) {
     console.log(`  ${yellow(`${blockers.length} thing(s) to fix`)} before chat will work — see hints above.\n`)
+    return false
   }
+  // NB: the "ready. open …" line is intentionally NOT printed here. The banner
+  // runs up front (so dependency checks are visible immediately), but the port
+  // isn't listening yet and the sandbox base image may still be pulling. The
+  // caller prints printReadyLine() only after the port is actually open and the
+  // image is prepared — otherwise we'd claim readiness mid-boot.
+  console.log("")
+  return true
+}
+
+/** The "ready. open <url>" line — printed by the boot sequence AFTER the port
+ *  is listening and the sandbox image is ready (see printBootstrapBanner). */
+export function printReadyLine() {
+  const color = !!process.stdout.isTTY && process.env.NO_COLOR === undefined
+  const wrap = (code: string) => (s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s)
+  const green = wrap("32"), cyan = wrap("36")
+  console.log(`  ${green("ready.")} open ${cyan(`http://${accessHost()}:${process.env.PORT ?? 10001}`)}\n`)
 }

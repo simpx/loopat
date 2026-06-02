@@ -57,7 +57,7 @@ import {
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, loadTokenUsage, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadKnowledgeConfig, saveKnowledgeConfig, type ProviderConfig, type ModelEntry } from "./config"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
-import { printBootstrapBanner } from "./bootstrap"
+import { printBootstrapBanner, printReadyLine } from "./bootstrap"
 import { ensureSandboxClaudeBinary } from "./claude-binary"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
@@ -3155,7 +3155,7 @@ initChat(chatSeed)
 // instant, instead of silently triggering a multi-minute image build when the
 // user least expects it. When the image is already built (steady state, and
 // `bun --hot` dev), these steps return immediately.
-await printBootstrapBanner(cfg)
+const bootReady = await printBootstrapBanner(cfg)
 
 const podmanProbe = await probePodman()
 if (podmanProbe.ok) {
@@ -3205,6 +3205,10 @@ console.log(`[loopat] server listening on http://${hostname}:${port}`)
     console.log(`[loopat] workspace serve unavailable — serve binary not built (share / external-port off; the workspace runs fine without it)`)
   }
 }
+
+// Now the port is open AND the sandbox image is prepared — only now is it
+// honestly "ready". (Skipped when the banner reported blockers to fix.)
+if (bootReady) printReadyLine()
 
 const backfilled = await backfillAllMounts()
 if (backfilled > 0) console.log(`[loopat] backfilled context mounts on ${backfilled} loop(s)`)
