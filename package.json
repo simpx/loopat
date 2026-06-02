@@ -37,7 +37,8 @@
     "prepublishOnly": "bun install && bun run build:web",
     "postinstall": "node scripts/install-sandbox-claude.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "dogfood": "playwright test --config dogfood/playwright.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.150",
