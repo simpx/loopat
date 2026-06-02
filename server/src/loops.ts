@@ -453,13 +453,16 @@ async function ensureRepoCloned(user: string, name: string, sshCommand?: string)
   try {
     await mkdir(personalReposDir(user), { recursive: true })
     const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
-    // Blobless partial clone: pulls commits + trees but defers blobs (fetched
-    // lazily when checked out / diffed). Huge repos (e.g. vineyard) clone in
-    // seconds instead of minutes, so loop creation doesn't hang on it.
+    // Shallow clone (depth 1): fetch ONLY the latest commit's tree + blobs, no
+    // history. That's the smallest possible transfer and the working-tree
+    // checkout is instant (blobs are already local) — so creating a loop on a
+    // huge repo (e.g. vineyard) takes seconds, not minutes. (Blobless clone is
+    // worse here: it defers blobs to the worktree checkout, so every loop pays
+    // a lazy-fetch.) If the AI needs full history it can `git fetch --unshallow`.
     try {
-      await execFileP("git", ["clone", "--filter=blob:none", "--", spec.git, dir], { env, timeout: 180_000 })
+      await execFileP("git", ["clone", "--depth=1", "--", spec.git, dir], { env, timeout: 180_000 })
     } catch {
-      // Server may not allow partial clone — fall back to a full clone.
+      // Fall back to a full clone if the shallow clone is rejected.
       try { await rm(dir, { recursive: true, force: true }) } catch {}
       await execFileP("git", ["clone", "--", spec.git, dir], { env, timeout: 300_000 })
     }
