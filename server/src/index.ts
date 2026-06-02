@@ -690,6 +690,19 @@ app.put("/api/settings/personal/disk", requireAuth, async (c) => {
   return c.json({ ok: true })
 })
 
+// A vault edit (api key, mcp secret, …) is committed locally but pushing is a
+// SEPARATE step — without it the secret never reaches origin, so re-importing
+// the repo (or another machine) won't have it. Push after every vault write so
+// secrets persist. Best-effort: the local write already succeeded.
+async function persistPersonalAfterVaultWrite(userId: string) {
+  try {
+    const r = await pushPersonalToRemote(userId)
+    if (!r.ok) console.warn(`[loopat] personal push after vault write (${userId}): ${r.error}`)
+  } catch (e: any) {
+    console.warn(`[loopat] personal push after vault write (${userId}): ${e?.message ?? e}`)
+  }
+}
+
 // Write a value to a vault env file. Used by the Settings UI when the user
 // types a new apiKey / token. Body: `{ name, value, vault? }` — `name` is
 // the env var name (i.e. the contents of `${...}` in config.json apiKey ref);
@@ -704,6 +717,7 @@ app.post("/api/settings/personal/value", requireAuth, async (c) => {
   if (!name) return c.json({ error: "name required" }, 400)
   const r = await writeVaultEnv(userId, vault, name, value)
   if (!r.ok) return c.json({ error: r.error }, 400)
+  await persistPersonalAfterVaultWrite(userId)
   return c.json({ ok: true })
 })
 
@@ -831,6 +845,7 @@ app.post("/api/mcp-setup/parse", requireAuth, async (c) => {
     const r = await writeVaultEnv(userId, DEFAULT_VAULT, name, value)
     if (!r.ok) return c.json({ error: `couldn't save ${name}: ${r.error}` }, 400)
   }
+  await persistPersonalAfterVaultWrite(userId)
   return c.json({ ok: true, set: Object.keys(vars) })
 })
 
@@ -905,6 +920,7 @@ app.delete("/api/envs/:name", requireAuth, async (c) => {
   const name = c.req.param("name")
   if (!ENV_NAME_RE.test(name)) return c.json({ error: "invalid env name" }, 400)
   await deleteVaultEnv(userId, DEFAULT_VAULT, name)
+  await persistPersonalAfterVaultWrite(userId)
   return c.json({ ok: true })
 })
 
