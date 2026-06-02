@@ -107,6 +107,13 @@ const LABEL_CONFIG_HASH = "loopat.config-hash"
 // collisions. Same-Containerfile builds still share overlay layers, so the
 // per-workspace tags don't multiply disk usage.
 export const SANDBOX_IMAGE = process.env.LOOPAT_SANDBOX_IMAGE || `loopat-sandbox-${WORKSPACE}:latest`
+// Prebuilt multi-arch base image published to GHCR by CI, tagged by the
+// Containerfile content hash. ensureSandboxImage pulls this instead of building
+// locally — a pull is faster and far more reliable than apt-installing ~150
+// packages over a flaky China mirror. Falls back to a local build when the pull
+// fails (ghcr unreachable on this network, or a locally-modified Containerfile
+// whose hash was never published). Override the repo via env for forks.
+const SANDBOX_IMAGE_REF = process.env.LOOPAT_SANDBOX_IMAGE_REF || "ghcr.io/simpx/loopat-sandbox"
 
 // Container name: prefix with workspace to avoid collisions between loopat
 // instances running on the same host with different LOOPAT_HOME. Loop UUIDs
@@ -585,7 +592,23 @@ export async function ensureSandboxImage(opts?: { onProgress?: (msg: string) => 
       return
     }
 
-    console.log(`[podman] building sandbox image ${SANDBOX_IMAGE} (Containerfile changed or first run; may take ~30s)`)
+    // Fast path: pull the prebuilt image CI published for this exact
+    // Containerfile (content-hash tag). On success, tag it as both the hashTag
+    // (so the next boot's existence check above short-circuits) and the
+    // unversioned SANDBOX_IMAGE. Only fall back to a local build if the pull
+    // fails — ghcr unreachable on this network, or a modified Containerfile
+    // whose hash was never published.
+    const remoteRef = `${SANDBOX_IMAGE_REF}:${hash}`
+    console.log(`[podman] pulling prebuilt sandbox image ${remoteRef}`)
+    opts?.onProgress?.("Pulling prebuilt sandbox image…")
+    const pulled = await runPodman(["pull", remoteRef], { allowFail: true })
+    if (pulled.code === 0) {
+      await runPodman(["tag", remoteRef, hashTag], { allowFail: true })
+      await runPodman(["tag", remoteRef, SANDBOX_IMAGE], { allowFail: true })
+      console.log(`[podman] sandbox image ready (pulled ${remoteRef})`)
+      return
+    }
+    console.log(`[podman] prebuilt image unavailable — building sandbox image ${SANDBOX_IMAGE} locally (may take a few minutes)`)
     opts?.onProgress?.("Building sandbox environment…")
 
     // Stream build output, parsing STEP lines into progress messages.
