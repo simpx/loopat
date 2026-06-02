@@ -453,7 +453,16 @@ async function ensureRepoCloned(user: string, name: string, sshCommand?: string)
   try {
     await mkdir(personalReposDir(user), { recursive: true })
     const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
-    await execFileP("git", ["clone", "--", spec.git, dir], { env })
+    // Blobless partial clone: pulls commits + trees but defers blobs (fetched
+    // lazily when checked out / diffed). Huge repos (e.g. vineyard) clone in
+    // seconds instead of minutes, so loop creation doesn't hang on it.
+    try {
+      await execFileP("git", ["clone", "--filter=blob:none", "--", spec.git, dir], { env, timeout: 180_000 })
+    } catch {
+      // Server may not allow partial clone — fall back to a full clone.
+      try { await rm(dir, { recursive: true, force: true }) } catch {}
+      await execFileP("git", ["clone", "--", spec.git, dir], { env, timeout: 300_000 })
+    }
     console.log(`[loopat] cloned on demand ${spec.git} → ${dir}`)
     return true
   } catch (e: any) {
