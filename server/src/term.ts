@@ -87,7 +87,11 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     })
 
     const binary = process.env.LOOPAT_PODMAN_BIN || "podman"
-    console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length}`)
+    // Debug-only: arg count is meaningless to end users and printed at error
+    // level it looks like a failure. Gate behind LOOPAT_DEBUG.
+    if (process.env.LOOPAT_DEBUG || process.env.LOOPAT_DEBUG_SPAWN) {
+      console.error(`[term:${tag}] spawn ${binary} argc=${podmanArgs.length}`)
+    }
     const proc = spawn(binary, podmanArgs, {
       name: "xterm-256color",
       cols: initCols,

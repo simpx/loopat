@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
-import { execSync, execFile } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { promisify } from "node:util"
 import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, providerTokenHelp, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, ensureUserContext, promoteKnowledgeConfig, listVaultPublicKeys } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage } from "./podman"
@@ -111,8 +111,13 @@ app.get("/api/health", (c) => c.json({ ok: true, loopatHome: LOOPAT_HOME, worksp
 
 app.get("/api/version", (c) => {
   let branch = "unknown", commit = "unknown"
-  try { branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf8" }).trim() } catch {}
-  try { commit = execSync("git rev-parse HEAD", { encoding: "utf8" }).trim() } catch {}
+  // stdio stderr=ignore: under npx the install dir isn't a git repo, so git
+  // prints "fatal: not a git repository" to stderr. Without this it inherits
+  // the parent stderr and leaks that line to the console on every poll of this
+  // endpoint — suppress it (the catch already handles the non-git case).
+  const gitStdio: ["ignore", "pipe", "ignore"] = ["ignore", "pipe", "ignore"]
+  try { branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8", stdio: gitStdio }).trim() } catch {}
+  try { commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: gitStdio }).trim() } catch {}
   return c.json({ branch, commit })
 })
 
