@@ -17,8 +17,8 @@ import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { parse as parseToml } from "smol-toml"
 import {
-  workspaceTeamClaudeDir,
-  workspaceProfileClaudeDir,
+  personalKnowledgeTeamClaudeDir,
+  personalKnowledgeProfileClaudeDir,
 } from "./paths"
 import { lookupPluginInstallPath } from "./plugin-installer"
 
@@ -157,13 +157,14 @@ async function scanPlugin(pluginDir: string): Promise<{
  * Main entry: compute the totals for a hypothetical loop with the given
  * non-base profiles (team is always implicit). Returns deduped counts.
  */
-export async function computeLoopStats(profiles: string[]): Promise<LoopStats> {
-  // Collect all source .claude/ dirs to scan
+export async function computeLoopStats(user: string, profiles: string[]): Promise<LoopStats> {
+  // Collect all source .claude/ dirs to scan — from the user's PER-USER
+  // knowledge repo (matching resolveLoopPlan / listProfiles).
   const sources: Array<{ source: string; dir: string }> = []
-  const teamDir = workspaceTeamClaudeDir()
+  const teamDir = personalKnowledgeTeamClaudeDir(user)
   if (existsSync(teamDir)) sources.push({ source: "team", dir: teamDir })
   for (const p of profiles) {
-    const d = workspaceProfileClaudeDir(p)
+    const d = personalKnowledgeProfileClaudeDir(user, p)
     if (existsSync(d)) sources.push({ source: `profile:${p}`, dir: d })
   }
 
