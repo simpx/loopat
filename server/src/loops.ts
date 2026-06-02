@@ -28,6 +28,8 @@ import {
   personalNotesDir,
   personalReposDir,
   personalRepoDir,
+  personalRepoCacheDir,
+  personalRepoCacheRoot,
   personalVaultDir,
   uiNotesDir,
   personalMemoryDir,
@@ -443,34 +445,46 @@ async function writeReposManifest(reposDir: string, specs: RepoSpec[]) {
  * Clone a single registered repo if it isn't present yet. Returns whether the
  * repo dir exists afterwards. Used by loop creation and any on-demand path.
  */
-async function ensureRepoCloned(user: string, name: string, sshCommand?: string): Promise<boolean> {
-  const dir = personalRepoDir(user, name)
-  if (existsSyncBase(dir)) return true
+async function ensureRepoMirror(user: string, name: string, sshCommand?: string): Promise<string | null> {
   // The roster lives in the user's OWN knowledge repo (per-user, no fallback).
   const kcfg = await loadKnowledgeConfig(user)
   const spec = kcfg.repos?.find((r) => r.name === name)
-  if (!spec?.git) return false
+  if (!spec?.git) return null
+  const dir = personalRepoCacheDir(user, name)
+  const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
+  // Already mirrored → just fetch (incremental, fast). HEAD presence == bare repo.
+  if (existsSyncBase(join(dir, "HEAD"))) {
+    await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env, timeout: 60_000 }).catch(() => {})
+    return dir
+  }
   try {
-    await mkdir(personalReposDir(user), { recursive: true })
-    const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
-    // Shallow clone (depth 1): fetch ONLY the latest commit's tree + blobs, no
-    // history. That's the smallest possible transfer and the working-tree
-    // checkout is instant (blobs are already local) — so creating a loop on a
-    // huge repo (e.g. vineyard) takes seconds, not minutes. (Blobless clone is
-    // worse here: it defers blobs to the worktree checkout, so every loop pays
-    // a lazy-fetch.) If the AI needs full history it can `git fetch --unshallow`.
+    await mkdir(personalRepoCacheRoot(user), { recursive: true })
+    // Bare mirror (depth 1): smallest transfer, no working tree. Loop workdirs
+    // are `git worktree add`'d off this; their pushes go straight to origin; this
+    // mirror only ever fetches. So the FIRST loop on a repo clones once (seconds
+    // with depth=1) and every later loop is just fetch + worktree (instant).
+    // --depth=1 implies --single-branch, so this mirrors ONLY the default branch
+    // at depth 1 (small + fast: ~tens of MB, not the whole history of every branch).
     try {
-      await execFileP("git", ["clone", "--depth=1", "--", spec.git, dir], { env, timeout: 180_000 })
+      await execFileP("git", ["clone", "--bare", "--depth=1", "--", spec.git, dir], { env, timeout: 180_000 })
     } catch {
-      // Fall back to a full clone if the shallow clone is rejected.
+      // Fall back to a non-shallow bare clone if depth=1 is rejected.
       try { await rm(dir, { recursive: true, force: true }) } catch {}
-      await execFileP("git", ["clone", "--", spec.git, dir], { env, timeout: 300_000 })
+      await execFileP("git", ["clone", "--bare", "--single-branch", "--", spec.git, dir], { env, timeout: 300_000 })
     }
-    console.log(`[loopat] cloned on demand ${spec.git} → ${dir}`)
-    return true
+    // A bare clone sets NO fetch refspec, so `git fetch origin` wouldn't advance
+    // any ref. Pin one for JUST the default branch so future fetches keep
+    // refs/heads/<default> (= the worktree start point) fresh — and stay small.
+    const def = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+      .then((r) => r.stdout.trim()).catch(() => "")
+    if (def) {
+      await execFileP("git", ["-C", dir, "config", "remote.origin.fetch", `+refs/heads/${def}:refs/heads/${def}`]).catch(() => {})
+    }
+    console.log(`[loopat] mirrored ${spec.git} → ${dir}`)
+    return dir
   } catch (e: any) {
-    console.warn(`[loopat] repo clone failed (${spec.git}): ${e?.stderr ?? e?.message ?? e}`)
-    return false
+    console.warn(`[loopat] repo mirror failed (${spec.git}): ${e?.stderr ?? e?.message ?? e}`)
+    return null
   }
 }
 
@@ -2139,22 +2153,21 @@ export async function createLoop(opts: {
 
   // workdir = git worktree add (if repo selected) OR plain mkdir
   if (opts.repo) {
-    // clone + fetch as the user (their vault key), not the host's ssh.
+    // mirror + fetch as the user (their vault key), not the host's ssh.
     const userSsh = sshCommandForUser(opts.createdBy, opts.vault ?? "default")
-    // clone-on-demand: pull the repo down only now that a loop actually needs it
-    if (!(await ensureRepoCloned(opts.createdBy, opts.repo, userSsh))) {
+    // Ensure the host-only bare mirror exists (clone once, fetch otherwise), then
+    // worktree the workdir off it — fast even for huge repos.
+    const repoPath = await ensureRepoMirror(opts.createdBy, opts.repo, userSsh)
+    if (!repoPath) {
       throw new Error(`repo "${opts.repo}" not found / clone failed`)
     }
-    const repoPath = personalRepoDir(opts.createdBy, opts.repo)
     const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
     try {
-      // ① pull (docs/context-flow.md): base the workdir branch on origin/main
-      // (best-effort fetch) so it starts from latest consensus; fall back to
-      // local HEAD when there's no remote / no origin/main.
-      const start = await remoteStartPoint(repoPath, userSsh)
-      const wtArgs = ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
-      if (start) wtArgs.push(start)
-      await execFileP("git", wtArgs)
+      // ① pull (docs/context-flow.md): ensureRepoMirror already fetched, so the
+      // mirror's HEAD (refs/heads/<default>) is the latest consensus. Worktree
+      // the new loop branch off it — fresh, and the worktree's `origin` is the
+      // real remote, so the loop's pushes go straight upstream.
+      await execFileP("git", ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)])
       meta.repo = opts.repo
       meta.branch = branch
     } catch (e: any) {

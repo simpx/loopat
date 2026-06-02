@@ -46,6 +46,13 @@ export const personalKnowledgeDir = (user: string) => join(userContextDir(user),
 export const personalNotesDir = (user: string) => join(userContextDir(user), "notes")
 export const personalReposDir = (user: string) => join(userContextDir(user), "repos")
 export const personalRepoDir = (user: string, name: string) => join(personalReposDir(user), name)
+// Bare mirror cache for a roster repo — host-only (NOT mounted into the sandbox).
+// Cloned once, fetched per new-loop; loop workdirs are `git worktree add`'d off
+// it; pushes from those worktrees go straight to origin. Kept OUT of
+// personalReposDir so the sandbox's context/repos stays a clean clone-on-demand
+// area (just REPOS.md), never a pile of bare repos.
+export const personalRepoCacheRoot = (user: string) => join(userContextDir(user), "repo-cache")
+export const personalRepoCacheDir = (user: string, name: string) => join(personalRepoCacheRoot(user), name)
 // The per-user knowledge repo's .loopat root (holds its config.json = notes +
 // repo roster). Workspace-default equivalent is workspaceLoopatRoot().
 export const personalKnowledgeLoopatRoot = (user: string) => join(personalKnowledgeDir(user), ".loopat")
