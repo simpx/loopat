@@ -884,7 +884,8 @@ export async function importPersonalFromRepo(
     const unlockResult = await unlockWithCryptKey(tmp, userId, cryptKey)
     if (!unlockResult.ok) {
       await rm(tmp, { recursive: true, force: true }).catch(() => {})
-      return { ok: false, error: unlockResult.error }
+      // Wrong/invalid key — keep the "paste the key" field open for a retry.
+      return { ok: false, error: unlockResult.error, needsCryptKey: true }
     }
     return await swapPersonalDir(userId, tmp)
   }
@@ -895,9 +896,13 @@ export async function importPersonalFromRepo(
     await rm(tmp, { recursive: true, force: true }).catch(() => {})
     return {
       ok: false,
+      // needsCryptKey drives the inline "paste the key" field in BOTH flows
+      // (provider wizard + direct import); notClean keeps the direct flow's
+      // Recovery hint working.
+      needsCryptKey: true,
       notClean: true,
       error:
-        "this repo already has git-crypt configured — either point at a fresh empty repo, or paste your existing crypt key under Recovery to import it",
+        "this repo already has git-crypt configured — either point at a fresh empty repo, or paste your existing crypt key to import it",
     }
   }
   if (trackedSecrets.length > 0) {
