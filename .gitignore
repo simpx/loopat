@@ -12,6 +12,8 @@ test-results/
 playwright-report/
 e2e/.auth.json
 e2e/.test-meta.json
+dogfood/.auth.json
+dogfood/.test-meta.json
 server/src/*.js
 server/src/*.js.map
 
