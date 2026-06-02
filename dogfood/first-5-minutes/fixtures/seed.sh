@@ -8,7 +8,7 @@ chown git:git /home/git/.ssh/authorized_keys && chmod 600 /home/git/.ssh/authori
 
 export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@local
 export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@local
-for r in knowledge notes roster1; do
+for r in knowledge notes roster1 roster2; do
   git init --bare -q "/srv/git/$r.git"
   git -C "/srv/git/$r.git" config receive.denyCurrentBranch updateInstead
 done
@@ -20,12 +20,14 @@ printf '{\n  "notes": { "git": "git@loopat-fixture:notes.git" }\n}\n' > "$work/k
 git -C "$work/k" add -A && git -C "$work/k" commit -qm init && git -C "$work/k" push -q origin master
 git clone -q /srv/git/roster1.git "$work/r" && echo hello > "$work/r/README.md"
 git -C "$work/r" add -A && git -C "$work/r" commit -qm init && git -C "$work/r" push -q origin master
+git clone -q /srv/git/roster2.git "$work/r2" && echo hello2 > "$work/r2/README.md"
+git -C "$work/r2" add -A && git -C "$work/r2" commit -qm init && git -C "$work/r2" push -q origin master
 chown -R git:git /srv/git
 # Make the bare repos reachable via a home-relative ssh url too. The clients
 # use `git@host:<name>.git`, which over ssh resolves relative to git's HOME
 # (/home/git), not /srv/git — without these links the clone fails with
 # "does not appear to be a git repository".
-for r in knowledge notes roster1; do
+for r in knowledge notes roster1 roster2; do
   ln -sfn "/srv/git/$r.git" "/home/git/$r.git"
 done
 chown -h git:git /home/git/*.git

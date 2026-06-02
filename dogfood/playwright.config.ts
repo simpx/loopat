@@ -109,7 +109,7 @@ if (isWorker) {
 }
 
 export default defineConfig({
-  testDir: join(import.meta.dirname, "first-5-minutes"),
+  testDir: import.meta.dirname,
   // Real AI + real container — generous timeout, no retries (each run costs
   // money and is non-deterministic).
   timeout: 300_000,
