@@ -1557,10 +1557,11 @@ app.put("/api/personal/default-profiles", requireAuth, async (c) => {
  * (host-installed cache OR local marketplace source).
  */
 app.get("/api/loop-stats", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
   const { computeLoopStats } = await import("./loop-stats")
   const profilesParam = c.req.query("profiles") ?? ""
   const profiles = profilesParam.split(",").map((s) => s.trim()).filter(Boolean)
-  const stats = await computeLoopStats(profiles)
+  const stats = await computeLoopStats(userId, profiles)
   return c.json(stats)
 })
 
