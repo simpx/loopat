@@ -10,7 +10,7 @@
  *
  * Key decisions:
  *   - Base image is `loopat-sandbox:latest`, built locally on first run from
- *     server/templates/sandbox/Containerfile (FROM ubuntu:24.04 + bash +
+ *     server/templates/sandbox/Containerfile (FROM Aliyun AC2 Ubuntu 24.04 + bash +
  *     coreutils + util-linux + procps + less). Keeps the image small + boring
  *     — every "heavy" tool (claude binary, node, mise, host caches) is bound
  *     in from the host at container-create time via --volume. Glibc inside
@@ -536,8 +536,9 @@ export async function probePodman(): Promise<PodmanProbeResult> {
 /**
  * Ensure the loopat-sandbox base image exists in podman's local store. If
  * missing, build it from server/templates/sandbox/Containerfile. The
- * Containerfile is FROM ubuntu:24.04 + apt-installs basic shell tools; the
- * first build pulls ubuntu:24.04 from docker.io (~78MB), subsequent
+ * Containerfile is FROM Aliyun AC2 Ubuntu 24.04 + apt-installs basic shell
+ * tools; the first build pulls the base (~104MB) from the AC2 registry
+ * (anonymous, China-reachable — docker.io is not), subsequent
  * `ensureContainer` calls reuse the cached image.
  *
  * Concurrency: build is idempotent at podman's layer cache, but we still

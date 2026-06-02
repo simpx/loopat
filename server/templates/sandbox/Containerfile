@@ -10,9 +10,9 @@
 # create`'d from this image — or, when the loop has a composed mise.toml,
 # from a per-loop child `loopat-sandbox-<hash>:latest`.
 #
-# Base: ubuntu:24.04 so glibc matches the dev hosts (we use Ubuntu 24.04).
+# Base: Ubuntu 24.04 so glibc matches the dev hosts (we use Ubuntu 24.04).
 # The host's claude binary binds in via --volume and runs against this glibc.
-FROM ubuntu:24.04
+FROM ac2-registry.cn-hangzhou.cr.aliyuncs.com/ac2/base:ubuntu24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
