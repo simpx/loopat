@@ -151,19 +151,23 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
       : timeRange === "7d" ? daysAgo(7)
       : timeRange === "30d" ? daysAgo(30)
       : ""
-    const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number }> = {}
+    const modelMap: Record<string, { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number }> = {}
     for (const [model, dates] of Object.entries(dailyUsage)) {
       for (const [date, u] of Object.entries(dates)) {
         if (cutoff && date < cutoff) continue
-        const entry = modelMap[model] ?? { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0 }
+        const entry = modelMap[model] ?? { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }
         entry.inputTokens += u.inputTokens
         entry.outputTokens += u.outputTokens
         entry.cacheReadInputTokens += u.cacheReadInputTokens ?? 0
+        entry.cacheCreationInputTokens += u.cacheCreationInputTokens ?? 0
         modelMap[model] = entry
       }
     }
     return Object.entries(modelMap)
-      .map(([model, u]) => ({ model, ...u, total: u.inputTokens + u.outputTokens, cacheRate: (u.inputTokens + u.cacheReadInputTokens) > 0 ? Math.round(u.cacheReadInputTokens / (u.inputTokens + u.cacheReadInputTokens) * 100) : 0 }))
+      .map(([model, u]) => {
+        const totalInput = u.inputTokens + u.cacheReadInputTokens + u.cacheCreationInputTokens
+        return { model, ...u, totalInput, total: totalInput + u.outputTokens, cacheRate: totalInput > 0 ? Math.round(u.cacheReadInputTokens / totalInput * 100) : 0 }
+      })
   }, [dailyUsage, timeRange])
 
   const entries = useMemo(() => {
@@ -193,7 +197,7 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
   const grandTotal = entries.reduce((s, e) => s + e.total, 0)
   const maxTotal = Math.max(...entries.map(e => e.total), 1)
   const displayEntries = showAll ? entries : entries.slice(0, LIMIT)
-  const chartData = displayEntries.map(e => ({ label: e.model, input: e.inputTokens, output: e.outputTokens }))
+  const chartData = displayEntries.map(e => ({ label: e.model, input: e.totalInput, output: e.outputTokens }))
 
   return (
     <div>
@@ -205,7 +209,7 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="text-[11px] text-gray-500 mb-1">Prompt</div>
-          <div className="text-xl font-semibold text-blue-600">{formatTokens(entries.reduce((s, e) => s + e.inputTokens, 0))}</div>
+          <div className="text-xl font-semibold text-blue-600">{formatTokens(entries.reduce((s, e) => s + e.totalInput, 0))}</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="text-[11px] text-gray-500 mb-1">Completion</div>
@@ -215,9 +219,9 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
           <div className="text-[11px] text-gray-500 mb-1">Cached Tokens</div>
           <div className="text-xl font-semibold text-purple-600">{formatTokens(entries.reduce((s, e) => s + (e as any).cacheReadInputTokens, 0))}</div>
           <div className="text-[11px] text-purple-400 mt-0.5">{(() => {
-            const totalCache = entries.reduce((s, e) => s + (e as any).cacheReadInputTokens, 0)
-            const totalInput = entries.reduce((s, e) => s + e.inputTokens, 0)
-            return (totalInput + totalCache) > 0 ? `${Math.round(totalCache / (totalInput + totalCache) * 100)}% of potential input` : "—"
+            const totalCache = entries.reduce((s, e) => s + e.cacheReadInputTokens, 0)
+            const totalInputAll = entries.reduce((s, e) => s + e.totalInput, 0)
+            return totalInputAll > 0 ? `${Math.round(totalCache / totalInputAll * 100)}% of input` : "—"
           })()}</div>
         </div>
       </div>
@@ -242,7 +246,7 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/50">
               <SortableTh label="Model" field="model" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-left" />
-              <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Input" field="totalInput" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Cached" field="cacheRate" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
@@ -255,10 +259,10 @@ function ModelsView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRan
                 <td className="px-4 py-2.5">
                   <code className="text-[12px] text-gray-800">{e.model}</code>
                 </td>
-                <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(e.inputTokens)}</td>
+                <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(e.totalInput)}</td>
                 <td className="px-4 py-2.5 text-right text-[12px] text-green-600 tabular-nums">{formatTokens(e.outputTokens)}</td>
                 <td className="px-4 py-2.5 text-right text-[12px] text-gray-900 font-medium tabular-nums">{formatTokens(e.total)}</td>
-                <td className="px-4 py-2.5 text-right text-[12px] text-purple-600 tabular-nums">{formatTokens((e as any).cacheReadInputTokens)} <span className="text-[10px] text-purple-400">({(e as any).cacheRate}%)</span></td>
+                <td className="px-4 py-2.5 text-right text-[12px] text-purple-600 tabular-nums">{formatTokens(e.cacheReadInputTokens)} <span className="text-[10px] text-purple-400">({e.cacheRate}%)</span></td>
                 <td className="px-4 py-2.5 text-right text-[11px] text-gray-400 tabular-nums">
                   {grandTotal > 0 ? ((e.total / grandTotal) * 100).toFixed(1) : 0}%
                 </td>
@@ -308,15 +312,17 @@ function DailyView({ dailyUsage, timeRange }: { dailyUsage: DailyUsage; timeRang
     for (const model of sortedModels) {
       data[model] = {}
       for (const date of filteredDates) {
-        data[model][date] = (dailyUsage[model]?.[date]?.inputTokens ?? 0) + (dailyUsage[model]?.[date]?.outputTokens ?? 0)
+        const u = dailyUsage[model]?.[date]
+        data[model][date] = (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0) + (u?.cacheReadInputTokens ?? 0) + (u?.cacheCreationInputTokens ?? 0)
       }
     }
 
     const chartData = filteredDates.map(date => {
       let input = 0; let output = 0
       for (const m of sortedModels) {
-        input += dailyUsage[m]?.[date]?.inputTokens ?? 0
-        output += dailyUsage[m]?.[date]?.outputTokens ?? 0
+        const u = dailyUsage[m]?.[date]
+        input += (u?.inputTokens ?? 0) + (u?.cacheReadInputTokens ?? 0) + (u?.cacheCreationInputTokens ?? 0)
+        output += u?.outputTokens ?? 0
       }
       return { date, input, output }
     })
@@ -395,8 +401,11 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
       list.sort((a: any, b: any) => {
         let va: any, vb: any
         if (sortField === "total") {
-          va = a.inputTokens + a.outputTokens
-          vb = b.inputTokens + b.outputTokens
+          va = a.inputTokens + a.outputTokens + a.cacheReadInputTokens + (a.cacheCreationInputTokens ?? 0)
+          vb = b.inputTokens + b.outputTokens + b.cacheReadInputTokens + (b.cacheCreationInputTokens ?? 0)
+        } else if (sortField === "totalInput") {
+          va = a.inputTokens + a.cacheReadInputTokens + (a.cacheCreationInputTokens ?? 0)
+          vb = b.inputTokens + b.cacheReadInputTokens + (b.cacheCreationInputTokens ?? 0)
         } else if (sortField === "title" || sortField === "lastActivity") {
           va = a[sortField] ?? ""
           vb = b[sortField] ?? ""
@@ -422,7 +431,7 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
     }
   }
 
-  const grandTotal = filtered.reduce((s, l) => s + l.inputTokens + l.outputTokens, 0)
+  const grandTotal = filtered.reduce((s, l) => s + l.inputTokens + l.outputTokens + l.cacheReadInputTokens + (l.cacheCreationInputTokens ?? 0), 0)
   const navigate = useNavigate()
 
   return (
@@ -441,7 +450,7 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
             <tr className="border-b border-gray-200 bg-gray-50/50">
               <SortableTh label="Loop" field="title" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-left" />
               <th className="hidden sm:table-cell text-left px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Models</th>
-              <SortableTh label="Input" field="inputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
+              <SortableTh label="Input" field="totalInput" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Output" field="outputTokens" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <SortableTh label="Total" field="total" sortField={sortField} sortDir={sortDir} onSort={handleSort} className="text-right" />
               <th className="text-right px-4 py-2.5 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Cached</th>
@@ -450,8 +459,9 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
           </thead>
           <tbody>
             {filtered.map((l) => {
-              const total = l.inputTokens + l.outputTokens
-              const cacheRate = (l.inputTokens + l.cacheReadInputTokens) > 0 ? Math.round(l.cacheReadInputTokens / (l.inputTokens + l.cacheReadInputTokens) * 100) : 0
+              const totalInput = l.inputTokens + l.cacheReadInputTokens + (l.cacheCreationInputTokens ?? 0)
+              const total = totalInput + l.outputTokens
+              const cacheRate = totalInput > 0 ? Math.round(l.cacheReadInputTokens / totalInput * 100) : 0
               return (
                 <tr
                   key={l.loopId}
@@ -464,7 +474,7 @@ function LoopsView({ loopUsage, timeRange }: { loopUsage: LoopTokenUsage[]; time
                   <td className="hidden sm:table-cell px-4 py-2.5">
                     <code className="text-[11px] text-gray-500">{l.model}</code>
                   </td>
-                  <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(l.inputTokens)}</td>
+                  <td className="px-4 py-2.5 text-right text-[12px] text-blue-600 tabular-nums">{formatTokens(totalInput)}</td>
                   <td className="px-4 py-2.5 text-right text-[12px] text-green-600 tabular-nums">{formatTokens(l.outputTokens)}</td>
                   <td className="px-4 py-2.5 text-right text-[12px] text-gray-900 font-medium tabular-nums">{formatTokens(total)}</td>
                   <td className="px-4 py-2.5 text-right text-[12px] text-purple-600 tabular-nums">{formatTokens(l.cacheReadInputTokens)} <span className="text-[10px] text-purple-400">({cacheRate}%)</span></td>
