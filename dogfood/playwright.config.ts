@@ -14,8 +14,8 @@
  * fixture must NOT be started here or the second load collides on the port).
  */
 import { defineConfig } from "@playwright/test";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, readFileSync, renameSync } from "node:fs";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { execSync } from "node:child_process";
@@ -31,17 +31,16 @@ function requirePodman(): void {
   }
 }
 
-// The dev vault we copy the real ssh key + idealab key from. The whole point of
-// dogfood is "already onboarded": we lift the operator's working credentials.
-const DEV_VAULT = join(
-  process.env.HOME ?? "",
-  ".loopat/personal/simpx/.loopat/vaults/default",
-);
-function requireDevVault(): void {
-  const key = join(DEV_VAULT, "mounts/home/.ssh/id_ed25519");
-  const idealab = join(DEV_VAULT, "envs/IDEALAB_API_KEY");
-  if (!existsSync(key)) throw new Error(`[dogfood] dev vault ssh key missing: ${key}`);
-  if (!existsSync(idealab)) throw new Error(`[dogfood] dev vault IDEALAB_API_KEY missing: ${idealab}`);
+// The fixture is fully self-contained: the ssh keypair is generated fresh in
+// setup.ts, never lifted from any real vault (a real key sitting in the repo /
+// on github reads as "leaked credential"). The ONE thing a fixture can't fake
+// is a real provider key for real AI — it comes from the environment, never
+// from disk, never committed. Missing -> fail (a green dogfood run that didn't
+// actually call AI proves nothing).
+function requireIdealabKey(): void {
+  if (!process.env.IDEALAB_API_KEY) {
+    throw new Error("[dogfood] IDEALAB_API_KEY not set — export it before running (real AI needs a real key; we never read it from disk)");
+  }
 }
 
 // ── pick free ports (sshd publish + backend + vite) ──
@@ -67,7 +66,7 @@ function pickPorts(): { testServerPort: number; vitePort: number; sshdPort: numb
 }
 
 requirePodman();
-requireDevVault();
+requireIdealabKey();
 
 // Playwright loads this config in BOTH the main process AND each worker process.
 // Only the main process runs globalSetup/globalTeardown, so only it may pick
@@ -88,7 +87,14 @@ if (isWorker) {
   ({ testServerPort, vitePort, sshdPort, loopatHome } = m);
 } else {
   ({ testServerPort, vitePort, sshdPort } = pickPorts());
-  loopatHome = mkdtempSync(join(tmpdir(), "loopat-dogfood-"));
+  // The basename becomes the server's WORKSPACE, which is baked into podman
+  // image tags (loopat-sandbox-<workspace>-…). podman rejects uppercase in
+  // image names, and mkdtemp's XXXXXX suffix is mixed-case — so mkdtemp into a
+  // lowercase-prefixed dir and lowercase the whole basename.
+  const raw = mkdtempSync(join(tmpdir(), "loopat-dogfood-"));
+  const lower = join(tmpdir(), basename(raw).toLowerCase());
+  if (lower !== raw) renameSync(raw, lower);
+  loopatHome = lower;
   // Fixture (image build + container run) is started in setup.ts, which records
   // the container id back into this meta file. Teardown reads it from there.
   writeFileSync(
@@ -98,7 +104,6 @@ if (isWorker) {
       testServerPort,
       vitePort,
       sshdPort,
-      devVault: DEV_VAULT,
     }),
   );
 }
