@@ -62,13 +62,28 @@ async function globalSetup() {
   console.log(`[dogfood:setup] backend :${testServerPort}  vite :${vitePort}  sshd :${sshdPort}`);
 
   // ── 0. build + run the fixture sshd container ──
+  // The fixture sshd must be reachable from TWO places using the SAME ssh
+  // config (it lives in one vault): the backend, which runs on the HOST, and
+  // the loop's sandbox CONTAINER, which runs on a podman BRIDGE network (its
+  // 127.0.0.1 is its own loopback, not the host's). The one address that works
+  // from both is the host's default-route IP: from the host it's a local
+  // address, and from a bridge container it's exactly what `host.containers
+  // .internal` resolves to. So publish the sshd on 0.0.0.0 (not just loopback)
+  // and point the ssh config's HostName at that IP. (Publishing on 127.0.0.1
+  // only — the old way — works host-side but the sandbox push then fails to
+  // even connect, and with HostName 127.0.0.1 the sandbox would dial its own
+  // loopback.)
+  const hostIp = execSync("ip route get 1.1.1.1")
+    .toString()
+    .match(/src\s+(\d+\.\d+\.\d+\.\d+)/)?.[1];
+  if (!hostIp) throw new Error("[dogfood:setup] could not determine host default-route IP for the fixture sshd");
   console.log(`[dogfood:setup] building ${FIXTURE_IMAGE} from ${FIXTURE_DIR}`);
   execSync(`podman build -t ${FIXTURE_IMAGE} ${FIXTURE_DIR}`, { stdio: "inherit" });
   const fixtureContainer = execFileSync(
     "podman",
-    ["run", "-d", "-p", `127.0.0.1:${sshdPort}:22`, FIXTURE_IMAGE],
+    ["run", "-d", "-p", `0.0.0.0:${sshdPort}:22`, FIXTURE_IMAGE],
   ).toString().trim();
-  console.log(`[dogfood:setup] fixture sshd up: ${fixtureContainer.slice(0, 12)} on 127.0.0.1:${sshdPort}`);
+  console.log(`[dogfood:setup] fixture sshd up: ${fixtureContainer.slice(0, 12)} on ${hostIp}:${sshdPort} (0.0.0.0 published)`);
   // Record the container id immediately so teardown can reap it even if a
   // later setup step throws.
   writeFileSync(META, JSON.stringify({ ...meta, fixtureContainer }));
@@ -78,8 +93,8 @@ async function globalSetup() {
   // (written in step 4); git urls use it so the host:port stays out of the url.
   mkdirSync(loopatHome, { recursive: true });
   const workspaceConfig = {
-    knowledge: { git: "git@loopat-fixture:knowledge.git" },
-    gitHost: { baseUrl: `ssh://git@127.0.0.1:${sshdPort}` },
+    knowledge: { git: `ssh://git@${hostIp}:${sshdPort}/srv/git/knowledge.git` },
+    gitHost: { baseUrl: `ssh://git@${hostIp}:${sshdPort}` },
   };
   writeFileSync(join(loopatHome, "config.json"), JSON.stringify(workspaceConfig, null, 2) + "\n");
 
@@ -152,7 +167,7 @@ async function globalSetup() {
     join(sshDir, "config"),
     [
       "Host loopat-fixture",
-      "    HostName 127.0.0.1",
+      `    HostName ${hostIp}`,
       `    Port ${sshdPort}`,
       "    User git",
       "    IdentityFile ~/.ssh/id_ed25519",
@@ -165,6 +180,25 @@ async function globalSetup() {
       "",
     ].join("\n"),
   );
+  // OpenSSH SILENTLY IGNORES ~/.ssh/config if it is group- or world-writable
+  // (and the dir if it's group/world-writable). writeFileSync/mkdirSync leave
+  // 0664/0775 here, so the loopat-fixture Host alias would never apply inside
+  // the sandbox — ssh would try to resolve the literal hostname "loopat-fixture"
+  // and fail. Lock both down so the alias (HostName/Port/IdentityFile) is read.
+  chmodSync(join(sshDir, "config"), 0o600);
+  chmodSync(sshDir, 0o700);
+
+  // Pre-trust the fixture's host key. Remotes use absolute `ssh://git@<ip>:<port>`
+  // URLs (no Host alias — the mounted ssh config may not take effect inside the
+  // sandbox), so a host-key prompt would hang the non-interactive `git push`.
+  // Seed known_hosts directly from the running fixture so ssh trusts it.
+  try {
+    const scan = execFileSync("ssh-keyscan", ["-p", String(sshdPort), hostIp]).toString();
+    writeFileSync(join(sshDir, "known_hosts"), scan);
+    chmodSync(join(sshDir, "known_hosts"), 0o644);
+  } catch (e) {
+    console.warn(`[dogfood:setup] ssh-keyscan failed (host-key prompt may hang the push): ${e}`);
+  }
 
   // Personal config: idealab provider (apiKey resolved from vault), the roster
   // repo + knowledge pointer at the fixture.
@@ -179,9 +213,9 @@ async function globalSetup() {
         enabled: true,
       },
     },
-    knowledge: { git: "git@loopat-fixture:knowledge.git" },
+    knowledge: { git: `ssh://git@${hostIp}:${sshdPort}/srv/git/knowledge.git` },
     repos: [
-      { name: "roster1", git: "git@loopat-fixture:roster1.git" },
+      { name: "roster1", git: `ssh://git@${hostIp}:${sshdPort}/srv/git/roster1.git` },
     ],
   };
   mkdirSync(personalLoopat, { recursive: true });
