@@ -48,6 +48,21 @@ import { loadExtensionProviders, resolveProviderId } from "./providers" // also 
 
 const execFileP = promisify(execFile)
 
+// Serialize async work by key. A loop's create + attach + close all touch the
+// same per-user context dirs and worktrees nearly simultaneously; without this
+// their git clone / worktree-add race and trip "destination already exists" /
+// "'ui/<user>' is already checked out". Calls with the same key run strictly in
+// sequence (a later caller sees the dir/worktree the earlier one created and
+// takes the idempotent fast-path instead of re-cloning). Keys are bounded (per
+// user, per worktree path), so the map doesn't grow unbounded.
+const _keyedLocks = new Map<string, Promise<unknown>>()
+function runExclusive<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = _keyedLocks.get(key) ?? Promise.resolve()
+  const next = prev.then(fn, fn) // run fn regardless of the previous call's outcome
+  _keyedLocks.set(key, next.then(() => {}, () => {}))
+  return next
+}
+
 export type LoopMeta = {
   id: string
   title: string
@@ -343,7 +358,12 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
  * interactive host-key prompt. Host-side git overrides that config via
  * GIT_SSH_COMMAND (env beats config), so the sandbox path is never used here.
  */
-export async function ensureUserContext(user: string, vault: string = "default"): Promise<string[]> {
+export function ensureUserContext(user: string, vault: string = "default"): Promise<string[]> {
+  // Serialize per (user, vault) so concurrent loop create/attach/close don't
+  // race on the same clone targets (see runExclusive).
+  return runExclusive(`ctx:${user}:${vault}`, () => _ensureUserContext(user, vault))
+}
+async function _ensureUserContext(user: string, vault: string): Promise<string[]> {
   const errors: string[] = []
   const cfg = await loadPersonalConfig(user, vault)
   const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
@@ -1821,7 +1841,14 @@ async function ensureSymlink(link: string, target: string) {
  * a symlink so the path still resolves — those loops can't publish, but
  * read access still works.
  */
-async function ensureContextWorktree(repo: string, path: string, branchName: string) {
+function ensureContextWorktree(repo: string, path: string, branchName: string): Promise<void> {
+  // Serialize per MAIN repo (not per path): `git worktree add` takes a lock on
+  // the main repo, so two concurrent adds from the same repo — even to
+  // different paths — can collide. Same-path races still hit the early-return
+  // idempotency inside (see runExclusive).
+  return runExclusive(`wt:${repo}`, () => _ensureContextWorktree(repo, path, branchName))
+}
+async function _ensureContextWorktree(repo: string, path: string, branchName: string) {
   let stats: Awaited<ReturnType<typeof lstat>> | null = null
   try { stats = await lstat(path) } catch {}
   // Real dir with .git → already a worktree, leave it alone.
@@ -1851,18 +1878,26 @@ async function ensureContextWorktree(repo: string, path: string, branchName: str
   // and fails ("Unable to open key file"). For a git-crypt repo, add WITHOUT
   // checkout, then `git-crypt unlock` the worktree with the host key: that
   // installs the key into the worktree's gitdir AND decrypts the working tree.
-  if (existsSyncBase(join(repo, ".git", "git-crypt"))) {
-    // git-crypt + worktree: a worktree's gitdir has no git-crypt key, so the
-    // checkout's smudge filter crashes ("Unable to open key file") — and
-    // git-crypt doesn't support worktrees anyway (it wants a `.git` dir). We
-    // don't NEED the worktree's vaults decrypted: the sandbox's vault mounts
-    // read the MAIN repo's already-unlocked `personal/.loopat/vaults`. So
-    // neutralize the smudge filter (`smudge=cat`, `required=false`) — the
-    // git-crypt'd files (vaults/**) land encrypted-as-is, everything else
-    // (memory, etc.) checks out plainly.
-    await execFileP("git", ["-C", repo, "-c", "filter.git-crypt.smudge=cat", "-c", "filter.git-crypt.required=false", "worktree", "add", ...tail])
-  } else {
-    await execFileP("git", ["-C", repo, "worktree", "add", ...tail])
+  try {
+    if (existsSyncBase(join(repo, ".git", "git-crypt"))) {
+      // git-crypt + worktree: a worktree's gitdir has no git-crypt key, so the
+      // checkout's smudge filter crashes ("Unable to open key file") — and
+      // git-crypt doesn't support worktrees anyway (it wants a `.git` dir). We
+      // don't NEED the worktree's vaults decrypted: the sandbox's vault mounts
+      // read the MAIN repo's already-unlocked `personal/.loopat/vaults`. So
+      // neutralize the smudge filter (`smudge=cat`, `required=false`) — the
+      // git-crypt'd files (vaults/**) land encrypted-as-is, everything else
+      // (memory, etc.) checks out plainly.
+      await execFileP("git", ["-C", repo, "-c", "filter.git-crypt.smudge=cat", "-c", "filter.git-crypt.required=false", "worktree", "add", ...tail])
+    } else {
+      await execFileP("git", ["-C", repo, "worktree", "add", ...tail])
+    }
+  } catch (e: any) {
+    // Idempotent recovery: if a concurrent builder already produced the
+    // worktree (despite serialization, e.g. across process restarts), accept
+    // it instead of dumping a raw stack trace.
+    if (existsSyncBase(join(path, ".git"))) return
+    throw e
   }
 }
 
