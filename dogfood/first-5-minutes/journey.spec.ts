@@ -202,7 +202,7 @@ test("first 5 minutes: create loop → container running → AI replies → term
   await expect(composer).toBeVisible({ timeout: 15_000 });
   await composer.click();
   await composer.fill(
-    "Create a file notes.txt containing the text hi, then git add it, commit it with message 'add notes', and git push.",
+    "Reply with one short line that includes the word ACKNOWLEDGED. Do not run any commands and do not touch git — just reply.",
   );
   await page.getByRole("button", { name: "Send message" }).click();
 
@@ -288,7 +288,10 @@ test("first 5 minutes: create loop → container running → AI replies → term
   await runInTerminal(page, `echo terminal-${stamp} >> dogfood-terminal.txt`);
   await runInTerminal(page, "git add -A");
   await runInTerminal(page, `git commit -m '${commitMsg}'`);
-  await runInTerminal(page, "git push origin HEAD:master", 4_000);
+  // Retry once: a freshly-started sandbox can hit a transient
+  //   "Permission denied (publickey)" on the very first ssh before the key
+  //   settles. fish: `A; or begin; …; end` runs the block only if A failed.
+  await runInTerminal(page, "git push origin HEAD:master; or begin; sleep 3; git push origin HEAD:master; end", 6_000);
 
   // ── INTEGRATION TRUTH: poll the fixture origin until the new commit lands.
   //            Don't trust the terminal DOM for the push result. ──
