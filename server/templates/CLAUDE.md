@@ -71,6 +71,7 @@ For team memory: when an insight is genuinely team-relevant (a convention everyo
 - **Don't echo sensitive values** (API keys, tokens, SSH key material, anything that looks like a credential) to chat. Reference by filename or env var name instead.
 - **Default to short, direct answers**. Don't announce a plan unless the task is genuinely large.
 - **Read before Edit on long files**; avoid guessing surrounding context.
+- **`origin` is the source of truth — finishing means pushing to origin.** The workdir is an ordinary git worktree with a normal `origin/<default>` tracking ref, so `git rebase origin/<default>`, `git status` ahead/behind, and `git log origin/<default>` all work as usual. A local commit is NOT "done": work is only preserved and shared once it reaches origin — open a PR, or push directly when that's the team's flow. Don't consider a task complete while it lives only in local commits.
 
 ## collaboration
 

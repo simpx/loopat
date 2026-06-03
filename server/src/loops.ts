@@ -453,8 +453,23 @@ async function ensureRepoMirror(user: string, name: string, sshCommand?: string)
   if (!spec?.git) return null
   const dir = personalRepoCacheDir(user, name)
   const env = sshCommand ? { ...process.env, GIT_SSH_COMMAND: sshCommand } : process.env
-  // Already mirrored → just fetch (incremental, fast). HEAD presence == bare repo.
+  // Pin the STANDARD fetch refspec (default branch → refs/remotes/origin/<def>)
+  // so worktrees off this mirror get an ordinary `origin/<def>` tracking ref —
+  // `git rebase origin/<def>`, `git status` ahead/behind, `git log origin/<def>`
+  // all work as in any normal clone. Self-healing: re-assert it on EVERY ensure
+  // (incl. caches pinned by the old non-standard `+…:refs/heads/<def>` refspec),
+  // then fetch so the standard ref materializes.
+  const assertStandardRefspec = async () => {
+    const def = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+      .then((r) => r.stdout.trim()).catch(() => "")
+    if (def) {
+      await execFileP("git", ["-C", dir, "config", "remote.origin.fetch", `+refs/heads/${def}:refs/remotes/origin/${def}`]).catch(() => {})
+    }
+  }
+  // Already mirrored → re-assert the standard refspec, then fetch (incremental,
+  // fast). HEAD presence == bare repo.
   if (existsSyncBase(join(dir, "HEAD"))) {
+    await assertStandardRefspec()
     await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env, timeout: 60_000 }).catch(() => {})
     return dir
   }
@@ -474,13 +489,13 @@ async function ensureRepoMirror(user: string, name: string, sshCommand?: string)
       await execFileP("git", ["clone", "--bare", "--single-branch", "--", spec.git, dir], { env, timeout: 300_000 })
     }
     // A bare clone sets NO fetch refspec, so `git fetch origin` wouldn't advance
-    // any ref. Pin one for JUST the default branch so future fetches keep
-    // refs/heads/<default> (= the worktree start point) fresh — and stay small.
-    const def = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
-      .then((r) => r.stdout.trim()).catch(() => "")
-    if (def) {
-      await execFileP("git", ["-C", dir, "config", "remote.origin.fetch", `+refs/heads/${def}:refs/heads/${def}`]).catch(() => {})
-    }
+    // any ref. Pin the STANDARD one for JUST the default branch
+    // (+refs/heads/<def>:refs/remotes/origin/<def>) so worktrees off this mirror
+    // get an ordinary `origin/<def>` tracking ref — and the mirror stays small.
+    await assertStandardRefspec()
+    // Materialize refs/remotes/origin/<def> now (the clone only wrote
+    // refs/heads/<def>), so the very first worktree already tracks origin.
+    await execFileP("git", ["-C", dir, "fetch", "--quiet", "origin"], { env, timeout: 60_000 }).catch(() => {})
     console.log(`[loopat] mirrored ${spec.git} → ${dir}`)
     return dir
   } catch (e: any) {
@@ -2059,6 +2074,14 @@ async function remoteDefaultBranch(dir: string): Promise<string> {
     const m = stdout.match(/ref:\s+refs\/heads\/(\S+)\s+HEAD/)
     if (m?.[1]) return m[1]
   } catch {}
+  // Bare mirrors don't carry a refs/remotes/origin/HEAD, but their own HEAD
+  // symbolic-ref names the default branch the clone tracked — cheaper than (and
+  // a fallback for) ls-remote, and correct for `ensureRepoMirror`'s mirrors.
+  try {
+    const { stdout } = await execFileP("git", ["-C", dir, "symbolic-ref", "--short", "HEAD"])
+    const b = stdout.trim().replace(/^origin\//, "")
+    if (b) return b
+  } catch {}
   return "main"
 }
 
@@ -2206,10 +2229,17 @@ export async function createLoop(opts: {
     const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
     try {
       // ① pull (docs/context-flow.md): ensureRepoMirror already fetched, so the
-      // mirror's HEAD (refs/heads/<default>) is the latest consensus. Worktree
-      // the new loop branch off it — fresh, and the worktree's `origin` is the
-      // real remote, so the loop's pushes go straight upstream.
-      await execFileP("git", ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)])
+      // mirror's `origin/<default>` tracking ref is the latest consensus. Open
+      // the loop branch off `origin/<default>` (not the bare mirror's HEAD) so
+      // the worktree is an ORDINARY clone: it has a real `origin/<default>`
+      // tracking ref and `git rebase origin/<default>` / `git status`
+      // ahead-behind work with nothing special to learn. Fall back to HEAD only
+      // if origin/<default> can't be resolved (offline / empty remote).
+      const start = await remoteStartPoint(repoPath, userSsh)
+      const addArgs = start
+        ? ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id), start]
+        : ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
+      await execFileP("git", addArgs)
       meta.repo = opts.repo
       meta.branch = branch
     } catch (e: any) {

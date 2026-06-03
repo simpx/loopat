@@ -316,18 +316,34 @@ test("concurrent push: loop's stale push is rejected non-ff, then fetch+rebase+r
   }
   console.log(`[dogfood] PROVEN rejected: origin tip still ${Y_MSG}, Z absent — first push was non-ff rejected`);
 
-  // ── Step 5: resolve the standard way — pull --rebase onto origin's master,
-  //            then push again. After the rebase, the loop's Z sits on top of Y,
-  //            so the push is now a fast-forward and succeeds.
-  //            We use `git pull --rebase origin master` (fetch master + rebase
-  //            onto FETCH_HEAD) rather than `git rebase origin/master`: the loop
-  //            workdir is a worktree off a bare mirror whose fetch refspec maps
-  //            origin's master into the LOCAL `refs/heads/master` (not a
-  //            `refs/remotes/origin/master` tracking ref), so the explicit
-  //            `origin master` pull-rebase is the layout-independent, canonical
-  //            "resolve a non-ff" move. ──
-  await runInTerminal(page, "git pull --rebase origin master", 6_000);
+  // ── Step 5: resolve the ORDINARY git way — fetch, then rebase onto the
+  //            `origin/master` remote-tracking ref, then push again. After the
+  //            rebase the loop's Z sits on top of Y, so the push is a
+  //            fast-forward and succeeds.
+  //            The loop workdir is a NORMAL git worktree: its bare mirror pins
+  //            the standard refspec (+refs/heads/master:refs/remotes/origin/master),
+  //            so `git rebase origin/master` resolves a `refs/remotes/origin/master`
+  //            tracking ref exactly like any plain clone — no `pull --rebase
+  //            origin master` workaround needed. (Asserted below by State.) ──
+  await runInTerminal(page, "git fetch origin", 6_000);
+  await runInTerminal(page, "git rebase origin/master", 6_000);
   await runInTerminal(page, "git push origin HEAD:master", 6_000);
+
+  // ── ORDINARY-GIT ASSERTION: the sandbox workdir is a normal worktree — it has
+  //    a real `refs/remotes/origin/master` tracking ref (the whole point of the
+  //    standard refspec). `rev-parse --verify` succeeds inside the sandbox. ──
+  const wdEarly = `/loopat/loop/${loopId}/workdir`;
+  const originRefProbe = sandboxExec(
+    loopId,
+    `git -C ${wdEarly} rev-parse --verify refs/remotes/origin/master && echo ORIGIN_REF_OK`,
+  );
+  console.log(`[dogfood] sandbox origin/master probe:\n${originRefProbe}`);
+  expect(
+    originRefProbe,
+    "sandbox workdir must carry an ordinary refs/remotes/origin/master tracking ref",
+  ).toContain("ORIGIN_REF_OK");
+  const statusSb = sandboxExec(loopId, `git -C ${wdEarly} status -sb | head -1`);
+  console.log(`[dogfood] sandbox status -sb: ${statusSb}`);
 
   // DIAGNOSTIC: dump the loop workdir's local git state from the sandbox (truth,
   // not the flaky xterm) so a resolution failure is debuggable.
