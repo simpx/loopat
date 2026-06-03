@@ -20,6 +20,7 @@ import {
   listLoops,
   loopExists,
   patchLoopMeta,
+  userOnboarding,
   type LoopMeta,
 } from "./loops"
 import { getSession, type LoopSessionMessageListener } from "./session"
@@ -358,6 +359,13 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
 
   v1.post("/loops", requireApiAuth, async (c) => {
     const userId = c.get("userId") as string
+    // Onboarding gate: when the active provider requires onboarding, block loop
+    // creation until it's complete — same gate as the legacy POST /api/loops.
+    // (Without this, the UI's v1 create path bypasses the onboarding gate.)
+    const ob = await userOnboarding(userId)
+    if (ob.gated && !ob.done) {
+      return apiError(c, 403, "permission_error", "onboarding_incomplete", "onboarding incomplete")
+    }
     const body = await c.req.json().catch(() => ({}))
     const title = typeof body.title === "string" ? body.title.trim() : ""
     if (title.length > 200) return apiError(c, 400, "invalid_request_error", "title_too_long", "title exceeds 200 chars")
