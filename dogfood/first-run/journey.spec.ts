@@ -22,8 +22,18 @@
  *   8. re-check → onboarding done; enter context → background clone → see the
  *      knowledge repo content.
  *   9. create a loop → sandbox container reaches RUNNING.
- *  10. chat → a real AI reply (spends one idealab turn).
- *  11. terminal → `git status` works in the loop workdir.
+ *  10. AI COMPLETES: one chat turn tells the AI to create AI_DONE.txt, commit
+ *      it ('ai done'), and push to origin. INTEGRATION TRUTH: the fixture
+ *      roster1.git origin log shows the 'ai done' commit (spends one idealab
+ *      turn).
+ *  11. HUMAN COMPLETES: THEN in the real UI terminal (xterm, fish) the user
+ *      makes a separate change, commits, and `git push`es to origin.
+ *      INTEGRATION TRUTH: the fixture origin log also shows the human commit.
+ *
+ * Doctrine: origin is the source of truth → "done" means PUSHED to origin. The
+ * two completions run in SEQUENCE on the same workdir — the AI turn fully
+ * finishes before the human acts — so there is no push race; both land in the
+ * fixture roster1.git origin, proving both "AI done" and "human done" are real.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
@@ -93,6 +103,20 @@ function sandboxContainer(loopId: string): string {
 
 function sandboxExec(loopId: string, cmd: string): string {
   return execFileSync("podman", ["exec", sandboxContainer(loopId), "sh", "-lc", cmd]).toString();
+}
+
+/** `git log --all --oneline` of the fixture's bare roster1.git — the origin's
+ *  TRUTH. `--all` so a commit pushed to ANY ref (HEAD:master or otherwise)
+ *  shows up. The bare repo is owned by the `git` user and podman exec defaults
+ *  to root, so `-c safe.directory=*` waives git's "dubious ownership" refusal
+ *  (read-only log). */
+function fixtureRosterLog(container: string): string {
+  return execFileSync("podman", [
+    "exec", container,
+    "git", "-c", "safe.directory=*",
+    "-C", "/srv/git/roster1.git",
+    "log", "--all", "--oneline",
+  ]).toString().trim();
 }
 
 function cleanupLoopContainer(loopId: string): void {
@@ -351,13 +375,24 @@ test("first-run: empty install → register → onboard (personal repo + git-cry
   const preparing = page.getByText("Preparing this loop’s sandbox…");
   await expect(preparing).toBeHidden({ timeout: 300_000 });
 
-  // ════ Step 10: chat → a real AI reply. ════
+  // ════ Step 10: AI COMPLETES — one chat turn does a small, DETERMINISTIC task
+  //      AND pushes it to origin. "Done" = pushed to origin (doctrine). The task
+  //      wording is non-deterministic but the COMMIT SUBJECT is fixed ('ai done'),
+  //      so we assert integration truth on the subject, not on AI prose. ════
+  const beforeAiLog = fixtureRosterLog(fixtureContainer);
+  console.log(`[first-run] fixture roster1.git log BEFORE AI turn:\n${beforeAiLog}`);
+
   const composer = page.getByRole("textbox", { name: "Message input" });
   await expect(composer).toBeVisible({ timeout: 20_000 });
   await composer.click();
-  await composer.fill("Reply with exactly the single word: READY");
+  await composer.fill(
+    "In the current working directory, create a file named AI_DONE.txt containing exactly the word DONE. " +
+    "Then stage it, commit with the exact message 'ai done', and push it to origin with: git push origin HEAD:master . " +
+    "Report when the push succeeds.",
+  );
   await page.getByRole("button", { name: "Send message" }).click();
 
+  // Wait for the AI turn to finish: a non-empty assistant reply, no error event.
   const assistantMessages = page.locator('[data-role="assistant"]');
   await expect.poll(async () => {
     const n = await assistantMessages.count();
@@ -366,31 +401,38 @@ test("first-run: empty install → register → onboard (personal repo + git-cry
       if (t.length > 0) return t;
     }
     return "";
-  }, { message: "expected a non-empty assistant reply from the real AI", timeout: 180_000, intervals: [2000, 3000, 5000] }).not.toBe("");
+  }, { message: "expected a non-empty assistant reply from the real AI", timeout: 240_000, intervals: [2000, 3000, 5000] }).not.toBe("");
   const allText = (await assistantMessages.allInnerTexts()).join("\n");
   expect(allText, "no error event should appear in the chat").not.toContain("⚠️");
-  console.log(`[first-run] AI replied: ${(await assistantMessages.last().innerText()).trim().slice(0, 120)}`);
+  console.log(`[first-run] AI replied: ${(await assistantMessages.last().innerText()).trim().slice(0, 160)}`);
 
-  // ════ Step 11: the USER types `git status` in the REAL UI terminal (xterm).
-  //      The terminal panel is already open (step 9). Focus the xterm and TYPE
-  //      the command through the browser — this is the whole point: the command
-  //      goes through the real terminal UI, not `podman exec`.
-  //
-  //      xterm output is flaky to read (WebGL renderer ⇒ unreliable innerText),
-  //      so we SOFT-check the xterm buffer if it's readable, and keep a HARD
-  //      integration-truth backstop: the loop workdir IS a real git repo. ════
+  // INTEGRATION TRUTH: the AI's 'ai done' commit reached the fixture origin.
+  // The AI turn is slow + the push lands a moment after the reply renders, so
+  // poll the origin log with a generous budget.
+  await expect.poll(() => fixtureRosterLog(fixtureContainer), {
+    message: "expected the AI's 'ai done' commit to reach fixture roster1.git origin",
+    timeout: 120_000, intervals: [2000, 3000, 5000],
+  }).toContain("ai done");
+  console.log("[first-run] integration-truth: AI commit 'ai done' reached origin (AI is DONE)");
+
+  // ════ Step 11: HUMAN COMPLETES — THEN, in the REAL UI terminal (xterm, fish),
+  //      the user makes a SEPARATE change, commits, and pushes to origin. The AI
+  //      turn above has fully finished, so the human acts on the same workdir
+  //      with no push race. ORDINARY git now works (the worktree has a real
+  //      origin tracking ref), and we push the loop branch to origin's default
+  //      branch (HEAD:master) like any contributor. INTEGRATION TRUTH: the
+  //      fixture origin log also carries the human commit. ════
   const xterm = page.locator(".xterm-helper-textarea");
   await expect(xterm).toBeVisible({ timeout: 20_000 });
   await xterm.click();
 
-  // The sandbox shell is fish — `; and` / `; or`, no `2>&1`. Emit a sentinel that
-  // survives the flaky read: OK only if `git status` succeeded in the workdir.
+  // Soft-check that the workdir git works (sentinel survives the flaky xterm
+  // read); the HARD proof is the push reaching origin below — `git push` cannot
+  // succeed from a non-repo. The sandbox shell is fish: `; and` / `; or`.
   await runInTerminal(
     page,
     "git status > /dev/null 2>/dev/null; and echo FIRSTRUN_GIT_OK; or echo FIRSTRUN_GIT_FATAL",
   );
-
-  // Best-effort read of the rendered buffer. If readable, it MUST show OK.
   await expect(page.locator(".xterm-screen")).toBeVisible();
   let termText = "";
   for (let i = 0; i < 10; i++) {
@@ -404,17 +446,35 @@ test("first-run: empty install → register → onboard (personal repo + git-cry
     expect(termText).toContain("FIRSTRUN_GIT_OK");
     console.log("[first-run] terminal git status: FIRSTRUN_GIT_OK (read from xterm)");
   } else {
-    console.log("[first-run] xterm buffer unreadable (flaky) — relying on integration-truth workdir-is-a-git-repo as proof");
+    console.log("[first-run] xterm buffer unreadable (flaky) — relying on push-to-origin as proof of a working workdir git");
   }
 
-  // HARD integration-truth backstop: the loop workdir really is a git repo (so
-  // the `git status` the user typed had something real to run against). We check
-  // this host-side because the xterm DOM can't be trusted; the POINT, proven
-  // above, is the command went through the real terminal UI.
-  const gitStatus = sandboxExec(loopId, `git -C /loopat/loop/${loopId}/workdir status`).trim();
-  expect(gitStatus, "the loop workdir must be a real git repo (UI-terminal git status backstop)")
-    .toMatch(/On branch|HEAD detached|nothing to commit|Changes/);
-  console.log(`[first-run] integration-truth: workdir is a git repo:\n${gitStatus.split("\n").slice(0, 3).join("\n")}`);
+  // The human makes a separate change, commits, and pushes — through the real
+  // terminal UI. The deterministic commit subject is our integration-truth probe.
+  const stamp = Date.now();
+  const humanMsg = `human done ${stamp}`;
+  await runInTerminal(page, "git config user.email human@local");
+  await runInTerminal(page, "git config user.name human");
+  await runInTerminal(page, `echo human-${stamp} >> HUMAN_DONE.txt`);
+  await runInTerminal(page, "git add -A");
+  await runInTerminal(page, `git commit -m '${humanMsg}'`);
+  // ORDINARY git: the worktree tracks origin/<default>, so we push the loop
+  // branch to origin's default branch like any contributor would.
+  await runInTerminal(page, "git push origin HEAD:master", 6_000);
 
-  console.log("[first-run] PROVEN: full cold-start journey green");
+  // INTEGRATION TRUTH: the human commit reached the fixture origin. Don't trust
+  // the xterm DOM for the push result — poll the origin log.
+  await expect.poll(() => fixtureRosterLog(fixtureContainer), {
+    message: `expected the human commit "${humanMsg}" to reach fixture roster1.git origin`,
+    timeout: 60_000, intervals: [1000, 2000, 3000],
+  }).toContain(humanMsg);
+  console.log(`[first-run] integration-truth: human commit "${humanMsg}" reached origin (human is DONE)`);
+
+  // Final proof: BOTH completions are in the origin log together.
+  const afterLog = fixtureRosterLog(fixtureContainer);
+  console.log(`[first-run] fixture roster1.git log AFTER both pushes:\n${afterLog}`);
+  expect(afterLog, "origin must carry the AI commit").toContain("ai done");
+  expect(afterLog, "origin must carry the human commit").toContain(humanMsg);
+
+  console.log("[first-run] PROVEN: full cold-start journey green — AI-push + human-push both reached origin");
 });

@@ -39,6 +39,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "dogfood": "playwright test --config dogfood/playwright.config.ts",
+    "dogfood:smoke": "playwright test --config dogfood/playwright.config.ts dogfood/first-5-minutes",
+    "dogfood:journey": "playwright test --config dogfood/first-run/playwright.config.ts",
     "dogfood:first-run": "playwright test --config dogfood/first-run/playwright.config.ts"
   },
   "dependencies": {
