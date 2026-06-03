@@ -1,8 +1,21 @@
 #!/bin/sh
 # Run inside the fixture container after start: install the loop's public key,
-# create bare repos, seed knowledge with .loopat/config.json. arg1 = pubkey.
+# create bare repos, seed knowledge with .loopat/config.json.
+#   arg1 = loop pubkey (may be empty on a first-run seed).
+#   arg2 = absolute ssh base for the notes pointer, e.g.
+#          `ssh://git@<hostIp>:<sshdPort>`. The notes pointer lives in the
+#          knowledge repo's .loopat/config.json and is consumed by BOTH
+#          first-5-minutes and first-run; an env-specific Host alias resolves in
+#          only one vault config, so we write the env-agnostic ABSOLUTE url here.
+#          The host-side caller knows the published port; this script (running
+#          inside the container) does not, so it must be passed in.
 set -e
 PUBKEY="$1"
+NOTES_SSH_BASE="$2"
+if [ -z "$NOTES_SSH_BASE" ]; then
+  echo "seed.sh: missing arg2 (absolute ssh base for the notes pointer)" >&2
+  exit 1
+fi
 echo "$PUBKEY" > /home/git/.ssh/authorized_keys
 chown git:git /home/git/.ssh/authorized_keys && chmod 600 /home/git/.ssh/authorized_keys
 
@@ -16,7 +29,7 @@ done
 work=$(mktemp -d)
 git clone -q /srv/git/knowledge.git "$work/k"
 mkdir -p "$work/k/.loopat"
-printf '{\n  "notes": { "git": "git@loopat-fixture:notes.git" }\n}\n' > "$work/k/.loopat/config.json"
+printf '{\n  "notes": { "git": "%s/srv/git/notes.git" }\n}\n' "$NOTES_SSH_BASE" > "$work/k/.loopat/config.json"
 git -C "$work/k" add -A && git -C "$work/k" commit -qm init && git -C "$work/k" push -q origin master
 # notes needs at least one commit so `git ls-remote --exit-code HEAD` succeeds
 # (an empty bare repo has no HEAD — the onboarding ssh-access probe checks HEAD).

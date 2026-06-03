@@ -227,9 +227,13 @@ async function globalSetup() {
 
   // ── 5. seed the fixture with the vault pubkey + bare repos ──
   const pubkey = readFileSync(join(sshDir, "id_ed25519.pub"), "utf8").trim();
+  // Pass the absolute ssh base so seed.sh writes the notes pointer as an
+  // env-agnostic `ssh://git@<ip>:<port>/srv/git/notes.git` (no Host alias —
+  // resolves identically in first-5-minutes and first-run).
+  const notesSshBase = `ssh://git@${hostIp}:${sshdPort}`;
   const seedOut = execFileSync(
     "podman",
-    ["exec", fixtureContainer, "/seed.sh", pubkey],
+    ["exec", fixtureContainer, "/seed.sh", pubkey, notesSshBase],
   ).toString().trim();
   console.log(`[dogfood:setup] fixture seed: ${seedOut}`);
 

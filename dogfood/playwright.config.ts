@@ -110,6 +110,11 @@ if (isWorker) {
 
 export default defineConfig({
   testDir: import.meta.dirname,
+  // first-run/ is its OWN suite with its own globalSetup (empty LOOPAT_HOME +
+  // fixture provider). The preset suite boots an ALREADY-ONBOARDED stack, so
+  // running first-run under it would fail (no fixture provider env). Run it via
+  // `bun run dogfood:first-run` instead.
+  testIgnore: "**/first-run/**",
   // Real AI + real container — generous timeout, no retries (each run costs
   // money and is non-deterministic).
   timeout: 300_000,

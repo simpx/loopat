@@ -77,7 +77,12 @@ async function globalSetup() {
   // ── 1. seed the fixture repos with an EMPTY authorized_keys ──
   // No key reaches the fixture yet. registerDeployKey (personal repo) and the
   // step-7 vault-pubkey seed (team repos) populate it through the real flow.
-  const seedOut = execFileSync("podman", ["exec", fixtureContainer, "/seed.sh", ""]).toString().trim();
+  // arg1 (pubkey) is empty — no key reaches the fixture yet. arg2 is the
+  // absolute ssh base for the notes pointer seed.sh writes into the knowledge
+  // repo's config.json, so notes resolves env-agnostically (no Host alias,
+  // which this vault's seedDefaults ssh config does not define).
+  const notesSshBase = `ssh://git@${hostIp}:${sshdPort}`;
+  const seedOut = execFileSync("podman", ["exec", fixtureContainer, "/seed.sh", "", notesSshBase]).toString().trim();
   console.log(`[first-run:setup] fixture seed (empty authorized_keys): ${seedOut}`);
 
   // ── 2. minimal workspace config + install the fixture provider ──

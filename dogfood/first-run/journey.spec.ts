@@ -316,12 +316,28 @@ test("first-run: empty install → register → onboard (personal repo + git-cry
   // INTEGRATION TRUTH (step 8 payoff): loop creation ran ensureUserContext, which
   // cloned the knowledge repo with the now-authorized vault key. Assert it landed
   // on disk — proof the ssh-pubkey seed actually granted team-repo access.
-  const knowledgeDir = join(loopatHome, "context", "users", testUserId(loopatHome), "knowledge");
+  const userCtxDir = join(loopatHome, "context", "users", testUserId(loopatHome));
+  const knowledgeDir = join(userCtxDir, "knowledge");
   await expect.poll(() => existsSync(join(knowledgeDir, ".git")), {
     message: "knowledge repo must clone (vault key authorized) and land on disk after loop create",
     timeout: 60_000, intervals: [1000, 2000, 3000],
   }).toBeTruthy();
   console.log("[first-run] integration-truth: knowledge repo cloned on disk (vault key authorized)");
+
+  // INTEGRATION TRUTH: notes must clone too. ensureUserContext reads the notes
+  // pointer from the knowledge repo's .loopat/config.json (now an env-agnostic
+  // absolute ssh url — see seed.sh) and clones it with the same vault key. Until
+  // the url-scheme fix, the notes pointer was a Host alias this vault's ssh
+  // config never defined, so the notes clone silently failed; now it must land
+  // on disk AND carry the seeded content (README.md from seed.sh's initial
+  // commit) — proof notes is as real as knowledge.
+  const notesDir = join(userCtxDir, "notes");
+  await expect.poll(() => existsSync(join(notesDir, ".git")), {
+    message: "notes repo must clone (env-agnostic absolute ssh url, vault key authorized) and land on disk",
+    timeout: 60_000, intervals: [1000, 2000, 3000],
+  }).toBeTruthy();
+  expect(existsSync(join(notesDir, "README.md")), "the notes working tree must carry the seeded README.md").toBeTruthy();
+  console.log("[first-run] integration-truth: notes repo cloned on disk with seeded content (README.md)");
 
   // Open terminal → ensureContainer → poll until RUNNING.
   await page.getByRole("button", { name: /terminal/ }).first().click();
