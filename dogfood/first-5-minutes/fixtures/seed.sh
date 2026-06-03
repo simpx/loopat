@@ -18,6 +18,10 @@ git clone -q /srv/git/knowledge.git "$work/k"
 mkdir -p "$work/k/.loopat"
 printf '{\n  "notes": { "git": "git@loopat-fixture:notes.git" }\n}\n' > "$work/k/.loopat/config.json"
 git -C "$work/k" add -A && git -C "$work/k" commit -qm init && git -C "$work/k" push -q origin master
+# notes needs at least one commit so `git ls-remote --exit-code HEAD` succeeds
+# (an empty bare repo has no HEAD — the onboarding ssh-access probe checks HEAD).
+git clone -q /srv/git/notes.git "$work/n" && echo "# notes" > "$work/n/README.md"
+git -C "$work/n" add -A && git -C "$work/n" commit -qm init && git -C "$work/n" push -q origin master
 git clone -q /srv/git/roster1.git "$work/r" && echo hello > "$work/r/README.md"
 git -C "$work/r" add -A && git -C "$work/r" commit -qm init && git -C "$work/r" push -q origin master
 git clone -q /srv/git/roster2.git "$work/r2" && echo hello2 > "$work/r2/README.md"
