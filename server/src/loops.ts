@@ -312,7 +312,13 @@ async function ensureContextRepo(dir: string, name: string, url?: string): Promi
       console.log(`[loopat] cloned ${url} → ${dir}`)
       return
     } catch (e: any) {
-      console.warn(`[loopat] clone failed (${url}): ${e?.stderr ?? e?.message ?? e} — falling back to local origin`)
+      // The WORKSPACE-DEFAULT context clone uses the host's bare ssh — it has
+      // no per-user vault key, so a private ssh:// URL here is EXPECTED to fail
+      // `Permission denied (publickey)`. This is a bootstrap display mirror only
+      // (loops use the per-user path with the vault key, see ensureUserContext),
+      // so we fall back to a local origin. Log at info, and DON'T echo the raw
+      // "Permission denied (publickey)" — it gets mistaken for a loop-auth bug.
+      console.log(`[loopat] workspace-default ${name} not cloned over ssh (no host credential for ${url}) — using local origin (loops use the per-user vault key, unaffected)`)
     }
   }
   // Local backend: loopat-hosted bare origin.

@@ -288,10 +288,13 @@ test("first 5 minutes: create loop → container running → AI replies → term
   await runInTerminal(page, `echo terminal-${stamp} >> dogfood-terminal.txt`);
   await runInTerminal(page, "git add -A");
   await runInTerminal(page, `git commit -m '${commitMsg}'`);
-  // Retry once: a freshly-started sandbox can hit a transient
-  //   "Permission denied (publickey)" on the very first ssh before the key
-  //   settles. fish: `A; or begin; …; end` runs the block only if A failed.
-  await runInTerminal(page, "git push origin HEAD:master; or begin; sleep 3; git push origin HEAD:master; end", 6_000);
+  // No retry mask: the loop's vault key is bind-mounted into $HOME/.ssh at
+  // container-create time with deterministic 0600/0700 perms (podman.ts
+  // ensureSandboxSshPerms), so the FIRST ssh from the sandbox authenticates
+  // reliably. (The old retry guarded a flake that, root-caused, was the
+  // workspace-default boot clone's host-ssh "Permission denied (publickey)"
+  // log noise + a since-removed AI/terminal git race — not the loop push.)
+  await runInTerminal(page, "git push origin HEAD:master", 6_000);
 
   // ── INTEGRATION TRUTH: poll the fixture origin until the new commit lands.
   //            Don't trust the terminal DOM for the push result. ──

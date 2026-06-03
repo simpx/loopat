@@ -35,8 +35,8 @@
  */
 import { execFile, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { existsSync, readdirSync, statSync } from "node:fs"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { promisify } from "node:util"
@@ -57,6 +57,7 @@ import {
   loopHomeUpper,
   workspaceHomeSkelDir,
   loopDir,
+  personalVaultMountsHomeDir,
 } from "./paths"
 import { loadConfig } from "./config"
 import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
@@ -1148,6 +1149,45 @@ const SERVE_HOST = process.env.LOOPAT_SERVE_HOST ?? "127.0.0.1"
 const SERVE_PORT = Number(process.env.LOOPAT_SERVE_PORT ?? 7788)
 
 /**
+ * Lock down the vault `.ssh` perms RIGHT BEFORE the container that bind-mounts
+ * it starts. The vault's `.ssh` is git-crypt-decrypted / git-checked-out, so its
+ * private key lands at the umask default (0664) and the dir at 0775 — and git
+ * can't carry 0600 (it only tracks the exec bit). loops.ts chmods the key 0600
+ * "at point of use" host-side, but that only runs when a HOST git op goes through
+ * sshCommandForUser; a container that's created/recreated on a path that didn't
+ * (server restart → first attach, config/image-drift recreate) would bind-mount
+ * a stale-perms key. ssh then ignores the key (or rejects it under StrictModes)
+ * and the FIRST sandbox ssh fails `Permission denied (publickey)`; a later op
+ * that re-chmods host-side makes the retry succeed — exactly the intermittent
+ * we saw. Do it here, in the one chokepoint every container start passes
+ * through, so the perms are correct the instant the bind goes live. Cheap +
+ * idempotent; best-effort (a missing vault is fine — the mount just won't exist).
+ */
+export async function ensureSandboxSshPerms(user: string, vault: string): Promise<void> {
+  const sshDir = join(personalVaultMountsHomeDir(user, vault), ".ssh")
+  if (!existsSync(sshDir)) return
+  try {
+    await chmod(sshDir, 0o700).catch(() => {})
+    for (const name of readdirSync(sshDir)) {
+      const p = join(sshDir, name)
+      try {
+        if (!statSync(p).isFile()) continue
+      } catch { continue }
+      // Private keys MUST be 0600 (id_*, *_rsa/_ed25519/_ecdsa with no .pub) and
+      // `config` MUST NOT be group/world-writable or ssh silently ignores it.
+      // .pub / known_hosts are fine readable; clamp them to 0644 to be safe.
+      const isPub = name.endsWith(".pub")
+      const isPrivKey = !isPub && /^id_|_rsa$|_ed25519$|_ecdsa$|_dsa$|^identity$/.test(name)
+      if (name === "config" || isPrivKey) {
+        await chmod(p, 0o600).catch(() => {})
+      } else {
+        await chmod(p, 0o644).catch(() => {})
+      }
+    }
+  } catch {}
+}
+
+/**
  * Idempotent: bring the container to "running with current config".
  *   - missing       → podman create + start
  *   - stopped, hash matches → start
@@ -1157,6 +1197,10 @@ const SERVE_PORT = Number(process.env.LOOPAT_SERVE_PORT ?? 7788)
  */
 export async function ensureContainer(opts: ContainerOptions, progress?: { onProgress?: (msg: string) => void }): Promise<void> {
   await ensureLoopatNetwork()
+  // Deterministically fix the vault ssh-key perms BEFORE the container that
+  // bind-mounts them starts, so the first in-sandbox ssh authenticates reliably
+  // regardless of how/when the key was git-checked-out (see ensureSandboxSshPerms).
+  await ensureSandboxSshPerms(opts.createdBy, opts.vaultName?.trim() || DEFAULT_VAULT)
   // Resolve the image first — for loops with a composed mise.toml this
   // builds (or reuses) a per-loop child image with toolchains baked in.
   // For loops without mise.toml, this returns the base SANDBOX_IMAGE.
