@@ -76,10 +76,14 @@ test("S2 same kn shared, personal isolated: A distills knowledge -> B sees; pers
   execFileSync("podman", ["exec", ctn(), "sh", "-c",
     `set -e; export HOME=/root GIT_AUTHOR_NAME=fx GIT_AUTHOR_EMAIL=f@l GIT_COMMITTER_NAME=fx GIT_COMMITTER_EMAIL=f@l; git config --global --add safe.directory '*'; d=$(mktemp -d); git clone -q /srv/git/knowledge.git $d/k; echo kn-${stamp} > $d/k/s2-kn.md; git -C $d/k add -A; git -C $d/k commit -qm 'kn ${stamp}'; git -C $d/k push -q origin master`]);
   expect(fixtureKnowledgeLog()).not.toBe(beforeK);
+  // Shared kn pointer = same origin (both configs point here); kn advanced above.
+  // B SEEING kn through the product needs a loop (kn has no UI pull endpoint —
+  // read-only-to-others, cloned only into a sandbox) — that path is S3-shaped and
+  // deferred; here we assert only what the UI exposes: personal isolation.
   // B's notes worktree must NOT contain A's personal note (separate server).
   await refreshNotes(bApi);
   expect(await readNote(bApi, `s2-personal-A-${stamp}.md`)).toBeNull();
-  console.log("[sync] S2 GREEN: shared kn advanced, personal note isolated to A");
+  console.log("[sync] S2 GREEN: shared kn advanced + personal note isolated to A");
 });
 
 test("S4 concurrent different files: A and B push different notes -> both land", async () => {
