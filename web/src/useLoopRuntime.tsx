@@ -426,6 +426,9 @@ export interface LoopRuntimeExtra {
   setGoal: (goal: string | null) => void
   /** Mark the current goal as completed. */
   completeGoal: () => void
+  /** Re-send the most recent user message verbatim. Used by the retry
+   *  button on the last completed assistant message. */
+  retryLastUser: () => void
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -474,6 +477,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   goalStatus: null,
   setGoal: () => {},
   completeGoal: () => {},
+  retryLastUser: () => {},
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -876,9 +880,40 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     return total
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
+  const retryLastUser = useCallback(() => {
+    // Walk backwards to the most recent user message and re-post its text.
+    // The original send had any pendingFileContext already baked into the
+    // stored content, so re-sending verbatim matches the first attempt.
+    for (let i = aggregated.length - 1; i >= 0; i--) {
+      const m = aggregated[i]
+      if (m.role !== "user") continue
+      const text = (m.content ?? [])
+        .filter((p: any) => p?.type === "text")
+        .map((p: any) => p.text ?? "")
+        .join("")
+        .trim()
+      if (!text) return
+      setRunning(true)
+      displayOutputCharsRef.current = 0
+      streamingOutputRef.current = 0
+      waitingForResponseRef.current = true
+      setTurnGeneration((v) => v + 1)
+      const now = Date.now()
+      setTurnStartedAt(now)
+      try { sessionStorage.setItem(TURN_START_KEY, String(now)) } catch {}
+      fetch(`/api/v1/loops/loop_${loopId}/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ content: text, permission_mode: permissionModeRef.current }),
+      }).catch(() => {})
+      return
+    }
+  }, [aggregated, loopId, TURN_START_KEY])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser],
   )
 
   useEffect(() => {
