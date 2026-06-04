@@ -8,11 +8,24 @@ import { cn } from "@/lib/utils";
 import { sanitizeSvg } from "@/lib/sanitizeSvg";
 import { useDebouncedRender } from "@/lib/useDebouncedRender";
 
-// PRIVACY: the diagram source is deflated and sent to the public PlantUML
-// server below to be rendered into SVG. Nothing is rendered locally — the
-// text of every ```plantuml block leaves the browser. The endpoint is fixed
-// for now; a self-hosted server could be made configurable later.
-const PLANTUML_SERVER = "https://www.plantuml.com/plantuml";
+// PRIVACY: the diagram source is deflated and sent to a PlantUML server to be
+// rendered into SVG — nothing is rendered locally, so the text of every
+// ```plantuml block leaves the browser. The endpoint defaults to the public
+// server but can be pointed at a self-hosted instance via the
+// VITE_PLANTUML_SERVER build-time env var. The rendered card names the host
+// it talked to so the destination is never hidden from the user.
+const PLANTUML_SERVER = (
+  (import.meta as { env?: Record<string, string | undefined> }).env
+    ?.VITE_PLANTUML_SERVER || "https://www.plantuml.com/plantuml"
+).replace(/\/+$/, "");
+
+function serverHost(): string {
+  try {
+    return new URL(PLANTUML_SERVER).host;
+  } catch {
+    return PLANTUML_SERVER;
+  }
+}
 
 // PlantUML's own 6-bit alphabet — deliberately not standard base64.
 const ALPHABET =
@@ -97,10 +110,18 @@ export const PlantUMLBlock = ({ code }: SyntaxHighlighterProps) => {
           {isLoading && !html ? (
             <div className="text-gray-500 text-xs">Rendering diagram…</div>
           ) : (
-            <div
-              className="flex justify-center [&>svg]:h-auto [&>svg]:max-w-full"
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
+            <>
+              <div
+                className="flex justify-center [&>svg]:h-auto [&>svg]:max-w-full"
+                dangerouslySetInnerHTML={{ __html: html }}
+              />
+              <div
+                data-copy-ignore
+                className="mt-2 select-none text-center text-[10px] text-gray-500"
+              >
+                Rendered via {serverHost()} — diagram source is sent there
+              </div>
+            </>
           )}
         </div>
       )}
