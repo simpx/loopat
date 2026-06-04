@@ -1319,6 +1319,18 @@ class LoopSession {
     if (this.q) await this.q.interrupt().catch(() => {})
   }
 
+  /** Background in-flight foreground tasks (Bash commands + subagents) so the
+   *  turn finalizes and the queue can drain. Returns false if there was
+   *  nothing to background — useful for telling the caller whether the next
+   *  user message will actually go through immediately. */
+  async backgroundTasks(): Promise<boolean> {
+    if (!this.q) return false
+    return this.q.backgroundTasks().catch((e: any) => {
+      console.warn(`[sdk:${this.id.slice(0, 8)}] backgroundTasks failed: ${e?.message ?? e}`)
+      return false
+    })
+  }
+
   getQueueLength(): number {
     return this.messageQueue.length
   }

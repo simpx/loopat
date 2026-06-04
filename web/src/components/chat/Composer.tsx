@@ -9,6 +9,7 @@ import {
   ArrowUpIcon,
   SquareIcon,
   ListOrderedIcon,
+  ZapIcon,
   X,
   FileText,
   Plus,
@@ -38,7 +39,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
   );
   const composerText = useAuiState((s) => s.composer.text);
 
-  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, getWaitingForResponse, suppressSlashRef, goal, setGoal, goalStatus, completeGoal } = useLoopRuntimeExtra();
+  const { provider, permissionMode, setPermissionMode, enqueueMessage, queue, clearQueue, removeFromQueue, loopId, contextTokens, cumulativeTokens, getStreamingTokenCount, getWaitingForResponse, suppressSlashRef, goal, setGoal, goalStatus, completeGoal, backgroundTasks } = useLoopRuntimeExtra();
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
@@ -403,17 +404,34 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
               {/* Send / Enqueue button */}
               {hasInput && (
                 isRunning ? (
-                  <Button
-                    type="button"
-                    variant="default"
-                    size="icon"
-                    onClick={handleEnqueue}
-                    className="h-8 w-8 rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
-                    aria-label="Enqueue message"
-                    title="Enqueue message"
-                  >
-                    <ListOrderedIcon className="h-4 w-4" />
-                  </Button>
+                  <>
+                    {/* "Send now": enqueue then background in-flight Bash /
+                        subagents so the queue drains immediately. Lets the
+                        user keep chatting without waiting for a long agent
+                        run to finish. */}
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="icon"
+                      onClick={() => { handleEnqueue(); backgroundTasks(); }}
+                      className="h-8 w-8 rounded-lg bg-sky-500 hover:bg-sky-600 text-white"
+                      aria-label="Send now (background agents)"
+                      title="立即发送（后台暂停 agents）"
+                    >
+                      <ZapIcon className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="default"
+                      size="icon"
+                      onClick={handleEnqueue}
+                      className="h-8 w-8 rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
+                      aria-label="Enqueue message"
+                      title="Enqueue message"
+                    >
+                      <ListOrderedIcon className="h-4 w-4" />
+                    </Button>
+                  </>
                 ) : (
                   <ComposerPrimitive.Send asChild>
                     <Button
