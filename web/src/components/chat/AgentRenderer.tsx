@@ -24,6 +24,27 @@ function formatDuration(ms: number): string {
   return `${m}m ${rem}s`
 }
 
+// Friendly phase labels mapped from the agent's last tool call. When the
+// subagent has nothing in flight we fall back to the generic "Working…".
+const PHASE_LABELS: Record<string, string> = {
+  Read: "Reading files",
+  Grep: "Searching code",
+  Glob: "Finding files",
+  Edit: "Editing code",
+  Write: "Writing files",
+  ApplyPatch: "Applying patch",
+  Bash: "Running commands",
+  Task: "Delegating",
+  Agent: "Delegating",
+  WebFetch: "Fetching web",
+  WebSearch: "Searching web",
+}
+
+function phaseLabel(lastToolName?: string): string {
+  if (!lastToolName) return "Working"
+  return PHASE_LABELS[lastToolName] ?? lastToolName
+}
+
 interface AgentRendererProps {
   args: {
     description?: string
@@ -98,15 +119,20 @@ export default function AgentRenderer({
         <p className="text-[12px] text-gray-600 leading-relaxed">{description}</p>
       )}
 
-      {/* Running indicator */}
+      {/* Running indicator: phase label (mapped from last_tool_name) +
+          AI-generated progress summary when available (enabled by
+          agentProgressSummaries on the server). */}
       {isRunning && (
         <div className="flex items-center gap-2 py-1">
           <LoaderIcon className="h-3 w-3 animate-spin text-sky-500" />
-          <span className="text-[11px] text-gray-400">
-            {taskState?.last_tool_name
-              ? `Running ${taskState.last_tool_name}...`
-              : "Working..."}
+          <span className="text-[11px] text-gray-500">
+            {phaseLabel(taskState?.last_tool_name)}…
           </span>
+          {taskState?.summary && (
+            <span className="text-[11px] text-gray-400 italic truncate max-w-[280px]">
+              {taskState.summary}
+            </span>
+          )}
         </div>
       )}
 
