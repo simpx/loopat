@@ -1,6 +1,13 @@
 "use client";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
+import "katex/dist/katex.min.css";
+// mhchem extends KaTeX with chemistry macros (\ce, \pu); copy-tex makes a
+// selection copy the underlying TeX rather than the rendered glyphs. Both are
+// side-effect modules that patch the shared KaTeX instance / document.
+import "katex/contrib/mhchem";
+import "katex/contrib/copy-tex";
+import "remark-github-blockquote-alert/alert.css";
 
 import {
   type CodeHeaderProps,
@@ -9,14 +16,26 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkCjkFriendly from "remark-cjk-friendly";
+import { remarkAlert } from "remark-github-blockquote-alert";
+import rehypeKatex from "rehype-katex";
 import { memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { processLatexBrackets } from "@/lib/processLatexBrackets";
 
 const MarkdownTextImpl = () => {
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={[
+        remarkGfm,
+        remarkCjkFriendly,
+        [remarkMath, { singleDollarTextMath: true }],
+        remarkAlert,
+      ]}
+      rehypePlugins={[rehypeKatex]}
+      preprocess={processLatexBrackets}
       className="aui-md"
       components={defaultComponents}
     />
