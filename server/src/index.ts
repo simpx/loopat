@@ -3121,6 +3121,8 @@ app.get(
             session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
             session.interrupt()
+          } else if (msg?.type === "background_tasks") {
+            session.backgroundTasks().catch(() => {})
           } else if (msg?.type === "queue_clear") {
             session.clearQueue()
           } else if (msg?.type === "queue_remove") {

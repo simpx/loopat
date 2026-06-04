@@ -443,6 +443,10 @@ export interface LoopRuntimeExtra {
   /** Re-send the most recent user message verbatim. Used by the retry
    *  button on the last completed assistant message. */
   retryLastUser: () => void
+  /** Background in-flight foreground tasks (Bash + subagents) so the
+   *  current turn finalizes and the queue can drain. Used by the
+   *  "send now" button when the user wants to bypass the queue. */
+  backgroundTasks: () => void
   /** Per-turn stats keyed by the turn's rendered (merged) assistant message
    *  id. Present only for the last assistant message of each LIVE turn — the
    *  one the stats footer renders on. Replayed history has no entries. */
@@ -496,6 +500,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   setGoal: () => {},
   completeGoal: () => {},
   retryLastUser: () => {},
+  backgroundTasks: () => {},
   turnStatsByMessageId: new Map(),
 })
 
@@ -975,9 +980,16 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     }
   }, [aggregated, loopId, TURN_START_KEY])
 
+  const backgroundTasks = useCallback(() => {
+    const ws = wsRef.current
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "background_tasks" }))
+    }
+  }, [])
+
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser, turnStatsByMessageId }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser, turnStatsByMessageId],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser, backgroundTasks, turnStatsByMessageId }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser, backgroundTasks, turnStatsByMessageId],
   )
 
   useEffect(() => {
