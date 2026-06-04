@@ -54,6 +54,7 @@ import { HtmlArtifactCard } from "./HtmlArtifactCard";
 import { TableWithToolbar } from "./TableWithToolbar";
 import { CitationLink } from "./CitationTooltip";
 import { FencedSvg, SvgRenderer } from "./SvgRenderer";
+import { MermaidBlock } from "./MermaidBlock";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
@@ -175,6 +176,7 @@ const componentsByLanguage = {
   html: { SyntaxHighlighter: HtmlArtifactCard, CodeHeader: NoCodeHeader },
   svg: { SyntaxHighlighter: SvgFencedBlock, CodeHeader: NoCodeHeader },
   xml: { SyntaxHighlighter: XmlBlock, CodeHeader: XmlHeader },
+  mermaid: { SyntaxHighlighter: MermaidBlock, CodeHeader: NoCodeHeader },
 };
 
 /* ─── Clipboard hook ─── */
