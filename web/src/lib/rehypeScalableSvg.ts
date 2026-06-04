@@ -18,7 +18,37 @@ const UNSAFE_TAGS = new Set([
   "object",
   "embed",
   "foreignobject",
+  // Navigation / submission / metadata elements that can redirect the page,
+  // rebase relative URLs, or phish even without any script.
+  "form",
+  "base",
+  "meta",
+  "link",
 ]);
+
+// Attributes that carry a URL we must not let navigate to or execute. Compared
+// case-insensitively so it covers the various HAST property spellings
+// (href, xlinkHref, formAction, …).
+const URL_ATTRS = new Set([
+  "href",
+  "src",
+  "action",
+  "formaction",
+  "xlinkhref",
+  "poster",
+  "background",
+]);
+
+// data:image/* is a legitimate inline image; any other scheme below can run
+// code or smuggle markup through a navigation.
+const SAFE_DATA_URL = /^\s*data:image\//i;
+const DANGEROUS_URL = /^\s*(?:javascript|vbscript|data):/i;
+
+function isDangerousUrl(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  if (SAFE_DATA_URL.test(value)) return false;
+  return DANGEROUS_URL.test(value);
+}
 
 export function rehypeStripUnsafe() {
   return (tree: Root) => {
@@ -32,7 +62,13 @@ export function rehypeStripUnsafe() {
       const props = node.properties;
       if (props) {
         for (const key of Object.keys(props)) {
-          if (/^on/i.test(key)) delete props[key];
+          if (/^on/i.test(key)) {
+            delete props[key];
+            continue;
+          }
+          if (URL_ATTRS.has(key.toLowerCase()) && isDangerousUrl(props[key])) {
+            delete props[key];
+          }
         }
       }
       return undefined;
