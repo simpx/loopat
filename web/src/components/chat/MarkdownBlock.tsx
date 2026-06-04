@@ -7,7 +7,6 @@ import "katex/dist/katex.min.css";
 // side-effect modules that patch the shared KaTeX instance / document.
 import "katex/contrib/mhchem";
 import "katex/contrib/copy-tex";
-import "remark-github-blockquote-alert/alert.css";
 
 import {
   type CodeHeaderProps,
@@ -20,7 +19,7 @@ import { useMessagePartText } from "@assistant-ui/react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
-import { remarkAlert } from "remark-github-blockquote-alert";
+import { remarkAlert } from "@/lib/remarkAlert";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import type { PluggableList } from "unified";
