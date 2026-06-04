@@ -10,7 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { useLoopRuntimeExtra, type TurnStats } from "@/useLoopRuntime";
 import { cn } from "@/lib/utils";
 import ErrorBoundary from "./ErrorBoundary";
 
@@ -21,6 +21,17 @@ function extractTime(messageId: string | undefined): string {
     return new Date(parseInt(match[1], 10)).toLocaleTimeString();
   }
   return "";
+}
+
+/** Compact one-line per-turn stats footer, e.g.
+ *  `Tokens: 12,345 ↑10,000 ↓2,345  ·  TTFT 1.2s  ·  8.7s`. */
+function formatTurnStats(s: TurnStats): string {
+  const segs = [
+    `Tokens: ${(s.input + s.output).toLocaleString()} ↑${s.input.toLocaleString()} ↓${s.output.toLocaleString()}`,
+  ];
+  if (s.ttftMs != null) segs.push(`TTFT ${(s.ttftMs / 1000).toFixed(1)}s`);
+  segs.push(`${(s.totalMs / 1000).toFixed(1)}s`);
+  return segs.join("  ·  ");
 }
 
 /* ─── JSON detection helper ─── */
@@ -93,7 +104,7 @@ export default function AssistantMessage() {
   // hook-order invariant holds across renders (content shape changes during
   // streaming / clear-boundary insertion).
   const messageId = useAuiState((s) => s.message.id);
-  const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen, retryLastUser } = useLoopRuntimeExtra();
+  const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen, retryLastUser, turnStatsByMessageId } = useLoopRuntimeExtra();
   const messageParts = useAuiState((s) => s.message.content);
   const textContent = useAuiState((s) => {
     const parts = s.message.content;
@@ -109,6 +120,10 @@ export default function AssistantMessage() {
   const showRetry = !isRunning && isLast;
 
   const time = extractTime(messageId);
+  // Per-turn stats render once per turn, on the LAST assistant message of the
+  // turn — which, after mergeAssistantStreaks, is this single merged bubble.
+  // Present only for live-session turns that produced a model result.
+  const turnStats = turnStatsByMessageId.get(messageId);
 
   const hasContent = Array.isArray(messageParts) && messageParts.some(
     (p: any) =>
@@ -265,8 +280,9 @@ export default function AssistantMessage() {
         {children}
       </div>
 
-      {/* Footer: time + retry (retry only on the last completed message) */}
-      {(time || showRetry) && (
+      {/* Footer: time + retry + per-turn stats (stats only on the last
+          assistant message of a live turn; retry only when completed) */}
+      {(time || showRetry || turnStats) && (
         <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
           {time && <span>{time}</span>}
           {showRetry && (
@@ -279,6 +295,11 @@ export default function AssistantMessage() {
             >
               <RotateCcwIcon className="h-3 w-3" />
             </button>
+          )}
+          {turnStats && (
+            <span className="ml-auto tabular-nums select-none">
+              {formatTurnStats(turnStats)}
+            </span>
           )}
         </div>
       )}

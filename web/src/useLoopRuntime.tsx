@@ -338,6 +338,20 @@ export interface ContextUsage {
   model: string
 }
 
+/** Aggregated stats for one chat turn (one user message + all the assistant
+ *  messages that follow it). Live-session only; not persisted or recovered on
+ *  reconnect. */
+export interface TurnStats {
+  /** Sum of result.usage.input_tokens across the turn's result events. */
+  input: number
+  /** Sum of result.usage.output_tokens across the turn's result events. */
+  output: number
+  /** Time-to-first-token in ms (firstToken - turnStart). null until a token arrives. */
+  ttftMs: number | null
+  /** Sum of result.duration_ms across the turn's result events. */
+  totalMs: number
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
@@ -429,6 +443,10 @@ export interface LoopRuntimeExtra {
   /** Re-send the most recent user message verbatim. Used by the retry
    *  button on the last completed assistant message. */
   retryLastUser: () => void
+  /** Per-turn stats keyed by the turn's rendered (merged) assistant message
+   *  id. Present only for the last assistant message of each LIVE turn — the
+   *  one the stats footer renders on. Replayed history has no entries. */
+  turnStatsByMessageId: ReadonlyMap<string, TurnStats>
 }
 
 const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
@@ -478,6 +496,7 @@ const LoopRuntimeCtx = createContext<LoopRuntimeExtra>({
   setGoal: () => {},
   completeGoal: () => {},
   retryLastUser: () => {},
+  turnStatsByMessageId: new Map(),
 })
 
 export function useLoopRuntimeExtra(): LoopRuntimeExtra {
@@ -585,6 +604,25 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       return null
     }
   })
+
+  // Per-turn stats (live session only — not persisted, not recovered on
+  // reconnect). A "turn" = one user message + every assistant message that
+  // follows it, up to the next user message. Keyed internally by the turn's
+  // start time (turnStartedAt, unique per turn). endMessageId is the FIRST
+  // assistant message id of the turn, because mergeAssistantStreaks collapses
+  // a turn's assistant messages into one rendered bubble carrying that head id.
+  const turnStatsRef = useRef<Map<number, {
+    input: number
+    output: number
+    ttftMs: number | null
+    totalMs: number
+    endMessageId: string | null
+  }>>(new Map())
+  const [turnStatsVersion, setTurnStatsVersion] = useState(0)
+  // The turn currently accumulating stats (its turnStartedAt) and the id of
+  // that turn's first assistant message (= the merged bubble's id).
+  const currentTurnIdRef = useRef<number | null>(null)
+  const currentTurnHeadIdRef = useRef<string | null>(null)
 
   // Questions (AskUserQuestion tool) — plain object for immutable updates
   const [questionsObj, setQuestionsObj] = useState<Record<string, QuestionDef[]>>({})
@@ -880,6 +918,32 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     return total
   }, [tokenUsageVersion, taskVersion, streamingTokensVersion])
 
+  // On each new turn (turnStartedAt changes), point the accumulator at it and
+  // reset the head-id capture. Covers all turn-start paths (onNew,
+  // enqueueMessage, retryLastUser) since they all setTurnStartedAt(now).
+  useEffect(() => {
+    if (turnStartedAt == null) return
+    currentTurnIdRef.current = turnStartedAt
+    currentTurnHeadIdRef.current = null
+    if (!turnStatsRef.current.has(turnStartedAt)) {
+      turnStatsRef.current.set(turnStartedAt, { input: 0, output: 0, ttftMs: null, totalMs: 0, endMessageId: null })
+    }
+  }, [turnStartedAt])
+
+  // Expose per-turn stats keyed by the turn's rendered (merged) assistant
+  // message id. Skip turns with no model result (input/output both 0) and
+  // turns whose head id hasn't been captured yet — the footer only shows once
+  // a result has landed.
+  const turnStatsByMessageId = useMemo<ReadonlyMap<string, TurnStats>>(() => {
+    const out = new Map<string, TurnStats>()
+    for (const [, e] of turnStatsRef.current) {
+      if (!e.endMessageId) continue
+      if (e.input <= 0 && e.output <= 0) continue
+      out.set(e.endMessageId, { input: e.input, output: e.output, ttftMs: e.ttftMs, totalMs: e.totalMs })
+    }
+    return out
+  }, [turnStatsVersion])
+
   const retryLastUser = useCallback(() => {
     // Walk backwards to the most recent user message and re-post its text.
     // The original send had any pendingFileContext already baked into the
@@ -912,8 +976,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [aggregated, loopId, TURN_START_KEY])
 
   const extra = useMemo<LoopRuntimeExtra>(
-    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser }),
-    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser],
+    () => ({ toolProgressMap, taskMap, questions: questionsReadonlyMap, sendAnswers, thinkingOpen, setThinkingOpen, permissionMode, setPermissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId: loopId ?? "", loadingHistory, agentToolUseIds, childMessagesByAgentId, isRunning: running, enqueueMessage, queue, clearQueue: onClearQueue, removeFromQueue: onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, suppressSlashRef, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, getStreamingTokenCount, getWaitingForResponse, contextTokens, cumulativeTokens, openFile, goal, goalSetAt, goalStatus, setGoal: setGoalFn, completeGoal, retryLastUser, turnStatsByMessageId }),
+    [toolProgressMap, taskMap, questionsReadonlyMap, sendAnswers, thinkingOpen, permissionMode, permissionPrompt, answerPermission, setMaxThinkingTokens, getContextUsage, contextUsage, thinkingBudget, provider, selectProvider, clearContext, thinkingBlockCount, loopId, loadingHistory, agentToolUseIds, childMessagesByAgentId, running, enqueueMessage, queue, onClearQueue, onRemoveFromQueue, hasHistory, showHistory, toggleShowHistory, availableSlashCommands, hasOlderMessages, loadMoreMessages, turnGeneration, turnStartedAt, contextTokens, cumulativeTokens, openFile, retryLastUser, turnStatsByMessageId],
   )
 
   useEffect(() => {
@@ -944,6 +1008,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
       waitingForResponseRef.current = true
       contextTokensRef.current = 0
       setContextTokensVersion((v) => v + 1)
+      // Per-turn stats are live-session only — drop them on (re)connect; the
+      // server replays history and there's no longer a live turn to attribute.
+      turnStatsRef.current = new Map()
+      setTurnStatsVersion((v) => v + 1)
+      currentTurnIdRef.current = null
+      currentTurnHeadIdRef.current = null
       setQuestionsObj({})
       setPermissionPrompt(null)
       setGoal(null)
@@ -1172,6 +1242,21 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
             streamingInputRef.current = 0
             streamingTokensRef.current = 0
             setStreamingTokensVersion((v) => v + 1)
+            // Per-turn stats: accumulate this result's tokens + wall-clock and
+            // stamp the turn's head assistant id (set when the first assistant
+            // message of the turn arrived) so the footer renders on the merged
+            // bubble. Multiple results in one turn all stamp the same head id.
+            const turnId = currentTurnIdRef.current
+            if (turnId != null) {
+              const e = turnStatsRef.current.get(turnId)
+              if (e) {
+                if (typeof u?.input_tokens === "number") e.input += u.input_tokens
+                if (typeof u?.output_tokens === "number") e.output += u.output_tokens
+                if (typeof m.duration_ms === "number") e.totalMs += m.duration_ms
+                if (currentTurnHeadIdRef.current) e.endMessageId = currentTurnHeadIdRef.current
+                setTurnStatsVersion((v) => v + 1)
+              }
+            }
           }
           return
         }
@@ -1194,6 +1279,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
           const uuid: string = m.uuid ?? freshId("a")
           const content = m.message.content
           const parentId: string | null = m.parent_tool_use_id ?? null
+          // Capture the FIRST main-model assistant id of the current turn — it
+          // becomes the merged bubble's id and the key the stats footer renders
+          // on. Reset to null at each turn start.
+          if (!parentId && currentTurnHeadIdRef.current == null) {
+            currentTurnHeadIdRef.current = uuid
+          }
           try {
             setRaw((prev) => {
               const full: RawMsg = { id: uuid, role: "assistant", content, parent_tool_use_id: parentId }
@@ -1227,6 +1318,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
           // Only track main-model streams; agent stream events have
           // parent_tool_use_id and would overwrite the main counters.
           if (m.parent_tool_use_id) return
+          // Earliest capture of the turn's head assistant id — the streaming
+          // partial uses this same uuid, so it matches the merged bubble.
+          if (m.uuid && currentTurnHeadIdRef.current == null) {
+            currentTurnHeadIdRef.current = m.uuid
+          }
           // Track live token usage from streaming events.
           // message_delta only fires at stream end, so we estimate from
           // content_block_delta text/thinking growth for real-time updates.
@@ -1260,6 +1356,17 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
               deltaLen = d.partial_json.length
             }
             waitingForResponseRef.current = false
+            // TTFT: first content delta of the turn = first token. turnId IS
+            // turnStartedAt, so (now - turnId) is the time-to-first-token.
+            // Set once per turn (ttftMs starts null, reset at turn start).
+            const ttftTurnId = currentTurnIdRef.current
+            if (ttftTurnId != null) {
+              const e = turnStatsRef.current.get(ttftTurnId)
+              if (e && e.ttftMs == null) {
+                e.ttftMs = Date.now() - ttftTurnId
+                setTurnStatsVersion((v) => v + 1)
+              }
+            }
             // Per-sub-turn accumulator (resets on message_start) — used for
             // context-window math (streamingTokens, contextTokens).
             streamingOutputCharsRef.current += deltaLen
