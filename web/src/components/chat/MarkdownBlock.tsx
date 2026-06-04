@@ -55,6 +55,8 @@ import { TableWithToolbar } from "./TableWithToolbar";
 import { CitationLink } from "./CitationTooltip";
 import { FencedSvg, SvgRenderer } from "./SvgRenderer";
 import { MermaidBlock } from "./MermaidBlock";
+import { PlantUMLBlock } from "./PlantUMLBlock";
+import { GraphvizBlock } from "./GraphvizBlock";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
@@ -177,6 +179,9 @@ const componentsByLanguage = {
   svg: { SyntaxHighlighter: SvgFencedBlock, CodeHeader: NoCodeHeader },
   xml: { SyntaxHighlighter: XmlBlock, CodeHeader: XmlHeader },
   mermaid: { SyntaxHighlighter: MermaidBlock, CodeHeader: NoCodeHeader },
+  plantuml: { SyntaxHighlighter: PlantUMLBlock, CodeHeader: NoCodeHeader },
+  dot: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
+  graphviz: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
 };
 
 /* ─── Clipboard hook ─── */
