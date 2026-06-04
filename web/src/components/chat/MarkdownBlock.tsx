@@ -12,19 +12,24 @@ import "remark-github-blockquote-alert/alert.css";
 import {
   type CodeHeaderProps,
   MarkdownTextPrimitive,
+  type SyntaxHighlighterProps,
   unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
+import { useMessagePartText } from "@assistant-ui/react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import { remarkAlert } from "remark-github-blockquote-alert";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import type { PluggableList } from "unified";
 import {
   Fragment,
   isValidElement,
   memo,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -37,6 +42,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { processLatexBrackets } from "@/lib/processLatexBrackets";
+import { isSvgContent } from "@/lib/sanitizeSvg";
+import { rehypeScalableSvg, rehypeStripUnsafe } from "@/lib/rehypeScalableSvg";
 import {
   setTall,
   toggleCollapsed,
@@ -46,30 +53,46 @@ import {
 import { HtmlArtifactCard } from "./HtmlArtifactCard";
 import { TableWithToolbar } from "./TableWithToolbar";
 import { CitationLink } from "./CitationTooltip";
+import { FencedSvg, SvgRenderer } from "./SvgRenderer";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
 /** Minimum line count before a gutter of line numbers is drawn. */
 const GUTTER_MIN_LINES = 5;
 
-// ```html blocks render as a self-contained artifact card with its own chrome,
-// so the standard code header is suppressed for that language.
-const NoCodeHeader = () => null;
-const componentsByLanguage = {
-  html: { SyntaxHighlighter: HtmlArtifactCard, CodeHeader: NoCodeHeader },
-};
+// Raw-HTML parsing is opt-in per message: rehype-raw is only worth the cost
+// when the source actually contains one of the inline tags we care about.
+const RAW_HTML_HINT =
+  /<(svg|details|summary|sup|sub|br|abbr|table|thead|tbody|tr|th|td)\b/i;
+
+const REMARK_PLUGINS: PluggableList = [
+  remarkGfm,
+  remarkCjkFriendly,
+  [remarkMath, { singleDollarTextMath: true }],
+  remarkAlert,
+];
+const REHYPE_PLAIN: PluggableList = [rehypeKatex, rehypeScalableSvg];
+const REHYPE_WITH_RAW: PluggableList = [
+  rehypeRaw,
+  rehypeStripUnsafe,
+  rehypeKatex,
+  rehypeScalableSvg,
+];
 
 const MarkdownTextImpl = () => {
+  const { text } = useMessagePartText();
+  const allowRaw = RAW_HTML_HINT.test(text);
+  const rehypePlugins = useMemo(
+    () => (allowRaw ? REHYPE_WITH_RAW : REHYPE_PLAIN),
+    [allowRaw],
+  );
+
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[
-        remarkGfm,
-        remarkCjkFriendly,
-        [remarkMath, { singleDollarTextMath: true }],
-        remarkAlert,
-      ]}
-      rehypePlugins={[rehypeKatex]}
+      remarkPlugins={REMARK_PLUGINS}
+      rehypePlugins={rehypePlugins}
       preprocess={processLatexBrackets}
+      disallowedElements={["iframe", "script"]}
       className="aui-md"
       components={defaultComponents}
       componentsByLanguage={componentsByLanguage}
@@ -124,6 +147,34 @@ const CodeHeader: React.FC<CodeHeaderProps> = ({ language, code }) => {
       </div>
     </div>
   );
+};
+
+/* ─── Per-language code block overrides ─── */
+
+// Languages whose blocks render as bespoke widgets suppress the code header.
+const NoCodeHeader = () => null;
+
+// ```svg → always an image.
+const SvgFencedBlock = ({ code }: SyntaxHighlighterProps) => <FencedSvg svg={code} />;
+
+// ```xml → an image when it is actually SVG, otherwise a normal code block.
+const XmlBlock = ({ code, node, components }: SyntaxHighlighterProps) => {
+  if (isSvgContent(code)) return <FencedSvg svg={code} />;
+  const { Pre, Code } = components;
+  return (
+    <Pre>
+      <Code node={node}>{code}</Code>
+    </Pre>
+  );
+};
+
+const XmlHeader = ({ language, code }: CodeHeaderProps) =>
+  isSvgContent(code) ? null : <CodeHeader language={language} code={code} />;
+
+const componentsByLanguage = {
+  html: { SyntaxHighlighter: HtmlArtifactCard, CodeHeader: NoCodeHeader },
+  svg: { SyntaxHighlighter: SvgFencedBlock, CodeHeader: NoCodeHeader },
+  xml: { SyntaxHighlighter: XmlBlock, CodeHeader: XmlHeader },
 };
 
 /* ─── Clipboard hook ─── */
@@ -398,5 +449,6 @@ const defaultComponents = memoizeMarkdownComponents({
   ),
   pre: CodeBlockPre,
   code: CodeBlockCode,
+  svg: SvgRenderer,
   CodeHeader,
 });
