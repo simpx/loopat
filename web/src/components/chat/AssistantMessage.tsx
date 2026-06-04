@@ -128,14 +128,29 @@ export default function AssistantMessage() {
     <MessagePrimitive.GroupedParts
       groupBy={(part) => {
         if (part.type === "reasoning")
-          return ["group-chainOfThought", "group-reasoning"];
+          return ["group-pillRow", "group-chainOfThought", "group-reasoning"];
+        if (part.type === "tool-call")
+          return ["group-pillRow", "group-toolCalls"];
         return null;
       }}
     >
       {({ part, children }) => {
         switch (part.type) {
+          case "group-pillRow":
+            // Lay out adjacent reasoning + tool-call groups on one row. Each
+            // group renders full-width (own line) for now; this flex-wrap
+            // container lets future compact pills flow side by side without
+            // touching this layout.
+            return (
+              <div className="my-0.5 flex flex-wrap items-center gap-1">
+                {children}
+              </div>
+            );
           case "group-chainOfThought":
-            return <div data-slot="chain-of-thought">{children}</div>;
+            return <div data-slot="chain-of-thought" className="contents">{children}</div>;
+          case "group-toolCalls":
+            // Consecutive tool calls stacked full-width inside the pill row.
+            return <div className="w-full space-y-1">{children}</div>;
           case "group-reasoning": {
             const running = part.status.type === "running";
             const charCount = (part as any).indices?.reduce((sum: number, i: number) => {
@@ -148,7 +163,7 @@ export default function AssistantMessage() {
               <Collapsible
                 open={running ? true : thinkingOpen}
                 onOpenChange={setThinkingOpen}
-                className="group/think my-1 overflow-hidden rounded-md border border-gray-100 bg-gray-50/50"
+                className="group/think my-1 w-full overflow-hidden rounded-md border border-gray-100 bg-gray-50/50"
               >
                 <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors hover:bg-gray-100/50">
                   <BrainIcon className="h-3 w-3 shrink-0 text-gray-400" />

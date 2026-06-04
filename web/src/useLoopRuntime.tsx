@@ -71,6 +71,38 @@ function freshId(prefix: string) {
 }
 
 /**
+ * Squash consecutive assistant turns into one virtual message so that long
+ * tool-call chains (e.g. 5 successive single-tool assistant messages) render
+ * inside one bubble instead of five stacked bubbles. The grouping logic in
+ * AssistantMessage operates on a single message's parts list, so
+ * concatenating the content arrays lets reasoning/tool-call groups coalesce
+ * naturally.
+ *
+ * Keeps the first message's id so partial updates and scroll-anchors that
+ * reference the head id keep working. Never merges across user messages,
+ * and skips messages with parent_tool_use_id (those belong to a sub-agent
+ * stream tracked separately).
+ */
+function mergeAssistantStreaks(msgs: RawMsg[]): RawMsg[] {
+  const out: RawMsg[] = []
+  for (const m of msgs) {
+    const last = out[out.length - 1]
+    if (
+      last
+      && last.role === "assistant"
+      && m.role === "assistant"
+      && !last.parent_tool_use_id
+      && !m.parent_tool_use_id
+    ) {
+      out[out.length - 1] = { ...last, content: [...last.content, ...m.content] }
+    } else {
+      out.push(m)
+    }
+  }
+  return out
+}
+
+/**
  * Apply a SDKPartialAssistantMessage (`type: "stream_event"`) — text deltas
  * and tool_use input json deltas — to the live assistant message keyed by
  * uuid. Final SDKAssistantMessage with the same uuid replaces the partial
@@ -737,7 +769,8 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
   }, [loopId])
 
   const hasOlderMessages = aggregated.length > renderCount
-  const visibleMessages = hasOlderMessages ? aggregated.slice(-renderCount) : aggregated
+  const visibleMessagesRaw = hasOlderMessages ? aggregated.slice(-renderCount) : aggregated
+  const visibleMessages = useMemo(() => mergeAssistantStreaks(visibleMessagesRaw), [visibleMessagesRaw])
 
   const loadMoreMessages = useCallback(() => {
     setRenderCount(prev => prev + RENDER_WINDOW_BATCH)
