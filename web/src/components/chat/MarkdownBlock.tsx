@@ -44,6 +44,8 @@ import {
   useCodeBlockUi,
 } from "@/lib/codeBlockUiStore";
 import { HtmlArtifactCard } from "./HtmlArtifactCard";
+import { TableWithToolbar } from "./TableWithToolbar";
+import { CitationLink } from "./CitationTooltip";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
@@ -323,17 +325,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }: React.ComponentProps<"a">) => (
-    <a
-      className={cn(
-        "text-blue-600 underline underline-offset-2 hover:text-blue-500",
-        className,
-      )}
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    />
-  ),
+  a: CitationLink,
   blockquote: ({ className, ...props }: React.ComponentProps<"blockquote">) => (
     <blockquote
       className={cn(
@@ -367,17 +359,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  table: ({ className, ...props }: React.ComponentProps<"table">) => (
-    <div className="my-2 overflow-x-auto">
-      <table
-        className={cn(
-          "min-w-full border-separate border-spacing-0",
-          className,
-        )}
-        {...props}
-      />
-    </div>
-  ),
+  table: TableWithToolbar,
   th: ({ className, ...props }: React.ComponentProps<"th">) => (
     <th
       className={cn(
