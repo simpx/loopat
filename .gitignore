@@ -15,6 +15,9 @@ e2e/.test-meta.json
 dogfood/.auth.json
 dogfood/.test-meta.json
 dogfood/first-run/.test-meta.json
+dogfood/sync/.test-meta.json
+dogfood/sync/.authA.json
+dogfood/sync/.authB.json
 server/src/*.js
 server/src/*.js.map
 

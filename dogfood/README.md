@@ -7,7 +7,7 @@ real browser. No mocks. They catch integration bugs that the logic tests in
 key naming, real AI turns, real pushes to origin. If the stack can't actually
 run, a dogfood test **fails — it never skips green**.
 
-They cost a (small) real AI key spend, so they are organized into three tiers by
+They cost a (small) real AI key spend, so they are organized into four tiers by
 cost and intent.
 
 ## Tiers
@@ -48,6 +48,18 @@ Each isolates one behavior on the shared-fixture stack.
 
 Run the full scenario preset (the 7 shared-fixture cases): `bun run dogfood`
 
+### sync — two-server context flow, run before a release
+Two fully independent loopat servers (each its own `LOOPAT_HOME`/backend/vite/
+user/vault) sharing ONE fixture git origin. Proves the docs/context-flow.md
+claim that across-server and on-one-server multi-user are the same mechanism:
+every edit converges on the shared SoT.
+
+| Case | Answers |
+|------|---------|
+| `sync` (S0–S5) | A edits → origin → B sees it (UI loop, AI loop, shared kn, concurrent different files, and same-file held-back) — across two independent servers? |
+
+Run: `bun run dogfood:sync`
+
 ## Running
 
 All tiers need a real AI key in the environment (never read from disk, never
@@ -69,7 +81,10 @@ Then:
 bun run dogfood:smoke      # first-5-minutes (fast)
 bun run dogfood            # the 7 shared-fixture scenario cases
 bun run dogfood:journey    # first-run full cold-start (release)
+bun run dogfood:sync       # two-server context flow S0–S5 (release)
 ```
+
+`dogfood:sync` additionally needs `FIRST_RUN_AI_BASE_URL`.
 
 Preconditions are enforced at config load (fail, never skip): `podman`,
 `git-crypt` (journey only), and the required env vars must all be present.
