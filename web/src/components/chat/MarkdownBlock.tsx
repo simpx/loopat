@@ -20,10 +20,42 @@ import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import { remarkAlert } from "remark-github-blockquote-alert";
 import rehypeKatex from "rehype-katex";
-import { memo, useState } from "react";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import {
+  Fragment,
+  isValidElement,
+  memo,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  CheckIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
+  CopyIcon,
+  WrapTextIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { processLatexBrackets } from "@/lib/processLatexBrackets";
+import {
+  setTall,
+  toggleCollapsed,
+  toggleWrap,
+  useCodeBlockUi,
+} from "@/lib/codeBlockUiStore";
+import { HtmlArtifactCard } from "./HtmlArtifactCard";
+
+/** Vertical height (px) past which a code block is offered collapsed. */
+const COLLAPSE_THRESHOLD_PX = 400;
+/** Minimum line count before a gutter of line numbers is drawn. */
+const GUTTER_MIN_LINES = 5;
+
+// ```html blocks render as a self-contained artifact card with its own chrome,
+// so the standard code header is suppressed for that language.
+const NoCodeHeader = () => null;
+const componentsByLanguage = {
+  html: { SyntaxHighlighter: HtmlArtifactCard, CodeHeader: NoCodeHeader },
+};
 
 const MarkdownTextImpl = () => {
   return (
@@ -38,6 +70,7 @@ const MarkdownTextImpl = () => {
       preprocess={processLatexBrackets}
       className="aui-md"
       components={defaultComponents}
+      componentsByLanguage={componentsByLanguage}
     />
   );
 };
@@ -47,6 +80,8 @@ export const MarkdownBlock = memo(MarkdownTextImpl);
 /* ─── Code header with language label and copy button ─── */
 
 const CodeHeader: React.FC<CodeHeaderProps> = ({ language, code }) => {
+  const key = code ?? "";
+  const { wrap } = useCodeBlockUi(key);
   const { isCopied, copyToClipboard } = useClipboard();
   const onCopy = () => {
     if (!code || isCopied) return;
@@ -58,18 +93,33 @@ const CodeHeader: React.FC<CodeHeaderProps> = ({ language, code }) => {
       <span className="font-medium text-gray-400 lowercase">
         {language || "text"}
       </span>
-      <button
-        type="button"
-        onClick={onCopy}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
-      >
-        {isCopied ? (
-          <CheckIcon className="h-3 w-3 text-emerald-400" />
-        ) : (
-          <CopyIcon className="h-3 w-3" />
-        )}
-        <span className="text-[10px]">{isCopied ? "Copied" : "Copy"}</span>
-      </button>
+      <div data-copy-ignore className="flex select-none items-center gap-1">
+        <button
+          type="button"
+          onClick={() => toggleWrap(key)}
+          aria-pressed={wrap}
+          title="Toggle soft wrap"
+          className={cn(
+            "flex items-center gap-1 rounded px-1.5 py-0.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200",
+            wrap && "text-gray-200",
+          )}
+        >
+          <WrapTextIcon className="h-3 w-3" />
+          <span className="text-[10px]">Wrap</span>
+        </button>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-gray-400 transition-colors hover:bg-gray-700 hover:text-gray-200"
+        >
+          {isCopied ? (
+            <CheckIcon className="h-3 w-3 text-emerald-400" />
+          ) : (
+            <CopyIcon className="h-3 w-3" />
+          )}
+          <span className="text-[10px]">{isCopied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
     </div>
   );
 };
@@ -89,6 +139,141 @@ function useClipboard({ copiedDuration = 2000 } = {}) {
 
   return { isCopied, copyToClipboard };
 }
+
+/* ─── Shared code-block body: gutter, wrap, collapse ─── */
+
+// The <pre> receives its <code> child as a React element; pull the raw source
+// back out so the header, the scroller and the gutter all key off one string.
+function readCodeText(children: React.ReactNode): string {
+  if (isValidElement(children)) {
+    const inner = (children.props as { children?: unknown }).children;
+    if (typeof inner === "string") return inner;
+  }
+  return "";
+}
+
+const CodeBlockPre = ({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<"pre">) => {
+  const key = readCodeText(children);
+  const { wrap, collapsed, tall } = useCodeBlockUi(key);
+  const scrollerRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const measure = () =>
+      setTall(key, el.scrollHeight > COLLAPSE_THRESHOLD_PX);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [key]);
+
+  const clamped = tall && collapsed;
+
+  return (
+    <div className="relative">
+      <pre
+        ref={scrollerRef}
+        className={cn(
+          "overflow-x-auto rounded-t-none rounded-b-lg border border-gray-700 border-t-0 bg-gray-900 p-3 text-xs leading-relaxed text-gray-200",
+          wrap && "whitespace-pre-wrap break-words",
+          clamped && "overflow-y-hidden",
+          className,
+        )}
+        style={clamped ? { maxHeight: COLLAPSE_THRESHOLD_PX } : undefined}
+        {...props}
+      >
+        {children}
+      </pre>
+      {clamped && (
+        <div
+          data-copy-ignore
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-16 rounded-b-lg bg-gradient-to-t from-gray-900 to-transparent"
+        />
+      )}
+      {tall && (
+        <div className="mt-1 flex justify-center">
+          <button
+            type="button"
+            data-copy-ignore
+            onClick={() => toggleCollapsed(key)}
+            className="flex select-none items-center gap-1 rounded-full border border-gray-700 bg-gray-800 px-2.5 py-0.5 text-[10px] text-gray-300 transition-colors hover:bg-gray-700"
+          >
+            {collapsed ? (
+              <ChevronsUpDownIcon className="h-3 w-3" />
+            ) : (
+              <ChevronsDownUpIcon className="h-3 w-3" />
+            )}
+            {collapsed ? "Show more" : "Show less"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CodeBlockCode = ({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<"code">) => {
+  const isCodeBlock = useIsMarkdownCodeBlock();
+  const text = typeof children === "string" ? children : "";
+  const { wrap } = useCodeBlockUi(text);
+
+  if (!isCodeBlock) {
+    return (
+      <code
+        className={cn(
+          "rounded-md border border-gray-200 bg-gray-100 px-1.5 py-0.5 font-mono text-[0.85em] text-gray-800",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  }
+
+  const lines = text.replace(/\n$/, "").split("\n");
+  if (lines.length < GUTTER_MIN_LINES) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  }
+
+  const gutterWidth = `${String(lines.length).length + 1}ch`;
+  const lineWhitespace = wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre";
+
+  return (
+    <code
+      className={cn("grid", className)}
+      style={{ gridTemplateColumns: "auto minmax(0, 1fr)" }}
+      {...props}
+    >
+      {lines.map((line, index) => (
+        <Fragment key={index}>
+          <span
+            data-copy-ignore
+            aria-hidden
+            className="sticky left-0 select-none bg-gray-900 pr-3 text-right text-gray-600 tabular-nums"
+            style={{ minWidth: gutterWidth }}
+          >
+            {index + 1}
+          </span>
+          <span className={lineWhitespace}>{`${line}\n`}</span>
+        </Fragment>
+      ))}
+    </code>
+  );
+};
 
 /* ─── Custom markdown components ─── */
 
@@ -229,27 +414,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  pre: ({ className, ...props }: React.ComponentProps<"pre">) => (
-    <pre
-      className={cn(
-        "overflow-x-auto rounded-t-none rounded-b-lg border border-gray-700 border-t-0 bg-gray-900 p-3 text-xs leading-relaxed text-gray-200",
-        className,
-      )}
-      {...props}
-    />
-  ),
-  code: function Code({ className, ...props }: React.ComponentProps<"code">) {
-    const isCodeBlock = useIsMarkdownCodeBlock();
-    return (
-      <code
-        className={cn(
-          !isCodeBlock &&
-            "rounded-md border border-gray-200 bg-gray-100 px-1.5 py-0.5 font-mono text-[0.85em] text-gray-800",
-          className,
-        )}
-        {...props}
-      />
-    );
-  },
+  pre: CodeBlockPre,
+  code: CodeBlockCode,
   CodeHeader,
 });
