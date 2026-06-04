@@ -536,6 +536,12 @@ class LoopSession {
         // Required by SDK when using permissionMode: "bypassPermissions"
         ...(this.currentPermissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
         systemPrompt: { type: "preset", preset: "claude_code", append: loopatAppend },
+        // Stream full subagent conversations (text + thinking) and AI-generated
+        // progress summaries so the inline AgentRenderer card shows real-time
+        // activity instead of just a spinner. AgentRenderer + childMessagesByAgentId
+        // on the FE side are already wired to consume these.
+        forwardSubagentText: true,
+        agentProgressSummaries: true,
         mcpServers,
         // External marketplace plugins (enabledPlugins in settings.json) are
         // resolved natively by the inner SDK now — ~/.claude/plugins/ is
