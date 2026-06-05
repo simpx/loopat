@@ -15,7 +15,7 @@ import {
   unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
-import { useMessagePartText } from "@assistant-ui/react";
+import { useAuiState } from "@assistant-ui/react";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
@@ -82,12 +82,16 @@ const REHYPE_WITH_RAW: PluggableList = [
 ];
 
 const MarkdownTextImpl = () => {
-  const { text } = useMessagePartText();
+  const part = useAuiState((s) => s.part);
+  const isTextLike = part.type === "text" || part.type === "reasoning";
+  const text = isTextLike ? (part as { text: string }).text : "";
   const allowRaw = RAW_HTML_HINT.test(text);
   const rehypePlugins = useMemo(
     () => (allowRaw ? REHYPE_WITH_RAW : REHYPE_PLAIN),
     [allowRaw],
   );
+
+  if (!isTextLike) return null;
 
   return (
     <MarkdownTextPrimitive
