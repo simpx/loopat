@@ -213,7 +213,7 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
   const mounts: VolumeMount[] = []
 
   // /tmp: shared with host (for socat / mktemp / IPC sockets). Same as today.
-  mounts.push({ src: "/tmp", dst: "/tmp" })
+  // mounts.push({ src: "/tmp", dst: "/tmp" })
 
   // $HOME: per-loop upper layer, persistent across container restarts. We
   // place it under /loopat/home/<user> instead of host's actual homedir so
