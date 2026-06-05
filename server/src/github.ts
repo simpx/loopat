@@ -223,6 +223,46 @@ export const githubProvider: GitHostProvider = {
       level === "write" ? "push" : "pull",
     )
   },
+
+  // Seed a freshly-created personal repo: two provider defaults (keys go in the
+  // vault later) and an ssh keypair (standard id_ed25519, git-crypt-encrypted)
+  // so loops can clone repos with zero config.
+  async seedDefaults(ctx) {
+    const fs = await import("node:fs/promises")
+    const path = await import("node:path")
+    const { execFile } = await import("node:child_process")
+    const { promisify } = await import("node:util")
+    const run = promisify(execFile)
+
+    const config = {
+      providers: {
+        default: "anthropic",
+        anthropic: {
+          model: "claude-opus-4-7",
+          baseUrl: "https://api.anthropic.com",
+          apiKey: "${ANTHROPIC_API_KEY}",
+          maxContextTokens: 200000,
+          models: [{ id: "claude-opus-4-7", enabled: true }],
+          enabled: true,
+        },
+        openai: {
+          model: "qwen3.7-max",
+          baseUrl: "https://api.anthropic.com",
+          apiKey: "${OPENAI_API_KEY}",
+          maxContextTokens: 200000,
+          models: [{ id: "qwen3.7-max", enabled: true }],
+          enabled: true,
+        },
+      },
+    }
+    await fs.mkdir(path.join(ctx.repoDir, ".loopat"), { recursive: true })
+    await fs.writeFile(path.join(ctx.repoDir, ".loopat", "config.json"), JSON.stringify(config, null, 2) + "\n")
+
+    const sshDir = path.join(ctx.vaultDir, "mounts", "home", ".ssh")
+    await fs.mkdir(sshDir, { recursive: true })
+    await run("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `loopat:${ctx.login}`, "-f", path.join(sshDir, "id_ed25519")])
+    await fs.writeFile(path.join(sshDir, "config"), "Host *\n    StrictHostKeyChecking accept-new\n")
+  },
 }
 
 registerProvider(githubProvider)
