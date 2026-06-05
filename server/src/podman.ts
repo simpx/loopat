@@ -27,7 +27,7 @@
  *     SDK and PTY are `podman exec` siblings of this.
  *
  * Two mount-authority tiers (same model as bwrap):
- *   - operator: ~/.example/config.json `mounts` (any host path)
+ *   - operator: ~/.loopat/config.json `mounts` (any host path)
  *   - member:   convention-based via `vaults/<v>/mounts/home/<rel>/...` → $HOME/<rel>/...
  *   - admin:    no mount capability
  *

@@ -72,7 +72,7 @@ export ANTHROPIC_API_KEY=$(cat ~/.loopat/personal/<you>/.loopat/vaults/default/e
 `dogfood:journey` (first-run) additionally needs the AI provider base url:
 
 ```sh
-export FIRST_RUN_AI_BASE_URL=https://api.anthropic.com/api/anthropic
+export FIRST_RUN_AI_BASE_URL=https://api.anthropic.com
 ```
 
 Then:

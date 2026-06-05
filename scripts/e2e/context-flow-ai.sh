@@ -80,7 +80,7 @@ set_notes_url() {
   python3 - "$1" "$H/personal/simpx/.loopat/config.json" <<'PY'
 import json,sys
 url, path = sys.argv[1], sys.argv[2]
-json.dump({"providers":{"default":"anthropic/claude-opus-4-7","anthropic":{"baseUrl":"https://api.anthropic.com/api/anthropic","models":[{"id":"claude-opus-4-7","enabled":True}],"apiKey":"${ANTHROPIC_API_KEY}","enabled":True}},"notes":{"git":url}}, open(path,"w"))
+json.dump({"providers":{"default":"anthropic/claude-opus-4-7","anthropic":{"baseUrl":"https://api.anthropic.com","models":[{"id":"claude-opus-4-7","enabled":True}],"apiKey":"${ANTHROPIC_API_KEY}","enabled":True}},"notes":{"git":url}}, open(path,"w"))
 PY
 }
 api() { curl -fsS -H "authorization: Bearer $TOK" "$@"; }

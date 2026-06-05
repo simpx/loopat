@@ -52,7 +52,7 @@ describe("GET /api/settings/personal/disk", () => {
       providers: {
         default: "anthropic",
         anthropic: { baseUrl: "https://api.anthropic.com", model: "x", apiKey: "${ANTHROPIC_API_KEY}" },
-        anthropic:   { baseUrl: "https://anthropic.example.com", model: "y", apiKey: "${ANTHROPIC_API_KEY}" },
+        openai:    { baseUrl: "https://openai.example.com", model: "y", apiKey: "${OPENAI_API_KEY}" },
         custom:    { baseUrl: "u", model: "z", apiKey: "sk-literal-here" },
       },
     }))
@@ -68,8 +68,8 @@ describe("GET /api/settings/personal/disk", () => {
     expect(j.refExists["providers.anthropic.apiKey"]).toEqual({
       kind: "var", exists: true, varName: "ANTHROPIC_API_KEY",
     })
-    expect(j.refExists["providers.anthropic.apiKey"]).toEqual({
-      kind: "var", exists: false, varName: "ANTHROPIC_API_KEY",
+    expect(j.refExists["providers.openai.apiKey"]).toEqual({
+      kind: "var", exists: false, varName: "OPENAI_API_KEY",
     })
     expect(j.refExists["providers.custom.apiKey"]).toEqual({
       kind: "literal", exists: true,

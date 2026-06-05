@@ -207,7 +207,7 @@ async function globalSetup() {
       default: "anthropic/claude-opus-4-7",
       anthropic: {
         models: [{ id: "claude-opus-4-7", enabled: true }],
-        baseUrl: "https://api.anthropic.com/api/anthropic",
+        baseUrl: "https://api.anthropic.com",
         apiKey: "${ANTHROPIC_API_KEY}",
         maxContextTokens: 1000000,
         enabled: true,

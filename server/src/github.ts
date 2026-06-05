@@ -224,7 +224,7 @@ export const githubProvider: GitHostProvider = {
     )
   },
 
-  // Seed a freshly-created personal repo: two provider defaults (keys go in the
+  // Seed a freshly-created personal repo: one provider default (key goes in the
   // vault later) and an ssh keypair (standard id_ed25519, git-crypt-encrypted)
   // so loops can clone repos with zero config.
   async seedDefaults(ctx) {
@@ -243,14 +243,6 @@ export const githubProvider: GitHostProvider = {
           apiKey: "${ANTHROPIC_API_KEY}",
           maxContextTokens: 200000,
           models: [{ id: "claude-opus-4-7", enabled: true }],
-          enabled: true,
-        },
-        openai: {
-          model: "qwen3.7-max",
-          baseUrl: "https://api.anthropic.com",
-          apiKey: "${OPENAI_API_KEY}",
-          maxContextTokens: 200000,
-          models: [{ id: "qwen3.7-max", enabled: true }],
           enabled: true,
         },
       },

@@ -31,7 +31,7 @@ push); S3 swaps that for a real loop AI. Preconditions FAIL-not-skip: `podman`,
 
 ```sh
 export ANTHROPIC_API_KEY=$(cat ~/.loopat/personal/<you>/.loopat/vaults/default/envs/ANTHROPIC_API_KEY)
-export FIRST_RUN_AI_BASE_URL=https://api.anthropic.com/api/anthropic
+export FIRST_RUN_AI_BASE_URL=https://api.anthropic.com
 bun run dogfood:sync
 ```
 

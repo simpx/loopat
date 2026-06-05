@@ -26,7 +26,7 @@ describe.skipIf(SKIP)("L4: real AI sees vault-derived env var", () => {
     if (!apiKey) throw new Error("Need ANTHROPIC_API_KEY or ANTHROPIC_API_KEY env to run L4")
 
     const baseUrl = process.env.ANTHROPIC_API_KEY
-      ? "https://api.anthropic.com/api/anthropic"
+      ? "https://api.anthropic.com"
       : "https://api.anthropic.com"
 
     const it = query({
