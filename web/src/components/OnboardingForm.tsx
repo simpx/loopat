@@ -16,7 +16,11 @@ export function OnboardingForm({
   // re-renders the next form, or clears the gate when done.
   onAdvance: (next: OnboardingStatus) => void
 }) {
-  const [values, setValues] = useState<Record<string, string>>({})
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {}
+    for (const f of form.fields) if (f.value) init[f.name] = f.value
+    return init
+  })
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 

@@ -772,6 +772,7 @@ export async function submitOnboarding(
   // user acting on the real page, then onboarding() re-checks.
   if (cur.show.kind !== "form") return { ok: true, next: cur }
   let wroteVaultEnv = false
+  const providerFields: Record<string, string> = {}
   for (const field of cur.show.fields) {
     const raw = values[field.name]
     const value = typeof raw === "string" ? raw.trim() : ""
@@ -780,6 +781,8 @@ export async function submitOnboarding(
       const r = await writeVaultEnv(userId, vault, field.name, value)
       if (!r.ok) return { ok: false, error: `couldn't save ${field.label}: ${r.error}` }
       wroteVaultEnv = true
+    } else if (field.action === "provider-field") {
+      providerFields[field.name] = value
     } else if (field.action === "personal-repo-token") {
       const r = await setupPersonalViaProvider({
         userId,
@@ -790,6 +793,17 @@ export async function submitOnboarding(
       })
       if (!r.ok) return { ok: false, error: r.error }
     }
+  }
+  // Write provider-field edits (baseUrl / model) into the default provider.
+  if (Object.keys(providerFields).length > 0) {
+    const { readPersonalDiskRaw, savePersonalDisk } = await import("./config")
+    const disk = await readPersonalDiskRaw(userId)
+    const def = (disk.providers?.default as string) || "anthropic"
+    const p = { ...(disk.providers?.[def] as any) }
+    if (providerFields.baseUrl) p.baseUrl = providerFields.baseUrl
+    if (providerFields.model) { p.model = providerFields.model; p.models = [{ id: providerFields.model, enabled: true }] }
+    await savePersonalDisk(userId, { providers: { ...disk.providers, [def]: p } as any })
+    wroteVaultEnv = true // ensure the config change is pushed below
   }
   // Persist vault edits (e.g. an api key) to the personal remote — committed but
   // unpushed secrets are lost on re-import / another machine.

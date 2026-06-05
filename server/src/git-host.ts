@@ -25,12 +25,16 @@ export type OnboardingField = {
   type?: "password" | "text"
   help?: string
   placeholder?: string
+  /** Prefill value (e.g. the seeded baseUrl/model) — user can edit. */
+  value?: string
   /**
    *  - "vault-env":           store the submitted value in the vault under `name`.
    *  - "personal-repo-token": use the submitted value as the git token to
    *                           provision + import the user's personal repo.
+   *  - "provider-field":      write to the default provider's `name` field
+   *                           (e.g. baseUrl, model) in personal config.json.
    */
-  action: "vault-env" | "personal-repo-token"
+  action: "vault-env" | "personal-repo-token" | "provider-field"
 }
 
 export type OnboardingForm = {

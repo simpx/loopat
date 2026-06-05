@@ -174,7 +174,8 @@ export type OnboardingField = {
   type?: "password" | "text"
   help?: string
   placeholder?: string
-  action: "vault-env" | "personal-repo-token"
+  value?: string
+  action: "vault-env" | "personal-repo-token" | "provider-field"
 }
 export type OnboardingForm = {
   title: string

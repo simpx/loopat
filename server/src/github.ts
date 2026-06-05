@@ -193,6 +193,27 @@ export const githubProvider: GitHostProvider = {
         },
       }
     }
+    // Step 2: need at least one usable AI key. Judge by resolved providers (key
+    // already expanded from vault) — repo seeded anthropic with a baseUrl/model.
+    const providers = (ctx.config?.providers ?? {}) as Record<string, any>
+    const hasKey = Object.values(providers).some((p) => p && typeof p.apiKey === "string" && p.apiKey.trim().length > 0)
+    const anthropic = providers.anthropic ?? {}
+    if (!hasKey) {
+      return {
+        done: false,
+        show: {
+          kind: "form",
+          title: "配置 AI Provider",
+          description: "填一个 API key 才能开始。URL 和 model 可改(默认 Anthropic)。key 存在你自己的加密 vault 里,不上服务器。",
+          submitLabel: "保存并开始",
+          fields: [
+            { name: "ANTHROPIC_API_KEY", label: "API Key", type: "password", action: "vault-env" },
+            { name: "baseUrl", label: "API URL", type: "text", action: "provider-field", value: anthropic.baseUrl ?? "https://api.anthropic.com" },
+            { name: "model", label: "Model", type: "text", action: "provider-field", value: anthropic.model ?? "claude-opus-4-7" },
+          ],
+        },
+      }
+    }
     return { done: true }
   },
   async authenticate(cred) {
