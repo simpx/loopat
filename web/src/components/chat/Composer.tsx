@@ -345,7 +345,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
             autoFocus
             aria-label="Message input"
             onKeyDown={handleKeyDown}
-            unstable_insertNewlineOnTouchEnter
+            {...({ unstable_insertNewlineOnTouchEnter: true } as any)}
           />
 
           {/* Toolbar */}
