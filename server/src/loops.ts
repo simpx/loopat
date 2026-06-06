@@ -49,6 +49,7 @@ import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider, type OnboardingView } from "./git-host"
 import { loadExtensionProviders, resolveProviderId, resolveProvider } from "./providers" // also registers built-in providers
 import { loadVaultEnvs } from "./vaults"
+import { tracer, withSpan } from "./tracer"
 
 const execFileP = promisify(execFile)
 
@@ -2266,64 +2267,59 @@ export async function createLoop(opts: {
   if (opts.mountAllLoops) {
     meta.config = { ...(meta.config ?? {}), mount_all_loops: true }
   }
-  await mkdir(loopDir(id), { recursive: true })
-  await mkdir(loopClaudeDir(id), { recursive: true })
-  // Compose skills/agents + profile-chain doctrine into .claude/, write
-  // settings.json (autoMemory). Plugin resolution happens at spawn time
-  // (see session.ts) — SDK loads plugins via its `plugins` option, no
-  // loop-local install state needed.
-  await composeLoopClaudeConfig(id, opts.createdBy, opts.profiles)
-  await writeLoopSettings(id)
+  return withSpan("createLoop", async (rootSpan) => {
+    rootSpan.setAttribute("loop.repo", opts.repo ?? "none")
+    await mkdir(loopDir(id), { recursive: true })
+    await mkdir(loopClaudeDir(id), { recursive: true })
 
-  // Pull the per-user knowledge/notes FIRST: clones the user's knowledge repo
-  // (from personal.knowledge) and reads its .loopat/config.json for the notes
-  // remote + repo roster — which the workdir clone-on-demand below depends on.
-  // Surface any clone failures (bad key / no access) as a loop banner so the
-  // user isn't left with a silently-empty context.
-  const ctxWarnings = await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
-    (e: any) => { console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`); return [`context init failed: ${e?.message ?? e}`] },
-  )
-  if (ctxWarnings.length) meta.contextWarnings = ctxWarnings
+    await withSpan("composeClaudeConfig", async () => {
+      await composeLoopClaudeConfig(id, opts.createdBy, opts.profiles)
+      await writeLoopSettings(id)
+    })
 
-  // workdir = git worktree add (if repo selected) OR plain mkdir
-  if (opts.repo) {
-    // mirror + fetch as the user (their vault key), not the host's ssh.
-    const userSsh = sshCommandForUser(opts.createdBy, opts.vault ?? "default")
-    // Ensure the host-only bare mirror exists (clone once, fetch otherwise), then
-    // worktree the workdir off it — fast even for huge repos.
-    const repoPath = await ensureRepoMirror(opts.createdBy, opts.repo, userSsh)
-    if (!repoPath) {
-      throw new Error(`repo "${opts.repo}" not found / clone failed`)
-    }
-    const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
-    try {
-      // ① pull (docs/context-flow.md): ensureRepoMirror already fetched, so the
-      // mirror's `origin/<default>` tracking ref is the latest consensus. Open
-      // the loop branch off `origin/<default>` (not the bare mirror's HEAD) so
-      // the worktree is an ORDINARY clone: it has a real `origin/<default>`
-      // tracking ref and `git rebase origin/<default>` / `git status`
-      // ahead-behind work with nothing special to learn. Fall back to HEAD only
-      // if origin/<default> can't be resolved (offline / empty remote).
-      const start = await remoteStartPoint(repoPath, userSsh)
-      const addArgs = start
-        ? ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id), start]
-        : ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
-      await execFileP("git", addArgs)
-      meta.repo = opts.repo
-      meta.branch = branch
-    } catch (e: any) {
-      // fallback: plain mkdir (let user know)
-      console.warn(`[loopat] git worktree add failed for repo=${opts.repo}: ${e?.stderr ?? e?.message}`)
+    // Pull the per-user knowledge/notes FIRST: clones the user's knowledge repo
+    // and reads its .loopat/config.json for the notes remote + repo roster.
+    const ctxWarnings = await withSpan("ensureUserContext", async () => {
+      return await ensureUserContext(opts.createdBy, opts.vault ?? "default").catch(
+        (e: any) => { console.warn(`[loopat] ensureUserContext(${opts.createdBy}): ${e?.message ?? e}`); return [`context init failed: ${e?.message ?? e}`] },
+      )
+    })
+    if (ctxWarnings.length) meta.contextWarnings = ctxWarnings
+
+    if (opts.repo) {
+      await withSpan("ensureRepoMirror", async () => {
+        const userSsh = sshCommandForUser(opts.createdBy, opts.vault ?? "default")
+        const repoPath = await ensureRepoMirror(opts.createdBy, opts.repo!, userSsh)
+        if (!repoPath) {
+          throw new Error(`repo "${opts.repo}" not found / clone failed`)
+        }
+        const branch = `loop/${(await shortBranchSlug(meta.title))}-${id.slice(0, 6)}`
+        try {
+          // Open the loop branch off origin/<default> so the worktree has
+          // a real tracking ref and git rebase / status work normally.
+          const start = await remoteStartPoint(repoPath, userSsh)
+          const addArgs = start
+            ? ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id), start]
+            : ["-C", repoPath, "worktree", "add", "-b", branch, loopWorkdir(id)]
+          await execFileP("git", addArgs)
+          meta.repo = opts.repo
+          meta.branch = branch
+        } catch (e: any) {
+          console.warn(`[loopat] git worktree add failed for repo=${opts.repo}: ${e?.stderr ?? e?.message}`)
+          await mkdir(loopWorkdir(id), { recursive: true })
+        }
+      })
+    } else {
       await mkdir(loopWorkdir(id), { recursive: true })
     }
-  } else {
-    await mkdir(loopWorkdir(id), { recursive: true })
-  }
 
-  // (ensureUserContext already ran above, before the workdir clone.)
-  await ensureContextMounts(id, effectiveDriver(meta))
-  await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
-  return meta
+    await withSpan("ensureContextMounts", async () => {
+      await ensureContextMounts(id, effectiveDriver(meta))
+    })
+
+    await writeFile(loopMetaPath(id), JSON.stringify(meta, null, 2))
+    return meta
+  })
 }
 
 /**

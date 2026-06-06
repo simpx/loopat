@@ -14,6 +14,7 @@ import { effectiveDriver, getLoop, loopEphemeralPorts, patchLoopMeta } from "./l
 import { spawn as nodeSpawn } from "node:child_process"
 import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus, setLoopPhase } from "./loop-status"
+import { tracer, withSpan } from "./tracer"
 
 // Tests override LOOPAT_CLAUDE_BIN to point at a mock binary (a script that
 // reads stream-json from stdin and writes canned messages back) so we can
@@ -365,6 +366,8 @@ class LoopSession {
 
   private async ensureStarted() {
     if (this.q) return
+    return withSpan("ensureStarted", async (rootSpan) => {
+    rootSpan.setAttribute("loop.id", this.id.slice(0, 8))
     const shouldContinue = await hasPriorSdkSession(this.id)
     const meta = await getLoop(this.id)
     if (!meta) {
@@ -374,10 +377,13 @@ class LoopSession {
     // all follow this user, not the immutable createdBy. Updated by the
     // /api/loops/:id/drive handoff endpoint; next spawn picks it up here.
     const driver = effectiveDriver(meta)
-    const resolved = await this.resolveProvider(meta, [
-      this.providerOverride,
-      meta.config?.default_model,
-    ], true)
+
+    const resolved = await withSpan("resolveProvider", async () => {
+      return await this.resolveProvider(meta, [
+        this.providerOverride,
+        meta.config?.default_model,
+      ], true)
+    })
     if (!resolved) {
       throw new Error(`no provider with a valid apiKey for vault "${meta.config?.vault ?? "default"}" — set one in personal/${driver}/.loopat/vaults/${meta.config?.vault ?? "default"}/envs/`)
     }
@@ -390,47 +396,26 @@ class LoopSession {
     // Compose runs ONCE at loop creation (loops.ts:createLoop). At spawn we
     // only re-compose if the snapshot is missing — this happens for loops
     // created before the snapshot model landed, and self-heals on first spawn.
-    //
-    // The "compose once and freeze" semantics is what makes principle 1
-    // (old loops never change) work: subsequent admin pushes to knowledge
-    // don't affect a loop that's already been materialized.
     const composedSettingsPath = join(loopClaudeDir(loopId), "settings.json")
     if (!existsSync(composedSettingsPath)) {
       await composeLoopClaudeConfig(loopId, driver, meta.config?.profiles)
     }
-    // Ensure host CC has every marketplace registered + every enabled plugin
-    // installed. We don't need the resolved paths (sandbox sees host
-    // ~/.claude/plugins/ via a wholesale ro-bind in bwrap, and the inner SDK
-    // resolves enabledPlugins natively from settings.json). This is purely
-    // side-effectful: drive `claude plugin marketplace add/remove` +
-    // `claude plugin install` as needed. See plugin-installer.ts.
-    await ensureLoopPluginsInstalled(loopId)
 
-    // Nuke CC's MCP-related cache files that linger across spawns:
-    //   `.credentials.json`         — CC's ephemeral OAuth state.
-    //   `mcp-needs-auth-cache.json` — CC's "this server needs auth" short-circuit.
-    // Tokens flow through vault envs/MCP_*_TOKEN now, substituted into the
-    // workspace `mcpServers[*].headers.Authorization` template by the spawned
-    // binary at startup. Stale CC cache files would shortcircuit that, so we
-    // clear them every spawn.
+    await withSpan("ensurePlugins", () => ensureLoopPluginsInstalled(loopId))
+
+    // Nuke CC's MCP-related cache files that linger across spawns.
+    // Tokens flow through vault envs now; stale cache would shortcircuit that.
     for (const f of [".credentials.json", "mcp-needs-auth-cache.json"]) {
       try {
         await rm(join(loopClaudeDir(loopId), f), { force: true })
       } catch {}
     }
 
-    // mcpServers come straight from the merged settings.json (workspace +
-    // profiles + personal — compose wrote it to loops/<id>/.claude/settings.json
-    // above). Any `${VAR}` references in headers / env are substituted by the
-    // spawned claude binary against its own process env — which inherits the
-    // vault envs we inject into extraEnv below.
     const mergedSettingsPath = join(loopClaudeDir(loopId), "settings.json")
     let mcpServers: Record<string, any> = {}
     if (existsSync(mergedSettingsPath)) {
       try {
         const merged = JSON.parse(await readFile(mergedSettingsPath, "utf8"))
-        // Strip loopat-only inline metadata (e.g. `x-loopat-resource`, used by
-        // the MCP setup UI) so the SDK / CC only sees standard MCP fields.
         mcpServers = Object.fromEntries(
           Object.entries((merged.mcpServers ?? {}) as Record<string, any>).map(([name, srv]) => {
             if (srv && typeof srv === "object") {
@@ -447,9 +432,7 @@ class LoopSession {
     }
 
     // Build sandbox env. Order matters: vault envs first (so the spawned binary
-    // can substitute ${VAR} in mcpServers headers passed via SDK options),
-    // then platform-controlled vars (which can't be overridden by a stray
-    // vault env file).
+    // can substitute ${VAR} in mcpServers headers), then platform-controlled vars.
     const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
     const extraEnv: Record<string, string> = {
       ...personalCfg.vaultEnvs,
@@ -477,33 +460,26 @@ class LoopSession {
     if (contextTokenOverride && contextTokenOverride > 0) {
       extraEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(contextTokenOverride)
     }
-    // Mise toolchain: baked into the per-loop image at ensureLoopImage
-    // build time. The image's ENV puts /opt/loopat-mise/shims on PATH, so
-    // every process inside the container (SDK + PTY) finds the right
-    // toolchain — no host-side activation needed here.
-    //
+
     // Ensure the per-loop podman container exists and is running. Idempotent:
-    // if the container is already up with the same config-hash, no-op. Both
-    // this SDK driver AND the PTY (term.ts) call ensureContainer with the
-    // same options, so they end up sharing one container (same PID / Mount /
-    // IPC namespace) — that's the whole point of the podman refactor.
-    // Mirrors term.ts: only raise the `preparing` gate once a build/pull
-    // actually emits progress; clear it to `ready` once the container is up.
+    // if the container is already up with the same config-hash, no-op.
     let building = false
-    await ensureContainer({
-      loopId,
-      createdBy: driver,
-      vaultName: meta.config?.vault,
-      knowledgeRw: meta.config?.knowledge_rw,
-      mountAllLoops: meta.config?.mount_all_loops,
-      repo: meta.repo,
-      extraEnv,
-      ephemeralPorts: loopEphemeralPorts(meta),
-    }, {
-      onProgress: (msg) => {
-        if (!building) { building = true; setLoopPhase(loopId, "preparing") }
-        updateLoopStatus(loopId, msg)
-      },
+    await withSpan("ensureContainer", async () => {
+      await ensureContainer({
+        loopId,
+        createdBy: driver,
+        vaultName: meta.config?.vault,
+        knowledgeRw: meta.config?.knowledge_rw,
+        mountAllLoops: meta.config?.mount_all_loops,
+        repo: meta.repo,
+        extraEnv,
+        ephemeralPorts: loopEphemeralPorts(meta),
+      }, {
+        onProgress: (msg) => {
+          if (!building) { building = true; setLoopPhase(loopId, "preparing") }
+          updateLoopStatus(loopId, msg)
+        },
+      })
     })
     if (building) setLoopPhase(loopId, "ready")
     updateLoopStatus(loopId, "Ready")
@@ -769,6 +745,7 @@ class LoopSession {
       },
     })
     this.consume(this.q)
+    }) // end withSpan("ensureStarted")
   }
 
   private async consume(q: Query) {

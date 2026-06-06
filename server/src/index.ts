@@ -1,3 +1,4 @@
+import "./tracer"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { createBunWebSocket } from "hono/bun"

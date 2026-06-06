@@ -13,7 +13,11 @@
     "@scalar/hono-api-reference": "^0.10.19",
     "bun-pty": "^0.4.8",
     "hono": "^4.12.18",
-    "smol-toml": "^1.6.1"
+    "smol-toml": "^1.6.1",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-trace-node": "^1.30.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
+    "@opentelemetry/resources": "^1.30.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
