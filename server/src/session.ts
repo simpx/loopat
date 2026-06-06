@@ -7,13 +7,13 @@ import { join } from "node:path"
 import { loopClaudeDir, loopDir, loopHistoryPath, personalSkillsDir, workspaceTeamSkillsDir } from "./paths"
 import { appendLoopUsage, appendLoopUsageClear, insertUsageDb, type UsageEntry } from "./usage"
 import { resolveSandboxClaudeBinary } from "./claude-binary"
-import { loadConfig, loadPersonalConfig, parseDefault, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, parseDefault, pickProvider, type ProviderConfig } from "./config"
 import { buildLoopatAppend } from "./system-prompt"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLUGIN_PATH } from "./plugin-installer"
 import { effectiveDriver, getLoop, loopEphemeralPorts, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
-import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
+import { ensureContainer, buildPodmanExecArgs, buildLoopEnv, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
 import { updateLoopStatus, setLoopPhase } from "./loop-status"
 import { tracer, withSpan } from "./tracer"
 import { SpanStatusCode, type Span } from "@opentelemetry/api"
@@ -48,39 +48,9 @@ async function readSkillDescription(skillsDir: string, skillName: string): Promi
   }
 }
 
-/**
- * Pick a provider from personal + workspace configs given a candidate list,
- * applying the priority order:
- *   1. explicit candidates (caller-supplied: WS override, loop.meta.config)
- *   2. personal config's `default` field
- *   3. workspace config's `default` field
- *   4. enumeration (personal first, then workspace)
- *
- * `requireKey=true` skips providers with empty apiKey and keeps walking.
- * Returns null when no match found. Pure function; tests use it directly.
- */
-export function pickProvider(
-  pCfg: { default: string; providers: Record<string, ProviderConfig> },
-  wCfg: { default?: string; providers?: Record<string, ProviderConfig> },
-  candidateNames: (string | null | undefined)[],
-  requireKey: boolean,
-): { name: string; provider: ProviderConfig } | null {
-  const names = [
-    ...candidateNames,
-    pCfg.default ? parseDefault(pCfg.default).providerName : undefined,
-    wCfg.default ? parseDefault(wCfg.default).providerName : undefined,
-    ...Object.keys(pCfg.providers),
-    ...Object.keys(wCfg.providers ?? {}),
-  ].filter(Boolean) as string[]
-  const seen = new Set<string>()
-  for (const name of names) {
-    if (seen.has(name)) continue
-    seen.add(name)
-    const p = pCfg.providers[name] ?? wCfg.providers?.[name]
-    if (p && (!requireKey || p.apiKey)) return { name, provider: p }
-  }
-  return null
-}
+// pickProvider moved to config.ts to avoid circular deps (podman.ts also needs it).
+// Re-exported here for backward compat with tests that import from session.
+export { pickProvider } from "./config"
 
 /**
  * Mirror cli's ff(): explicit override wins; otherwise [1m] tag → 1M;
@@ -279,25 +249,14 @@ class LoopSession {
   }
 
   /**
-   * Set the active provider. Takes effect on the next user message — the
-   * current claude-binary child (if any) is interrupted and torn down so
-   * `ensureStarted` re-spawns it with the new provider's env (baseUrl /
-   * apiKey / model). Conversation history is preserved via `--continue`,
-   * which reads the existing SDK jsonl on disk, so the swap is transparent
-   * to the user beyond the brief pause.
-   *
-   * Always returns true — provider switching is unconditional. The setter
-   * is fire-and-forget; the interrupt runs in the background, and the next
-   * sendUserText awaits the freshly-null `q` and re-enters ensureStarted.
-   *
-   * The pushIterable is also reset: the old `Query` is still holding the
-   * old iter, so a fresh push would race the dying-but-not-dead loop. The
-   * new query takes a brand-new iter; the orphaned iter is GC'd when the
-   * old Query's internal loop unwinds.
+   * Set the active provider. Takes effect on the next user message — each
+   * turn spawns a fresh claude binary via `ensureStarted`, which calls
+   * `buildLoopEnv` with the current `providerOverride`. No need to
+   * interrupt the running turn; the new provider applies naturally when
+   * the current response finishes and the next message triggers a new spawn.
    */
   setProvider(name: string | null) {
     this.providerOverride = name
-    this.restartOnNextMessage()
     return true
   }
 
@@ -440,36 +399,15 @@ class LoopSession {
       }
     }
 
-    // Build sandbox env. Order matters: vault envs first (so the spawned binary
-    // can substitute ${VAR} in mcpServers headers), then platform-controlled vars.
-    const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
-    const extraEnv: Record<string, string> = {
-      ...personalCfg.vaultEnvs,
-      ANTHROPIC_API_KEY: provider.apiKey,
-      ANTHROPIC_BASE_URL: provider.baseUrl,
-      CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
-    }
-    // Tell CC when to auto-compact for gateway-routed / non-claude models
-    // whose context window CC can't auto-detect. CLAUDE_CODE_AUTO_COMPACT_WINDOW
-    // sets the compact trigger threshold without disabling compaction itself.
-    // (DISABLE_COMPACT + CLAUDE_CODE_MAX_CONTEXT_TOKENS disables ALL compaction
-    // — auto AND manual — which causes "Prompt is too long" on long sessions.)
-    let modelId: string | undefined = meta.config?.default_model_id
-    if (!modelId) {
-      const pCfg = await loadPersonalConfig(driver, meta.config?.vault)
-      const defaultParsed = parseDefault(pCfg.default)
-      if (defaultParsed.modelId && defaultParsed.providerName === providerName) {
-        modelId = defaultParsed.modelId
-      }
-    }
-    const activeModel = (modelId ? provider.models.find(m => m.id === modelId) : undefined)
-      ?? provider.models.find(m => m.enabled !== false)
-      ?? provider.models[0]
-    const contextTokenOverride = activeModel?.maxContextTokens ?? provider.maxContextTokens
-    if (contextTokenOverride && contextTokenOverride > 0) {
-      extraEnv.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(contextTokenOverride)
-    }
-
+    // Unified env for the loop — same for SDK and PTY. buildLoopEnv resolves
+    // vault secrets, provider credentials, CC config dir, and compact threshold.
+    const extraEnv = await buildLoopEnv({
+      loopId,
+      driver,
+      vault: meta.config?.vault,
+      providerOverride: this.providerOverride ?? meta.config?.default_model,
+      modelIdOverride: meta.config?.default_model_id,
+    })
     // Ensure the per-loop podman container exists and is running. Idempotent:
     // if the container is already up with the same config-hash, no-op.
     let building = false
@@ -496,10 +434,12 @@ class LoopSession {
     const claudeBinary = getClaudeBinary()
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
-      console.error(`[sdk:${tag}] config: provider=${providerName} model=${activeModel?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
+      console.error(`[sdk:${tag}] config: provider=${providerName} model=${resolved?.provider.models[0]?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
       console.error(`[sdk:${tag}] config: binary=${claudeBinary}`)
     }
+
+    const activeModel = provider.models.find(m => m.enabled !== false) ?? provider.models[0]
 
     this.q = query({
       prompt: this.input.iter,
@@ -507,9 +447,7 @@ class LoopSession {
         cwd: V_LOOP_WORKDIR(loopId),
         env: {
           ...process.env,
-          CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(loopId),
-          ANTHROPIC_API_KEY: provider.apiKey,
-          ANTHROPIC_BASE_URL: provider.baseUrl,
+          ...extraEnv,
         },
         model: activeModel?.id ?? "",
         permissionMode: this.currentPermissionMode,

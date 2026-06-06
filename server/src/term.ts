@@ -2,10 +2,9 @@ import { spawn, type IPty } from "bun-pty"
 import type { WSContext } from "hono/ws"
 import { mkdir, chmod } from "node:fs/promises"
 import { join } from "node:path"
-import { ensureContainer, buildPodmanExecArgs, markActive, markInactive, V_LOOP_WORKDIR, getLoopWarning } from "./podman"
+import { ensureContainer, buildPodmanExecArgs, buildLoopEnv, markActive, markInactive, V_LOOP_WORKDIR, getLoopWarning } from "./podman"
 import { updateLoopStatus, setLoopPhase } from "./loop-status"
 import { effectiveDriver, getLoop, loopEphemeralPorts } from "./loops"
-import { loadPersonalConfig } from "./config"
 import { withSpan } from "./tracer"
 
 type Term = {
@@ -37,7 +36,6 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     const meta = await getLoop(loopId)
     if (!meta) throw new Error(`loop ${loopId} not found`)
     const driver = effectiveDriver(meta)
-    const personalCfg = await loadPersonalConfig(driver, meta.config?.vault)
 
     // Inner shell: fish, baked into the sandbox image — no per-user override
     // (the base image ships a good interactive shell so users don't configure it).
@@ -62,6 +60,12 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
     // Only flips `preparing` on once a build/pull actually emits progress —
     // a warm loop (image cached) never fires onProgress, so the UI shows no
     // gate. After ensureContainer returns we clear it back to `ready`.
+    const loopEnv = await buildLoopEnv({
+      loopId,
+      driver,
+      vault: meta.config?.vault,
+    })
+
     let building = false
     await ensureContainer({
       loopId,
@@ -70,7 +74,7 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       repo: meta.repo,
-      extraEnv: personalCfg.vaultEnvs,
+      extraEnv: loopEnv,
       ephemeralPorts: loopEphemeralPorts(meta),
     }, {
       onProgress: (msg) => {
@@ -87,7 +91,7 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       command: "/bin/bash",
       args: ["-c", innerCmd],
       env: {
-        ...personalCfg.vaultEnvs,
+        ...loopEnv,
         TERM: "xterm-256color",
         XDG_DATA_HOME: fishData,
         XDG_RUNTIME_DIR: fishRuntime,

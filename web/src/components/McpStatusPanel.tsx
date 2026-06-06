@@ -11,12 +11,11 @@
  * indistinguishable from other vault envs (per design).
  */
 import { useCallback, useEffect, useState } from "react"
-import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, RotateCw, ExternalLink, KeyRound } from "lucide-react"
+import { Check, AlertTriangle, RefreshCw, Link2, Unlink, X, ExternalLink, KeyRound } from "lucide-react"
 import {
   startMcpAuth,
   listMcpServers,
   deleteEnv,
-  restartLoopSession,
   parseMcpSetup,
   type McpServerEntry,
 } from "@/api"
@@ -34,7 +33,6 @@ export function McpStatusPanel({
   const [loading, setLoading] = useState(true)
   const [busyFor, setBusyFor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [reloadFlash, setReloadFlash] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -75,20 +73,6 @@ export function McpStatusPanel({
     return null
   }
 
-  const reloadSession = async () => {
-    setReloadFlash(null)
-    const r = await restartLoopSession(loopId)
-    if (r.error) {
-      setError(r.error)
-    } else {
-      setReloadFlash(
-        r.restarted
-          ? "Loop SDK session restarted. Send a message to re-spawn with new MCP tokens."
-          : "No active SDK session — next message will spawn fresh.",
-      )
-    }
-  }
-
   return (
     <div className="text-sm">
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
@@ -106,12 +90,6 @@ export function McpStatusPanel({
       {error && (
         <div className="mx-3 mt-3 rounded px-3 py-2 text-[12px] bg-red-50 text-red-800 border border-red-200">
           {error}
-        </div>
-      )}
-
-      {reloadFlash && (
-        <div className="mx-3 mt-3 rounded px-3 py-2 text-[12px] bg-blue-50 text-blue-800 border border-blue-200">
-          {reloadFlash}
         </div>
       )}
 
@@ -138,15 +116,6 @@ export function McpStatusPanel({
         )}
       </div>
 
-      <div className="border-t border-gray-200 px-3 py-2 flex items-center justify-end text-[11px]">
-        <button
-          onClick={reloadSession}
-          className="text-gray-600 hover:text-gray-900 flex items-center gap-1"
-          title="Restart the SDK session so newly-connected MCPs take effect. Conversation history is preserved."
-        >
-          <RotateCw size={10} /> Reload session
-        </button>
-      </div>
     </div>
   )
 }

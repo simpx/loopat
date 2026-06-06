@@ -59,7 +59,7 @@ import {
   loopDir,
   personalVaultMountsHomeDir,
 } from "./paths"
-import { loadConfig } from "./config"
+import { loadConfig, loadPersonalConfig, parseDefault, pickProvider, type ProviderConfig } from "./config"
 import { DEFAULT_VAULT, listVaultHomeMounts } from "./vaults"
 import { hostExecDir, writeHostShims } from "./host-exec"
 import { resolveSandboxClaudeBinary } from "./claude-binary"
@@ -378,6 +378,58 @@ export async function buildContainerEnv(opts: ContainerOptions): Promise<Record<
 }
 
 /**
+ * Build the unified env for a loop — used by BOTH SDK (session.ts) and PTY
+ * (term.ts). Every process inside the container sees the same env: vault
+ * secrets, provider credentials, CC config dir, compact threshold.
+ *
+ * Callers may layer terminal-only vars (TERM, XDG_*) on top at exec time.
+ */
+export async function buildLoopEnv(opts: {
+  loopId: string
+  driver: string
+  vault?: string
+  providerOverride?: string | null
+  modelIdOverride?: string
+}): Promise<Record<string, string>> {
+  const pCfg = await loadPersonalConfig(opts.driver, opts.vault)
+  const wCfg = await loadConfig()
+  const resolved = pickProvider(pCfg, wCfg, [opts.providerOverride], true)
+
+  const env: Record<string, string> = {
+    ...pCfg.vaultEnvs,
+    CLAUDE_CONFIG_DIR: V_LOOP_CLAUDE(opts.loopId),
+  }
+
+  if (resolved) {
+    env.ANTHROPIC_API_KEY = resolved.provider.apiKey
+    env.ANTHROPIC_BASE_URL = resolved.provider.baseUrl
+
+    let modelId = opts.modelIdOverride
+    if (!modelId) {
+      const defaultParsed = parseDefault(pCfg.default)
+      if (defaultParsed.modelId && defaultParsed.providerName === resolved.name) {
+        modelId = defaultParsed.modelId
+      }
+    }
+    const activeModel = (modelId ? resolved.provider.models.find(m => m.id === modelId) : undefined)
+      ?? resolved.provider.models.find(m => m.enabled !== false)
+      ?? resolved.provider.models[0]
+    const contextTokenOverride = activeModel?.maxContextTokens ?? resolved.provider.maxContextTokens
+    if (contextTokenOverride && contextTokenOverride > 0) {
+      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(contextTokenOverride)
+    }
+  }
+
+  // Override legacy env vars that old containers may carry from a prior code
+  // version. Empty string is falsy in JS, effectively unsetting them at
+  // podman exec time without needing to recreate the container.
+  env.DISABLE_COMPACT = ""
+  env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = ""
+
+  return env
+}
+
+/**
  * Build the `podman create` argv (after "podman create"). The container is
  * named, labeled with the loop id + a config-hash so we can detect spec
  * drift and recreate when needed.
@@ -456,8 +508,6 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     args.push("-p", `:${ep.internalPort}${proto}`)
   }
 
-  // Config hash. Covers mounts + opts but NOT env — see hashCreateArgs
-  // doc for why.
   const hash = hashCreateArgs(mounts, opts)
   args.push("--label", `${LABEL_CONFIG_HASH}=${hash}`)
 
@@ -470,17 +520,11 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
 }
 
 /**
- * Config hash: covers everything that, if changed, would require recreating
- * the container — mounts + loop-scoped opts. Deliberately EXCLUDES the env
- * map because different callers (term.ts / session.ts) legitimately pass
- * different extraEnv (PTY doesn't need ANTHROPIC_API_KEY; SDK does). If we
- * hashed env, those callers would force-recreate the container on every
- * activity flip, killing each other's exec'd processes with SIGKILL (the
- * actual bug behind "PTY exits 137 the moment a chat starts").
- *
- * Env still lands in `podman create --env` for convenience (so an exec
- * without explicit env inherits something sane), but the values that
- * actually matter at runtime should be passed at exec time anyway.
+ * Config hash: covers mounts + loop-scoped opts. Deliberately EXCLUDES env
+ * — env changes take effect on next session restart (podman exec --env),
+ * not via container recreation. The container is a long-lived shell; env
+ * is injected per-exec, matching CC's behavior where env changes need an
+ * explicit restart to take effect.
  */
 function hashCreateArgs(
   mounts: VolumeMount[],
@@ -496,8 +540,6 @@ function hashCreateArgs(
   for (const m of [...mounts].sort((a, b) => a.dst.localeCompare(b.dst))) {
     h.update(`vol\t${m.src}\t${m.dst}\t${m.ro ? "ro" : "rw"}\n`)
   }
-  // Ephemeral port set is part of create-args — must invalidate hash so
-  // toggling share rebuilds the container with new `-p` flags.
   for (const ep of [...(opts.ephemeralPorts ?? [])].sort((a, b) => a.internalPort - b.internalPort)) {
     h.update(`epport\t${ep.internalPort}\t${ep.protocol ?? "tcp"}\n`)
   }
