@@ -239,6 +239,20 @@ export function convertMessage(raw: RawMsg) {
         type: "text",
         text: `---\n*Context cleared${stamp ? ` ${stamp}` : ""}*\n---`,
       })
+    } else if (b?.type === "compact-divider") {
+      const meta = (b as any).compact_metadata
+      const trigger = meta?.trigger === "manual" ? "manual" : "auto"
+      const pre = meta?.pre_tokens
+      const post = meta?.post_tokens
+      const dur = meta?.duration_ms
+      const tokenInfo = (typeof pre === "number" && typeof post === "number")
+        ? ` ${(pre / 1000).toFixed(0)}K → ${(post / 1000).toFixed(0)}K tokens`
+        : ""
+      const durInfo = typeof dur === "number" ? ` · ${(dur / 1000).toFixed(1)}s` : ""
+      parts.push({
+        type: "text",
+        text: `---\n*Context compacted (${trigger})${tokenInfo}${durInfo}*\n---`,
+      })
     } else if (b?.type === "thinking") {
       parts.push({
         type: "reasoning",
@@ -1235,6 +1249,28 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
             setTaskVersion((v) => v + 1)
             return
           }
+          // system/compact_boundary — SDK finished compacting the context.
+          // Replace the "Compacting..." placeholder (if any) with a final
+          // divider showing token stats. Same visual pattern as clear-boundary.
+          if (subtype === "compact_boundary") {
+            const meta = m.compact_metadata
+            if (meta && typeof meta.post_tokens === "number") {
+              contextTokensRef.current = meta.post_tokens
+              setContextTokensVersion((v) => v + 1)
+            }
+            setRaw((prev) => {
+              const without = prev.filter((r) => !(r as any)._compacting)
+              return [
+                ...without,
+                {
+                  id: freshId("compact"),
+                  role: "assistant",
+                  content: [{ type: "compact-divider", compact_metadata: meta ?? {} } as any],
+                },
+              ]
+            })
+            return
+          }
           // system/init — start running; also cache the slash-command catalog
           // advertised by CC (built-ins + skills + plugin commands like
           // "loopat:onboarding").
@@ -1419,6 +1455,20 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
             { id: freshId("e"), role: "assistant", content: [{ type: "text", text: `⚠️ ${m.message ?? "error"}` }] },
           ])
           if (!loadingHistoryRef.current) setRunning(false)
+        } else if (m?.type === "compacting") {
+          // PreCompact hook fired — compaction is about to start. Show a
+          // live "Compacting..." indicator in the chat stream. The matching
+          // compact_boundary (system subtype) will follow when it finishes,
+          // at which point we replace this with the final divider.
+          setRaw((prev) => [
+            ...prev,
+            {
+              id: freshId("compacting"),
+              role: "assistant",
+              content: [{ type: "text", text: `⏳ *Compacting context…*` }],
+              _compacting: true,
+            } as any,
+          ])
         } else if (m?.type === "clear-boundary") {
           // Context dropped — reset the context-window snapshot.
           contextTokensRef.current = 0

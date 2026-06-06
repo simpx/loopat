@@ -629,6 +629,13 @@ class LoopSession {
         // behavior — the hook fires on session-end and blocks the stop while
         // goal-related tasks are still running.
         hooks: {
+          PreCompact: [{
+            hooks: [async (input) => {
+              const trigger = (input as any).trigger ?? "auto"
+              this.broadcast({ type: "compacting", trigger, ts: new Date().toISOString() })
+              return {}
+            }],
+          }],
           Stop: [{
             hooks: [async (input) => {
               const si = input as StopHookInput
