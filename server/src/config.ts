@@ -97,6 +97,11 @@ export type ProviderConfigDisk = {
   models?: ModelEntryDisk[]
   baseUrl: string
   apiKey?: string
+  /** Which HTTP auth header the resolved key is sent as. "bearer" →
+   *  Authorization: Bearer (ANTHROPIC_AUTH_TOKEN); default/omitted →
+   *  x-api-key (ANTHROPIC_API_KEY). Needed for Anthropic-compatible
+   *  gateways (e.g. corporate reverse proxies) that only accept Bearer. */
+  authScheme?: "bearer"
   enabled?: boolean
 }
 
@@ -105,6 +110,9 @@ export type ProviderConfig = {
   models: ModelEntry[]
   baseUrl: string
   apiKey: string
+  /** See ProviderConfigDisk.authScheme. Selects which auth env var the
+   *  resolved apiKey is injected as at spawn time. */
+  authScheme?: "bearer"
   enabled: boolean
 }
 
@@ -510,6 +518,7 @@ export async function loadPersonalConfig(
       models,
       baseUrl: p.baseUrl,
       apiKey,
+      ...(p.authScheme === "bearer" ? { authScheme: "bearer" as const } : {}),
       enabled: p.enabled !== false,
     }
   }
@@ -674,6 +683,9 @@ export async function savePersonalDisk(
       }
       if (p.apiKey !== undefined && typeof p.apiKey !== "string" && !(typeof p.apiKey === "object" && typeof (p.apiKey as any).vault === "string")) {
         return { ok: false, error: `provider "${name}" apiKey must be a string or { vault }` }
+      }
+      if (p.authScheme !== undefined && p.authScheme !== "bearer") {
+        return { ok: false, error: `provider "${name}" authScheme must be "bearer" if set` }
       }
     }
     const defName = patch.providers.default
