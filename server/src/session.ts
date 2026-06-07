@@ -987,7 +987,7 @@ class LoopSession {
         .flatMap((m: any) => m.message?.content ?? m.content ?? [])
         .find((b: any) => b?.type === "text")?.text ?? ""
 
-      generateTitle(baseUrl, apiKey, model, userText, assistantText)
+      generateTitle(baseUrl, apiKey, model, userText, assistantText, this.resolvedProvider!.authScheme)
         .then(async (title) => {
           if (!title) return
           const current = await getLoop(loopId)

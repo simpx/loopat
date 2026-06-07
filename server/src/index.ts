@@ -57,6 +57,7 @@ import {
   loopsDir,
 } from "./paths"
 import { loadConfig, loadPersonalConfig, savePersonalConfig, saveWorkspaceConfig, getActiveProvider, readPersonalDiskRaw, savePersonalDisk, describeApiKeyRef, writeVaultEnv, deleteVaultEnv, loadA2AConfig, saveA2AConfig, type ProviderConfig, type ModelEntry } from "./config"
+import { buildAuthHeaders } from "./auto-title"
 import { queryUserTokenUsage, queryWorkspaceTokenUsage, queryDailyTokenUsage, queryLoopTokenUsage } from "./usage"
 import { createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
@@ -296,23 +297,28 @@ app.get("/api/providers", requireAuth, async (c) => {
 // key server-side (so tests work for stored/encrypted keys without re-typing).
 app.post("/api/providers/test", requireAuth, async (c) => {
   const body = await c.req.json().catch(() => ({}))
-  const { baseUrl, apiKey: rawApiKey, model, provider, source } = body
+  const { baseUrl, apiKey: rawApiKey, model, provider, source, authScheme: rawAuthScheme } = body
   if (typeof baseUrl !== "string" || !baseUrl) return c.json({ ok: false, error: "baseUrl required" }, 400)
   if (typeof model !== "string" || !model) return c.json({ ok: false, error: "model required" }, 400)
 
   let apiKey = typeof rawApiKey === "string" ? rawApiKey.trim() : ""
+  let authScheme: "bearer" | undefined = rawAuthScheme === "bearer" ? "bearer" : undefined
   // Resolve key server-side when a stored (encrypted) key is being tested
   if (!apiKey && typeof provider === "string" && provider) {
     if (source === "personal") {
       const userId = c.get("userId") as string
       try {
         const pCfg = await loadPersonalConfig(userId)
-        apiKey = pCfg.providers[provider]?.apiKey ?? ""
+        const prov = pCfg.providers[provider]
+        apiKey = prov?.apiKey ?? ""
+        if (!authScheme) authScheme = prov?.authScheme
       } catch {}
     } else if (source === "workspace") {
       try {
         const wCfg = await loadConfig()
-        apiKey = (wCfg.providers?.[provider] as any)?.apiKey ?? ""
+        const prov = (wCfg.providers?.[provider] as any)
+        apiKey = prov?.apiKey ?? ""
+        if (!authScheme) authScheme = prov?.authScheme === "bearer" ? "bearer" : undefined
       } catch {}
     }
   }
@@ -323,8 +329,7 @@ app.post("/api/providers/test", requireAuth, async (c) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        ...buildAuthHeaders(apiKey, authScheme),
       },
       body: JSON.stringify({
         model,

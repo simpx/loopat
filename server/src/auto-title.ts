@@ -1,11 +1,19 @@
 const SYSTEM = "Generate a short title (3-8 words) for this conversation. Output only the title, nothing else. Do not use quotes."
 
+export function buildAuthHeaders(apiKey: string, authScheme?: "bearer"): Record<string, string> {
+  if (authScheme === "bearer") {
+    return { "Authorization": `Bearer ${apiKey}` }
+  }
+  return { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+}
+
 export async function generateTitle(
   baseUrl: string,
   apiKey: string,
   model: string,
   userText: string,
   assistantText: string,
+  authScheme?: "bearer",
 ): Promise<string | null> {
   const snippet = [
     `User: ${userText.slice(0, 500)}`,
@@ -17,8 +25,7 @@ export async function generateTitle(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
+        ...buildAuthHeaders(apiKey, authScheme),
       },
       body: JSON.stringify({
         model,
