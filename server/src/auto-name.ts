@@ -16,10 +16,6 @@
  *   - No new dep: direct fetch() to provider.baseUrl/v1/messages. All loopat
  *     providers are Anthropic-compatible (that's how the CC binary talks to
  *     them via ANTHROPIC_BASE_URL).
- *   - `anthropic-beta: claude-code-20250219` + `user-agent: claude-code/*`
- *     headers are required for internal gateways (e.g. alibaba idealab) that
- *     UA-fingerprint Claude Code traffic. See team memory
- *     idealab-gateway-claude-code-ua.md.
  */
 import { readFile } from "node:fs/promises"
 import { getLoop, patchLoopMeta, listLoops } from "./loops"
@@ -115,7 +111,7 @@ ${firstUser}${assistantBlock}`
 const AUTH_FAILED = Symbol("auth_failed")
 
 async function callForTitle(provider: ProviderConfig, userPrompt: string): Promise<string | null | typeof AUTH_FAILED> {
-  const activeModel = provider.models.find((m) => m.enabled !== false) ?? provider.models[0]
+  const activeModel = provider.models[0]
   if (!activeModel?.id) return AUTH_FAILED
   const url = provider.baseUrl.replace(/\/+$/, "") + "/v1/messages"
   const ctrl = new AbortController()
@@ -126,9 +122,7 @@ async function callForTitle(provider: ProviderConfig, userPrompt: string): Promi
       headers: {
         "content-type": "application/json",
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "claude-code-20250219",
         "x-api-key": provider.apiKey,
-        "user-agent": "claude-code/1.0.0",
       },
       body: JSON.stringify({
         model: activeModel.id,
