@@ -1307,6 +1307,8 @@ export type ProviderDisk = {
   baseUrl: string
   /** Plain string; may contain `${VAR}` references resolved against vault envs/ at load. */
   apiKey?: string
+  /** "bearer" → Authorization: Bearer; omitted → x-api-key (default). */
+  authScheme?: "bearer"
   enabled?: boolean
 }
 

@@ -354,6 +354,7 @@ type ProvidersDraft = {
     enabled: boolean
     apiKeyNewValue: string
     apiKeyStored: boolean
+    bearerAuth: boolean
   }>
 }
 
@@ -400,6 +401,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
           enabled: p.enabled !== false,
           apiKeyNewValue: "",
           apiKeyStored: !!refInfo?.exists,
+          bearerAuth: p.authScheme === "bearer",
         }
       }
     }
@@ -507,7 +509,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       if (d.providers[n]) return d
       return { ...d, providers: { ...d.providers, [n]: {
         models: [], baseUrl: "", enabled: false,
-        apiKeyNewValue: "", apiKeyStored: false,
+        apiKeyNewValue: "", apiKeyStored: false, bearerAuth: false,
       } } }
     })
     setNewName("")
@@ -540,6 +542,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       providersOut[name] = {
         baseUrl: p.baseUrl,
         apiKey: `\${${providerEnvVarName(name)}}`,
+        ...(p.bearerAuth ? { authScheme: "bearer" as const } : {}),
         ...(models.length > 0 ? { models } : {}),
         ...(p.enabled ? {} : { enabled: false }),
       }
@@ -635,7 +638,21 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                     onChange={(e) => updateProv(name, { apiKeyNewValue: e.target.value })}
                     placeholder={p.apiKeyStored ? "•••••• stored encrypted in vault" : "paste API key"}
                     className={inputClass}
+                    autoComplete="new-password"
+                    data-1p-ignore
+                    data-lpignore="true"
+                    data-form-type="other"
                   />
+                </Labeled>
+                <Labeled label="Auth header" className="sm:col-span-2">
+                  <label className="flex items-center gap-2 select-none text-[12px] text-gray-600">
+                    <Switch
+                      checked={p.bearerAuth}
+                      onCheckedChange={(v) => updateProv(name, { bearerAuth: v })}
+                      size="sm"
+                    />
+                    Send key as <code className="text-[11px]">Authorization: Bearer</code> (for Anthropic-compatible gateways)
+                  </label>
                 </Labeled>
               </div>
 
@@ -802,6 +819,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                       enabled: false,
                       apiKeyNewValue: "",
                       apiKeyStored: false,
+                      bearerAuth: false,
                     },
                   },
                 }
