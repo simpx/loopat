@@ -460,8 +460,45 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
 
     const body = await c.req.json().catch(() => ({}))
     const content = typeof body.content === "string" ? body.content : ""
-    if (!content) return apiError(c, 400, "invalid_request_error", "missing_content", "content required")
     if (content.length > 1024 * 1024) return apiError(c, 400, "invalid_request_error", "content_too_large", "content exceeds 1 MB")
+
+    // ── Image attachments (optional) ──
+    const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+    const MAX_IMAGES = 5
+    const MAX_IMAGE_BASE64_LEN = Math.ceil(10 * 1024 * 1024 * 4 / 3) // 10 MB raw → ~13.3 MB base64
+    type ImageInput = { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string; filename?: string }
+    let images: ImageInput[] | undefined
+    if (Array.isArray(body.images) && body.images.length > 0) {
+      if (body.images.length > MAX_IMAGES) {
+        return apiError(c, 400, "invalid_request_error", "too_many_images", `images exceeds ${MAX_IMAGES} per message`)
+      }
+      const parsed: ImageInput[] = []
+      for (let i = 0; i < body.images.length; i++) {
+        const raw = body.images[i]
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return apiError(c, 400, "invalid_request_error", "image_data_invalid", `images[${i}] must be an object`)
+        }
+        const mt = (raw as any).mediaType
+        if (typeof mt !== "string" || !ALLOWED_MEDIA.has(mt)) {
+          return apiError(c, 400, "invalid_request_error", "unsupported_media_type",
+            `images[${i}].mediaType must be one of: ${[...ALLOWED_MEDIA].join(", ")}`)
+        }
+        const data = (raw as any).data
+        if (typeof data !== "string" || data.length === 0) {
+          return apiError(c, 400, "invalid_request_error", "image_data_invalid", `images[${i}].data required`)
+        }
+        if (data.length > MAX_IMAGE_BASE64_LEN) {
+          return apiError(c, 400, "invalid_request_error", "image_too_large", `images[${i}] exceeds 10 MB`)
+        }
+        const filename = typeof (raw as any).filename === "string" ? (raw as any).filename : undefined
+        parsed.push({ mediaType: mt as ImageInput["mediaType"], data, ...(filename ? { filename } : {}) })
+      }
+      images = parsed
+    }
+
+    if (!content && (!images || images.length === 0)) {
+      return apiError(c, 400, "invalid_request_error", "missing_content", "content or images required")
+    }
     const VALID_MODES = new Set(["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"])
     const permissionMode = typeof body.permission_mode === "string" && VALID_MODES.has(body.permission_mode)
       ? body.permission_mode as "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
@@ -470,7 +507,8 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
     // Idempotency check.
     sweepIdempotency()
     const idemKeyHeader = c.req.header("idempotency-key")
-    const reqHash = hashRequest(content)
+    const imagesSuffix = images ? "::" + images.map(i => i.mediaType + ":" + i.data.length).join("|") : ""
+    const reqHash = hashRequest(content + imagesSuffix)
     let idemRecord: IdempotencyRecord | undefined
     if (idemKeyHeader) {
       if (idemKeyHeader.length > 256) {
@@ -555,7 +593,7 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
       }, 15_000)
 
       if (!isReplay) {
-        session.sendUserText(content, permissionMode).catch(async (e: any) => {
+        session.sendUserText(content, permissionMode, images).catch(async (e: any) => {
           await emit({ event: "error", data: { code: "send_failed", message: e?.message ?? String(e) } })
           finishStream()
         })
