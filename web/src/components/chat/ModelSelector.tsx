@@ -42,10 +42,17 @@ export default function ModelSelector() {
     return result;
   }, [providers, search]);
 
-  // Reset selection when filter changes.
+  // On open / filter change, start the keyboard-highlight on the model the
+  // loop is *currently using* (the one marked with the dot), not blindly the
+  // first row — so the highlight block and the dot agree (no misleading
+  // "first model looks selected"). Falls back to the first row when the active
+  // model isn't in the (possibly filtered) list.
   useEffect(() => {
-    setSelectedIdx(0);
-  }, [search, open]);
+    const activeIdx = flatModels.findIndex(
+      (m) => m.provName === currentName && m.modelId === currentModel,
+    );
+    setSelectedIdx(activeIdx >= 0 ? activeIdx : 0);
+  }, [search, open, flatModels, currentName, currentModel]);
 
   // Scroll selected item into view.
   useEffect(() => {
