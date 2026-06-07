@@ -370,7 +370,12 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
       setCreating({ type: action === "new-file" ? "file" : "folder", path: node.path })
       setNewName("")
     } else if (action === "delete") {
-      if (!confirm(`Delete "${node.name}"?`)) return
+      const msg = isSecretFile(vault, node.path)
+        ? `Delete encrypted credential "${node.name}"? This cannot be undone.`
+        : isSecretsFolder(vault, node.path)
+          ? `Delete folder "${node.name}"? Only works if the folder is empty.`
+          : `Delete "${node.name}"?`
+      if (!confirm(msg)) return
       vaultDeleteFile(vault, node.path).then((r) => {
         if (r.ok) {
           setPickedPath((p) => p === node.path ? null : p)
@@ -383,8 +388,19 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
   }, [vault])
 
   const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
-    if (isSecretsFolder(vault, node.path)) return []
     if (node.type === "dir") {
+      if (isSecretsFolder(vault, node.path)) {
+        // Encrypted dir (vaults container, vault root, or any dir inside one):
+        // building out the credential tree is fine; Delete only succeeds when
+        // the dir is empty (server uses rmdir, not rm -rf) — that way users
+        // can clean up empty leftovers without nuking a whole credential
+        // bundle that's still wired into config.json.
+        return [
+          { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
+          { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
+          { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+        ]
+      }
       return [
         { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
         { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
