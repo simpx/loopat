@@ -381,9 +381,10 @@ async function _ensureUserContext(user: string, vault: string): Promise<string[]
   const cfg = await loadPersonalConfig(user, vault)
   const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
   // Clone-or-sync a PER-USER context main repo from `url` with the vault key.
-  // STRICT, per the context model: personal wins even when empty — an empty url
-  // means the dir is REMOVED so the loop sees nothing (no fallback to any
-  // workspace default). Returns whether the repo exists afterwards.
+  // STRICT for most repos: personal wins even when empty — an empty url means
+  // the dir is REMOVED so the loop sees nothing. Exception: knowledge.git falls
+  // back to workspace config when personal config has no knowledge field at all
+  // (legacy upgrade path). Returns whether the repo exists afterwards.
   const ensurePerUserRepo = async (dir: string, url: string | undefined, label: string): Promise<boolean> => {
     if (!url) {
       try { await rm(dir, { recursive: true, force: true }) } catch {}
@@ -419,12 +420,11 @@ async function _ensureUserContext(user: string, vault: string): Promise<string[]
   // knowledge is the entry pointer (personal-declared url); clone it first, then
   // read ITS .loopat/config.json for the notes remote. The repo roster is
   // personal (cfg.repos), no longer inside the knowledge repo.
-  // Since context repo resolution is now multi-hop (personal config -> knowledge.git
-  // -> notes + repos), legacy users upgrading to this version would need to manually
-  // edit personal config to set knowledge.git. For backward compatibility we fall
-  // back to ~/.loopat/config.json (the legacy workspace config).
+  // Legacy upgrade path: if personal config has no knowledge field at all,
+  // fall back to workspace config. An explicit empty string (knowledge.git: "")
+  // means the user opted out — do NOT fall back in that case.
   let knowledgeGit = cfg.knowledge?.git
-  if (!knowledgeGit) {
+  if (cfg.knowledge === undefined) {
     const wsCfg = await loadConfig()
     knowledgeGit = wsCfg.knowledge?.git || undefined
   }
