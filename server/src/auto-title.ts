@@ -19,6 +19,7 @@ export async function generateTitle(
         "Content-Type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "user-agent": "claude-cli/1.0.0",
       },
       body: JSON.stringify({
         model,

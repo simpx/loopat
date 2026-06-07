@@ -463,6 +463,7 @@ class LoopSession {
           ...extraEnv,
         },
         model: activeModel?.id ?? "",
+        thinking: { type: "adaptive" },
         settings: {
           ...(Object.keys(modelOverrides).length > 0 ? { modelOverrides } : {}),
           ...(autoCompactWindow && autoCompactWindow > 0 ? { autoCompactWindow } : {}),
