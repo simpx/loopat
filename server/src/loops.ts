@@ -3,7 +3,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, writeFile, 
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { existsSync, chmodSync, readFileSync, readdirSync } from "node:fs"
+import { existsSync, chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import {
   loopsDir,
@@ -1030,47 +1030,57 @@ function sshCommandForUser(userId: string, vault: string = "default"): string {
   const vaultHome = join(personalVaultDir(userId, vault), "mounts", "home")
   const sshDir = join(vaultHome, ".ssh")
 
-  const candidates = new Set<string>()
-
-  // Source 1: parse IdentityFile from vault config, rewrite ~ → vault home
   const configPath = join(sshDir, "config")
   if (existsSyncBase(configPath)) {
+    // Rewrite vault SSH config: resolve IdentityFile ~ and relative paths to
+    // absolute host-side paths. Everything else (Host/Match blocks, ProxyCommand,
+    // known_hosts, StrictHostKeyChecking) is preserved intact.
     try {
-      const lines = readFileSync(configPath, "utf8").split("\n")
-      for (const line of lines) {
-        const m = line.match(/^\s*IdentityFile\s+(.+)/)
-        if (!m) continue
-        const raw = m[1].trim()
-        if (raw.startsWith("~/")) candidates.add(join(vaultHome, raw.slice(2)))
-        else if (raw.startsWith("/")) candidates.add(raw)
-        else candidates.add(join(sshDir, raw))
-      }
-    } catch {}
+      const raw = readFileSync(configPath, "utf8")
+      const rewritten = raw.split("\n").map(line => {
+        const m = line.match(/^(\s*identityfile\s+)(.+)/i)
+        if (!m) return line
+        const p = m[2].trim()
+        let abs: string
+        if (p.startsWith("~/")) abs = join(vaultHome, p.slice(2))
+        else if (p.startsWith("/")) abs = p
+        else abs = join(sshDir, p)
+        if (existsSyncBase(abs)) try { chmodSync(abs, 0o600) } catch {}
+        return `${m[1]}${abs}`
+      }).join("\n")
+
+      const resolvedDir = join(tmpdir(), "loopat-ssh", userId, vault)
+      mkdirSync(resolvedDir, { recursive: true })
+      const resolvedConfig = join(resolvedDir, "config")
+      writeFileSync(resolvedConfig, rewritten, { mode: 0o600 })
+      return `ssh -F ${sq(resolvedConfig)}`
+    } catch (e) {
+      console.warn(`[loopat] failed to rewrite vault SSH config ${configPath}: ${e}`)
+    }
   }
 
-  // Source 2: glob id_* in vault .ssh/ (SSH standard defaults, covers vaults
-  // without a config or with a config that doesn't list every key)
+  // No config (or rewrite failed): discover id_* keys in vault .ssh/ directly
+  const keys: string[] = []
   try {
     for (const f of readdirSync(sshDir)) {
-      if (f.startsWith("id_") && !f.endsWith(".pub")) candidates.add(join(sshDir, f))
+      if (f.startsWith("id_") && !f.endsWith(".pub")) {
+        const p = join(sshDir, f)
+        if (existsSyncBase(p)) {
+          try { chmodSync(p, 0o600) } catch {}
+          keys.push(p)
+        }
+      }
     }
   } catch {}
 
-  // Filter to files that actually exist, chmod 0600 (git can't persist it)
-  const available: string[] = []
-  for (const k of candidates) {
-    if (!existsSyncBase(k)) continue
-    try { chmodSync(k, 0o600) } catch {}
-    available.push(k)
+  if (keys.length === 0) {
+    console.warn(`[loopat] no SSH keys found for vault ${vault} user ${userId}`)
+    return "ssh -o IdentitiesOnly=yes"
   }
-
-  if (available.length === 0) {
-    return `ssh -F /dev/null -o IdentitiesOnly=yes`
-  }
-
-  const identity = available.map(k => `-i ${k}`).join(" ")
-  return `ssh -F /dev/null ${identity} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null`
+  return `ssh ${keys.map(k => `-i ${sq(k)}`).join(" ")} -o IdentitiesOnly=yes`
 }
+
+function sq(s: string): string { return `'${s.replace(/'/g, "'\\''")}'` }
 
 /**
  * PERSONAL key: reaching the user's OWN personal repo (clone / pull / push) uses
