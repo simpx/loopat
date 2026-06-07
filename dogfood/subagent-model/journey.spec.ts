@@ -21,6 +21,8 @@ import { join } from "node:path";
 
 const META = join(import.meta.dirname, "..", ".test-meta.json");
 const { loopatHome } = JSON.parse(readFileSync(META, "utf8")) as { loopatHome: string };
+// Same source of truth as setup.ts: the one model this provider serves.
+const MODEL = process.env.LOOPAT_TEST_MODEL || "claude-opus-4-7";
 
 function runningContainers(loopId: string): string[] {
   return execFileSync("podman", [
@@ -98,10 +100,15 @@ test("Explore subagent runs on the configured agent_model, never the default hai
   await expect.poll(() => readFileSync(join(loopatHome, "loops", loopId, "messages.jsonl"), "utf8"),
     { timeout: 60_000, intervals: [1_000, 2_000, 3_000] }).toContain('"Explore"');
 
+  const transcript = readFileSync(join(loopatHome, "loops", loopId, "messages.jsonl"), "utf8");
+  // The subagent must have SUCCEEDED. Without the per-tier passthrough Explore
+  // requests the default haiku tier the gateway lacks → "model not available" /
+  // 模型不存在 / 400 in the transcript. That is the bug; assert it's absent.
+  expect(transcript, "subagent must not hit a model-not-available error").not.toMatch(/model not available|模型不存在|API Error: 400/i);
   // Ignore non-model markers like "<synthetic>"; pin only the real model tiers.
   const models = [...new Set(modelsUsed(loopId))].filter((m) => m.startsWith("claude-"));
   console.log(`[dogfood] models used: ${models.join(", ")}`);
-  expect(models, "opus-4-7 must appear (main + subagent)").toContain("claude-opus-4-7");
+  expect(models, `${MODEL} must appear (main + subagent)`).toContain(MODEL);
   expect(models.some((m) => /haiku/i.test(m)), "no haiku tier — agent_model must override").toBe(false);
-  console.log("[dogfood] PROVEN: Explore subagent ran on agent_model opus-4-7, no haiku fallback");
+  console.log(`[dogfood] PROVEN: Explore subagent ran on agent_model ${MODEL}, no haiku fallback`);
 });

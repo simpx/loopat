@@ -202,23 +202,27 @@ async function globalSetup() {
 
   // Personal config: anthropic provider (apiKey resolved from vault), the roster
   // repo + knowledge pointer at the fixture.
+  // The model is provider-specific: official api.anthropic.com serves all tiers,
+  // but a single-model gateway (idealab opus-4-6) serves only one — and built-in
+  // subagents default to the haiku tier it doesn't have. The subagent-model
+  // suite points these at idealab via env to reproduce that 404 when the per-tier
+  // passthrough is missing; everything else uses the official default.
+  const baseUrl = process.env.LOOPAT_TEST_BASEURL || "https://api.anthropic.com";
+  const mainModel = process.env.LOOPAT_TEST_MODEL || "claude-opus-4-7";
   const personalConfig = {
     providers: {
-      default: "anthropic/claude-opus-4-7",
+      default: `anthropic/${mainModel}`,
       anthropic: {
-        models: [{ id: "claude-opus-4-7", enabled: true }],
-        baseUrl: "https://api.anthropic.com",
+        models: [{ id: mainModel, enabled: true }],
+        baseUrl,
         apiKey: "${ANTHROPIC_API_KEY}",
         maxContextTokens: 1000000,
         enabled: true,
-        // Pin every built-in subagent to the one model this provider serves —
-        // mirrors a single-model gateway. The env passthrough turns these into
-        // ANTHROPIC_DEFAULT_*_MODEL + CLAUDE_CODE_SUBAGENT_MODEL; the
-        // subagent-model case proves Explore runs on opus-4-7, never the
-        // unconfigured default haiku tier.
-        sonnet_model: "claude-opus-4-7",
-        haiku_model: "claude-opus-4-7",
-        agent_model: "claude-opus-4-7",
+        // Pin every built-in subagent to the one model this provider serves.
+        // Env passthrough → ANTHROPIC_DEFAULT_*_MODEL + CLAUDE_CODE_SUBAGENT_MODEL.
+        sonnet_model: mainModel,
+        haiku_model: mainModel,
+        agent_model: mainModel,
       },
     },
     knowledge: { git: `ssh://git@${hostIp}:${sshdPort}/srv/git/knowledge.git` },
