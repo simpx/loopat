@@ -20,7 +20,7 @@
 import { readFile } from "node:fs/promises"
 import { getLoop, patchLoopMeta, listLoops } from "./loops"
 import { loopHistoryPath } from "./paths"
-import { loadConfig, loadPersonalConfig, type ProviderConfig } from "./config"
+import { loadConfig, loadPersonalConfig, type ProviderConfig, getModelByTier, inferTier } from "./config"
 import { listTopics } from "./workspace"
 
 const MAX_USER_CHARS = 400
@@ -111,7 +111,7 @@ ${firstUser}${assistantBlock}`
 const AUTH_FAILED = Symbol("auth_failed")
 
 async function callForTitle(provider: ProviderConfig, userPrompt: string): Promise<string | null | typeof AUTH_FAILED> {
-  const activeModel = provider.models[0]
+  const activeModel = getModelByTier(provider, "haiku") ?? provider.models[0]
   if (!activeModel?.id) return AUTH_FAILED
   const url = provider.baseUrl.replace(/\/+$/, "") + "/v1/messages"
   const ctrl = new AbortController()
@@ -126,8 +126,9 @@ async function callForTitle(provider: ProviderConfig, userPrompt: string): Promi
       },
       body: JSON.stringify({
         model: activeModel.id,
-        max_tokens: 32,
+        max_tokens: 64,
         system: SYSTEM_PROMPT,
+        ...(!inferTier(activeModel.id) ? { thinking: { type: "disabled" } } : {}),
         messages: [{ role: "user", content: userPrompt }],
       }),
       signal: ctrl.signal,
@@ -165,12 +166,12 @@ export async function maybeAutoName(loopId: string): Promise<boolean> {
     const { firstUser, firstAssistant } = await extractFirstTurn(loopId)
     if (!firstUser) return false
 
+    const providers = await resolveProvidersForLoop(meta)
+    if (providers.length === 0) return false
+
     const allLoops = await listLoops()
     const topics = await listTopics(allLoops.map((l) => ({ id: l.id, title: l.title })))
     const candidates = topics.slice(0, MAX_TOPICS).map((t) => t.name)
-
-    const providers = await resolveProvidersForLoop(meta)
-    if (providers.length === 0) return false
 
     const prompt = buildUserPrompt(firstUser, firstAssistant, candidates)
     let title: string | null = null

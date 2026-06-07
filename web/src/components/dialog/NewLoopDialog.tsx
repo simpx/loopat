@@ -306,7 +306,7 @@ export function NewLoopDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="refactor-gateway"
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+              className="w-full px-3 py-2.5 sm:py-1.5 text-base sm:text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
             />
           </DialogField>
         </form>
