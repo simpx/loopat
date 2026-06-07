@@ -154,13 +154,25 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     let mo: MutationObserver | null = null;
     const observeAll = () => {
       io.disconnect();
-      visible.clear();
       const els = inner.querySelectorAll<HTMLElement>('[data-role="user"][data-message-id]');
+      // Prune IDs no longer in the DOM instead of clearing — avoids a
+      // flash to null between clear and IntersectionObserver re-firing.
+      const currentIds = new Set<string>();
+      els.forEach((el) => {
+        const id = el.dataset.messageId;
+        if (id) currentIds.add(id);
+      });
+      for (const id of visible) {
+        if (!currentIds.has(id)) visible.delete(id);
+      }
       els.forEach((el) => io.observe(el));
     };
     observeAll();
     mo = new MutationObserver(() => observeAll());
-    mo.observe(inner, { childList: true, subtree: true });
+    // Only watch direct childList changes (message-level add/remove), not
+    // subtree mutations — subtree:true fires on every text delta during
+    // streaming, causing dozens of observeAll() calls per second.
+    mo.observe(inner, { childList: true });
     return () => {
       io.disconnect();
       mo?.disconnect();
@@ -186,7 +198,7 @@ export default function ChatInterface({ archived = false, onUnarchive, readOnly 
     let frames = 0;
     const tick = () => {
       if (cancelled) return;
-      const el = containerRef.current?.querySelector(`[data-message-id="${scrollTarget}"]`) as HTMLElement | null;
+      const el = containerRef.current?.querySelector(`[data-message-id="${CSS.escape(scrollTarget)}"]`) as HTMLElement | null;
       if (el) {
         el.scrollIntoView({ block: "start", behavior: "smooth" });
         setScrollTarget(null);

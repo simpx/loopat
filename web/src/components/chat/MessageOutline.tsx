@@ -31,7 +31,7 @@ const MessageOutline: FC<Props> = ({ messages, currentVisibleId, onSelect, onClo
   // When the highlighted entry changes, keep it in view inside the popover.
   useEffect(() => {
     if (!currentVisibleId) return
-    const el = listRef.current?.querySelector(`[data-outline-id="${currentVisibleId}"]`) as HTMLElement | null
+    const el = listRef.current?.querySelector(`[data-outline-id="${CSS.escape(currentVisibleId)}"]`) as HTMLElement | null
     if (el) el.scrollIntoView({ block: "nearest" })
   }, [currentVisibleId])
 

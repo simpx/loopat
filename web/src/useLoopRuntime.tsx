@@ -876,7 +876,11 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     if (idx < 0) return true // unknown id — nothing to do
     const neededFromEnd = agg.length - idx
     if (neededFromEnd <= renderCountRef.current) return true
-    const next = Math.ceil(neededFromEnd / RENDER_WINDOW_BATCH) * RENDER_WINDOW_BATCH
+    // Cap at 200 to avoid rendering all messages at once when jumping
+    // to an early message in a very long conversation. The user can still
+    // scroll to load intermediate messages.
+    const MAX_EXPAND = 200
+    const next = Math.min(Math.ceil(neededFromEnd / RENDER_WINDOW_BATCH) * RENDER_WINDOW_BATCH, MAX_EXPAND)
     setRenderCount(prev => Math.max(prev, next))
     return false
   }, [])
