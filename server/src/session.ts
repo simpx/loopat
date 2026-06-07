@@ -443,7 +443,7 @@ class LoopSession {
     const claudeBinary = getClaudeBinary()
     if (DEBUG) {
       const tag = loopId.slice(0, 8)
-      console.error(`[sdk:${tag}] config: provider=${providerName} model=${resolved?.provider.models[0]?.id ?? "?"} baseUrl=${provider.baseUrl} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
+      console.error(`[sdk:${tag}] config: provider=${providerName} model=${resolved?.provider.models[0]?.id ?? "?"} baseUrl=${provider.baseUrl} auth=${provider.authScheme === "bearer" ? "bearer" : "x-api-key"} apiKey=${provider.apiKey ? `<set len=${provider.apiKey.length}>` : "<empty>"}`)
       console.error(`[sdk:${tag}] config: continue=${shouldContinue} cwd=${V_LOOP_WORKDIR(loopId)} CLAUDE_CONFIG_DIR=${V_LOOP_CLAUDE(loopId)}`)
       console.error(`[sdk:${tag}] config: binary=${claudeBinary}`)
     }

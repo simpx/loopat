@@ -401,7 +401,18 @@ export async function buildLoopEnv(opts: {
   }
 
   if (resolved) {
-    env.ANTHROPIC_API_KEY = resolved.provider.apiKey
+    // Anthropic-compatible gateways (e.g. corporate reverse proxies) accept the
+    // key only as Authorization: Bearer; the default Anthropic API uses
+    // x-api-key. The SDK maps ANTHROPIC_AUTH_TOKEN→Bearer and
+    // ANTHROPIC_API_KEY→x-api-key. Set the chosen one and blank the other so an
+    // inherited value can't shadow the active scheme.
+    if (resolved.provider.authScheme === "bearer") {
+      env.ANTHROPIC_AUTH_TOKEN = resolved.provider.apiKey
+      env.ANTHROPIC_API_KEY = ""
+    } else {
+      env.ANTHROPIC_API_KEY = resolved.provider.apiKey
+      env.ANTHROPIC_AUTH_TOKEN = ""
+    }
     env.ANTHROPIC_BASE_URL = resolved.provider.baseUrl
   }
 
