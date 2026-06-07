@@ -75,7 +75,7 @@ export function FileTree({
     }
   }, [triggerUpload, loopId])
 
-  const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
+  const getContextActions = useCallback((node: TreeNodeData, _ctx: { children: TreeNodeData[] | null }): TreeContextAction[] => {
     if (node.type === "dir") {
       return [
         { label: "Upload here", icon: <Upload size={12} />, action: "upload" },
@@ -159,7 +159,7 @@ function SectionFolder({
   onUpload: () => void
   onReload: () => void
   reloadKey: number
-  getContextActions: (node: TreeNodeData) => TreeContextAction[]
+  getContextActions: (node: TreeNodeData, ctx: { children: TreeNodeData[] | null }) => TreeContextAction[]
   onAction: (action: string, node: TreeNodeData) => void
   treeId: string
 }) {

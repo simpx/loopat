@@ -2257,7 +2257,7 @@ app.delete("/api/workspace/file", requireAuth, async (c) => {
   const path = c.req.query("path") ?? ""
   if (!path) return c.json({ error: "path required" }, 400)
   const r = await vaultDelete(vault as VaultId, path, userId)
-  if (!r.ok) return c.json({ error: r.error }, 500)
+  if (!r.ok) return c.json({ error: r.error }, 400)
   return c.json({ ok: true })
 })
 
