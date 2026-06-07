@@ -84,6 +84,21 @@ export default function UserMessage() {
                   </>
                 )
               },
+              Image: ({ image }) => (
+                <a
+                  href={image}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-1 mr-1 inline-block first:mt-0"
+                >
+                  <img
+                    src={image}
+                    alt="Pasted image"
+                    className="max-h-48 max-w-xs rounded-md border border-gray-200 object-contain"
+                    loading="lazy"
+                  />
+                </a>
+              ),
             }}
           />
         </div>

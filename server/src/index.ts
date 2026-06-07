@@ -2963,6 +2963,26 @@ app.get(
             const permissionMode = typeof pm === "string" && validModes.includes(pm)
               ? pm as "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk" | "auto"
               : undefined
+            // Validate optional images: base64-encoded image blocks pasted
+            // from the composer. Drop anything that doesn't look right rather
+            // than letting bad input reach the SDK.
+            const allowedMedia = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+            const MAX_IMAGES_PER_MSG = 20
+            const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // matches FE cap
+            const images: { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string; filename?: string }[] = []
+            if (Array.isArray(msg.images)) {
+              for (const raw of msg.images.slice(0, MAX_IMAGES_PER_MSG)) {
+                if (!raw || typeof raw !== "object") continue
+                const mediaType = (raw as any).mediaType
+                const data = (raw as any).data
+                if (typeof mediaType !== "string" || !allowedMedia.has(mediaType)) continue
+                if (typeof data !== "string" || data.length === 0) continue
+                // base64 data length is ~4/3 the byte length; cheap upper-bound check
+                if (data.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3)) continue
+                const filename = typeof (raw as any).filename === "string" ? (raw as any).filename : undefined
+                images.push({ mediaType: mediaType as any, data, ...(filename ? { filename } : {}) })
+              }
+            }
             // /goal: extract goal, persist to meta, set on session.
             // Rewrite the text so CC sees a natural-language message instead
             // of an unrecognized slash command.
@@ -2974,7 +2994,7 @@ app.get(
               patchLoopMeta(id, { config: { ...(meta?.config ?? {}), goal, goalSetAt: setAt, goalStatus: "active" } }).catch(() => {})
               msg.text = `My goal is: ${goal}`
             }
-            session.sendUserText(msg.text, permissionMode)
+            session.sendUserText(msg.text, permissionMode, images.length > 0 ? images : undefined)
           } else if (msg?.type === "clear") {
             session.clear(userId ?? "anon")
           } else if (msg?.type === "interrupt") {
