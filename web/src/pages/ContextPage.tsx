@@ -387,18 +387,22 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     }
   }, [vault])
 
-  const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
+  const getContextActions = useCallback((node: TreeNodeData, ctx: { children: TreeNodeData[] | null }): TreeContextAction[] => {
     if (node.type === "dir") {
       if (isSecretsFolder(vault, node.path)) {
         // Encrypted dir (vaults container, vault root, or any dir inside one):
-        // building out the credential tree is fine; Delete only succeeds when
-        // the dir is empty (server uses rmdir, not rm -rf) — that way users
-        // can clean up empty leftovers without nuking a whole credential
-        // bundle that's still wired into config.json.
+        // building out the credential tree is fine; Delete only appears when
+        // we've confirmed the dir is empty (children loaded, length === 0) so
+        // users can't even attempt to wipe a still-wired credential bundle.
+        // Server also uses rmdir as a backstop — but hiding the action keeps
+        // the UI honest about what's possible.
+        const empty = ctx.children !== null && ctx.children.length === 0
         return [
           { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
           { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
-          { label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true },
+          ...(empty
+            ? [{ label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true }]
+            : []),
         ]
       }
       return [
