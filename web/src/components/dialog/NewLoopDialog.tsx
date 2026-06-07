@@ -126,16 +126,6 @@ export function NewLoopDialog({
 
         {/* Scrollable body */}
         <form id="new-loop-form" onSubmit={submit} className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-4 flex flex-col gap-4">
-          <DialogField label="Name" hint="Optional — defaults to 'untitled'.">
-            <input
-              ref={inputRef}
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="refactor-gateway"
-              className="w-full px-3 py-2.5 sm:py-1.5 text-base sm:text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
-            />
-          </DialogField>
 
           <DialogField label="Repo" hint="Sets the workdir. Optional — leave (none) for an empty workdir.">
             <select
@@ -290,7 +280,7 @@ export function NewLoopDialog({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="refactor-gateway"
-              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
+              className="w-full px-3 py-2.5 sm:py-1.5 text-base sm:text-sm border border-gray-300 rounded outline-none focus:border-gray-500"
             />
           </DialogField>
         </form>
