@@ -32,6 +32,7 @@ import { getChatHistory, appendChatHistory, readFile } from "@/api";
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB per image — Anthropic's documented limit
+const MAX_IMAGES = 5; // Must match MAX_IMAGES_PER_MESSAGE in server/src/session.ts
 const ALLOWED_IMAGE_TYPES: ReadonlySet<string> = new Set([
   "image/png",
   "image/jpeg",
@@ -114,9 +115,23 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     });
   };
 
+  // Collect preview URLs to revoke after the component re-renders with
+  // pendingImages=[] — revoking synchronously before the re-render would
+  // break thumbnails for one frame.
+  const urlsToRevokeRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (pendingImages.length === 0 && urlsToRevokeRef.current.length > 0) {
+      for (const u of urlsToRevokeRef.current) URL.revokeObjectURL(u);
+      urlsToRevokeRef.current = [];
+    }
+  }, [pendingImages]);
+
   const consumePendingImages = (): ImageInput[] => {
     const snapshot = pendingImages;
     if (snapshot.length === 0) return [];
+    // Schedule revocation for after the re-render (via the useEffect above)
+    // instead of revoking synchronously, which would show broken thumbnails.
+    urlsToRevokeRef.current = snapshot.map((p) => p.previewUrl);
     setPendingImages([]);
     // Strip preview-only fields before sending.
     return snapshot.map((p) => ({
@@ -144,8 +159,20 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     e.preventDefault();
     setPasteError(null);
 
+    // Enforce image count limit (aligned with backend MAX_IMAGES_PER_MESSAGE)
+    const currentCount = pendingImagesRef.current.length;
+    const remaining = MAX_IMAGES - currentCount;
+    if (remaining <= 0) {
+      setPasteError(`Maximum ${MAX_IMAGES} images per message.`);
+      return;
+    }
+    const accepted = files.slice(0, remaining);
+    if (accepted.length < files.length) {
+      setPasteError(`Only ${remaining} more image(s) allowed (max ${MAX_IMAGES}).`);
+    }
+
     const next: PendingImage[] = [];
-    for (const file of files) {
+    for (const file of accepted) {
       if (file.size > MAX_IMAGE_BYTES) {
         setPasteError(
           `Image is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB > 10 MB).`,

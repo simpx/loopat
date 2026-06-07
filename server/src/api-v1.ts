@@ -23,7 +23,7 @@ import {
   userOnboarding,
   type LoopMeta,
 } from "./loops"
-import { getSession, type LoopSessionMessageListener } from "./session"
+import { getSession, type LoopSessionMessageListener, type ImageInput, MAX_IMAGES_PER_MESSAGE, BASE64_RE } from "./session"
 
 // ── ID prefixing ─────────────────────────────────────────────────────────
 
@@ -464,13 +464,11 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
 
     // ── Image attachments (optional) ──
     const ALLOWED_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
-    const MAX_IMAGES = 5
     const MAX_IMAGE_BASE64_LEN = Math.ceil(10 * 1024 * 1024 * 4 / 3) // 10 MB raw → ~13.3 MB base64
-    type ImageInput = { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string; filename?: string }
     let images: ImageInput[] | undefined
     if (Array.isArray(body.images) && body.images.length > 0) {
-      if (body.images.length > MAX_IMAGES) {
-        return apiError(c, 400, "invalid_request_error", "too_many_images", `images exceeds ${MAX_IMAGES} per message`)
+      if (body.images.length > MAX_IMAGES_PER_MESSAGE) {
+        return apiError(c, 400, "invalid_request_error", "too_many_images", `images exceeds ${MAX_IMAGES_PER_MESSAGE} per message`)
       }
       const parsed: ImageInput[] = []
       for (let i = 0; i < body.images.length; i++) {
@@ -489,6 +487,9 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
         }
         if (data.length > MAX_IMAGE_BASE64_LEN) {
           return apiError(c, 400, "invalid_request_error", "image_too_large", `images[${i}] exceeds 10 MB`)
+        }
+        if (!BASE64_RE.test(data)) {
+          return apiError(c, 400, "invalid_request_error", "image_data_invalid", `images[${i}].data is not valid base64`)
         }
         const filename = typeof (raw as any).filename === "string" ? (raw as any).filename : undefined
         parsed.push({ mediaType: mt as ImageInput["mediaType"], data, ...(filename ? { filename } : {}) })

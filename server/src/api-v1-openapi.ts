@@ -277,8 +277,8 @@ export const v1OpenApiSpec = {
                   content: { type: "string", maxLength: 1048576, description: "Text content. At least one of content or images must be present." },
                   images: {
                     type: "array",
-                    maxItems: 5,
-                    description: "Up to 5 base64-encoded images (10 MB raw each). At least one of content or images must be present.",
+                    maxItems: 5, // must match MAX_IMAGES_PER_MESSAGE in session.ts
+                    description: "Up to 5 base64-encoded images (MAX_IMAGES_PER_MESSAGE) (10 MB raw each). At least one of content or images must be present.",
                     items: {
                       type: "object",
                       required: ["mediaType", "data"],

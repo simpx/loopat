@@ -244,7 +244,11 @@ export function convertMessage(raw: RawMsg) {
       if (src.type === "base64" && src.data && src.media_type) {
         url = `data:${src.media_type};base64,${src.data}`
       } else if (src.type === "url" && typeof src.url === "string") {
-        url = src.url
+        // Protocol whitelist: reject javascript: and other dangerous schemes
+        try {
+          const u = new URL(src.url)
+          if (u.protocol === "https:" || u.protocol === "http:" || u.protocol === "data:") url = src.url
+        } catch {}
       }
       if (url) parts.push({ type: "image", image: url })
     } else if (b?.type === "clear-divider") {

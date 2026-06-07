@@ -185,6 +185,14 @@ export type ImageInput = {
   filename?: string
 }
 
+/** Maximum number of images per user message — shared across v1 API, WS
+ *  handler, and (as a number literal) the frontend Composer. Keep in sync
+ *  with the OpenAPI spec (api-v1-openapi.ts). */
+export const MAX_IMAGES_PER_MESSAGE = 5
+
+/** Regex for validating base64-encoded strings (RFC 4648 alphabet + padding). */
+export const BASE64_RE = /^[A-Za-z0-9+\/]*={0,2}$/
+
 type QueuedMessage = {
   text: string
   permissionMode?: SdkPermissionMode

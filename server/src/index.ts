@@ -29,7 +29,7 @@ import { join as pathJoin, dirname } from "node:path"
 import { ensurePersonalKeypair, getPublicKey } from "./personal-keys"
 // `destroySession` here clashes with auth's session-token destroyer; alias to
 // keep both callable without import-order-dependent shadowing.
-import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot } from "./session"
+import { getSession, destroySession as destroyLoopSession, restartSession, getActivitySnapshot, MAX_IMAGES_PER_MESSAGE, BASE64_RE } from "./session"
 import { listDir, listDirRecursive, readWorkdirFile, writeWorkdirFile, deleteWorkdirFile, createWorkdirFolder } from "./files"
 import { vaultList, vaultFlatList, vaultRead, vaultWrite, vaultCreateFile, vaultCreateFolder, vaultDelete, vaultBacklinks, listTopics, type VaultId } from "./workspace"
 // sandboxes module removed — no /api/sandboxes/* routes in the profile model.
@@ -2967,11 +2967,11 @@ app.get(
             // from the composer. Drop anything that doesn't look right rather
             // than letting bad input reach the SDK.
             const allowedMedia = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
-            const MAX_IMAGES_PER_MSG = 20
+            // Use shared constant from session.ts
             const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // matches FE cap
             const images: { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string; filename?: string }[] = []
             if (Array.isArray(msg.images)) {
-              for (const raw of msg.images.slice(0, MAX_IMAGES_PER_MSG)) {
+              for (const raw of msg.images.slice(0, MAX_IMAGES_PER_MESSAGE)) {
                 if (!raw || typeof raw !== "object") continue
                 const mediaType = (raw as any).mediaType
                 const data = (raw as any).data
@@ -2979,6 +2979,7 @@ app.get(
                 if (typeof data !== "string" || data.length === 0) continue
                 // base64 data length is ~4/3 the byte length; cheap upper-bound check
                 if (data.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3)) continue
+                if (!BASE64_RE.test(data)) continue
                 const filename = typeof (raw as any).filename === "string" ? (raw as any).filename : undefined
                 images.push({ mediaType: mediaType as any, data, ...(filename ? { filename } : {}) })
               }
