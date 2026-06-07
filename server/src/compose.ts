@@ -551,8 +551,12 @@ export async function listLoopAgents(loopId: string): Promise<AgentMeta[]> {
       continue
     }
     const fm = parseAgentFrontmatter(text)
+    const agentName = fm.name ?? name.replace(/\.md$/, "")
+    // Reject names with unsafe characters (e.g. backticks would break
+    // markdown formatting in the system prompt).
+    if (!/^[a-zA-Z0-9_-]+$/.test(agentName)) continue
     out.push({
-      name: fm.name ?? name.replace(/\.md$/, ""),
+      name: agentName,
       description: fm.description ?? "",
       ...(fm.color ? { color: fm.color } : {}),
     })

@@ -71,15 +71,20 @@ export default function AgentMention() {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        setSelectedIdx((prev) => Math.min(prev + 1, filtered.length - 1));
+        setSelectedIdx((prev) =>
+          Math.min(prev + 1, Math.max(filtered.length - 1, 0)),
+        );
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         e.stopImmediatePropagation();
-        setSelectedIdx((prev) => Math.max(prev - 1, 0));
+        setSelectedIdx((prev) =>
+          Math.max(Math.min(prev - 1, filtered.length - 1), 0),
+        );
       } else if (e.key === "Enter" && filtered.length > 0) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        insertAgent(filtered[selectedIdx]);
+        const idx = Math.min(selectedIdx, filtered.length - 1);
+        insertAgent(filtered[idx]);
       } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
