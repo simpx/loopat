@@ -419,7 +419,16 @@ async function _ensureUserContext(user: string, vault: string): Promise<string[]
   // knowledge is the entry pointer (personal-declared url); clone it first, then
   // read ITS .loopat/config.json for the notes remote. The repo roster is
   // personal (cfg.repos), no longer inside the knowledge repo.
-  const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), cfg.knowledge?.git, "knowledge")
+  // Since context repo resolution is now multi-hop (personal config -> knowledge.git
+  // -> notes + repos), legacy users upgrading to this version would need to manually
+  // edit personal config to set knowledge.git. For backward compatibility we fall
+  // back to ~/.loopat/config.json (the legacy workspace config).
+  let knowledgeGit = cfg.knowledge?.git
+  if (!knowledgeGit) {
+    const wsCfg = await loadConfig()
+    knowledgeGit = wsCfg.knowledge?.git || undefined
+  }
+  const hasKnowledge = await ensurePerUserRepo(personalKnowledgeDir(user), knowledgeGit, "knowledge")
   const kcfg = hasKnowledge ? await loadKnowledgeConfig(user) : { notes: undefined }
   await ensurePerUserRepo(personalNotesDir(user), kcfg.notes?.git, "notes")
   await writeReposManifest(personalReposDir(user), cfg.repos ?? [])
