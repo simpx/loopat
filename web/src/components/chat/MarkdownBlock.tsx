@@ -30,7 +30,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from "react";
 import {
   CheckIcon,
@@ -56,6 +55,7 @@ import { FencedSvg, SvgRenderer } from "./SvgRenderer";
 import { MermaidBlock } from "./MermaidBlock";
 import { PlantUMLBlock } from "./PlantUMLBlock";
 import { GraphvizBlock } from "./GraphvizBlock";
+import { useClipboard } from "@/lib/useClipboard";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
@@ -113,18 +113,21 @@ export const MarkdownBlock = memo(MarkdownTextImpl);
 const CodeHeader: React.FC<CodeHeaderProps> = ({ language, code }) => {
   const key = code ?? "";
   const { wrap } = useCodeBlockUi(key);
-  const { isCopied, copyToClipboard } = useClipboard();
+  const { isCopied, copyToClipboard } = useClipboard(2000);
   const onCopy = () => {
     if (!code || isCopied) return;
-    copyToClipboard(code);
+    void copyToClipboard(code);
   };
 
   return (
-    <div className="flex items-center justify-between gap-2 rounded-t-lg border border-gray-700 border-b-0 bg-gray-800 px-3 py-1.5 text-xs">
+    <div
+      data-copy-ignore
+      className="flex select-none items-center justify-between gap-2 rounded-t-lg border border-gray-700 border-b-0 bg-gray-800 px-3 py-1.5 text-xs"
+    >
       <span className="font-medium text-gray-400 lowercase">
         {language || "text"}
       </span>
-      <div data-copy-ignore className="flex select-none items-center gap-1">
+      <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={() => toggleWrap(key)}
@@ -186,22 +189,6 @@ const componentsByLanguage = {
   dot: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
   graphviz: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
 };
-
-/* ─── Clipboard hook ─── */
-
-function useClipboard({ copiedDuration = 2000 } = {}) {
-  const [isCopied, setIsCopied] = useState(false);
-
-  const copyToClipboard = (value: string) => {
-    if (!value) return;
-    navigator.clipboard.writeText(value).then(() => {
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), copiedDuration);
-    });
-  };
-
-  return { isCopied, copyToClipboard };
-}
 
 /* ─── Shared code-block body: gutter, wrap, collapse ─── */
 

@@ -3,6 +3,7 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import { BrainIcon, ChevronDownIcon, RotateCcwIcon } from "lucide-react";
+import { useCallback, useRef } from "react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
 import {
@@ -13,6 +14,7 @@ import {
 import { useLoopRuntimeExtra, type TurnStats } from "@/useLoopRuntime";
 import { cn } from "@/lib/utils";
 import ErrorBoundary from "./ErrorBoundary";
+import MessageCopyButton from "./MessageCopyButton";
 
 function extractTime(messageId: string | undefined): string {
   if (!messageId) return "";
@@ -49,7 +51,7 @@ function JsonBlock({ content }: { content: string }) {
     const formatted = JSON.stringify(parsed, null, 2);
     return (
       <div className="my-2">
-        <div className="mb-2 flex items-center gap-2 text-sm text-gray-500">
+        <div data-copy-ignore className="mb-2 flex select-none items-center gap-2 text-sm text-gray-500">
           <svg
             className="h-4 w-4"
             fill="none"
@@ -118,6 +120,8 @@ export default function AssistantMessage() {
   const isRunning = useAuiState((s) => s.message.status?.type === "running");
   const isLast = useAuiState((s) => s.message.isLast);
   const showRetry = !isRunning && isLast && !textContent.startsWith("```bash");
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const getPlainText = useCallback(() => textContent, [textContent]);
 
   const time = extractTime(messageId);
   // Per-turn stats render once per turn, on the LAST assistant message of the
@@ -185,7 +189,10 @@ export default function AssistantMessage() {
                 onOpenChange={setThinkingOpen}
                 className="group/think my-1 w-full overflow-hidden rounded-md border border-gray-100 bg-gray-50/50"
               >
-                <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors hover:bg-gray-100/50">
+                <CollapsibleTrigger
+                  data-copy-ignore
+                  className="flex w-full select-none items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors hover:bg-gray-100/50"
+                >
                   <BrainIcon className="h-3 w-3 shrink-0 text-gray-400" />
                   <span className="text-gray-400">{label}</span>
                   {running && (
@@ -237,17 +244,19 @@ export default function AssistantMessage() {
               ? Array.from(taskMap.values()).find((t) => t.tool_use_id === toolCallId)
               : undefined;
             return (
-              <ErrorBoundary name={"ToolRenderer:" + toolName}>
-                <ToolRenderer
-                  toolName={toolName}
-                  args={args}
-                  result={result}
-                  status={status}
-                  elapsedSeconds={toolProgress?.elapsed_time_seconds}
-                  taskState={taskFromToolUseId}
-                  toolCallId={toolCallId}
-                />
-              </ErrorBoundary>
+              <div data-copy-ignore>
+                <ErrorBoundary name={"ToolRenderer:" + toolName}>
+                  <ToolRenderer
+                    toolName={toolName}
+                    args={args}
+                    result={result}
+                    status={status}
+                    elapsedSeconds={toolProgress?.elapsed_time_seconds}
+                    taskState={taskFromToolUseId}
+                    toolCallId={toolCallId}
+                  />
+                </ErrorBoundary>
+              </div>
             );
           }
           default:
@@ -281,15 +290,22 @@ export default function AssistantMessage() {
       />
 
       {/* Content */}
-      <div className="w-full text-[13px] md:text-sm text-gray-700">
+      <div ref={contentRef} className="w-full text-[13px] md:text-sm text-gray-700">
         {children}
       </div>
 
       {/* Footer: time + retry + per-turn stats (stats only on the last
           assistant message of a live turn; retry only when completed) */}
-      {(time || showRetry || turnStats) && (
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
+      {(time || showRetry || turnStats || (!isRunning && textContent)) && (
+        <div data-copy-ignore className="mt-1 flex items-center gap-2 text-[11px] text-gray-400">
           {time && <span>{time}</span>}
+          {!isRunning && textContent && (
+            <MessageCopyButton
+              contentRef={contentRef}
+              getPlainText={getPlainText}
+              className="aui-msg-copy"
+            />
+          )}
           {showRetry && (
             <button
               type="button"

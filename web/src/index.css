@@ -453,3 +453,8 @@ html, body {
     font: inherit;
   }
 }
+
+/* Keep the latest assistant message copy action visible without affecting older messages. */
+[data-role="assistant"]:not(:has(~ [data-role="assistant"])) .aui-msg-copy {
+  opacity: 1;
+}
