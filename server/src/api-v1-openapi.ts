@@ -273,9 +273,22 @@ export const v1OpenApiSpec = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["content"],
                 properties: {
-                  content: { type: "string", maxLength: 1048576 },
+                  content: { type: "string", maxLength: 1048576, description: "Text content. At least one of content or images must be present." },
+                  images: {
+                    type: "array",
+                    maxItems: 5, // must match MAX_IMAGES_PER_MESSAGE in session.ts
+                    description: "Up to 5 base64-encoded images (MAX_IMAGES_PER_MESSAGE) (10 MB raw each). At least one of content or images must be present.",
+                    items: {
+                      type: "object",
+                      required: ["mediaType", "data"],
+                      properties: {
+                        mediaType: { type: "string", enum: ["image/png", "image/jpeg", "image/gif", "image/webp"] },
+                        data: { type: "string", description: "Base64-encoded image data (no data-URI prefix)." },
+                        filename: { type: "string", description: "Optional filename hint." },
+                      },
+                    },
+                  },
                   permission_mode: {
                     type: "string",
                     enum: ["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"],

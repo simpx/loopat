@@ -26,11 +26,46 @@ import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
 import TokenUsagePie from "./TokenUsagePie";
 import { FilePicker } from "./FilePicker";
-import { useLoopRuntimeExtra } from "@/useLoopRuntime";
+import { useLoopRuntimeExtra, type ImageInput } from "@/useLoopRuntime";
 import { getChatHistory, appendChatHistory, readFile } from "@/api";
 
 const FALLBACK_CONTEXT_WINDOW = 200_000;
 const MAX_HISTORY = 500;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB per image — Anthropic's documented limit
+const MAX_IMAGES = 5; // Must match MAX_IMAGES_PER_MESSAGE in server/src/session.ts
+const ALLOWED_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+interface PendingImage extends ImageInput {
+  /** Object URL for thumbnail preview (revoked on remove / send). */
+  previewUrl: string;
+  /** Stable key for React list rendering. */
+  key: string;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("unexpected reader result"));
+        return;
+      }
+      // result format: "data:<mime>;base64,<data>"
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+let pendingImageCounter = 0;
 
 const MOBILE_QUERY = "(max-width: 767px)";
 function useIsMobile() {
@@ -58,6 +93,110 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
   const contextWindow = provider?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
 
   const aui = useAui();
+
+  // ── pending pasted images ──
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const pendingImagesRef = useRef<PendingImage[]>([]);
+  pendingImagesRef.current = pendingImages;
+
+  useEffect(() => {
+    // Revoke any object URLs still alive on unmount (e.g. unsent paste).
+    return () => {
+      for (const img of pendingImagesRef.current) URL.revokeObjectURL(img.previewUrl);
+    };
+  }, []);
+
+  const removePendingImage = (key: string) => {
+    setPendingImages((prev) => {
+      const target = prev.find((p) => p.key === key);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((p) => p.key !== key);
+    });
+  };
+
+  // Collect preview URLs to revoke after the component re-renders with
+  // pendingImages=[] — revoking synchronously before the re-render would
+  // break thumbnails for one frame.
+  const urlsToRevokeRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (pendingImages.length === 0 && urlsToRevokeRef.current.length > 0) {
+      for (const u of urlsToRevokeRef.current) URL.revokeObjectURL(u);
+      urlsToRevokeRef.current = [];
+    }
+  }, [pendingImages]);
+
+  const consumePendingImages = (): ImageInput[] => {
+    const snapshot = pendingImages;
+    if (snapshot.length === 0) return [];
+    // Schedule revocation for after the re-render (via the useEffect above)
+    // instead of revoking synchronously, which would show broken thumbnails.
+    urlsToRevokeRef.current = snapshot.map((p) => p.previewUrl);
+    setPendingImages([]);
+    // Strip preview-only fields before sending.
+    return snapshot.map((p) => ({
+      mediaType: p.mediaType,
+      data: p.data,
+      ...(p.filename ? { filename: p.filename } : {}),
+    }));
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items || items.length === 0) return;
+
+    const files: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind !== "file") continue;
+      if (!ALLOWED_IMAGE_TYPES.has(it.type)) continue;
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+    if (files.length === 0) return;
+
+    // We're going to handle these images; don't also paste their text/URL repr.
+    e.preventDefault();
+    setPasteError(null);
+
+    // Enforce image count limit (aligned with backend MAX_IMAGES_PER_MESSAGE)
+    const currentCount = pendingImagesRef.current.length;
+    const remaining = MAX_IMAGES - currentCount;
+    if (remaining <= 0) {
+      setPasteError(`Maximum ${MAX_IMAGES} images per message.`);
+      return;
+    }
+    const accepted = files.slice(0, remaining);
+    if (accepted.length < files.length) {
+      setPasteError(`Only ${remaining} more image(s) allowed (max ${MAX_IMAGES}).`);
+    }
+
+    const next: PendingImage[] = [];
+    for (const file of accepted) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        setPasteError(
+          `Image is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB > 10 MB).`,
+        );
+        continue;
+      }
+      try {
+        const base64 = await readFileAsBase64(file);
+        const previewUrl = URL.createObjectURL(file);
+        pendingImageCounter += 1;
+        next.push({
+          mediaType: file.type as ImageInput["mediaType"],
+          data: base64,
+          filename: file.name || undefined,
+          previewUrl,
+          key: `paste-${Date.now()}-${pendingImageCounter}`,
+        });
+      } catch (err) {
+        console.error("[composer:paste] read failed", err);
+        setPasteError("Failed to read pasted image.");
+      }
+    }
+    if (next.length > 0) setPendingImages((prev) => [...prev, ...next]);
+  };
 
   // ── File references ──
   const [includeEditorFile, setIncludeEditorFile] = useState(false)
@@ -167,15 +306,20 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     appendChatHistory(loopId, trimmed).catch(() => {});
   };
 
-  const handleEnqueue = () => {
+  /** Unified send handler — used for both initial send and enqueue. The
+   *  server treats every message identically: if a turn is in flight it
+   *  goes onto the queue, otherwise it kicks off a new run. */
+  const handleSend = () => {
     const text = typeof composerText === "string" ? composerText.trim() : "";
-    if (!text) return;
-    saveToHistory(text);
+    const images = consumePendingImages();
+    if (!text && images.length === 0) return;
+    if (text) saveToHistory(text);
     if (fileContextRef.current) {
       try { sessionStorage.setItem("loopat:pendingFileContext", fileContextRef.current) } catch {}
     }
-    enqueueMessage(wrapWithContext(text));
+    enqueueMessage(wrapWithContext(text), images.length > 0 ? images : undefined);
     aui.composer().setText("");
+    setPasteError(null);
   };
 
   const handleSubmit = () => {
@@ -214,11 +358,17 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
     if (e.key !== "ArrowUp" && e.key !== "ArrowDown") {
       suppressSlashRef.current = false;
     }
-    if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey && isRunning) {
+    // Send / enqueue on Enter — covers both pending images (which need our
+    // own handler) and plain text. ComposerPrimitive.Send still works for
+    // mouse clicks on the text-only path.
+    if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey) {
       if (isMobile) return;
-      e.preventDefault();
-      handleEnqueue();
-      return;
+      const hasPending = pendingImagesRef.current.length > 0;
+      if (isRunning || hasPending) {
+        e.preventDefault();
+        handleSend();
+        return;
+      }
     }
     if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
       if (history.length === 0) return;
@@ -353,6 +503,37 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
       >
         <SlashCommand />
 
+        {/* Pasted-image previews */}
+        {pendingImages.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 px-1.5">
+            {pendingImages.map((img) => (
+              <div
+                key={img.key}
+                className="group relative h-16 w-16 overflow-hidden rounded-md border border-gray-200 bg-gray-50 shadow-sm"
+                title={img.filename || "Pasted image"}
+              >
+                <img
+                  src={img.previewUrl}
+                  alt={img.filename || "Pasted image"}
+                  className="h-full w-full object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => removePendingImage(img.key)}
+                  className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                  aria-label="Remove image"
+                  title="Remove image"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {pasteError && (
+          <div className="px-1.5 text-xs text-red-500">{pasteError}</div>
+        )}
+
         <ComposerPrimitive.Input
             placeholder="Send a message..."
             className="max-h-32 min-h-10 w-full resize-none bg-transparent px-1.5 py-1 text-sm text-gray-900 outline-none placeholder:text-gray-400"
@@ -360,6 +541,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
             autoFocus
             aria-label="Message input"
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             submitMode={isMobile ? "none" : "enter"}
           />
 
@@ -419,7 +601,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
               />
 
               {/* Send / Enqueue button */}
-              {hasInput && (
+              {(hasInput || pendingImages.length > 0) && (
                 isRunning ? (
                   <>
                     {/* "Send now": enqueue then background in-flight Bash /
@@ -430,7 +612,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
                       type="button"
                       variant="default"
                       size="icon"
-                      onClick={() => { handleEnqueue(); backgroundTasks(); }}
+                      onClick={() => { handleSend(); backgroundTasks(); }}
                       className="h-8 w-8 rounded-lg bg-sky-500 hover:bg-sky-600 text-white"
                       aria-label="Send now (background agents)"
                       title="立即发送（后台暂停 agents）"
@@ -441,7 +623,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
                       type="button"
                       variant="default"
                       size="icon"
-                      onClick={handleEnqueue}
+                      onClick={handleSend}
                       className="h-8 w-8 rounded-lg bg-amber-500 hover:bg-amber-600 text-white"
                       aria-label="Enqueue message"
                       title="Enqueue message"
@@ -449,6 +631,20 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
                       <ListOrderedIcon className="h-4 w-4" />
                     </Button>
                   </>
+                ) : pendingImages.length > 0 ? (
+                  // Pasted images need to ride alongside text — bypass
+                  // ComposerPrimitive.Send so the WS payload includes them.
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="icon"
+                    onClick={handleSend}
+                    className="h-8 w-8 rounded-lg bg-gray-800 hover:bg-gray-900 text-white"
+                    aria-label="Send message"
+                    title="Send message"
+                  >
+                    <ArrowUpIcon className="h-4 w-4" />
+                  </Button>
                 ) : (
                   <ComposerPrimitive.Send asChild>
                     <Button

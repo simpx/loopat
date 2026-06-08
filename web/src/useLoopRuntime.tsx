@@ -197,9 +197,15 @@ function aggregateToolResults(raw: RawMsg[]): RawMsg[] {
   const out: RawMsg[] = []
   for (const m of raw) {
     if (m.role === "user") {
-      const textBlocks = m.content.filter((b: any) => b?.type === "text" && (b.text ?? "").trim())
-      if (textBlocks.length === 0) continue
-      out.push({ ...m, content: textBlocks })
+      // Keep both text and image blocks so pasted screenshots stay visible
+      // in the chat history (image blocks are rendered by UserMessage).
+      const visibleBlocks = m.content.filter(
+        (b: any) =>
+          (b?.type === "text" && (b.text ?? "").trim()) ||
+          b?.type === "image",
+      )
+      if (visibleBlocks.length === 0) continue
+      out.push({ ...m, content: visibleBlocks })
     } else {
       const enriched = m.content.map((b: any) => {
         if (b?.type === "tool_use") {
@@ -229,6 +235,22 @@ export function convertMessage(raw: RawMsg) {
     if (b?.type === "text") {
       const txt = (b.text ?? "").trim()
       if (txt) parts.push({ type: "text", text: txt })
+    } else if (b?.type === "image") {
+      // Anthropic image blocks come as { source: { type: "base64", media_type, data } }
+      // or { source: { type: "url", url } }. Convert to the assistant-ui
+      // ImageMessagePart shape so MessagePrimitive.Parts can render it.
+      const src = b.source ?? {}
+      let url: string | undefined
+      if (src.type === "base64" && src.data && src.media_type) {
+        url = `data:${src.media_type};base64,${src.data}`
+      } else if (src.type === "url" && typeof src.url === "string") {
+        // Protocol whitelist: reject javascript: and other dangerous schemes
+        try {
+          const u = new URL(src.url)
+          if (u.protocol === "https:" || u.protocol === "http:" || u.protocol === "data:") url = src.url
+        } catch {}
+      }
+      if (url) parts.push({ type: "image", image: url })
     } else if (b?.type === "clear-divider") {
       const ts = (b as any).ts
       const by = (b as any).by
@@ -354,6 +376,15 @@ export interface TurnStats {
   totalMs: number
 }
 
+/** Image attached to an outgoing user message. `data` is base64 *without* the
+ *  `data:<mime>;base64,` prefix — the wire format mirrors Anthropic's
+ *  Base64ImageSource so the server can pass it straight to the SDK. */
+export interface ImageInput {
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+  data: string
+  filename?: string
+}
+
 export interface LoopRuntimeExtra {
   toolProgressMap: ReadonlyMap<string, ToolProgress>
   taskMap: ReadonlyMap<string, TaskState>
@@ -388,8 +419,10 @@ export interface LoopRuntimeExtra {
   childMessagesByAgentId: ReadonlyMap<string, RawMsg[]>
   /** True while SDK is generating. */
   isRunning: boolean
-  /** Enqueue a message to be sent after current generation completes. */
-  enqueueMessage: (text: string) => void
+  /** Enqueue a message to be sent after current generation completes.
+   *  Optional images are forwarded as `image` content blocks so the SDK
+   *  can see screenshots pasted into the composer. */
+  enqueueMessage: (text: string, images?: ImageInput[]) => void
   /** Messages waiting in the server queue. */
   queue: string[]
   /** Clear the pending message queue. */
@@ -904,7 +937,7 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     ws.send(JSON.stringify({ type: "queue_remove", index }))
   }, [])
 
-  const enqueueMessage = useCallback((text: string, files?: { path: string; content: string }[]) => {
+  const enqueueMessage = useCallback((text: string, images?: ImageInput[], files?: { path: string; content: string }[]) => {
     const ws = wsRef.current
 
     // ! shell command (CC "!" bang mode). !! escapes to literal "!".
@@ -928,12 +961,12 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
 
     // v1: POST /loops/{id}/messages. files attachments still go via WS until
     // v1 supports them (rare path: user pastes a screenshot or similar).
-    const postV1 = (content: string) => {
+    const postV1 = (content: string, imgs?: ImageInput[]) => {
       fetch(`/api/v1/loops/loop_${loopId}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ content, permission_mode: permissionModeRef.current }),
+        body: JSON.stringify({ content, permission_mode: permissionModeRef.current, ...(imgs && imgs.length > 0 ? { images: imgs } : {}) }),
         // Don't consume the SSE response body — the parallel /events listener
         // (or WS) already delivers all SDK messages from this turn.
       }).catch(() => {})
@@ -953,16 +986,22 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
         return
       }
       ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: arg }))
-      if (files?.length) {
-        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "user", text: `My goal is: ${arg}`, files, permissionMode: permissionModeRef.current }))
+      if (files?.length || images?.length) {
+        const payload: Record<string, unknown> = { type: "user", text: `My goal is: ${arg}`, permissionMode: permissionModeRef.current }
+        if (files?.length) payload.files = files
+        if (images?.length) payload.images = images
+        ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(payload))
       } else {
         postV1(`My goal is: ${arg}`)
       }
     } else if (bareGoal) {
       ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "set_goal", goal: null }))
-    } else if (files?.length) {
-      // Files attachment: still WS (v1 doesn't support file blocks yet).
-      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "user", text, files, permissionMode: permissionModeRef.current }))
+    } else if (files?.length || images?.length) {
+      // Files/images attachment: send via WS so images ride alongside text.
+      const payload: Record<string, unknown> = { type: "user", text, permissionMode: permissionModeRef.current }
+      if (files?.length) payload.files = files
+      if (images?.length) payload.images = images
+      ws?.readyState === WebSocket.OPEN && ws.send(JSON.stringify(payload))
     } else {
       postV1(text)
     }

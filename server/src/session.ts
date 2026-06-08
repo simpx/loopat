@@ -177,7 +177,27 @@ const EDIT_TOOLS = new Set(["Write", "Edit", "NotebookEdit"])
 
 const IDLE_TIMEOUT_MS = Number(process.env.LOOPAT_SESSION_IDLE_MS) || 5 * 60 * 1000
 
-type QueuedMessage = { text: string; permissionMode?: SdkPermissionMode }
+/** Image attached to a queued/incoming user message. Mirrors Anthropic's
+ *  Base64ImageSource so we can pass it straight to the SDK. */
+export type ImageInput = {
+  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+  data: string
+  filename?: string
+}
+
+/** Maximum number of images per user message — shared across v1 API, WS
+ *  handler, and (as a number literal) the frontend Composer. Keep in sync
+ *  with the OpenAPI spec (api-v1-openapi.ts). */
+export const MAX_IMAGES_PER_MESSAGE = 5
+
+/** Regex for validating base64-encoded strings (RFC 4648 alphabet + padding). */
+export const BASE64_RE = /^[A-Za-z0-9+\/]*={0,2}$/
+
+type QueuedMessage = {
+  text: string
+  permissionMode?: SdkPermissionMode
+  images?: ImageInput[]
+}
 
 export type LoopSessionMessageListener = (msg: any) => void
 
@@ -1169,10 +1189,10 @@ class LoopSession {
     this.persist(msg)
   }
 
-  async sendUserText(text: string, permissionMode?: SdkPermissionMode) {
+  async sendUserText(text: string, permissionMode?: SdkPermissionMode, images?: ImageInput[]) {
     updateLoopStatus(this.id, `User: ${text.slice(0, 50)}${text.length > 50 ? "..." : ""}`)
     if (this.generating || this.messageQueue.length > 0 || this.queueProcessing) {
-      this.messageQueue.push({ text, permissionMode })
+      this.messageQueue.push({ text, permissionMode, images })
       this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
       return
     }
@@ -1187,7 +1207,7 @@ class LoopSession {
       attributes: { "loop.id": this.id.slice(0, 8) },
     })
     try {
-      await this._pushUserMessage(text, permissionMode)
+      await this._pushUserMessage(text, permissionMode, images)
     } catch (e: any) {
       this.generating = false
       const message = e?.message ?? String(e)
@@ -1230,7 +1250,11 @@ class LoopSession {
     return this.pendingQuestions.has(toolUseId)
   }
 
-  private async _pushUserMessage(text: string, permissionMode?: SdkPermissionMode) {
+  private async _pushUserMessage(
+    text: string,
+    permissionMode?: SdkPermissionMode,
+    images?: ImageInput[],
+  ) {
     if (permissionMode && permissionMode !== this.currentPermissionMode) {
       this.currentPermissionMode = permissionMode
       patchLoopMeta(this.id, { config: { permission_mode: permissionMode } }).catch(() => {})
@@ -1250,9 +1274,25 @@ class LoopSession {
       await patchLoopMeta(this.id, { pendingDriverNote: undefined }).catch(() => {})
     }
     await this.ensureStarted()
+    // No images → preserve the historical string-content shape so jsonl
+    // replay stays byte-identical with pre-image sessions.
+    let content: SDKUserMessage["message"]["content"]
+    if (images && images.length > 0) {
+      const blocks: any[] = []
+      if (text) blocks.push({ type: "text", text })
+      for (const img of images) {
+        blocks.push({
+          type: "image",
+          source: { type: "base64", media_type: img.mediaType, data: img.data },
+        })
+      }
+      content = blocks
+    } else {
+      content = text
+    }
     const userMsg: SDKUserMessage = {
       type: "user",
-      message: { role: "user", content: text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
       uuid: randomUUID(),
     }
@@ -1274,7 +1314,7 @@ class LoopSession {
     this.queueProcessing = true
     const next = this.messageQueue.shift()!
     this.broadcast({ type: "queue_update", queue: this.messageQueue.map(m => m.text) })
-    this._pushUserMessage(next.text, next.permissionMode).catch((e) => {
+    this._pushUserMessage(next.text, next.permissionMode, next.images).catch((e) => {
       console.error("[loopat] queued message failed:", e)
       this.queueProcessing = false
       // Try next message on failure
