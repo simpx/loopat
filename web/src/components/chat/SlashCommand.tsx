@@ -285,7 +285,7 @@ export default function SlashCommand() {
         e.preventDefault();
         e.stopImmediatePropagation();
         setSelectedIdx((prev) => Math.max(prev - 1, 0));
-      } else if (e.key === "Enter" && flatOrdered.length > 0) {
+      } else if ((e.key === "Enter" || e.key === "Tab") && flatOrdered.length > 0) {
         e.preventDefault();
         e.stopImmediatePropagation();
         executeCommand(flatOrdered[selectedIdx]);
