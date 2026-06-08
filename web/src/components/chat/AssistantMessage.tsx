@@ -2,9 +2,11 @@ import {
   MessagePrimitive,
   useAuiState,
 } from "@assistant-ui/react";
-import { BrainIcon, ChevronDownIcon, RotateCcwIcon } from "lucide-react";
+import { BrainIcon, ChevronDownIcon, RotateCcwIcon, WrenchIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { MarkdownBlock } from "./MarkdownBlock";
 import ToolRenderer from "./ToolRenderer";
+import { getToolCallGroupState, type ToolCallGroupPart } from "./toolCallGroupState";
 import {
   Collapsible,
   CollapsibleContent,
@@ -97,6 +99,56 @@ function getDotType(parts: any[]): DotType {
   return "gray";
 }
 
+/* ─── Collapsible tool-call group ─── */
+
+function ToolCallGroup({
+  state,
+  children,
+}: {
+  state: ReturnType<typeof getToolCallGroupState>;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const effectiveOpen = state.forceOpen || open;
+
+  if (!state.shouldGroup) {
+    return <div className="w-full space-y-1">{children}</div>;
+  }
+
+  return (
+    <Collapsible
+      open={effectiveOpen}
+      onOpenChange={setOpen}
+      className="my-1 w-full overflow-hidden rounded-md border border-gray-100 bg-gray-50/50"
+    >
+      <CollapsibleTrigger
+        data-copy-ignore=""
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs transition-colors hover:bg-gray-100/50 select-none"
+      >
+        <WrenchIcon className="h-3 w-3 shrink-0 text-gray-400" />
+        <span className="text-gray-400">{state.label}</span>
+        <ChevronDownIcon
+          className={cn(
+            "ml-auto h-3 w-3 shrink-0 text-gray-300 transition-transform",
+            effectiveOpen && "rotate-180",
+          )}
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent
+        className={cn(
+          "overflow-hidden",
+          "data-[state=open]:animate-collapsible-down",
+          "data-[state=closed]:animate-collapsible-up",
+        )}
+      >
+        <div className="space-y-1 border-t border-gray-100 px-1 py-1">
+          {children}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 /* ─── Assistant message ─── */
 
 export default function AssistantMessage() {
@@ -104,7 +156,7 @@ export default function AssistantMessage() {
   // hook-order invariant holds across renders (content shape changes during
   // streaming / clear-boundary insertion).
   const messageId = useAuiState((s) => s.message.id);
-  const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen, retryLastUser, turnStatsByMessageId } = useLoopRuntimeExtra();
+  const { toolProgressMap, taskMap, thinkingOpen, setThinkingOpen, retryLastUser, turnStatsByMessageId, permissionPrompt } = useLoopRuntimeExtra();
   const messageParts = useAuiState((s) => s.message.content);
   const textContent = useAuiState((s) => {
     const parts = s.message.content;
@@ -169,7 +221,17 @@ export default function AssistantMessage() {
           case "group-chainOfThought":
             return <div data-slot="chain-of-thought" className="contents">{children}</div>;
           case "group-toolCalls":
-            return <div className="w-full space-y-1">{children}</div>;
+            return (
+              <ToolCallGroup
+                state={getToolCallGroupState(
+                  messageParts as ToolCallGroupPart[],
+                  (part as any).indices ?? [],
+                  permissionPrompt?.toolUseId,
+                )}
+              >
+                {children}
+              </ToolCallGroup>
+            );
           case "group-reasoning": {
             const running = part.status.type === "running";
             const charCount = (part as any).indices?.reduce((sum: number, i: number) => {
