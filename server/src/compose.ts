@@ -25,6 +25,7 @@ import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path"
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml"
 import {
   loopClaudeDir,
+  loopComposedAgentsDir,
   personalAgentsDir,
   personalClaudeDir,
   personalClaudeMdPath,
@@ -475,4 +476,93 @@ export async function composeFromPlan(loopId: string, plan: LoopPlan): Promise<C
  */
 export async function writeLoopSettings(_loopId: string): Promise<void> {
   // no-op
+}
+
+/**
+ * Metadata for a single sub-agent, parsed from its `.md` frontmatter. Shared
+ * shape between the `@`-mention dropdown (web/AgentMention) and the system
+ * prompt's @-mention block (system-prompt.ts).
+ */
+export interface AgentMeta {
+  /** Agent identifier — what CC's Agent tool wants in `subagent_type`. */
+  name: string
+  /** Short human description. May be empty if the file has none. */
+  description: string
+  /** Optional accent color from frontmatter (e.g. "blue"). UI hint only. */
+  color?: string
+}
+
+/**
+ * Pull `name` / `description` / `color` out of a CC-style agent `.md`
+ * frontmatter block. Minimal hand-rolled parser — frontmatter is small,
+ * single-line `key: value` pairs (with optional surrounding quotes). Block
+ * scalars / multi-line values are not supported (every agent we've seen uses
+ * single-line values; description can be long but stays on one line).
+ */
+function parseAgentFrontmatter(
+  text: string,
+): { name?: string; description?: string; color?: string } {
+  if (!text.startsWith("---")) return {}
+  const after = text.slice(4)
+  const endRel = after.search(/\n---\s*(\n|$)/)
+  if (endRel < 0) return {}
+  const body = after.slice(0, endRel)
+  const out: { name?: string; description?: string; color?: string } = {}
+  for (const raw of body.split("\n")) {
+    const m = raw.match(/^([a-zA-Z_][a-zA-Z0-9_-]*)\s*:\s*(.*?)\s*$/)
+    if (!m) continue
+    const key = m[1]
+    let val = m[2]
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1)
+    }
+    if (key === "name" || key === "description" || key === "color") {
+      out[key] = val
+    }
+  }
+  return out
+}
+
+/**
+ * Enumerate sub-agents composed into a loop's `.claude/agents/`. Returns `[]`
+ * if the dir doesn't exist or has no `.md` files. Filename (sans `.md`) is the
+ * fallback name when frontmatter has none. Broken symlinks / unreadable files
+ * are skipped.
+ */
+export async function listLoopAgents(loopId: string): Promise<AgentMeta[]> {
+  const dir = loopComposedAgentsDir(loopId)
+  if (!existsSync(dir)) return []
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch {
+    return []
+  }
+  const out: AgentMeta[] = []
+  for (const name of entries) {
+    if (!name.endsWith(".md") || name.startsWith(".")) continue
+    let text = ""
+    try {
+      text = await readFile(join(dir, name), "utf8")
+    } catch {
+      continue
+    }
+    const fm = parseAgentFrontmatter(text)
+    const agentName = fm.name ?? name.replace(/\.md$/, "")
+    // Reject names with unsafe characters (e.g. backticks would break
+    // markdown formatting in the system prompt).
+    if (!/^[a-zA-Z0-9_-]+$/.test(agentName)) continue
+    out.push({
+      name: agentName,
+      description: fm.description ?? "",
+      ...(fm.color ? { color: fm.color } : {}),
+    })
+  }
+  // Stable alpha order so the system-prompt block reads cleanly without
+  // depending on the client sort.
+  out.sort((a, b) => a.name.localeCompare(b.name))
+  return out
 }

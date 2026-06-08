@@ -20,6 +20,7 @@ import { readFile } from "node:fs/promises"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { effectiveDriver, type LoopMeta } from "./loops"
+import { listLoopAgents } from "./compose"
 import { bundledDoctrinePath, personalNotesDir, personalKnowledgeDir } from "./paths"
 
 const execFileP = promisify(execFile)
@@ -84,8 +85,33 @@ async function buildRuntimeBlock(loop: LoopMeta): Promise<string> {
   return lines.join("\n").trim()
 }
 
+/**
+ * Build the `@`-mention sub-agent block. Tells the model: when the user's
+ * message starts with `@<agent-name>`, dispatch to that sub-agent via the
+ * Agent tool. Skipped entirely when the loop has no composed agents.
+ *
+ * This is what makes the UI's `@`-picker actually trigger a real subagent
+ * invocation — without it the `@foo` text would just sit there.
+ */
+async function buildAgentBlock(loopId: string): Promise<string> {
+  const agents = await listLoopAgents(loopId)
+  if (agents.length === 0) return ""
+  const lines = agents.map(
+    (a) => `- \`${a.name}\`${a.description ? ` — ${a.description}` : ""}`,
+  )
+  return `## @-mention sub-agents
+
+The user can dispatch to a sub-agent by starting their message with \`@<agent-name>\` followed by the task. When you receive such a message, you MUST call the Agent tool with \`subagent_type\` set to the named agent and \`prompt\` set to the rest of the user's message (everything after the \`@<agent-name>\` token). Don't answer the request yourself — delegate. After the sub-agent returns, you may relay or summarize its result.
+
+If the agent name isn't in the list below, treat the \`@\` as plain text and answer normally.
+
+Available sub-agents in this loop:
+${lines.join("\n")}`.trim()
+}
+
 export async function buildLoopatAppend(loop: LoopMeta): Promise<string> {
   const bundled = await loadBundled()
   const runtime = await buildRuntimeBlock(loop)
-  return `${bundled}\n\n${runtime}\n`.trim()
+  const agentBlock = await buildAgentBlock(loop.id)
+  return [bundled, runtime, agentBlock].filter(Boolean).join("\n\n").trim()
 }

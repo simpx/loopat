@@ -24,6 +24,7 @@ import PlanModeToggle from "./PlanModeToggle";
 import ModelSelector from "./ModelSelector";
 import PluginsButton from "./PluginsButton";
 import SlashCommand from "./SlashCommand";
+import AgentMention from "./AgentMention";
 import TokenUsagePie from "./TokenUsagePie";
 import { FilePicker } from "./FilePicker";
 import { useLoopRuntimeExtra } from "@/useLoopRuntime";
@@ -352,6 +353,7 @@ export default function Composer({ pickedFile, editorSelection }: { pickedFile?:
         className="flex w-full flex-col gap-2 rounded-2xl border border-gray-200 bg-white p-2.5 shadow-sm"
       >
         <SlashCommand />
+        <AgentMention />
 
         <ComposerPrimitive.Input
             placeholder="Send a message..."
