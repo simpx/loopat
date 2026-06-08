@@ -38,7 +38,24 @@ import { PresetsPanel } from "../components/settings/PresetsPanel"
 import { getAdminPresets, normalizePresetModel, type ProviderPreset } from "../api"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
-import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark, GripVertical } from "lucide-react"
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
@@ -357,6 +374,31 @@ type ProvidersDraft = {
   }>
 }
 
+export function buildProvidersDiskFromDraft(
+  draft: ProvidersDraft,
+  providerOrder: string[],
+): Record<string, ProviderDisk | string> {
+  const providersOut: Record<string, ProviderDisk | string> = {}
+  if (draft.default) providersOut.default = draft.default
+  for (const name of providerOrder) {
+    const p = draft.providers[name]
+    if (!p) continue
+    const models: ModelEntry[] = p.models
+      .filter(m => m.id.trim())
+      .map(m => ({
+        id: m.id.trim(),
+        ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
+      }))
+    providersOut[name] = {
+      baseUrl: p.baseUrl,
+      apiKey: `\${${providerEnvVarName(name)}}`,
+      ...(models.length > 0 ? { models } : {}),
+      ...(p.enabled ? {} : { enabled: false }),
+    }
+  }
+  return providersOut
+}
+
 function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   disk: PersonalConfigDisk | null
   refExists: RefExistsMap
@@ -378,12 +420,18 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const [testingModel, setTestingModel] = useState<Record<string, string>>({})
   const [testError, setTestError] = useState<Record<string, string>>({})
   const [providerPresets, setProviderPresets] = useState<ProviderPreset[]>([])
+  const [providerOrder, setProviderOrder] = useState<string[]>([])
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
 
   useEffect(() => { getAdminPresets().then(d => setProviderPresets(d.providerPresets)).catch(() => {}) }, [])
 
   useEffect(() => {
-    if (!disk) { setDraft(null); setSaved(false); return }
+    if (!disk) { setDraft(null); setProviderOrder([]); setSaved(false); return }
     const next: ProvidersDraft = { default: "", providers: {} }
+    const order: string[] = []
     for (const [name, val] of Object.entries(disk.providers)) {
       if (name === "default") {
         if (typeof val === "string") next.default = val
@@ -401,12 +449,14 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
           apiKeyNewValue: "",
           apiKeyStored: !!refInfo?.exists,
         }
+        order.push(name)
       }
     }
     setDraft(next)
+    setProviderOrder(order)
   }, [disk, refExists])
 
-  const names = draft ? Object.keys(draft.providers) : []
+  const names = providerOrder.filter((name) => !!draft?.providers[name])
 
   const updateProv = (name: string, patch: Partial<ProvidersDraft["providers"][string]>) => {
     setDraft((d) => {
@@ -422,6 +472,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       const clearDefault = d.default === name || d.default.startsWith(`${name}/`)
       return { ...d, providers: rest, default: clearDefault ? "" : d.default }
     })
+    setProviderOrder((order) => order.filter((n) => n !== name))
   }
 
   const updateModel = (provName: string, modelId: string, patch: Partial<ModelEntry>) => {
@@ -482,6 +533,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
   const renameProvider = (oldName: string) => {
     const newName = provRenameValue.trim()
     if (!newName || newName === oldName || newName === "default") { setEditingProvName(null); return }
+    if (!draft || !draft.providers[oldName] || draft.providers[newName]) { setEditingProvName(null); return }
     setDraft((d) => {
       if (!d || !d.providers[oldName]) return d
       if (d.providers[newName]) return d
@@ -495,6 +547,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       }
       return { ...d, default: newDefault, providers: { ...rest, [newName]: prov } }
     })
+    setProviderOrder((order) => order.map((name) => name === oldName ? newName : name))
     setEditingProvName(null)
   }
 
@@ -510,6 +563,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         apiKeyNewValue: "", apiKeyStored: false,
       } } }
     })
+    setProviderOrder((order) => order.includes(n) ? order : [...order, n])
     setNewName("")
     setAdding(false)
     setErr(null)
@@ -528,22 +582,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
       const r = await writeVaultEnv(varName, p.apiKeyNewValue.trim())
       if (!r.ok) { setErr(`apiKey write failed for "${name}": ${r.error}`); setSaving(false); return }
     }
-    const providersOut: Record<string, ProviderDisk | string> = {}
-    if (draft.default) providersOut.default = draft.default
-    for (const [name, p] of Object.entries(draft.providers)) {
-      const models: ModelEntry[] = p.models
-        .filter(m => m.id.trim())
-        .map(m => ({
-          id: m.id.trim(),
-          ...(m.maxContextTokens && m.maxContextTokens > 0 ? { maxContextTokens: m.maxContextTokens } : {}),
-        }))
-      providersOut[name] = {
-        baseUrl: p.baseUrl,
-        apiKey: `\${${providerEnvVarName(name)}}`,
-        ...(models.length > 0 ? { models } : {}),
-        ...(p.enabled ? {} : { enabled: false }),
-      }
-    }
+    const providersOut = buildProvidersDiskFromDraft(draft, providerOrder)
     const r = await savePersonalDisk({ providers: providersOut })
     if (!r.ok) { setSaving(false); setErr(r.error ?? "save failed"); return }
     // Write-through: personal is a per-user repo — push the change to the remote
@@ -563,18 +602,42 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
     onChanged()
   }
 
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setProviderOrder((order) => {
+      const oldIdx = order.indexOf(String(active.id))
+      const newIdx = order.indexOf(String(over.id))
+      if (oldIdx < 0 || newIdx < 0) return order
+      return arrayMove(order, oldIdx, newIdx)
+    })
+  }
+
   if (!draft) return <div className="text-[12px] text-gray-400 italic">no providers yet</div>
 
   return (
     <div className="flex flex-col gap-3">
+      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={names} strategy={verticalListSortingStrategy}>
       {names.map((name) => {
         const p = draft.providers[name]
         const isAddingModel = addingModel[name] ?? false
         const hasKey = p.apiKeyStored || p.apiKeyNewValue.trim() !== ""
         return (
-          <div key={name} className="bg-white border border-gray-200 rounded-lg overflow-hidden transition-shadow hover:shadow-sm">
+          <SortableProviderCard key={name} id={name}>
+            {(dragHandleProps) => (
+            <>
             {/* Provider header */}
             <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50/50 border-b border-gray-100">
+              <button
+                type="button"
+                {...dragHandleProps}
+                className="shrink-0 cursor-grab touch-none text-gray-300 hover:text-gray-500 active:cursor-grabbing focus:outline-none focus:ring-1 focus:ring-gray-300 rounded"
+                title="reorder provider"
+                aria-label={`Reorder ${name} provider`}
+              >
+                <GripVertical size={14} />
+              </button>
               <label className="flex items-center gap-2.5 flex-1 min-w-0 select-none">
                 <Switch
                   checked={p.enabled}
@@ -779,9 +842,13 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                 </div>
               </div>
             </div>
-          </div>
+            </>
+            )}
+          </SortableProviderCard>
         )
       })}
+        </SortableContext>
+      </DndContext>
 
       {/* Preset provider shortcuts */}
       <div className="flex flex-wrap items-center gap-1.5">
@@ -806,6 +873,7 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
                   },
                 }
               })
+              setProviderOrder((order) => order.includes(p.name) ? order : [...order, p.name])
             }}
             className="px-2 py-0.5 rounded border border-gray-200 bg-white text-[10px] text-gray-500 hover:text-gray-900 hover:border-gray-400 transition-colors"
             title={`Add ${p.name} preset`}
@@ -845,6 +913,30 @@ function ProvidersSection({ disk, refExists, onChanged, disabled }: {
         </Button>
       </div>
 
+    </div>
+  )
+}
+
+function SortableProviderCard({
+  id,
+  children,
+}: {
+  id: string
+  children: (dragHandleProps: Record<string, unknown>) => ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="bg-white border border-gray-200 rounded-lg overflow-hidden transition-shadow hover:shadow-sm"
+    >
+      {children({ ...attributes, ...listeners })}
     </div>
   )
 }
@@ -1083,4 +1175,3 @@ function ApiTokensSection() {
     </div>
   )
 }
-
