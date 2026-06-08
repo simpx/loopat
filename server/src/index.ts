@@ -1,3 +1,4 @@
+import rootPkg from "../../package.json" with { type: "json" }
 import { traceMiddleware, shutdownTracing } from "./tracer"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
@@ -3224,6 +3225,7 @@ initChat(chatSeed)
 // user least expects it. When the image is already built (steady state, and
 // `bun --hot` dev), these steps return immediately.
 const bootReady = await printBootstrapBanner(cfg)
+console.log(`[loopat] v${rootPkg.version}`)
 
 const podmanProbe = await probePodman()
 if (podmanProbe.ok) {
