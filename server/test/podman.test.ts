@@ -19,6 +19,7 @@ const {
   buildPodmanCreateArgs,
   buildPodmanExecArgs,
   containerName,
+  readUserGitIdentity,
   V_LOOP_CLAUDE,
   V_LOOP_WORKDIR,
   V_CONTEXT_PERSONAL,
@@ -42,6 +43,7 @@ const HOST_HOME = homedir()
 
 const LOOP_ID = "11111111-2222-3333-4444-555555555555"
 const USER = "alice"
+const USER_GITCONFIG = join(personalDir(USER), ".gitconfig")
 
 async function setupFixture() {
   await rm(TEST_HOME, { recursive: true, force: true })
@@ -327,5 +329,58 @@ describe("buildContainerEnv — caller env wins", () => {
     })
     expect(env.ANTHROPIC_API_KEY).toBe("sk-test")
     expect(env.VAULT_KEY).toBe("v")
+  })
+})
+
+describe("readUserGitIdentity", () => {
+  test("parses name and email from the user section in personal .gitconfig", async () => {
+    await writeFile(
+      USER_GITCONFIG,
+      `
+[core]
+  editor = vim
+
+[user]
+  name = Alice Driver
+  email = alice@example.test
+`,
+    )
+
+    await expect(readUserGitIdentity(personalDir(USER))).resolves.toEqual({
+      name: "Alice Driver",
+      email: "alice@example.test",
+    })
+  })
+
+  test("returns null when .gitconfig is missing or incomplete", async () => {
+    await rm(USER_GITCONFIG, { force: true })
+    await expect(readUserGitIdentity(personalDir(USER))).resolves.toBeNull()
+
+    await writeFile(USER_GITCONFIG, "[user]\n  name = Alice Driver\n")
+    await expect(readUserGitIdentity(personalDir(USER))).resolves.toBeNull()
+  })
+})
+
+describe("buildContainerEnv — sandbox git identity", () => {
+  test("pins author and committer env vars from the driver's personal .gitconfig", async () => {
+    await writeFile(USER_GITCONFIG, "[user]\n  name = Alice Driver\n  email = alice@example.test\n")
+
+    const env = await buildContainerEnv({ loopId: LOOP_ID, createdBy: USER })
+
+    expect(env.GIT_AUTHOR_NAME).toBe("Alice Driver")
+    expect(env.GIT_AUTHOR_EMAIL).toBe("alice@example.test")
+    expect(env.GIT_COMMITTER_NAME).toBe("Alice Driver")
+    expect(env.GIT_COMMITTER_EMAIL).toBe("alice@example.test")
+  })
+
+  test("omits git identity env vars when the driver's .gitconfig is incomplete", async () => {
+    await writeFile(USER_GITCONFIG, "[user]\n  email = alice@example.test\n")
+
+    const env = await buildContainerEnv({ loopId: LOOP_ID, createdBy: USER })
+
+    expect(env.GIT_AUTHOR_NAME).toBeUndefined()
+    expect(env.GIT_AUTHOR_EMAIL).toBeUndefined()
+    expect(env.GIT_COMMITTER_NAME).toBeUndefined()
+    expect(env.GIT_COMMITTER_EMAIL).toBeUndefined()
   })
 })
