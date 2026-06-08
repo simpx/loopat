@@ -1,12 +1,27 @@
 "use client";
 
 import { type SyntaxHighlighterProps } from "@assistant-ui/react-markdown";
-import mermaid from "mermaid";
 import { CodeIcon, EyeIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { sanitizeSvg } from "@/lib/sanitizeSvg";
 import { useDebouncedRender } from "@/lib/useDebouncedRender";
+
+type MermaidInstance = typeof import("mermaid").default;
+
+let mermaidInstance: MermaidInstance | null = null;
+let mermaidPromise: Promise<MermaidInstance> | null = null;
+
+function loadMermaid(): Promise<MermaidInstance> {
+  if (mermaidInstance) return Promise.resolve(mermaidInstance);
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid").then((module) => {
+      mermaidInstance = module.default;
+      return mermaidInstance;
+    });
+  }
+  return mermaidPromise;
+}
 
 /** Whether the page is currently in a dark colour scheme. */
 function detectDark(): boolean {
@@ -57,6 +72,7 @@ export const MermaidBlock = ({ code }: SyntaxHighlighterProps) => {
   const { html, error, isLoading } = useDebouncedRender(
     code,
     async (source) => {
+      const mermaid = await loadMermaid();
       mermaid.initialize({
         startOnLoad: false,
         theme: isDark ? "dark" : "default",

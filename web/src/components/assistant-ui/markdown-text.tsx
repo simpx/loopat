@@ -13,6 +13,7 @@ import { type FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
+import { createMarkdownLanguageComponents } from "@/components/chat/markdownLanguageComponents";
 import { cn } from "@/lib/utils";
 
 const MarkdownTextImpl = () => {
@@ -21,6 +22,7 @@ const MarkdownTextImpl = () => {
       remarkPlugins={[remarkGfm]}
       className="aui-md"
       components={defaultComponents}
+      componentsByLanguage={markdownLanguageComponents}
     />
   );
 };
@@ -46,6 +48,8 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
     </div>
   );
 };
+
+const markdownLanguageComponents = createMarkdownLanguageComponents(CodeHeader);
 
 const useCopyToClipboard = ({
   copiedDuration = 3000,
