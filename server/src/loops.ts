@@ -3,7 +3,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rename, writeFile, 
 import { randomUUID } from "node:crypto"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
-import { existsSync, chmodSync } from "node:fs"
+import { existsSync, chmodSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import {
   loopsDir,
@@ -1031,29 +1031,75 @@ export async function importPersonalFromRepo(
 
 /**
  * TEAM key: the ssh command a host-side git op uses to reach SHARED context —
- * knowledge / notes / repos — as the user, with their OWN vault. We just point
- * ssh at the vault's `.ssh` and let it follow the standard: the standard-named
- * key (`id_ed25519`, via `-i` because on the host `~` isn't the vault) and the
- * vault's own `config` (via `-F`, so the user's Host / known-hosts / strict-
- * checking choices apply). No `IdentitiesOnly` / `UserKnownHostsFile` overrides
- * — loopat doesn't special-case the key, it follows ssh's standard resolution.
- * If the key isn't there the op simply fails: we deliberately do NOT fall back
- * to the host deploy-key, so a loop never borrows access it wasn't granted
+ * knowledge / notes / repos — as the user, with their OWN vault key(s).
+ *
+ * The vault's `.ssh/config` is designed for sandbox use (IdentityFile paths
+ * use `~` which resolves to the sandbox home, not the host home). We can't
+ * load it via `-F` on the host — that would resolve `~/.ssh/foo` to
+ * `/home/admin/.ssh/foo` (doesn't exist) instead of the vault path. Instead
+ * we parse the config to extract IdentityFile entries, rewrite `~` to the
+ * vault home absolute path, and pass them via `-i`. As a fallback for vaults
+ * without a config, we also glob `id_*` (the SSH standard default names).
+ *
+ * If no key is found the op fails: we deliberately do NOT fall back to the
+ * host deploy-key, so a loop never borrows access it wasn't granted
  * (see behavior/02-personal-permissions.md).
  */
 function sshCommandForUser(userId: string, vault: string = "default"): string {
-  const sshDir = join(personalVaultDir(userId, vault), "mounts", "home", ".ssh")
-  const vaultKey = join(sshDir, "id_ed25519")
-  const vaultConfig = join(sshDir, "config")
-  // git can't persist 0600 — it only tracks the exec bit — so a fresh checkout
-  // of the git-crypt vault lands the key at the umask default (0664 under a 002
-  // umask), and ssh refuses it ("permissions too open"). Force 0600 at point of
-  // use: this fixes every host-side git op AND the file the sandbox bind-mounts
-  // into $HOME, regardless of how/when it was checked out. Cheap + idempotent.
-  try { chmodSync(vaultKey, 0o600) } catch {}
-  const f = existsSyncBase(vaultConfig) ? `-F ${vaultConfig} ` : ""
-  return `ssh ${f}-i ${vaultKey}`
+  const vaultHome = join(personalVaultDir(userId, vault), "mounts", "home")
+  const sshDir = join(vaultHome, ".ssh")
+
+  const configPath = join(sshDir, "config")
+  if (existsSyncBase(configPath)) {
+    // Rewrite vault SSH config: resolve IdentityFile ~ and relative paths to
+    // absolute host-side paths. Everything else (Host/Match blocks, ProxyCommand,
+    // known_hosts, StrictHostKeyChecking) is preserved intact.
+    try {
+      const raw = readFileSync(configPath, "utf8")
+      const rewritten = raw.split("\n").map(line => {
+        const m = line.match(/^(\s*identityfile\s+)(.+)/i)
+        if (!m) return line
+        const p = m[2].trim()
+        let abs: string
+        if (p.startsWith("~/")) abs = join(vaultHome, p.slice(2))
+        else if (p.startsWith("/")) abs = p
+        else abs = join(sshDir, p)
+        if (existsSyncBase(abs)) try { chmodSync(abs, 0o600) } catch {}
+        return `${m[1]}${abs}`
+      }).join("\n")
+
+      const resolvedDir = join(tmpdir(), "loopat-ssh", userId, vault)
+      mkdirSync(resolvedDir, { recursive: true })
+      const resolvedConfig = join(resolvedDir, "config")
+      writeFileSync(resolvedConfig, rewritten, { mode: 0o600 })
+      return `ssh -F ${sq(resolvedConfig)}`
+    } catch (e) {
+      console.warn(`[loopat] failed to rewrite vault SSH config ${configPath}: ${e}`)
+    }
+  }
+
+  // No config (or rewrite failed): discover id_* keys in vault .ssh/ directly
+  const keys: string[] = []
+  try {
+    for (const f of readdirSync(sshDir)) {
+      if (f.startsWith("id_") && !f.endsWith(".pub")) {
+        const p = join(sshDir, f)
+        if (existsSyncBase(p)) {
+          try { chmodSync(p, 0o600) } catch {}
+          keys.push(p)
+        }
+      }
+    }
+  } catch {}
+
+  if (keys.length === 0) {
+    console.warn(`[loopat] no SSH keys found for vault ${vault} user ${userId}`)
+    return "ssh -o IdentitiesOnly=yes"
+  }
+  return `ssh ${keys.map(k => `-i ${sq(k)}`).join(" ")} -o IdentitiesOnly=yes`
 }
+
+function sq(s: string): string { return `'${s.replace(/'/g, "'\\''")}'` }
 
 /**
  * PERSONAL key: reaching the user's OWN personal repo (clone / pull / push) uses
