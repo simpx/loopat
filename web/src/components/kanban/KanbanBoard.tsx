@@ -16,6 +16,7 @@ import { listKanbanColumns, getKanbanConfig, saveKanbanColumnOrder, toggleKanban
 import { KanbanColumn as KanbanColumnView } from "./KanbanColumn"
 import { KanbanCardStatic } from "./KanbanCardView"
 import { useKanbanWebSocket } from "../../useKanbanWebSocket"
+import { gapToColumnFinalIndex } from "./kanbanReorder"
 
 export type KanbanBoardHandle = { refresh: () => void }
 
@@ -162,9 +163,8 @@ export const KanbanBoard = forwardRef<KanbanBoardHandle, {
       const collisionCenter = firstCollision?.data?.droppableRect
         ? firstCollision.data.droppableRect.left + firstCollision.data.droppableRect.width / 2
         : 0
-      // arrayMove's "to" is the final index — matches the indicator position
-      const targetIdx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
-      const clampedIdx = Math.max(0, Math.min(targetIdx, orderedFiles.length - 1))
+      const gapIdx = activeCenter < collisionCenter ? overColIdx : overColIdx + 1
+      const clampedIdx = gapToColumnFinalIndex(oldIdx, gapIdx, orderedFiles.length)
       if (clampedIdx === oldIdx) return
 
       const newOrder = arrayMove([...orderedFiles], oldIdx, clampedIdx)

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react"
+import { cleanupKanbanWebSocket, handleKanbanUnexpectedClose } from "./kanbanWebSocket"
 
 export function useKanbanWebSocket(onUpdate: () => void) {
   const wsRef = useRef<WebSocket | null>(null)
@@ -23,10 +24,7 @@ export function useKanbanWebSocket(onUpdate: () => void) {
     }
 
     ws.onclose = () => {
-      setConnected(false)
-      wsRef.current = null
-      // Reconnect with backoff
-      setTimeout(connect, 2000 + Math.random() * 3000)
+      handleKanbanUnexpectedClose({ wsRef, setConnected, connect })
     }
 
     ws.onerror = () => {
@@ -37,8 +35,9 @@ export function useKanbanWebSocket(onUpdate: () => void) {
   useEffect(() => {
     connect()
     return () => {
-      wsRef.current?.close()
+      const ws = wsRef.current
       wsRef.current = null
+      cleanupKanbanWebSocket(ws, WebSocket.CONNECTING)
     }
   }, [connect])
 
