@@ -80,6 +80,13 @@ function maskEnv(env: Record<string, string | undefined>): Record<string, string
   return out
 }
 
+export function buildHeadlessSdkSpawnEnv(extraEnv: Record<string, string>): Record<string, string> {
+  return {
+    ...extraEnv,
+    CLAUDE_CODE_SYNC_PLUGIN_INSTALL: "1",
+  }
+}
+
 function pushIterable<T>() {
   const queue: T[] = []
   let resolver: ((v: IteratorResult<T>) => void) | null = null
@@ -412,7 +419,7 @@ class LoopSession {
       }
     }
 
-    const extraEnv = await buildLoopEnv({
+    const loopEnv = await buildLoopEnv({
       loopId,
       driver,
       vault: meta.config?.vault,
@@ -441,7 +448,7 @@ class LoopSession {
       knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       repo: meta.repo,
-      extraEnv,
+      extraEnv: loopEnv,
       ephemeralPorts: loopEphemeralPorts(meta),
     }, {
       onProgress: (msg) => {
@@ -451,6 +458,7 @@ class LoopSession {
     })
     if (building) setLoopPhase(loopId, "ready")
     updateLoopStatus(loopId, "Ready")
+    const sdkSpawnEnv = buildHeadlessSdkSpawnEnv(loopEnv)
     // Tell the container lifecycle scheduler that this loop has an active
     // SDK source. Released in destroy() via markInactive(loopId, "sdk").
     markActive(loopId, "sdk")
@@ -468,7 +476,7 @@ class LoopSession {
         cwd: V_LOOP_WORKDIR(loopId),
         env: {
           ...process.env,
-          ...extraEnv,
+          ...sdkSpawnEnv,
         },
         model: activeModel?.id ?? "",
         thinking: { type: "adaptive" },
@@ -642,7 +650,7 @@ class LoopSession {
             loopId,
             command,
             args,
-            env: extraEnv,
+            env: sdkSpawnEnv,
             workdir: V_LOOP_WORKDIR(loopId),
             interactive: true,
           })
