@@ -163,10 +163,7 @@ function LoopMain({ meta }: { meta: LoopMeta }) {
     setEditorSelection(null)
     setOpenPanels((prev) => prev.includes("editor") ? prev : [...prev, "editor"])
   }
-  const handleTitleChanged = useCallback((title: string) => {
-    ws.updateLoopInPlace(meta.id, { title })
-  }, [meta.id, ws.updateLoopInPlace])
-  const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "", openFile, handleTitleChanged)
+  const { runtime, connected, reconnecting, running, viewers, extra, queue, onClearQueue } = useLoopRuntime(meta.id, ws.currentUser?.id ?? "", openFile)
 
   // Sandbox-prep gate: on first use, the per-loop image builds (mise toolchain
   // install / base-image pull). While it runs, terminal + chat aren't usable —

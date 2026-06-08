@@ -539,7 +539,7 @@ export function LoopRuntimeProvider({
   )
 }
 
-export function useLoopRuntime(loopId: string | null, currentUserId: string, openFile?: (path: string) => void, onTitleChanged?: (title: string) => void) {
+export function useLoopRuntime(loopId: string | null, currentUserId: string, openFile?: (path: string) => void) {
   const [raw, setRaw] = useState<RawMsg[]>([])
   const [connected, setConnected] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
@@ -562,8 +562,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
     },
   )
   const suppressSlashRef = useRef(false)
-  const onTitleChangedRef = useRef(onTitleChanged)
-  onTitleChangedRef.current = onTitleChanged
   const wsRef = useRef<WebSocket | null>(null)
   // v1 SSE subscription for live SDK messages (parallel to WS). The WS keeps
   // delivering history + initial state + operator-feature broadcasts; v1 SSE
@@ -1202,11 +1200,6 @@ export function useLoopRuntime(loopId: string | null, currentUserId: string, ope
             setGoalSetAt(null)
             setGoalStatus(null)
           }
-          return
-        }
-
-        if (m?.type === "title_changed" && typeof m.title === "string") {
-          onTitleChangedRef.current?.(m.title)
           return
         }
 
