@@ -370,7 +370,12 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
       setCreating({ type: action === "new-file" ? "file" : "folder", path: node.path })
       setNewName("")
     } else if (action === "delete") {
-      if (!confirm(`Delete "${node.name}"?`)) return
+      const msg = isSecretFile(vault, node.path)
+        ? `Delete encrypted credential "${node.name}"? This cannot be undone.`
+        : isSecretsFolder(vault, node.path)
+          ? `Delete folder "${node.name}"? Only works if the folder is empty.`
+          : `Delete "${node.name}"?`
+      if (!confirm(msg)) return
       vaultDeleteFile(vault, node.path).then((r) => {
         if (r.ok) {
           setPickedPath((p) => p === node.path ? null : p)
@@ -382,9 +387,22 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     }
   }, [vault])
 
-  const getContextActions = useCallback((node: TreeNodeData): TreeContextAction[] => {
-    if (isSecretsFolder(vault, node.path)) return []
+  const getContextActions = useCallback((node: TreeNodeData, ctx: { children: TreeNodeData[] | null }): TreeContextAction[] => {
     if (node.type === "dir") {
+      if (isSecretsFolder(vault, node.path)) {
+        // Encrypted dir: Delete only appears when children are loaded and
+        // empty. This is a stale-state hint (children may have changed since
+        // load) — the server's rmdir backstop is the authoritative guard
+        // against deleting non-empty credential dirs.
+        const empty = ctx.children !== null && ctx.children.length === 0
+        return [
+          { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
+          { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
+          ...(empty
+            ? [{ label: "Delete", icon: <Trash2 size={12} />, action: "delete", danger: true }]
+            : []),
+        ]
+      }
       return [
         { label: "New file", icon: <FilePlus size={12} />, action: "new-file" },
         { label: "New folder", icon: <FolderPlus size={12} />, action: "new-folder" },
@@ -600,9 +618,7 @@ function SearchIcon() {
  */
 function isSecretsFolder(vault: VaultId, path: string): boolean {
   if (vault !== "personal") return false
-  if (!path.startsWith(".loopat/vaults/")) return false
-  const rest = path.slice(".loopat/vaults/".length)
-  return rest.length > 0
+  return path === ".loopat/vaults" || path.startsWith(".loopat/vaults/")
 }
 function isSecretFile(vault: VaultId, path: string): boolean {
   if (vault !== "personal") return false

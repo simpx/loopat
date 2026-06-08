@@ -3,7 +3,7 @@
  * personal / repos). Auto-commits on write per user's design:
  * "每次修改自动 commit, log 记录动作"。
  */
-import { readdir, readFile, writeFile, stat, lstat, mkdir, rm, unlink, symlink } from "node:fs/promises"
+import { readdir, readFile, writeFile, stat, lstat, mkdir, rm, rmdir, unlink, symlink } from "node:fs/promises"
 // Re-using readFile for parsing focus/inbox markdown.
 import { existsSync } from "node:fs"
 import { execFile } from "node:child_process"
@@ -234,11 +234,25 @@ export async function vaultDelete(vault: VaultId, relPath: string, user: string)
   try {
     const s = await stat(abs)
     if (s.isDirectory()) {
-      await rm(abs, { recursive: true, force: true })
+      // Encrypted vault subtrees use rmdir (non-recursive) so an `rm -rf` of
+      // a whole credential bundle can't happen through this API. Empty
+      // leftover dirs still clean up; non-empty raises ENOTEMPTY → we surface
+      // it as a clean "directory not empty" error.
+      const isEncryptedDir = vault === "personal" && (
+        relPath === ".loopat/vaults" || relPath.startsWith(".loopat/vaults/")
+      )
+      if (isEncryptedDir) {
+        await rmdir(abs)
+      } else {
+        await rm(abs, { recursive: true, force: true })
+      }
     } else {
       await unlink(abs)
     }
   } catch (e: any) {
+    if (e?.code === "ENOTEMPTY") {
+      return { ok: false, error: "directory not empty" }
+    }
     return { ok: false, error: e?.message ?? "delete failed" }
   }
   return { ok: true }

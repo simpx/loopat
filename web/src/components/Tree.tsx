@@ -52,8 +52,14 @@ export type TreeProps = {
   picked: string | null
   /** Called to load children of a directory */
   onLoadChildren: (path: string) => Promise<TreeNodeData[]>
-  /** Returns context menu items for a node */
-  getContextActions: (node: TreeNodeData) => TreeContextAction[]
+  /**
+   * Returns context menu items for a node.
+   *
+   * `ctx.children` is the node's currently-loaded children (only meaningful
+   * for dirs). `null` when the dir hasn't been expanded yet — callers that
+   * want to gate actions on emptiness must treat null as "unknown".
+   */
+  getContextActions: (node: TreeNodeData, ctx: { children: TreeNodeData[] | null }) => TreeContextAction[]
   /** Called when a context action is triggered */
   onAction: (action: string, node: TreeNodeData) => void
   /** Depth offset (default 0) */
@@ -120,7 +126,7 @@ function TreeNode({
   onPick: (path: string) => void
   picked: string | null
   onLoadChildren: (path: string) => Promise<TreeNodeData[]>
-  getContextActions: (node: TreeNodeData) => TreeContextAction[]
+  getContextActions: (node: TreeNodeData, ctx: { children: TreeNodeData[] | null }) => TreeContextAction[]
   onAction: (action: string, node: TreeNodeData) => void
   renderNode?: (node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => ReactNode
   nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
@@ -157,6 +163,10 @@ function TreeNode({
   }, [open, entry.path, onLoadChildren, children])
 
   const handleContextMenu = (e: React.MouseEvent) => {
+    // If this node has no actions (e.g. encrypted files in personal vault),
+    // don't suppress the native menu — and don't open an empty bubble.
+    const items = getContextActions(entry, { children }).filter((a) => !a.hidden)
+    if (items.length === 0) return
     e.preventDefault()
     e.stopPropagation()
     setMenuPos({ x: e.clientX, y: e.clientY })
@@ -195,7 +205,7 @@ function TreeNode({
             <ContextMenu
               x={menuPos.x}
               y={menuPos.y}
-              items={getContextActions(entry).filter((a) => !a.hidden)}
+              items={getContextActions(entry, { children }).filter((a) => !a.hidden)}
               onAction={(action) => onAction(action, entry)}
               onClose={() => setMenuPos(null)}
             />
@@ -255,7 +265,7 @@ function TreeNode({
           <ContextMenu
             x={menuPos.x}
             y={menuPos.y}
-            items={getContextActions(entry).filter((a) => !a.hidden)}
+            items={getContextActions(entry, { children }).filter((a) => !a.hidden)}
             onAction={(action) => onAction(action, entry)}
             onClose={() => setMenuPos(null)}
           />
@@ -279,7 +289,7 @@ function TreeNode({
           <ContextMenu
             x={menuPos.x}
             y={menuPos.y}
-            items={getContextActions(entry).filter((a) => !a.hidden)}
+            items={getContextActions(entry, { children: null }).filter((a) => !a.hidden)}
             onAction={(action) => onAction(action, entry)}
             onClose={() => setMenuPos(null)}
           />
@@ -311,7 +321,7 @@ function TreeNode({
           <ContextMenu
             x={menuPos.x}
             y={menuPos.y}
-            items={getContextActions(entry).filter((a) => !a.hidden)}
+            items={getContextActions(entry, { children: null }).filter((a) => !a.hidden)}
             onAction={(action) => onAction(action, entry)}
             onClose={() => setMenuPos(null)}
           />
