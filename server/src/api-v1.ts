@@ -444,6 +444,26 @@ export function buildApiV1(): Hono<{ Variables: Variables }> {
     return c.json(metaToApi(meta, { withRuntime: true }))
   })
 
+  v1.patch("/loops/:id", requireApiAuth, async (c) => {
+    const userId = c.get("userId") as string
+    const id = loopIdFromApi(c.req.param("id") ?? "")
+    const meta = await getLoop(id)
+    if (!meta) return apiError(c, 404, "not_found_error", "loop_not_found", "loop not found")
+    if (meta.createdBy !== userId) return apiError(c, 403, "permission_error", "not_loop_owner", "not your loop")
+    const body = await c.req.json().catch(() => ({}))
+    const patch: Record<string, unknown> = {}
+    if (typeof body.title === "string") {
+      patch.title = body.title.trim().slice(0, 200)
+      patch.titleAuto = false
+    }
+    if (body.metadata && typeof body.metadata === "object") patch.metadata = body.metadata
+    if (Object.keys(patch).length === 0) {
+      return apiError(c, 400, "invalid_request_error", "empty_patch", "nothing to update (supported: title, metadata)")
+    }
+    const patched = await patchLoopMeta(id, patch as any)
+    return c.json(metaToApi(patched!))
+  })
+
   v1.delete("/loops/:id", requireApiAuth, async (c) => {
     const userId = c.get("userId") as string
     const id = loopIdFromApi(c.req.param("id") ?? "")
