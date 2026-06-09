@@ -39,6 +39,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
+    "copy-to-clipboard": "^3.3.3",
     "dompurify": "^3.4.8",
     "highlight.js": "^11.11.1",
     "katex": "^0.17.0",

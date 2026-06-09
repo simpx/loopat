@@ -6,6 +6,7 @@
  */
 import { useState } from "react"
 import { getOnboarding, type OnboardingStatus } from "../api"
+import { copyText } from "@/lib/clipboard"
 
 export function OnboardingInfo({
   show,
@@ -44,7 +45,7 @@ export function OnboardingInfo({
               <div className="flex items-start gap-2">
                 <code className="flex-1 min-w-0 break-all bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[10px] font-mono">{v.value}</code>
                 <button
-                  onClick={() => { navigator.clipboard.writeText(v.value); setCopied(v.label); setTimeout(() => setCopied(null), 1500) }}
+                  onClick={() => { if (copyText(v.value)) { setCopied(v.label); setTimeout(() => setCopied(null), 1500) } }}
                   className="shrink-0 text-[11px] text-gray-500 hover:text-gray-800 px-1.5 py-1"
                 >
                   {copied === v.label ? "copied" : "copy"}

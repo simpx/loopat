@@ -2,6 +2,7 @@ import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { getServeConfig, checkAliasAvailable, getAvailablePort, checkPortAvailable, getCurrentSharePort, type LoopMeta, type ServeConfig } from "../api"
 import { Globe, Copy, Check, AlertCircle, Shuffle, RefreshCw } from "lucide-react"
+import { copyText } from "@/lib/clipboard"
 
 type ShareMode = "static" | "port" | "direct" | "ephemeral"
 type TabKey = "standard" | "direct" | "ephemeral"
@@ -205,9 +206,9 @@ export function ShareArtifactDialog({ loop, open, onClose, onSaved }: { loop: Lo
     }
   }
 
-  const copyUrl = async () => {
-    try { await navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 1500) }
-    catch { window.prompt("Copy this URL:", shareUrl) }
+  const copyUrl = () => {
+    if (copyText(shareUrl)) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
+    else window.prompt("Copy this URL:", shareUrl)
   }
 
   const canSave =

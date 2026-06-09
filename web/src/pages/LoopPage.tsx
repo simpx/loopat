@@ -14,6 +14,7 @@ import { useLoopRuntime, LoopRuntimeProvider } from "../useLoopRuntime"
 import { distillLoop, listProfiles, type LoopMeta, markLoopViewed, getServeConfig, type ServeConfig } from "../api"
 import { SharePage } from "./SharePage"
 import { useIsMobile } from "../lib/useIsMobile"
+import { copyText } from "@/lib/clipboard"
 import { useLoopStatus } from "../useLoopStatus"
 import { LoopListContent } from "../components/LoopListContent"
 import { FileTree } from "../FileTree"
@@ -709,12 +710,11 @@ function ShareToggle({ meta }: { meta: LoopMeta }) {
     }
   }
 
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(shareUrl)
+  const onCopy = () => {
+    if (copyText(shareUrl)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    } catch {}
+    }
   }
 
   if (!isOwner) {

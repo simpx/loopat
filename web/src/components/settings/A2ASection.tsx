@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from "react"
 import { getA2A, saveA2A, regenA2AKey, type A2ASettings } from "../../api"
+import { copyText } from "@/lib/clipboard"
 
 function CopyRow({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
@@ -13,7 +14,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
       <span className="text-[11px] text-gray-500 w-20 shrink-0">{label}</span>
       <code className="flex-1 min-w-0 truncate bg-white border border-gray-200 rounded px-2 py-1 text-[10px] font-mono">{value}</code>
       <button
-        onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+        onClick={() => { if (copyText(value)) { setCopied(true); setTimeout(() => setCopied(false), 1500) } }}
         className="text-[11px] text-gray-500 hover:text-gray-800 shrink-0"
       >
         {copied ? "copied" : "copy"}

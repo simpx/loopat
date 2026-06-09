@@ -3,6 +3,7 @@
 import { CheckIcon, CopyIcon, DownloadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { copyRich } from "@/lib/clipboard";
 
 type TableProps = React.ComponentProps<"table"> & { node?: unknown };
 
@@ -49,21 +50,9 @@ export const TableWithToolbar = ({ node, className, ...props }: TableProps) => {
     const grid = readGrid(table);
     const markdown = gridToMarkdown(grid);
     const html = table.outerHTML;
-    try {
-      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            "text/plain": new Blob([markdown], { type: "text/plain" }),
-            "text/html": new Blob([html], { type: "text/html" }),
-          }),
-        ]);
-      } else {
-        await navigator.clipboard.writeText(markdown);
-      }
+    if (await copyRich({ text: markdown, html })) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Clipboard access can be denied; fail quietly.
     }
   };
 
