@@ -6,12 +6,14 @@ export const NEW_LOOP_MEMORY_KEYS = {
   repo: "loopat:newLoop:lastRepo",
   profiles: "loopat:newLoop:lastProfiles",
   vault: "loopat:newLoop:lastVault",
+  freshness: "loopat:newLoop:lastFreshness",
 } as const
 
 type NewLoopMemory = {
   repo: string | null
   profiles: string[] | null
   vault: string | null
+  freshness: "latest" | "cached" | "custom" | null
 }
 
 export function readNewLoopMemory(storage: NewLoopStorage): NewLoopMemory {
@@ -19,6 +21,7 @@ export function readNewLoopMemory(storage: NewLoopStorage): NewLoopMemory {
     repo: safeGet(storage, NEW_LOOP_MEMORY_KEYS.repo),
     profiles: readProfileList(storage),
     vault: safeGet(storage, NEW_LOOP_MEMORY_KEYS.vault),
+    freshness: readFreshness(storage),
   }
 }
 
@@ -48,14 +51,19 @@ export function resolveStoredVault(memory: NewLoopMemory, vaults: string[]): str
   return "default"
 }
 
+export function resolveStoredFreshness(memory: NewLoopMemory): "latest" | "cached" | "custom" {
+  return memory.freshness ?? "latest"
+}
+
 export function writeNewLoopMemory(
   storage: NewLoopStorage,
-  selection: { repo: string; profiles: string[]; vault: string },
+  selection: { repo: string; profiles: string[]; vault: string; freshness: "latest" | "cached" | "custom" },
 ) {
   try {
     storage.setItem(NEW_LOOP_MEMORY_KEYS.repo, selection.repo)
     storage.setItem(NEW_LOOP_MEMORY_KEYS.profiles, JSON.stringify(selection.profiles))
     storage.setItem(NEW_LOOP_MEMORY_KEYS.vault, selection.vault)
+    storage.setItem(NEW_LOOP_MEMORY_KEYS.freshness, selection.freshness)
   } catch {
     // localStorage is best-effort; loop creation already succeeded.
   }
@@ -78,4 +86,10 @@ function readProfileList(storage: NewLoopStorage): string[] | null {
   } catch {
     return null
   }
+}
+
+function readFreshness(storage: NewLoopStorage): "latest" | "cached" | "custom" | null {
+  const raw = safeGet(storage, NEW_LOOP_MEMORY_KEYS.freshness)
+  if (raw === "latest" || raw === "cached" || raw === "custom") return raw
+  return null
 }

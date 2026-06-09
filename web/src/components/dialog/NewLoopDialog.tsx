@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { getDefaultProfiles, getLoopStats, listProfiles, getContextRepos, listVaults, type LoopStats, type ProfileEntry, type ContextRepoSpec } from "../../api"
 import { RepoSelect } from "./RepoSelect"
-import { readNewLoopMemory, resolveStoredProfiles, resolveStoredRepo, resolveStoredVault, writeNewLoopMemory } from "./newLoopMemory"
+import { readNewLoopMemory, resolveStoredFreshness, resolveStoredProfiles, resolveStoredRepo, resolveStoredVault, writeNewLoopMemory } from "./newLoopMemory"
 
 export function NewLoopDialog({
   onClose,
@@ -52,6 +52,7 @@ export function NewLoopDialog({
       setVaults(vs)
       setVault(resolveStoredVault(memory, vs))
     })
+    setFreshness(resolveStoredFreshness(memory))
     inputRef.current?.focus()
   }, [])
 
@@ -111,6 +112,7 @@ export function NewLoopDialog({
         repo,
         profiles: [...selectedProfiles],
         vault,
+        freshness,
       })
     } finally {
       setBusy(false)

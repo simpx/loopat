@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   NEW_LOOP_MEMORY_KEYS,
   readNewLoopMemory,
+  resolveStoredFreshness,
   resolveStoredProfiles,
   resolveStoredRepo,
   resolveStoredVault,
@@ -68,17 +69,33 @@ describe("new loop memory", () => {
     expect(resolveStoredVault(memory, [])).toBe("default")
   })
 
-  test("writes selected repo, profiles, and vault after successful creation", () => {
+  test("writes selected repo, profiles, vault, and freshness after successful creation", () => {
     const memoryStorage = storage()
 
     writeNewLoopMemory(memoryStorage, {
       repo: "loopat",
       profiles: ["docs", "ops"],
       vault: "prod",
+      freshness: "cached",
     })
 
     expect(memoryStorage.getItem(NEW_LOOP_MEMORY_KEYS.repo)).toBe("loopat")
     expect(memoryStorage.getItem(NEW_LOOP_MEMORY_KEYS.profiles)).toBe(JSON.stringify(["docs", "ops"]))
     expect(memoryStorage.getItem(NEW_LOOP_MEMORY_KEYS.vault)).toBe("prod")
+    expect(memoryStorage.getItem(NEW_LOOP_MEMORY_KEYS.freshness)).toBe("cached")
+  })
+
+  test("restores a stored freshness when valid, defaults to latest otherwise", () => {
+    const cachedStorage = storage({ [NEW_LOOP_MEMORY_KEYS.freshness]: "cached" })
+    const customStorage = storage({ [NEW_LOOP_MEMORY_KEYS.freshness]: "custom" })
+    const latestStorage = storage({ [NEW_LOOP_MEMORY_KEYS.freshness]: "latest" })
+    const invalidStorage = storage({ [NEW_LOOP_MEMORY_KEYS.freshness]: "unknown" })
+    const emptyStorage = storage()
+
+    expect(resolveStoredFreshness(readNewLoopMemory(cachedStorage))).toBe("cached")
+    expect(resolveStoredFreshness(readNewLoopMemory(customStorage))).toBe("custom")
+    expect(resolveStoredFreshness(readNewLoopMemory(latestStorage))).toBe("latest")
+    expect(resolveStoredFreshness(readNewLoopMemory(invalidStorage))).toBe("latest")
+    expect(resolveStoredFreshness(readNewLoopMemory(emptyStorage))).toBe("latest")
   })
 })
