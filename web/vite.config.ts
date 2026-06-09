@@ -33,6 +33,7 @@ export default defineConfig({
     allowedHosts: [".ngrok-free.app"],
     proxy: {
       "/api": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
+      "/sendBucSSOToken.do": { target: `http://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}` },
       "/ws": {
         target: `ws://${process.env.HOST ?? "localhost"}:${process.env.PORT ?? 10001}`,
         ws: true,

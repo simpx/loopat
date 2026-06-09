@@ -11,6 +11,15 @@
 export type HostCred = { token: string; baseUrl?: string }
 export type RepoRef = { owner: string; name: string }
 
+export type ExternalAuth = {
+  id: string
+  label: string
+  callbackPath: string
+  tokenParam: string
+  buildLoginUrl(backUrl: string): string
+  verify(token: string): Promise<{ oauthId: string; username: string; email?: string }>
+}
+
 /**
  * Onboarding is fully implemented by the provider (see GitHostProvider.onboarding).
  * The provider is a state machine: given the current context it either reports
@@ -27,6 +36,7 @@ export type OnboardingField = {
   placeholder?: string
   /** Prefill value (e.g. the seeded baseUrl/model) — user can edit. */
   value?: string
+  meta?: Record<string, any>
   /**
    *  - "vault-env":           store the submitted value in the vault under `name`.
    *  - "personal-repo-token": use the submitted value as the git token to
@@ -67,7 +77,6 @@ export type OnboardingView =
       show:
         | ({ kind: "form" } & OnboardingForm)
         | { kind: "route"; path: string; title?: string; description?: string }
-        | { kind: "device"; title: string; description?: string }
         | {
             kind: "info"
             title: string
@@ -77,6 +86,8 @@ export type OnboardingView =
             /** External help links (e.g. where to register the key). */
             help?: { label: string; url: string }[]
           }
+        | { kind: "wizard"; title: string; steps: any[] }
+        | { kind: "device"; title: string; description?: string }
     }
 
 export interface GitHostProvider {
@@ -119,8 +130,8 @@ export interface GitHostProvider {
     repoDir: string | null
     /** Workspace-level provider config (from ~/.loopat/config.json), so the
      *  provider can skip the "enter an API key" step when the workspace already
-     *  has keys configured for shared use. null when unreadable. */
-    workspaceConfig: Record<string, unknown> | null
+     *  has keys configured for shared use. undefined when unreadable. */
+    workspaceConfig?: Record<string, unknown>
   }): Promise<OnboardingView>
 
 
@@ -192,7 +203,12 @@ export interface GitHostProvider {
     vaultDir: string
     userId: string
     login: string
+    token?: string
   }): Promise<void>
+
+  readonly externalAuth?: ExternalAuth
+
+  init?(config: Record<string, unknown>): void
 }
 
 const providers = new Map<string, GitHostProvider>()
@@ -205,4 +221,10 @@ export function getProvider(id: string): GitHostProvider | undefined {
 }
 export function listProviders(): { id: string; label: string }[] {
   return [...providers.values()].map((p) => ({ id: p.id, label: p.label }))
+}
+export function getExternalAuth(): ExternalAuth | undefined {
+  for (const p of providers.values()) {
+    if (p.externalAuth) return p.externalAuth
+  }
+  return undefined
 }

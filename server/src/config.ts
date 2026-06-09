@@ -238,6 +238,8 @@ export type WorkspaceConfig = {
   serveEphemeralDomain?: string
   /** Admin-managed presets for quick-add in provider/mise tool configs. */
   presets?: PresetsData
+  providerConfig?: Record<string, Record<string, unknown>>
+  extensionUrl?: string
 }
 
 /**
@@ -413,6 +415,11 @@ export async function loadConfig(): Promise<WorkspaceConfig> {
     for (const [, p] of Object.entries(parsed.providers)) {
       if (p.enabled === undefined) (p as any).enabled = true
     }
+  }
+  if ((parsed as any).buc && !parsed.providerConfig?.code) {
+    parsed.providerConfig = parsed.providerConfig ?? {}
+    parsed.providerConfig.code = { buc: (parsed as any).buc }
+    delete (parsed as any).buc
   }
   cachedWorkspace = parsed
   cachedWorkspaceMtimeMs = mtimeMs
@@ -897,6 +904,7 @@ export async function saveWorkspaceConfig(cfg: Partial<WorkspaceConfig>): Promis
   if (cfg.serveEphemeralEnabled !== undefined) merged.serveEphemeralEnabled = cfg.serveEphemeralEnabled
   if (cfg.serveEphemeralDomain !== undefined) merged.serveEphemeralDomain = cfg.serveEphemeralDomain
   if (cfg.presets !== undefined) merged.presets = cfg.presets
+  if (cfg.providerConfig !== undefined) merged.providerConfig = cfg.providerConfig
   await writeFile(configPath(), JSON.stringify(merged, null, 2) + "\n")
   cachedWorkspace = null
 }

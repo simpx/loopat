@@ -31,6 +31,7 @@ import {
   personalRepoCacheDir,
   personalRepoCacheRoot,
   personalVaultDir,
+  personalVaultMountsHomeDir,
   uiNotesDir,
   personalMemoryDir,
   workspaceMemoryDir,
@@ -44,6 +45,7 @@ import {
 import type { RepoSpec } from "./config"
 import { existsSync as existsSyncBase } from "node:fs"
 import { loadConfig, loadPersonalConfig, loadKnowledgeConfig, writeVaultEnv } from "./config"
+import { setPersonalRepo } from "./auth"
 import { ensurePersonalKeypair } from "./personal-keys"
 import { composeLoopClaudeConfig, writeLoopSettings } from "./compose"
 import { getProvider, type OnboardingView } from "./git-host"
@@ -770,7 +772,7 @@ async function onboardingView(userId: string, vault: string): Promise<Onboarding
   let workspaceConfig: Record<string, unknown> | null = null
   try { workspaceConfig = (await loadConfig()) as unknown as Record<string, unknown> } catch { /* leave null */ }
   try {
-    const view = await provider.onboarding({ userId, vaultEnvs, config, personalRepoImported, repoDir, workspaceConfig })
+    const view = await provider.onboarding({ userId, vaultEnvs, config, personalRepoImported, repoDir, workspaceConfig: workspaceConfig ?? undefined })
     return { gated: true, ...view }
   } catch (e: any) {
     // Fail OPEN: a broken onboarding impl must not lock the user out.
@@ -808,12 +810,20 @@ export async function submitOnboarding(
   if (!provider?.onboarding) return { ok: false, error: "no onboarding for this provider" }
   const cur = await onboardingView(userId, vault)
   if (cur.done) return { ok: true, next: cur }
-  // Only "form" remediations have values to run; "route" ones are handled by the
-  // user acting on the real page, then onboarding() re-checks.
-  if (cur.show.kind !== "form") return { ok: true, next: cur }
+  // Collect fields from form or wizard
+  let allFields: Array<{ name: string; label: string; action: string }> = []
+  if (cur.show.kind === "form") {
+    allFields = cur.show.fields
+  } else if (cur.show.kind === "wizard") {
+    for (const step of (cur.show as any).steps ?? []) {
+      if (step.fields) allFields.push(...step.fields)
+    }
+  } else {
+    return { ok: true, next: cur }
+  }
   let wroteVaultEnv = false
   const providerFields: Record<string, string> = {}
-  for (const field of cur.show.fields) {
+  for (const field of allFields) {
     const raw = values[field.name]
     const value = typeof raw === "string" ? raw.trim() : ""
     if (!value) continue // skip blanks (the provider's `require` rule is enforced UI-side)
@@ -821,20 +831,50 @@ export async function submitOnboarding(
       const r = await writeVaultEnv(userId, vault, field.name, value)
       if (!r.ok) return { ok: false, error: `couldn't save ${field.label}: ${r.error}` }
       wroteVaultEnv = true
+    } else if (field.action === "personal-repo-token") {
+      const personalFresh = await isPersonalFresh(userId)
+      if (personalFresh) {
+        const repoName = (typeof values.__repoName__ === "string" && values.__repoName__.trim()) || provider.defaultRepo || "loopat-personal"
+        let r = await setupPersonalViaProvider({
+          userId, provider: provider.id, token: value,
+          baseUrl: provider.baseUrl, repoName,
+        })
+        if (!r.ok && r.needsCryptKey) {
+          const keyPath = personalGitCryptKeyPath(userId)
+          const key = existsSyncBase(keyPath)
+            ? (await readFile(keyPath)).toString("base64")
+            : undefined
+          if (key) {
+            r = await setupPersonalViaProvider({
+              userId, provider: provider.id, token: value,
+              baseUrl: provider.baseUrl, repoName, cryptKey: key,
+            })
+          }
+        }
+        if (!r.ok) return { ok: false, error: r.error }
+        if (r.repoUrl) await setPersonalRepo(userId, r.repoUrl)
+        if (provider.ensureRepo) {
+          try { await provider.ensureRepo({ token: value, baseUrl: provider.baseUrl }, repoName, { private: true }) } catch {}
+        }
+      }
+      const sshDir = join(personalDir(userId), ".loopat", "vaults", vault, "mounts", "home", ".ssh")
+      const keyFile = join(sshDir, "id_ed25519")
+      try {
+        const content = await readFile(keyFile, "utf8").catch(() => "")
+        if (!content.includes("OPENSSH PRIVATE KEY")) {
+          await rm(keyFile, { force: true })
+          await rm(keyFile + ".pub", { force: true })
+          await mkdir(sshDir, { recursive: true })
+          await execFileP("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `loopat:${userId}`, "-f", keyFile])
+          console.log(`[loopat] regenerated SSH key for ${userId}`)
+        }
+      } catch (e: any) {
+        console.warn(`[loopat] SSH key fix failed for ${userId}: ${e?.message ?? e}`)
+      }
     } else if (field.action === "provider-field") {
       providerFields[field.name] = value
-    } else if (field.action === "personal-repo-token") {
-      const r = await setupPersonalViaProvider({
-        userId,
-        provider: provider.id,
-        token: value,
-        baseUrl: provider.baseUrl,
-        repoName: provider.defaultRepo ?? "loopat-personal",
-      })
-      if (!r.ok) return { ok: false, error: r.error }
     }
   }
-  // Write provider-field edits (baseUrl / model) into the default provider.
   if (Object.keys(providerFields).length > 0) {
     const { readPersonalDiskRaw, savePersonalDisk } = await import("./config")
     const disk = await readPersonalDiskRaw(userId)
@@ -843,7 +883,26 @@ export async function submitOnboarding(
     if (providerFields.baseUrl) p.baseUrl = providerFields.baseUrl
     if (providerFields.model) { p.model = providerFields.model; p.models = [{ id: providerFields.model, enabled: true }] }
     await savePersonalDisk(userId, { providers: { ...disk.providers, [def]: p } as any })
-    wroteVaultEnv = true // ensure the config change is pushed below
+    wroteVaultEnv = true
+  }
+  // Handle extra KV values not in the declared field list
+  const knownFieldNames = new Set(allFields.map((f: any) => f.name))
+  for (const [name, raw] of Object.entries(values)) {
+    if (knownFieldNames.has(name)) continue
+    const value = typeof raw === "string" ? raw.trim() : ""
+    if (!value) continue
+    if (name.startsWith("__mount__")) {
+      const relPath = name.slice("__mount__".length)
+      if (relPath && !relPath.includes("..")) {
+        const mountPath = join(personalVaultMountsHomeDir(userId, vault), relPath)
+        await mkdir(join(mountPath, ".."), { recursive: true })
+        await writeFile(mountPath, value)
+        wroteVaultEnv = true
+      }
+    } else {
+      const r = await writeVaultEnv(userId, vault, name, value)
+      if (r.ok) wroteVaultEnv = true
+    }
   }
   // Persist vault edits (e.g. an api key) to the personal remote — committed but
   // unpushed secrets are lost on re-import / another machine.

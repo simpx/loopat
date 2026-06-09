@@ -180,6 +180,7 @@ export type OnboardingField = {
   placeholder?: string
   value?: string
   action: "vault-env" | "personal-repo-token" | "provider-field"
+  meta?: Record<string, any>
 }
 export type OnboardingForm = {
   title: string
@@ -188,6 +189,24 @@ export type OnboardingForm = {
   require?: "all" | "any"
   fields: OnboardingField[]
 }
+
+export type WizardStep = {
+  id: string
+  label: string
+  required?: boolean
+  completed?: boolean
+  description?: string
+  mode?: "default" | "radio" | "link" | "key-value-list"
+  collapsible?: boolean
+  fields?: OnboardingField[]
+  link?: { label: string; url: string }
+  sections?: Array<{ title: string; mode: string; action?: string }>
+}
+export type OnboardingWizard = {
+  title: string
+  steps: WizardStep[]
+}
+
 // The provider either reports done, or tells the UI what to show next: a form,
 // or an existing loopat page (route) to send the user to.
 export type OnboardingShow =
@@ -200,6 +219,7 @@ export type OnboardingShow =
       values?: { label: string; value: string }[]
       help?: { label: string; url: string }[]
     }
+  | ({ kind: "wizard" } & OnboardingWizard)
   | { kind: "device"; title: string; description?: string }
 export type OnboardingStatus =
   | { gated: boolean; done: true }

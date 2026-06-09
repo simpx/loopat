@@ -44,6 +44,8 @@ export type User = {
   personalRepo?: string
   createdAt: string
   activatedAt?: string
+  oauthProvider?: string
+  oauthId?: string
 }
 
 export type PublicUser = {
@@ -53,6 +55,7 @@ export type PublicUser = {
   personalRepo?: string
   createdAt: string
   activatedAt?: string
+  oauthProvider?: string
 }
 
 function toPublic(u: User): PublicUser {
@@ -63,6 +66,7 @@ function toPublic(u: User): PublicUser {
     personalRepo: u.personalRepo,
     createdAt: u.createdAt,
     activatedAt: u.activatedAt,
+    oauthProvider: u.oauthProvider,
   }
 }
 
@@ -146,6 +150,36 @@ export async function createUser(input: {
     personalRepo: input.personalRepo?.trim() || undefined,
     createdAt: now,
     activatedAt: isFirst ? now : undefined,
+  }
+  await writeUsersFile({ users: [...f.users, user] })
+  return user
+}
+
+export async function findUserByOAuth(provider: string, oauthId: string): Promise<User | null> {
+  const f = await readUsersFile()
+  return f.users.find((u) => u.oauthProvider === provider && u.oauthId === oauthId) ?? null
+}
+
+export async function createOAuthUser(input: {
+  id: string
+  oauthProvider: string
+  oauthId: string
+}): Promise<User> {
+  if (!isValidUsername(input.id)) throw new Error("invalid username (lowercase a-z0-9_- , 1-32 chars, leading alnum)")
+  const f = await readUsersFile()
+  if (f.users.some((u) => u.id === input.id)) throw new Error("username taken")
+  const isFirst = f.users.length === 0
+  const now = new Date().toISOString()
+  const user: User = {
+    id: input.id,
+    salt: "",
+    hash: "",
+    role: isFirst ? "admin" : "member",
+    status: "active",
+    createdAt: now,
+    activatedAt: now,
+    oauthProvider: input.oauthProvider,
+    oauthId: input.oauthId,
   }
   await writeUsersFile({ users: [...f.users, user] })
   return user

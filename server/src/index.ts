@@ -62,7 +62,7 @@ import { queryUserTokenUsage, queryWorkspaceTokenUsage, queryDailyTokenUsage, qu
 import { createApiToken, listApiTokens, revokeApiToken } from "./api-tokens"
 import { listBoards, createBoard, renameBoard, listKanbanColumns, addCard, toggleCard, deleteCard, moveCard, updateCardMeta, updateCardBlock, reorderCards, createColumn, deleteColumn, readKanbanConfig, saveColumnOrder, setColumnColor, renameColumn, assignDriverForCard, createLoopFromCard, linkLoopToCard, kanbanUserCtx } from "./kanban"
 import { printBootstrapBanner, printReadyLine } from "./bootstrap"
-import { resolveProvider } from "./providers"
+import { resolveProvider, loadExtensionProviders } from "./providers"
 import { ensureSandboxClaudeBinary } from "./claude-binary"
 import { serveHostExec, hostExecSocketPath } from "./host-exec"
 import {
@@ -83,8 +83,11 @@ import {
   activateUser,
   setUserRole,
   deleteUser,
+  findUserByOAuth,
+  createOAuthUser,
 } from "./auth"
 import { getCookie } from "hono/cookie"
+import { getExternalAuth } from "./git-host"
 
 const execFileP = promisify(execFile)
 
@@ -407,6 +410,25 @@ app.get("/api/auth/me", async (c) => {
   const user = await findUser(userId)
   if (!user) return c.json({ error: "unauthorized" }, 401)
   return c.json({ user: { id: user.id, role: user.role, status: user.status } })
+})
+
+// ── External auth (SSO) — provider-driven, core is platform-agnostic ──
+
+app.get("/api/auth/external/status", async (c) => {
+  await loadExtensionProviders()
+  const ext = getExternalAuth()
+  if (!ext) return c.json({ enabled: false })
+  return c.json({ enabled: true, id: ext.id, label: ext.label })
+})
+
+app.get("/api/auth/external/start", async (c) => {
+  await loadExtensionProviders()
+  const ext = getExternalAuth()
+  if (!ext) return c.json({ error: "no external auth configured" }, 400)
+  const protocol = c.req.header("x-forwarded-proto") ?? "http"
+  const host = c.req.header("host") ?? "localhost"
+  const backUrl = `${protocol}://${host}${ext.callbackPath}`
+  return c.redirect(ext.buildLoginUrl(backUrl))
 })
 
 // ── admin (requireAdmin) ──
@@ -876,6 +898,23 @@ app.post("/api/mcp-auth/start", requireAuth, async (c) => {
   })
   if (!r.ok) return c.json({ error: r.error }, 400)
   return c.json({ authorizationUrl: r.authorizationUrl })
+})
+
+app.get("/api/mcp-auth/onboarding", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const serverName = c.req.query("server") || "mcp"
+  const serverUrl = c.req.query("url") || ""
+  if (!serverUrl) return c.json({ error: "url query param required" }, 400)
+  let headers: Record<string, string> = {}
+  try { headers = JSON.parse(c.req.query("headers") || "{}") } catch {}
+  const r = await startMcpAuth({
+    user: userId,
+    serverName,
+    publicBaseUrl: publicBaseUrl(c),
+    serverConfig: { type: "http" as const, url: serverUrl, headers },
+  })
+  if (!r.ok) return c.json({ error: r.error }, 400)
+  return c.redirect(r.authorizationUrl!)
 })
 
 // OAuth provider redirects the browser here after the user authorizes. We
@@ -3194,6 +3233,39 @@ import { join } from "node:path"
 import { networkInterfaces } from "node:os"
 const webDist = join(import.meta.dir, "..", "..", "web", "dist")
 const indexHtml = join(webDist, "index.html")
+
+// External auth callback — intercept provider callbackPath before the SPA catch-all.
+app.get("*", async (c, next) => {
+  const path = c.req.path
+  if (!path.startsWith("/api/") && !path.startsWith("/ws/") && !path.startsWith("/assets/")) {
+    await loadExtensionProviders()
+    const ext = getExternalAuth()
+    if (ext && ext.callbackPath === path) {
+      const token = c.req.query(ext.tokenParam) ?? c.req.query(ext.tokenParam.toLowerCase()) ?? ""
+      if (!token) return c.text(ext.tokenParam + " missing", 400)
+      try {
+        const identity = await ext.verify(token)
+        if (!identity.oauthId) throw new Error("empty oauthId")
+        let user = await findUserByOAuth(ext.id, identity.oauthId)
+        if (!user) {
+          let username = (identity.username ?? "").toLowerCase().replace(/[^a-z0-9_-]/g, "")
+          if (!username) username = ext.id + "_" + identity.oauthId
+          if (username.length > 32) username = username.slice(0, 32)
+          const existing = await findUser(username)
+          if (existing) username = ext.id + "_" + identity.oauthId
+          user = await createOAuthUser({ id: username, oauthProvider: ext.id, oauthId: identity.oauthId })
+        }
+        if (user.status !== "active") throw new Error("user is not active")
+        const sessionToken = createSession(user.id)
+        setSessionCookie(c, sessionToken)
+        return c.redirect("/")
+      } catch (e: any) {
+        return c.text("External login failed: " + (e?.message ?? "unknown error"), 500)
+      }
+    }
+  }
+  return next()
+})
 
 app.get("*", async (c, next) => {
   const path = c.req.path

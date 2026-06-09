@@ -2,31 +2,68 @@
  * Git-host provider registry bootstrap.
  *
  * - Built-in (open-source) providers self-register via the static imports below.
- * - External / internal providers live OUTSIDE the repo, in
- *   `LOOPAT_HOME/extensions/providers/*.{ts,js,mjs}`. `loadExtensionProviders()`
- *   dynamically imports each file and registers its default export. An extension
- *   is a plain object shaped like GitHostProvider — it does NOT import loopat, so
- *   an internal platform's adapter never has to enter the open-source core.
+ * - Remote extension: if `extensionUrl` is set in workspace config, the file is
+ *   fetched on startup and cached at `LOOPAT_HOME/extensions/providers/`. On
+ *   fetch failure, the cached version is used.
+ * - Local extensions in `LOOPAT_HOME/extensions/providers/*.{ts,js,mjs}` are
+ *   always loaded (includes the cached remote extension).
  */
 import { join } from "node:path"
 import { existsSync } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { mkdir, readdir, writeFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import { registerProvider, getProvider, type GitHostProvider } from "./git-host"
 import { extensionsProvidersDir } from "./paths"
+import { loadConfig } from "./config"
 
 import "./github" // built-in, open-source
 
 let extLoaded = false
-// Ids of providers loaded from extension files (NOT the built-in github). A
-// dropped-in extension IS the active provider — see resolveProviderId().
 const extensionProviderIds: string[] = []
 
-/** Idempotently load external provider extensions from the extensions dir. */
-export async function loadExtensionProviders(): Promise<void> {
-  if (extLoaded) return
-  extLoaded = true
+async function fetchRemoteExtension(): Promise<void> {
+  const cfg = await loadConfig()
+  if (!cfg.extensionUrl) return
   const dir = extensionsProvidersDir()
+  await mkdir(dir, { recursive: true })
+  const url = cfg.extensionUrl
+  const filename = url.split("/").pop() || "remote-extension.ts"
+  const dest = join(dir, filename)
+
+  if (url.startsWith("/") || url.startsWith("./") || url.startsWith("~/")) {
+    const { copyFile } = await import("node:fs/promises")
+    const src = url.startsWith("~") ? join(process.env.HOME ?? "", url.slice(1)) : url
+    try {
+      await copyFile(src, dest)
+      console.log(`[loopat] extension loaded from local: ${src}`)
+    } catch (e: any) {
+      if (existsSync(dest)) {
+        console.log(`[loopat] local extension not found, using cache: ${e?.message ?? e}`)
+      } else {
+        console.warn(`[loopat] local extension not found, no cache: ${e?.message ?? e}`)
+      }
+    }
+    return
+  }
+
+  try {
+    const res = await fetch(url + `?t=${Date.now()}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const content = await res.text()
+    await writeFile(dest + ".tmp", content)
+    const { rename } = await import("node:fs/promises")
+    await rename(dest + ".tmp", dest)
+    console.log(`[loopat] extension updated from ${url}`)
+  } catch (e: any) {
+    if (existsSync(dest)) {
+      console.log(`[loopat] extension fetch failed, using cache: ${e?.message ?? e}`)
+    } else {
+      console.warn(`[loopat] extension fetch failed, no cache: ${e?.message ?? e}`)
+    }
+  }
+}
+
+async function loadProvidersFromDir(dir: string): Promise<void> {
   if (!existsSync(dir)) return
   let files: string[] = []
   try { files = await readdir(dir) } catch { return }
@@ -38,6 +75,10 @@ export async function loadExtensionProviders(): Promise<void> {
       if (p?.id && typeof p.authenticate === "function" && typeof p.ensureRepo === "function") {
         registerProvider(p as GitHostProvider)
         if (!extensionProviderIds.includes(p.id)) extensionProviderIds.push(p.id)
+        try {
+          const cfg = await loadConfig()
+          if (typeof p.init === "function") p.init(cfg.providerConfig?.[p.id] ?? {})
+        } catch {}
         console.log(`[loopat] loaded git-host extension: ${p.id}`)
       } else {
         console.warn(`[loopat] ${f}: not a valid GitHostProvider (need id / authenticate / ensureRepo)`)
@@ -46,6 +87,14 @@ export async function loadExtensionProviders(): Promise<void> {
       console.warn(`[loopat] failed to load provider extension ${f}: ${e?.message ?? e}`)
     }
   }
+}
+
+/** Idempotently load provider extensions (fetch remote + load local cache). */
+export async function loadExtensionProviders(): Promise<void> {
+  if (extLoaded) return
+  extLoaded = true
+  await fetchRemoteExtension()
+  await loadProvidersFromDir(extensionsProvidersDir())
 }
 
 /**

@@ -30,6 +30,7 @@ import { SetupPersonalRepoCard, isSetupPersonalRepoDismissed } from "./component
 import { getServerWorkspace, getVersion, getBuildInfo, linkKanbanLoop, getPersonalStatus, getOnboarding, type PersonalStatus, type OnboardingStatus } from "./api"
 import { OnboardingForm } from "./components/OnboardingForm"
 import { OnboardingInfo } from "./components/OnboardingInfo"
+import { OnboardingWizard } from "./components/OnboardingWizard"
 import { OnboardingDevice } from "./components/OnboardingDevice"
 import { useChatUnreadTitle } from "./useChatUnreadTitle"
 import { ThemeProvider, useTheme } from "./theme"
@@ -408,6 +409,10 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           // Provider wants to show instructions → render them with a re-check button.
           if (ob.show.kind === "info") {
             return <OnboardingInfo show={ob.show} onAdvance={setOnboarding} />
+          }
+          // Provider wants a wizard → render the multi-step setup.
+          if (ob.show.kind === "wizard") {
+            return <OnboardingWizard wizard={ob.show} onAdvance={setOnboarding} />
           }
           // Provider wants device-flow login → drive the code/poll dance.
           if (ob.show.kind === "device") {

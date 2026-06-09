@@ -410,16 +410,15 @@ async function lookupServerInMergedSettings(
 export async function startMcpAuth(opts: {
   user: string
   serverName: string
-  /** Loop the auth request originates from — used to resolve the server in
-   *  the loop's merged settings.json. */
-  loopId: string
+  loopId?: string
   publicBaseUrl: string
+  serverConfig?: McpServerConfig
 }): Promise<StartResult> {
   const { user, serverName, loopId, publicBaseUrl } = opts
 
-  const srv = await lookupServerInMergedSettings(loopId, serverName)
+  const srv = opts.serverConfig ?? (loopId ? await lookupServerInMergedSettings(loopId, serverName) : null)
   if (!srv) {
-    return { ok: false, error: `server "${serverName}" not found in loop's merged settings.json` }
+    return { ok: false, error: `server "${serverName}" not found` }
   }
   if (srv.type !== "http" && srv.type !== "sse") {
     return { ok: false, error: `server "${serverName}" is type "${srv.type}"; only http/sse support OAuth` }

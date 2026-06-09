@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
 
 type Mode = "login" | "register"
@@ -17,6 +17,16 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingNotice, setPendingNotice] = useState<string | null>(null)
+  const [externalAuth, setExternalAuth] = useState<{ enabled: boolean; label?: string } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fetch("/api/auth/external/status")
+      .then((r) => r.json())
+      .then((r: any) => { if (alive) setExternalAuth(r) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -100,6 +110,21 @@ export function AuthPage({ onClose }: { onClose?: () => void } = {}) {
             </button>
           ))}
         </div>
+        {mode === "login" && externalAuth?.enabled && (
+          <div className="flex flex-col gap-2 mb-4">
+            <a
+              href="/api/auth/external/start"
+              className="flex items-center justify-center gap-2 h-9 text-sm rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 font-medium"
+            >
+              {externalAuth.label ?? "SSO Login"}
+            </a>
+            <div className="flex items-center gap-2 text-xs text-gray-400 my-1">
+              <div className="flex-1 border-t border-gray-200" />
+              or
+              <div className="flex-1 border-t border-gray-200" />
+            </div>
+          </div>
+        )}
         <form onSubmit={submit} className="flex flex-col gap-4">
           <Field label="Username" hint="lowercase a-z 0-9 _ - · 1-32 chars">
             <input
