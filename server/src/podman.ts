@@ -356,6 +356,42 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
   return mounts
 }
 
+export async function readUserGitIdentity(personalRoot: string): Promise<{ name: string; email: string } | null> {
+  let raw: string
+  try {
+    raw = await readFile(join(personalRoot, ".gitconfig"), "utf8")
+  } catch {
+    return null
+  }
+
+  let inUserSection = false
+  let name: string | null = null
+  let email: string | null = null
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) continue
+
+    const section = trimmed.match(/^\[([^\]]+)\]$/)
+    if (section) {
+      inUserSection = section[1].trim().toLowerCase() === "user"
+      continue
+    }
+    if (!inUserSection) continue
+
+    const entry = trimmed.match(/^([\w.-]+)\s*=\s*(.*?)\s*$/)
+    if (!entry) continue
+
+    const key = entry[1].toLowerCase()
+    const value = entry[2].replace(/^(['"])(.*)\1$/, "$2").trim()
+    if (key === "name") name = value
+    if (key === "email") email = value
+  }
+
+  if (!name || !email) return null
+  return { name, email }
+}
+
 /**
  * Build env-var map to bake into the container at create time.
  *
@@ -371,6 +407,15 @@ export async function buildContainerEnv(opts: ContainerOptions): Promise<Record<
   // socket is and which loop it speaks for (server uses it for the workdir).
   out.LOOPAT_HOST_SOCK = V_HOST_EXEC_SOCK
   out.LOOPAT_LOOP_ID = opts.loopId
+
+  const gitIdentity = await readUserGitIdentity(personalDir(opts.createdBy))
+  if (gitIdentity) {
+    out.GIT_AUTHOR_NAME = gitIdentity.name
+    out.GIT_AUTHOR_EMAIL = gitIdentity.email
+    out.GIT_COMMITTER_NAME = gitIdentity.name
+    out.GIT_COMMITTER_EMAIL = gitIdentity.email
+  }
+
   for (const [k, v] of Object.entries(opts.extraEnv ?? {})) {
     out[k] = v
   }
