@@ -15,10 +15,16 @@ let mermaidPromise: Promise<MermaidInstance> | null = null;
 function loadMermaid(): Promise<MermaidInstance> {
   if (mermaidInstance) return Promise.resolve(mermaidInstance);
   if (!mermaidPromise) {
-    mermaidPromise = import("mermaid").then((module) => {
-      mermaidInstance = module.default;
-      return mermaidInstance;
-    });
+    mermaidPromise = import("mermaid").then(
+      (module) => {
+        mermaidInstance = module.default;
+        return mermaidInstance;
+      },
+      (err) => {
+        mermaidPromise = null; // allow retry on next call
+        throw err;
+      },
+    );
   }
   return mermaidPromise;
 }
