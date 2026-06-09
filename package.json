@@ -34,6 +34,7 @@
     "dev:serve": "(cd server && bun run serve)",
     "build": "bun install && (cd web && bun run build)",
     "build:web": "cd web && bunx tsc -b && bunx vite build",
+    "test:mermaid-lazy-load": "node web/scripts/assert-mermaid-lazy-load.mjs",
     "prepublishOnly": "bun install && bun run build:web",
     "postinstall": "node scripts/install-sandbox-claude.mjs",
     "test:e2e": "playwright test",

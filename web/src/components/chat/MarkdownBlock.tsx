@@ -11,7 +11,6 @@ import "katex/contrib/copy-tex";
 import {
   type CodeHeaderProps,
   MarkdownTextPrimitive,
-  type SyntaxHighlighterProps,
   unstable_memoizeMarkdownComponents as memoizeMarkdownComponents,
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
@@ -41,7 +40,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { processLatexBrackets } from "@/lib/processLatexBrackets";
-import { isSvgContent } from "@/lib/sanitizeSvg";
 import { rehypeScalableSvg, rehypeStripUnsafe } from "@/lib/rehypeScalableSvg";
 import {
   setTall,
@@ -49,13 +47,10 @@ import {
   toggleWrap,
   useCodeBlockUi,
 } from "@/lib/codeBlockUiStore";
-import { HtmlArtifactCard } from "./HtmlArtifactCard";
 import { TableWithToolbar } from "./TableWithToolbar";
 import { CitationLink } from "./CitationTooltip";
-import { FencedSvg, SvgRenderer } from "./SvgRenderer";
-import { MermaidBlock } from "./MermaidBlock";
-import { PlantUMLBlock } from "./PlantUMLBlock";
-import { GraphvizBlock } from "./GraphvizBlock";
+import { SvgRenderer } from "./SvgRenderer";
+import { createMarkdownLanguageComponents } from "./markdownLanguageComponents";
 
 /** Vertical height (px) past which a code block is offered collapsed. */
 const COLLAPSE_THRESHOLD_PX = 400;
@@ -101,7 +96,7 @@ const MarkdownTextImpl = () => {
       disallowedElements={["iframe", "script"]}
       className="aui-md"
       components={defaultComponents}
-      componentsByLanguage={componentsByLanguage}
+      componentsByLanguage={markdownLanguageComponents}
     />
   );
 };
@@ -155,37 +150,7 @@ const CodeHeader: React.FC<CodeHeaderProps> = ({ language, code }) => {
   );
 };
 
-/* ─── Per-language code block overrides ─── */
-
-// Languages whose blocks render as bespoke widgets suppress the code header.
-const NoCodeHeader = () => null;
-
-// ```svg → always an image.
-const SvgFencedBlock = ({ code }: SyntaxHighlighterProps) => <FencedSvg svg={code} />;
-
-// ```xml → an image when it is actually SVG, otherwise a normal code block.
-const XmlBlock = ({ code, node, components }: SyntaxHighlighterProps) => {
-  if (isSvgContent(code)) return <FencedSvg svg={code} />;
-  const { Pre, Code } = components;
-  return (
-    <Pre>
-      <Code node={node}>{code}</Code>
-    </Pre>
-  );
-};
-
-const XmlHeader = ({ language, code }: CodeHeaderProps) =>
-  isSvgContent(code) ? null : <CodeHeader language={language} code={code} />;
-
-const componentsByLanguage = {
-  html: { SyntaxHighlighter: HtmlArtifactCard, CodeHeader: NoCodeHeader },
-  svg: { SyntaxHighlighter: SvgFencedBlock, CodeHeader: NoCodeHeader },
-  xml: { SyntaxHighlighter: XmlBlock, CodeHeader: XmlHeader },
-  mermaid: { SyntaxHighlighter: MermaidBlock, CodeHeader: NoCodeHeader },
-  plantuml: { SyntaxHighlighter: PlantUMLBlock, CodeHeader: NoCodeHeader },
-  dot: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
-  graphviz: { SyntaxHighlighter: GraphvizBlock, CodeHeader: NoCodeHeader },
-};
+const markdownLanguageComponents = createMarkdownLanguageComponents(CodeHeader);
 
 /* ─── Clipboard hook ─── */
 
