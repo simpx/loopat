@@ -1184,7 +1184,7 @@ function NewFileDialog({
           value={path}
           onChange={(e) => setPath(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && path.trim()) onCreate(path.trim())
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && path.trim()) onCreate(path.trim())
             if (e.key === "Escape") onClose()
           }}
           placeholder="loopat/new-doc.md"
