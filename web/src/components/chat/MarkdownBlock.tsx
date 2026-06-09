@@ -20,6 +20,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import remarkCjkFriendly from "remark-cjk-friendly";
 import { remarkAlert } from "@/lib/remarkAlert";
+import { copyText } from "@/lib/clipboard";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import type { PluggableList } from "unified";
@@ -194,10 +195,10 @@ function useClipboard({ copiedDuration = 2000 } = {}) {
 
   const copyToClipboard = (value: string) => {
     if (!value) return;
-    navigator.clipboard.writeText(value).then(() => {
+    if (copyText(value)) {
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), copiedDuration);
-    });
+    }
   };
 
   return { isCopied, copyToClipboard };

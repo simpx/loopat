@@ -11,35 +11,7 @@ import {
   type PersonalStatus,
 } from "@/api"
 import { ArrowUp, ArrowDown, AlertTriangle, Check, X } from "lucide-react"
-
-/**
- * Robust clipboard copy. navigator.clipboard is undefined in non-secure
- * contexts (e.g. dev:host accessed over http://<ip>:port), which silently
- * broke the "copy" buttons. Fall back to a hidden textarea + execCommand,
- * which works there too.
- */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {}
-  try {
-    const ta = document.createElement("textarea")
-    ta.value = text
-    ta.style.position = "fixed"
-    ta.style.left = "-9999px"
-    document.body.appendChild(ta)
-    ta.focus()
-    ta.select()
-    const ok = document.execCommand("copy")
-    document.body.removeChild(ta)
-    return ok
-  } catch {
-    return false
-  }
-}
+import { copyText } from "@/lib/clipboard"
 
 /**
  * Personal-repo deploy-key flow, rendered as a settings panel.
@@ -1098,13 +1070,12 @@ function ExportKeyFlow({ onDone }: { onDone: () => void }) {
     }
   }
 
-  const copy = async () => {
+  const copy = () => {
     if (!cryptKey) return
-    try {
-      await navigator.clipboard.writeText(cryptKey)
+    if (copyText(cryptKey)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    } catch {}
+    }
   }
 
   if (cryptKey) {

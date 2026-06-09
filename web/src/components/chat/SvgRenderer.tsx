@@ -4,6 +4,7 @@ import { ExternalLinkIcon, LinkIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { sanitizeSvg } from "@/lib/sanitizeSvg";
+import { copyText } from "@/lib/clipboard";
 
 type SvgRendererProps = React.SVGProps<SVGSVGElement> & { node?: unknown };
 
@@ -132,7 +133,7 @@ export const SvgRenderer = ({ node, children, ...rest }: SvgRendererProps) => {
             <button
               type="button"
               onClick={() => {
-                void navigator.clipboard?.writeText(menu.url);
+                copyText(menu.url);
                 setMenu(null);
               }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-gray-700 hover:bg-gray-100"

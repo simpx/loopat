@@ -3,6 +3,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
 
 interface CopyButtonProps {
   content: string;
@@ -15,10 +16,10 @@ export default function CopyButton({ content, className, iconClassName }: CopyBu
 
   const handleCopy = () => {
     if (!content || copied) return;
-    navigator.clipboard.writeText(content).then(() => {
+    if (copyText(content)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    });
+    }
   };
 
   return (

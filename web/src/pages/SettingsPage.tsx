@@ -38,6 +38,7 @@ import { PresetsPanel } from "../components/settings/PresetsPanel"
 import { getAdminPresets, normalizePresetModel, type ProviderPreset } from "../api"
 import { TokenUsagePage } from "./TokenUsagePage"
 import { useWorkspace } from "@/ctx"
+import { copyText } from "@/lib/clipboard"
 import { ArrowLeft, Plus, Trash2, RefreshCw, Check, AlertCircle, Lock, FileCode2, Search, User, Cpu, Terminal, Layers, BarChart3, Users, Globe, Share2, KeyRound, Copy, Wrench, Bookmark } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -915,10 +916,10 @@ function ApiTokensSection() {
 
   const handleCopy = () => {
     if (!newToken) return
-    navigator.clipboard.writeText(newToken).then(() => {
+    if (copyText(newToken)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
-    })
+    }
   }
 
   return (

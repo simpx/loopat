@@ -7,20 +7,7 @@
 import { useEffect, useRef, useState } from "react"
 import { deviceStart, devicePoll, getOnboarding, type OnboardingStatus } from "../api"
 import { PersonalRepoPanel } from "./dialog/PersonalRepoPanel"
-
-// navigator.clipboard is undefined over http://<ip> (non-secure context); fall
-// back to a hidden textarea + execCommand so copy works there too.
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true }
-  } catch {}
-  try {
-    const ta = document.createElement("textarea")
-    ta.value = text; ta.style.position = "fixed"; ta.style.left = "-9999px"
-    document.body.appendChild(ta); ta.focus(); ta.select()
-    const ok = document.execCommand("copy"); document.body.removeChild(ta); return ok
-  } catch { return false }
-}
+import { copyText } from "@/lib/clipboard"
 
 export function OnboardingDevice({
   show,
