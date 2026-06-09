@@ -145,6 +145,33 @@ function Shell({ ws }: { ws: WorkspaceState }) {
     })
   }, [shareMode])
 
+  useEffect(() => {
+    if (shareMode || !loggedIn) return
+
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tagName = target.tagName.toLowerCase()
+      return (
+        tagName === "input" ||
+        tagName === "textarea" ||
+        tagName === "select" ||
+        target.isContentEditable
+      )
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const pressedL = event.key.toLowerCase() === "l" || event.code === "KeyL"
+      if (!event.shiftKey || !(event.metaKey || event.ctrlKey) || !pressedL) return
+      if (isEditableTarget(event.target)) return
+
+      event.preventDefault()
+      ws.setNewLoopDialogOpen(true)
+    }
+
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [shareMode, loggedIn, ws.setNewLoopDialogOpen])
+
   // Hard onboarding gate — the active provider fully owns the flow (see
   // GitHostProvider.onboarding). loopat just shows what it returns.
   const [onboarding, setOnboarding] = useState<OnboardingStatus | null>(null)
@@ -243,7 +270,7 @@ function Shell({ ws }: { ws: WorkspaceState }) {
           type="button"
           onClick={() => ws.setNewLoopDialogOpen(true)}
           className="flex items-center gap-1 md:gap-1.5 px-2 md:px-3 h-8 rounded text-sm bg-gray-900 text-white hover:bg-gray-700"
-          title="create new loop"
+          title="create new loop (Cmd/Ctrl+Shift+L)"
         >
           <span className="text-base leading-none">+</span>
           <span className="hidden md:inline">New Loop</span>

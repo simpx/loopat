@@ -126,6 +126,42 @@ test.describe("/loop page", () => {
     await expect(page).toHaveURL(/\/loop\/[a-f0-9-]+/, { timeout: 10_000 });
   });
 
+  test("opens NewLoopDialog from the global shortcut but ignores editable targets", async ({ page }) => {
+    await page.goto("/loop");
+    await expect(page.getByRole("button", { name: /^\+ New Loop$/i })).toBeVisible({ timeout: 10_000 });
+
+    const dialogTitle = page.getByText("New loop", { exact: true });
+
+    await page.evaluate(() => {
+      const input = document.createElement("input");
+      input.setAttribute("aria-label", "shortcut test input");
+      document.body.append(input);
+      input.focus();
+      input.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "l",
+        code: "KeyL",
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    await expect(dialogTitle).not.toBeVisible();
+
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "x",
+        code: "KeyL",
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+
+    await expect(dialogTitle).toBeVisible({ timeout: 5_000 });
+  });
+
   test("chat send + receive uses v1 API end-to-end", async ({ page }) => {
     // Walks through the full chat chain on the v1 surface:
     //   - GET  /api/v1/loops/:id/events   (live SSE subscription)
