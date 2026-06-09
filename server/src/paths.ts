@@ -74,6 +74,7 @@ export const loopMetaPath = (id: string) => join(loopDir(id), "meta.json")
 export const uiDir = (user: string) => join(LOOPAT_HOME, "ui", user)
 export const uiNotesDir = (user: string) => join(uiDir(user), "notes")
 export const loopHistoryPath = (id: string) => join(loopDir(id), "messages.jsonl")
+export const loopTracePath = (id: string) => join(loopDir(id), "trace.jsonl")
 export const loopUsagePath = (id: string) => join(loopDir(id), "usage.jsonl")
 export const loopChatHistoryPath = (id: string) => join(loopDir(id), "chat_history.jsonl")
 

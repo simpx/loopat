@@ -14,6 +14,7 @@ import { ensureLoopPluginsInstalled, lookupPluginInstallPath, BUILTIN_LOOPAT_PLU
 import { effectiveDriver, getLoop, loopEphemeralPorts, patchLoopMeta } from "./loops"
 import { spawn as nodeSpawn } from "node:child_process"
 import { ensureContainer, buildPodmanExecArgs, buildLoopEnv, markActive, markInactive, V_LOOP_WORKDIR, V_LOOP_CLAUDE } from "./podman"
+import { startLoopGateway, type LoopGateway } from "./egress-gateway"
 import { updateLoopStatus, setLoopPhase } from "./loop-status"
 import { tracer, withSpan } from "./tracer"
 import { SpanStatusCode, type Span } from "@opentelemetry/api"
@@ -227,6 +228,7 @@ class LoopSession {
   private ttfbSpan: Span | null = null
   private usageSession = 0
   private currentDriver: string | null = null
+  private gateway: LoopGateway | null = null
 
   constructor(id: string) {
     this.id = id
@@ -419,6 +421,14 @@ class LoopSession {
       providerOverride: this.providerOverride ?? meta.config?.default_model,
       modelIdOverride: meta.config?.default_model_id,
     })
+
+    // Per-loop egress gateway: claude → gateway (plaintext over bridge) →
+    // provider (https). Records full req/resp to trace.jsonl. Lives with the
+    // session; reachable from the sandbox at host.containers.internal:<port>.
+    if (process.env.LOOPAT_EGRESS_TRACE) {
+      if (!this.gateway) this.gateway = startLoopGateway(loopId, extraEnv.ANTHROPIC_BASE_URL ?? provider.baseUrl)
+      extraEnv.ANTHROPIC_BASE_URL = `http://host.containers.internal:${this.gateway.port}`
+    }
 
     let modelId: string | undefined = meta.config?.default_model_id
     if (!modelId) {
@@ -1403,6 +1413,7 @@ class LoopSession {
     // will be `podman stop`'d after CONTAINER_IDLE_MS unless something else
     // (e.g. PTY subscribers) keeps it active.
     markInactive(this.id, "sdk")
+    if (this.gateway) { try { this.gateway.stop() } catch {}; this.gateway = null }
     if (this.q) {
       try { await this.q.interrupt() } catch {}
       this.q = null

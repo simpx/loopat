@@ -467,6 +467,9 @@ export async function buildPodmanCreateArgs(opts: ContainerOptions): Promise<str
     // Shared bridge network so the serve container can reach loop
     // containers by name (aardvark-dns). Outbound API calls via NAT.
     "--network", LOOPAT_NETWORK,
+    // Reach the host's per-loop egress gateway (ANTHROPIC_BASE_URL) — claude
+    // dials host.containers.internal:<port>. host-gateway maps it to the host.
+    "--add-host", "host.containers.internal:host-gateway",
     "--hostname", `loop-${opts.loopId.slice(0, 8)}`,
     // Container cwd at creation; per-exec we override with -w.
     "--workdir", V_LOOP_WORKDIR(opts.loopId),
