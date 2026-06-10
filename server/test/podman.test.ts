@@ -96,15 +96,8 @@ describe("buildVolumeMounts — core loop visibility", () => {
     expect(mounts.find((m) => m.dst === HOST_HOME)).toBeUndefined()
   })
 
-  test("knowledge is ro by default", async () => {
+  test("knowledge is rw — the gate moved to the promote edge", async () => {
     const mounts = await buildVolumeMounts({ loopId: LOOP_ID, createdBy: USER })
-    const m = mounts.find((m) => m.dst === V_CONTEXT_KNOWLEDGE)
-    expect(m).toBeDefined()
-    expect(m!.ro).toBe(true)
-  })
-
-  test("knowledge becomes rw when knowledgeRw=true", async () => {
-    const mounts = await buildVolumeMounts({ loopId: LOOP_ID, createdBy: USER, knowledgeRw: true })
     const m = mounts.find((m) => m.dst === V_CONTEXT_KNOWLEDGE)
     expect(m).toBeDefined()
     expect(m!.ro).toBeFalsy()

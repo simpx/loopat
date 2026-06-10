@@ -35,6 +35,10 @@ import {
   type Backlink,
   type SyncResource,
   type RepoSyncStatus,
+  listKnowledgeProposals,
+  mergeKnowledgeProposal,
+  discardKnowledgeProposal,
+  type KnowledgeProposal,
 } from "../api"
 import { useEffect, useState, useCallback, useRef, type FormEvent } from "react"
 import { useWorkspace } from "../ctx"
@@ -182,6 +186,55 @@ function SyncWidget({ resource, canPush = true }: { resource: SyncResource; canP
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// Knowledge proposals — the review&merge half of the gated promote
+// (docs/context-flow.md "Gates"). Loops commit knowledge onto their local
+// loop/<id> ref and stop; this widget lists those proposals and lets the
+// driver merge (fetch→merge→push with their key) or discard each.
+function ProposalsWidget({ onMerged }: { onMerged: () => void }) {
+  const [proposals, setProposals] = useState<KnowledgeProposal[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    setProposals(await listKnowledgeProposals())
+  }, [])
+  useEffect(() => { void refresh() }, [refresh])
+
+  if (proposals.length === 0) return null
+  return (
+    <div className="px-3 py-1.5 border-t border-gray-200 flex flex-col gap-1 text-[11px]">
+      <div className="text-gray-500 font-medium">proposals (review &amp; merge)</div>
+      {proposals.map((p) => (
+        <div key={p.branch} className="flex items-center gap-1.5">
+          <span className="truncate flex-1 min-w-0 text-gray-700" title={p.subjects.join("\n")}>
+            {p.branch.replace(/^loop\//, "").slice(0, 8)} · {p.subjects[0] ?? ""} {p.ahead > 1 ? `(+${p.ahead - 1})` : ""}
+          </span>
+          <button
+            onClick={async () => {
+              setBusy(p.branch); setMsg(null)
+              const r = await mergeKnowledgeProposal(p.branch)
+              setBusy(null)
+              if (r.ok) { onMerged(); void refresh() } else setMsg(r.error ?? "merge failed")
+            }}
+            disabled={busy !== null}
+            className="px-1.5 h-5 rounded border border-emerald-300 text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+          >{busy === p.branch ? "merging…" : "merge"}</button>
+          <button
+            onClick={async () => {
+              setBusy(p.branch)
+              await discardKnowledgeProposal(p.branch)
+              setBusy(null); void refresh()
+            }}
+            disabled={busy !== null}
+            className="px-1.5 h-5 rounded border border-gray-200 text-gray-500 hover:bg-gray-100 disabled:opacity-40"
+          >discard</button>
+        </div>
+      ))}
+      {msg && <span className="text-red-600 truncate" title={msg}>{msg}</span>}
     </div>
   )
 }
@@ -514,6 +567,7 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
         {VAULT_TAGLINE[vault]}
       </div>
       {vault === "knowledge" && <SyncWidget resource={vault} />}
+      {vault === "knowledge" && <ProposalsWidget onMerged={() => setReloadKey((k) => k + 1)} />}
       {vault === "notes" && <NotesSyncBar onRefreshed={() => setReloadKey((k) => k + 1)} />}
     </aside>
   )
@@ -781,7 +835,8 @@ function DocView({
         vaultBacklinks(vault, path).then(setBacklinks)
         // notes + personal live on shared remotes and are UNGATED — push the
         // save right away (ff-only; a real conflict is held back, the local edit
-        // kept). knowledge is GATED (promote via a distill loop), so it only
+        // kept). knowledge is GATED on the promote edge (proposals reviewed
+        // in the sidebar widget), so it only
         // commits locally here and is pushed via its own promote flow.
         if (vault === "notes") {
           const sync = await saveNotes()
@@ -823,7 +878,7 @@ function DocView({
   }
 
   const startDistill = async () => {
-    const m = await ws.createLoop({ title: `distill ${path} → knowledge`, knowledgeRw: true })
+    const m = await ws.createLoop({ title: `distill ${path} → knowledge` })
     navigate(`/loop/${m.id}`)
   }
 

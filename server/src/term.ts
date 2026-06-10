@@ -71,7 +71,6 @@ async function getOrSpawn(loopId: string, initCols = 80, initRows = 24): Promise
       loopId,
       createdBy: driver,
       vaultName: meta.config?.vault,
-      knowledgeRw: meta.config?.knowledge_rw,
       mountAllLoops: meta.config?.mount_all_loops,
       repo: meta.repo,
       extraEnv: loopEnv,

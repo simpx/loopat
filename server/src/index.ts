@@ -6,7 +6,7 @@ import { createBunWebSocket } from "hono/bun"
 import { existsSync } from "node:fs"
 import { execFile, execFileSync, spawn } from "node:child_process"
 import { promisify } from "node:util"
-import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, discardUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, listVaultPublicKeys, userOnboarding, submitOnboarding, dismissOnboarding, deviceFlowStart, deviceFlowPoll } from "./loops"
+import { listLoops, createLoop, getLoop, loopExists, patchLoopMeta, backfillAllMounts, ensureWorkspaceDirs, provisionUserPersonal, importPersonalFromRepo, setupPersonalViaProvider, listPersonalReposViaProvider, authenticateViaProvider, isPersonalFresh, ensureUiNotesWorktree, syncUiNotes, ffUpdateUiNotes, discardUiNotes, notesBehind, inspectPersonalDirty, syncPersonalToRemote, deletePersonalVault, pullPersonalFromRemote, pushPersonalToRemote, ensureContextMounts, effectiveDriver, isDriver, distillLoop, listKnowledgeProposals, knowledgeProposalDiff, mergeKnowledgeProposal, discardKnowledgeProposal, inspectRepoSync, pullRepoFromRemote, pushRepoToRemote, listVaultPublicKeys, userOnboarding, submitOnboarding, dismissOnboarding, deviceFlowStart, deviceFlowPoll } from "./loops"
 import { getEphemeralHostPort, probePodman, stopAllWorkspaceContainers, ensureServeContainer, ensurePortProxyContainer, ensureSandboxImage, buildPodmanExecArgs, ensureContainer, containerName, V_LOOP_WORKDIR } from "./podman"
 import { startMcpAuth, completeMcpAuth, probeOAuthSupport, evictOAuthProbe, parseBearerEnvName, mcpRequiredEnvs, parseTemplateVars, type OAuthSupport } from "./mcp-oauth"
 import { DEFAULT_VAULT, loadVaultEnvs } from "./vaults"
@@ -1577,7 +1577,6 @@ app.post("/api/loops", requireAuth, async (c) => {
     ? body.profiles.filter((s: unknown): s is string => typeof s === "string" && s.trim().length > 0)
     : undefined
   const vault = typeof body.vault === "string" && body.vault.trim() ? body.vault.trim() : undefined
-  const knowledgeRw = body.knowledge_rw === true
   const mountAllLoops = body.mount_all_loops === true
   if (mountAllLoops) {
     // Cross-loop view exposes every other loop's chats / workdir / meta.
@@ -1589,7 +1588,7 @@ app.post("/api/loops", requireAuth, async (c) => {
     }
   }
   try {
-    const meta = await createLoop({ title, repo, createdBy: userId, profiles, vault, knowledgeRw, mountAllLoops })
+    const meta = await createLoop({ title, repo, createdBy: userId, profiles, vault, mountAllLoops })
     return c.json(meta)
   } catch (e: any) {
     return c.json({ error: e?.message ?? "create failed" }, 400)
@@ -1610,6 +1609,38 @@ app.post("/api/loops/:id/distill", requireAuth, async (c) => {
     const code = /not found/i.test(msg) ? 404 : 400
     return c.json({ error: msg }, code)
   }
+})
+
+// ── knowledge proposals: the review&merge half of the gated promote ──────
+app.get("/api/knowledge/proposals", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  return c.json({ proposals: await listKnowledgeProposals(userId) })
+})
+
+app.get("/api/knowledge/proposals/diff", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const branch = c.req.query("branch") ?? ""
+  try {
+    return c.json({ diff: await knowledgeProposalDiff(userId, branch) })
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "diff failed" }, 400)
+  }
+})
+
+app.post("/api/knowledge/proposals/merge", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const branch = typeof body.branch === "string" ? body.branch : ""
+  const r = await mergeKnowledgeProposal(userId, branch)
+  if (!r.ok) return c.json({ error: r.error, ...(r.conflict ? { conflict: true } : {}) }, r.conflict ? 409 : 400)
+  return c.json({ ok: true })
+})
+
+app.post("/api/knowledge/proposals/discard", requireAuth, async (c) => {
+  const userId = c.get("userId") as string
+  const body = await c.req.json().catch(() => ({}))
+  const branch = typeof body.branch === "string" ? body.branch : ""
+  return c.json({ ok: await discardKnowledgeProposal(userId, branch) })
 })
 
 app.post("/api/loops/:id/viewed", requireAuth, async (c) => {

@@ -11,7 +11,7 @@ You're running in a **distill loop** — a child loop spawned to extract reusabl
 
 Both are read-only from your standpoint — they're the substrate you're distilling, not files you edit. If either is missing, the source had no record of that kind.
 
-`knowledge/` is **rw** in this loop (worktree on branch `loop/<id>`, same publish workflow as any other rw context: commit → merge trunk → push). Treat publishing knowledge as the goal of this loop.
+`knowledge/` is your private worktree on branch `loop/<id>`, like in any loop. Distill is a workflow, not a permission: produce the distilled docs, **commit them on `loop/<id>` and stop** — the proposal is reviewed & merged by the driver in the Context UI. Never push knowledge `main` directly. Treat a committed, review-ready proposal as the goal of this loop.
 
 ## How to work
 

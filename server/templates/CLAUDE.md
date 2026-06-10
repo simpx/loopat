@@ -11,7 +11,7 @@ You see a virtualized filesystem, all rooted under `/loopat/`:
 - `/loopat/loop/<id>/workdir/`      — the workdir (rw). cwd lives here. For code-repo loops, contents = git worktree of one repo in `context/repos/`.
 - `/loopat/loop/<id>/.claude/`      — internal SDK session state (rw). Don't poke unless debugging.
 - `/loopat/loops/`                  — **admin / cross-loop distill only.** Read-only view of every other loop's `loops/<id>/{meta.json,messages.jsonl,workdir/,...}`. Absent on normal loops. When present, treat it as observation-only: the AI is shoulder-surfing other drivers' sessions — distill insights into knowledge, never echo verbatim chat back to this loop's user.
-- `/loopat/context/knowledge/`      — workspace's distilled docs. **Your private git worktree** on branch `loop/<id>`. Read-only by default; rw if the loop opted in. Other loops see your edits only after you publish (see below).
+- `/loopat/context/knowledge/`      — workspace's distilled docs (rw). **Your private git worktree** on branch `loop/<id>`. Curated layer with a gated promote: commit your changes and STOP — never push knowledge `main` directly; the proposal waits on `loop/<id>` for human review & merge in the Context UI.
 - `/loopat/context/notes/`          — workspace prose layer (rw). **Your private git worktree** on branch `loop/<id>`. `inbox.md`, `focus.md`, plus `memory/` (team memory). Other loops see your edits only after you publish.
 - `/loopat/context/personal/`       — your driver's private space (rw). Includes `memory/` (personal memory) and `.loopat/config.json` (per-user config).
 - `/loopat/context/repos/<name>/`   — workspace repos (rw), **clone-on-demand**. Only already-cloned repos exist as subdirs; the full roster (with git urls) is in `repos/REPOS.md`. Need one that isn't there yet? `git clone <git> /loopat/context/repos/<name>`. The current loop's workdir is typically a worktree of one of them.
@@ -23,8 +23,8 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
 
 ## context conventions
 
-- `/loopat/context/knowledge/` is the **sedimented** doc tree.
-  - **Don't edit knowledge directly with Edit/Write.** Suggest the user use Context tab's "edit by loop" or "distill" — those flow through deliberate human-AI revision. This applies to `.loopat/` too (see below).
+- `/loopat/context/knowledge/` is the **sedimented** doc tree — curated and slow.
+  - Writing is allowed (it's your private worktree), but knowledge changes are **proposals**: commit on `loop/<id>` and stop. **Never `git push` knowledge `main`** — the driver reviews & merges proposals in the Context UI. Prefer the distill flow for anything substantial.
   - Reading is fine and encouraged.
 - `/loopat/context/notes/inbox.md` — workspace scratch prose. Format: one bullet per line, `- xxx`. Append freely.
 - `/loopat/context/notes/focus.md` — `## pinned` and `## listed` sections name the workspace's current foci. Edit when user asks.
@@ -33,7 +33,7 @@ Everything outside `/loopat/` (host's other home dirs, `/etc/private`, etc.) is 
 
 ## publishing context edits (promote)
 
-`notes/` and `knowledge/` are per-loop git worktrees — your edits stay on branch `loop/<id>` until you **promote** them into shared `main`. Use the **`/promote`** skill: it merges in the latest, pushes to `main` (or opens a PR for gated context like `knowledge`/repos), and walks you through any conflict — which you, the loop's AI, resolve in place (you're the merge agent; no other agent, no script). This is the ② edge of `docs/context-flow.md`.
+`notes/` and `knowledge/` are per-loop git worktrees — your edits stay on branch `loop/<id>` until promoted into shared `main`. For **notes** use the **`/promote`** skill: it merges in the latest, pushes to `main`, and walks you through any conflict — which you, the loop's AI, resolve in place (you're the merge agent; no other agent, no script). For **knowledge** the promote is gated: commit on `loop/<id>` and stop — the proposal is reviewed & merged by the driver in the Context UI, never pushed to `main` from inside a loop. This is the ② edge of `docs/context-flow.md`.
 
 **When to promote**: when an edit is genuinely meant for the workspace, not on every save. Working notes / scratch can live unpromoted as long as the loop lives. **Runtime never auto-promotes** — if you don't promote, your edits stay in the worktree and persist as long as the loop does.
 
@@ -64,8 +64,7 @@ For team memory: when an insight is genuinely team-relevant (a convention everyo
 
 ## behavior
 
-- **Edit/Write directly** for `/loopat/loop/<id>/workdir/*`, `/loopat/context/notes/*`, `/loopat/context/personal/*`, and `/loopat/context/repos/*` (when explicitly working in another repo). Edits to notes/knowledge accumulate as uncommitted changes in your loop's worktree — they don't reach the workspace until you commit + publish (see below). Edits to personal still auto-commit on the host side as before.
-- **Don't edit `/loopat/context/knowledge/`** directly — wrong tier, propose user-driven flow instead.
+- **Edit/Write directly** for `/loopat/loop/<id>/workdir/*`, `/loopat/context/notes/*`, `/loopat/context/knowledge/*`, `/loopat/context/personal/*`, and `/loopat/context/repos/*` (when explicitly working in another repo). Edits to notes/knowledge accumulate as uncommitted changes in your loop's worktree — they don't reach the workspace until promoted (see above; knowledge promotes are gated proposals). Edits to personal still auto-commit on the host side as before.
 - **Confirm files exist before referencing** them across docs (Glob or Read first).
 - **Grep `/loopat/context/knowledge/`** when the user asks about a concept you don't recognize.
 - **Don't echo sensitive values** (API keys, tokens, SSH key material, anything that looks like a credential) to chat. Reference by filename or env var name instead.

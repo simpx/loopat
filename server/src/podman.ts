@@ -140,7 +140,6 @@ export type ContainerOptions = {
   loopId: string
   createdBy: string
   vaultName?: string
-  knowledgeRw?: boolean
   mountAllLoops?: boolean
   /** Source roster repo for this loop's workdir (meta.repo). The workdir is a
    *  `git worktree add` off this repo's bare mirror (repo-cache/<repo>), so its
@@ -209,7 +208,7 @@ export type VolumeMount = {
  */
 export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeMount[]> {
   const hostHome = homedir()
-  const { loopId, createdBy, vaultName, knowledgeRw, mountAllLoops, repo } = opts
+  const { loopId, createdBy, vaultName, mountAllLoops, repo } = opts
   const virtualHome = V_HOME(createdBy)
   const mounts: VolumeMount[] = []
 
@@ -235,11 +234,10 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
     mounts.push({ src: cache, dst: cache })
   }
   mounts.push({ src: loopClaudeDir(loopId), dst: V_LOOP_CLAUDE(loopId) })
-  mounts.push({
-    src: loopContextKnowledge(loopId),
-    dst: V_CONTEXT_KNOWLEDGE,
-    ro: !knowledgeRw,
-  })
+  // knowledge is rw like every context worktree — the gate moved to the
+  // promote edge (docs/context-flow.md "Gates"): commits wait on loop/<id>
+  // for review&merge; nothing lands on main from inside the loop.
+  mounts.push({ src: loopContextKnowledge(loopId), dst: V_CONTEXT_KNOWLEDGE })
   mounts.push({ src: loopContextNotes(loopId), dst: V_CONTEXT_NOTES })
   mounts.push({ src: personalDir(createdBy), dst: V_CONTEXT_PERSONAL })
 
@@ -304,7 +302,7 @@ export async function buildVolumeMounts(opts: ContainerOptions): Promise<VolumeM
   }
   const knowledgeRepo = personalKnowledgeDir(createdBy)
   if (existsSync(knowledgeRepo)) {
-    mounts.push({ src: knowledgeRepo, dst: knowledgeRepo, ro: !knowledgeRw })
+    mounts.push({ src: knowledgeRepo, dst: knowledgeRepo })
   }
 
   // chat snapshots (per-loop, ro). Only mount if populated.
@@ -523,7 +521,6 @@ function hashCreateArgs(
   h.update(`loop:${opts.loopId}\n`)
   h.update(`createdBy:${opts.createdBy}\n`)
   h.update(`vault:${opts.vaultName ?? ""}\n`)
-  h.update(`knowledgeRw:${opts.knowledgeRw ? "1" : "0"}\n`)
   h.update(`mountAllLoops:${opts.mountAllLoops ? "1" : "0"}\n`)
   for (const m of [...mounts].sort((a, b) => a.dst.localeCompare(b.dst))) {
     h.update(`vol\t${m.src}\t${m.dst}\t${m.ro ? "ro" : "rw"}\n`)

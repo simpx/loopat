@@ -157,11 +157,6 @@ export type LoopMeta = {
      */
     vault?: string
     /**
-     * If true, /loopat/context/knowledge/ is bound rw instead of ro. Set
-     * for loops that exist to distill notes into knowledge.
-     */
-    knowledge_rw?: boolean
-    /**
      * Admin-only flag: bind the entire LOOPAT_HOME/loops/ tree read-only
      * at /loopat/loops/ so this loop can read every other loop's chat
      * history, workdir, meta, etc. — for cross-loop distill. Granted only
@@ -2299,7 +2294,6 @@ export async function createLoop(opts: {
   createdBy: string
   profiles?: string[]
   vault?: string
-  knowledgeRw?: boolean
   mountAllLoops?: boolean
   /** Per-component git ref for context freshness; default "HEAD" (cached, fast). */
   context?: ContextRefs
@@ -2325,9 +2319,6 @@ export async function createLoop(opts: {
   }
   if (opts.vault && opts.vault !== "default") {
     meta.config = { ...(meta.config ?? {}), vault: opts.vault }
-  }
-  if (opts.knowledgeRw) {
-    meta.config = { ...(meta.config ?? {}), knowledge_rw: true }
   }
   if (opts.mountAllLoops) {
     meta.config = { ...(meta.config ?? {}), mount_all_loops: true }
@@ -2392,11 +2383,83 @@ async function worktreeHead(dir: string): Promise<string | null> {
   return execFileP("git", ["-C", dir, "rev-parse", "--short", "HEAD"]).then((r) => r.stdout.trim()).catch(() => null)
 }
 
+// ── knowledge proposals (gated promote, docs/context-flow.md "Gates") ────
+//
+// A loop's knowledge commits wait on its local `loop/<id>` ref. These helpers
+// are the review&merge side: list proposals (branches ahead of origin's
+// default), merge one into main (an ordinary UI loop: fetch → merge → push
+// with the user's key), or discard one. All against the per-user knowledge
+// main clone — proposals stay local until someone else must see them.
+
+export type KnowledgeProposal = { branch: string; ahead: number; subjects: string[] }
+
+export async function listKnowledgeProposals(user: string): Promise<KnowledgeProposal[]> {
+  const repo = personalKnowledgeDir(user)
+  if (!existsSyncBase(join(repo, ".git"))) return []
+  const def = await remoteDefaultBranch(repo)
+  const base = `origin/${def}`
+  const { stdout } = await execFileP("git", ["-C", repo, "for-each-ref", "refs/heads/loop/", "--format=%(refname:short)"]).catch(() => ({ stdout: "" }))
+  const out: KnowledgeProposal[] = []
+  for (const branch of stdout.split("\n").map((s) => s.trim()).filter(Boolean)) {
+    const log = await execFileP("git", ["-C", repo, "log", "--format=%s", `${base}..${branch}`]).catch(() => null)
+    const subjects = log ? log.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : []
+    if (subjects.length > 0) out.push({ branch, ahead: subjects.length, subjects: subjects.slice(0, 10) })
+  }
+  return out
+}
+
+export async function knowledgeProposalDiff(user: string, branch: string): Promise<string> {
+  const repo = personalKnowledgeDir(user)
+  const def = await remoteDefaultBranch(repo)
+  const { stdout } = await execFileP("git", ["-C", repo, "diff", `origin/${def}...${branch}`], { maxBuffer: 4 * 1024 * 1024 })
+  return stdout
+}
+
+/**
+ * Merge one proposal into origin's default branch — fetch → merge → push with
+ * the user's vault key (the no-AI UI loop). A real conflict is held back: we
+ * abort the merge, leave the proposal branch untouched, and report it.
+ */
+export async function mergeKnowledgeProposal(user: string, branch: string, vault = "default"): Promise<{ ok: true } | { ok: false; conflict?: boolean; error: string }> {
+  const repo = personalKnowledgeDir(user)
+  if (!/^loop\/[a-zA-Z0-9_-]+$/.test(branch)) return { ok: false, error: "invalid branch" }
+  const sshEnv = { ...process.env, GIT_SSH_COMMAND: sshCommandForUser(user, vault) }
+  const def = await remoteDefaultBranch(repo)
+  const tmp = join(repo, ".git", `proposal-merge-${Date.now()}`)
+  try {
+    await execFileP("git", ["-C", repo, "fetch", "--quiet", "origin"], { env: sshEnv, timeout: 30_000 })
+    // Merge in a throwaway worktree so the user's clone HEAD is never touched.
+    await execFileP("git", ["-C", repo, "worktree", "add", "--detach", tmp, `origin/${def}`])
+    try {
+      await execFileP("git", ["-C", tmp, "-c", "user.email=loopat@local", "-c", "user.name=loopat", "merge", "--no-ff", "-m", `merge proposal ${branch}`, branch])
+    } catch (e: any) {
+      await execFileP("git", ["-C", tmp, "merge", "--abort"]).catch(() => {})
+      return { ok: false, conflict: true, error: "merge conflict — resolve in a loop, the proposal is kept" }
+    }
+    await execFileP("git", ["-C", tmp, "push", "origin", `HEAD:${def}`], { env: sshEnv, timeout: 30_000 })
+    // Best-effort cleanup: the branch may still back a live worktree — fine.
+    await execFileP("git", ["-C", repo, "branch", "-D", branch]).catch(() => {})
+    return { ok: true }
+  } catch (e: any) {
+    return { ok: false, error: (e?.stderr ?? e?.message ?? String(e)).toString().split("\n")[0] }
+  } finally {
+    await execFileP("git", ["-C", repo, "worktree", "remove", "--force", tmp]).catch(() => {})
+  }
+}
+
+export async function discardKnowledgeProposal(user: string, branch: string): Promise<boolean> {
+  const repo = personalKnowledgeDir(user)
+  if (!/^loop\/[a-zA-Z0-9_-]+$/.test(branch)) return false
+  return execFileP("git", ["-C", repo, "branch", "-D", branch]).then(() => true).catch(() => false)
+}
+
 /**
  * Spawn a child "distill loop" from a source loop. The child's workdir gets
  * a point-in-time snapshot of the source's conversation files plus a
- * project-tier CLAUDE.md telling the AI it's a distill loop. Knowledge is
- * rw so the child can publish sedimented insights. The source is not
+ * project-tier CLAUDE.md telling the AI it's a distill loop. Distill is a
+ * workflow, not a permission — knowledge is rw everywhere; what makes this
+ * loop special is its prompt + snapshot, and its knowledge commits wait on
+ * `loop/<id>` for review&merge like any other loop's. The source is not
  * touched. Any authenticated user may distill any loop — distill is a
  * read-only relationship.
  */
@@ -2405,10 +2468,12 @@ export async function distillLoop(sourceId: string, byUser: string): Promise<Loo
   if (!source) throw new Error(`source loop ${sourceId} not found`)
 
   const shortId = source.id.slice(0, 6)
+  // Distill is a workflow, not a permission: what makes this loop special is
+  // its prompt + source snapshot. knowledge is rw everywhere; its gate is on
+  // the promote edge (commit waits on loop/<id> for review&merge).
   const child = await createLoop({
     title: `distill: ${shortId} ${source.title}`,
     createdBy: byUser,
-    knowledgeRw: true,
   })
 
   // Snapshot the source's conversation into the child's workdir.

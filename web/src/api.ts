@@ -453,18 +453,16 @@ export async function createLoop(opts: {
   context?: string
   /** Admin-only flags — still go via the internal `/api/loops` endpoint;
    *  v1 doesn't surface them. */
-  knowledgeRw?: boolean
   mountAllLoops?: boolean
 }): Promise<LoopMeta> {
   // Admin-flag path keeps using the internal endpoint (those flags aren't in v1).
-  if (opts.knowledgeRw || opts.mountAllLoops) {
+  if (opts.mountAllLoops) {
     const body: Record<string, unknown> = {
       title: opts.title,
       repo: opts.repo,
       profiles: opts.profiles,
       vault: opts.vault,
     }
-    if (opts.knowledgeRw) body.knowledge_rw = true
     if (opts.mountAllLoops) body.mount_all_loops = true
     const r = await apiFetch("/api/loops", {
       method: "POST",
@@ -2067,6 +2065,34 @@ export async function createApiToken(label: string): Promise<{ tokenId: string; 
 export async function revokeApiToken(tokenId: string): Promise<boolean> {
   const r = await apiFetch(`/api/v1/me/tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
+  })
+  return r.ok
+}
+
+// ── knowledge proposals (gated promote review&merge) ──────────────────────
+export type KnowledgeProposal = { branch: string; ahead: number; subjects: string[] }
+
+export async function listKnowledgeProposals(): Promise<KnowledgeProposal[]> {
+  const r = await apiFetch("/api/knowledge/proposals")
+  if (!r.ok) return []
+  return ((await r.json()).proposals ?? []) as KnowledgeProposal[]
+}
+
+export async function mergeKnowledgeProposal(branch: string): Promise<{ ok: boolean; error?: string; conflict?: boolean }> {
+  const r = await apiFetch("/api/knowledge/proposals/merge", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ branch }),
+  })
+  const body = await r.json().catch(() => ({}))
+  return r.ok ? { ok: true } : { ok: false, error: body.error, conflict: body.conflict }
+}
+
+export async function discardKnowledgeProposal(branch: string): Promise<boolean> {
+  const r = await apiFetch("/api/knowledge/proposals/discard", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ branch }),
   })
   return r.ok
 }

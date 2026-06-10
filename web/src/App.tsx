@@ -316,7 +316,6 @@ function Shell({ ws }: { ws: WorkspaceState }) {
                         const m = await ws.createLoop({
                           title: "cross-loop distill",
                           mountAllLoops: true,
-                          knowledgeRw: true,
                         })
                         navigate(`/loop/${m.id}`)
                       } catch (e: any) {
