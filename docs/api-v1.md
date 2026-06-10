@@ -420,7 +420,7 @@ POST /api/v1/loops/{id}/interrupt
 
 | 端点 | spec | 实现 | 单测 | web 已切到 v1？ | 备注 |
 |---|---|---|---|---|---|
-| `POST /api/v1/loops` | ✅ | `api-v1.ts` | ✅ | NewLoopDialog | admin flag (knowledge_rw / mount_all_loops) 仍走 legacy `/api/loops` |
+| `POST /api/v1/loops` | ✅ | `api-v1.ts` | ✅ | NewLoopDialog | admin flag (mount_all_loops) 仍走 legacy `/api/loops` |
 | `GET  /api/v1/loops` | ✅ | `api-v1.ts` | ✅ | — | web sidebar 用 legacy 端点（带更多字段） |
 | `GET  /api/v1/loops/{id}` | ✅ | `api-v1.ts` | ✅ | — | 同上 |
 | `DELETE /api/v1/loops/{id}` | ✅ | `api-v1.ts` | ✅ | — | web 用 legacy PATCH (archived=true) |
@@ -460,7 +460,7 @@ web ─── operator ── ws.send (set_goal, complete_goal, provider_select,
 
 | 端点 | 用途 | 现在谁在用 |
 |---|---|---|
-| `/api/loops/*` (legacy REST) | admin 创建 (knowledge_rw 等) / list / patch | web sidebar、admin 操作 |
+| `/api/loops/*` (legacy REST) | admin 创建 (mount_all_loops 等) / list / patch | web sidebar、admin 操作 |
 | `/api/loops/:id/chat-history` | DM 历史 | 暂未启用 chat 功能 |
 | `/ws/loop/:id` | history 回放 + initial state + operator 出站 | useLoopRuntime |
 | `/ws/loop-status` | sidebar 状态点 | useLoopStatus |

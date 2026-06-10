@@ -114,9 +114,9 @@ So a gated context (knowledge by default) works like this:
   whose CLAUDE.md carries the distill instructions and a snapshot of the
   source — what makes it special is its prompt, not its mounts.
 
-> *Status: the current implementation still gates knowledge at the mount
-> (`knowledge_rw` + ro bind). It migrates to this model with the context-mount
-> refactor.*
+> *Status: implemented — worktrees are rw everywhere, proposals wait on
+> `loop/<id>`, and the Context UI's knowledge sidebar carries review & merge
+> (`/api/knowledge/proposals`).*
 
 ---
 

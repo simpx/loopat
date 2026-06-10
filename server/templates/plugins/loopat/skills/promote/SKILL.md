@@ -1,5 +1,5 @@
 ---
-description: Promote this loop's context into shared consensus — the ② edge of docs/context-flow.md. Use when work in a context worktree (notes / knowledge / personal / a repo workdir) is worth sharing, or when the user says promote / share this / publish / sync up / 发布 / 同步 / 合并上去. You merge the latest and push to main (or open a PR for gated context), resolving any conflict three-way yourself — that is the point: the loop's own AI resolves conflicts, nothing else does.
+description: Promote this loop's context into shared consensus — the ② edge of docs/context-flow.md. Use when work in a context worktree (notes / knowledge / personal / a repo workdir) is worth sharing, or when the user says promote / share this / publish / sync up / 发布 / 同步 / 合并上去. For notes/personal you merge the latest and push to main; for knowledge you commit and stop (the proposal is reviewed & merged in the Context UI); for repos follow the team's PR flow. You resolve any conflict three-way yourself — that is the point: the loop's own AI resolves conflicts, nothing else does.
 ---
 
 # promote — share a loop's context
@@ -28,13 +28,17 @@ git merge origin/main
 - `git add` the resolved files, then `git commit` to finish the merge.
 - (`git merge --abort` backs out cleanly.)
 
-Then push:
+Then land it — how depends on the layer:
 
 ```sh
 # ungated — notes · personal — straight into main:
 git push origin HEAD:main
 
-# gated — knowledge · repos — open a PR instead:
+# gated — knowledge — commit and STOP. Do NOT push anywhere:
+# your commits wait on this loop's local `loop/<id>` ref as a PROPOSAL;
+# the driver reviews & merges them in the Context UI.
+
+# repos — follow the team's flow for that repo (PR, or direct push):
 git push origin HEAD
 gh pr create --base main --head "$(git symbolic-ref --short HEAD)" --fill
 ```
@@ -47,7 +51,8 @@ worked), re-run `git merge origin/main`, resolve again, push again. It converges
 - Always **merge, never rebase** — both parents survive, so a bad merge is
   revertible.
 - Resolve conflicts **here, yourself** — never hand off to another agent.
-- `notes` / `personal` push straight to `main`; `knowledge` / repos are gated —
-  open a PR. (Gating is the team's choice; default for knowledge/repos = PR.)
+- `notes` / `personal` push straight to `main`. `knowledge` is gated: commit
+  and stop — never push knowledge `main`; the proposal is reviewed in the
+  Context UI. Repos follow the team's flow (PR or direct push).
 - Trunk is `main` (your runtime context block names it if it ever differs).
 - Solo works the same: `origin` is just a loopat-hosted local repo — same commands.

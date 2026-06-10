@@ -67,9 +67,10 @@ remotes and reports `✓ knowledge / ✓ notes / ✓ repos`.
 
 ## 2. Knowledge repo
 
-`knowledge/` is **read-only** inside sandboxes. Anything you commit
-here is visible to every loop on the workspace and forms the team's
-durable context layer.
+`knowledge/` is the team's durable, curated context layer. Loops write it
+freely in their own worktree, but their commits wait as **proposals** for
+review & merge in the Context UI (gated promote — see docs/context-flow.md
+"Gates"). Anything that lands on `main` is visible to every loop.
 
 Layout once provisioned:
 
