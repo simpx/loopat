@@ -34,7 +34,7 @@ else {
 
 export default defineConfig({
   testDir: import.meta.dirname,
-  testMatch: ["{reply,memory,tooluse,rename,twoloops,gitcommit,gitdiff,gitstage,restart,readfile,secondmsg,filestree,distill,folder,archive,multistep,interrupt,contextfiles,context,ai-extra}/journey.spec.ts"],
+  testMatch: ["{reply,memory,tooluse,rename,twoloops,gitcommit,gitdiff,gitstage,restart,readfile,secondmsg,filestree,distill,folder,archive,multistep,interrupt,contextfiles,context,ai-extra,context-latest,context-isolation,promote-absorb,structure-automerge}/journey.spec.ts"],
   timeout: 300_000, retries: 0, workers: 1,
   globalSetup: "./setup.ts", globalTeardown: "./teardown.ts",
   use: { baseURL: `http://127.0.0.1:${vitePort}`, trace: "on-first-retry", screenshot: "only-on-failure", storageState: join(import.meta.dirname, ".auth.json") },

@@ -24,7 +24,7 @@ export function cleanupLoop(loopId: string): void {
 }
 
 /** Create a loop on roster1 via the UI, return its raw uuid. */
-export async function createLoop(page: Page, title: string): Promise<string> {
+export async function createLoop(page: Page, title: string, opts?: { freshness?: "Latest" | "Cached" }): Promise<string> {
   await page.goto("/loop");
   await expect(page.getByRole("button", { name: /^\+?\s*New Loop$/i }).first()).toBeVisible({ timeout: 15_000 });
   const createResp = page.waitForResponse((r) => r.url().includes("/api/v1/loops") && r.request().method() === "POST", { timeout: 15_000 });
@@ -32,6 +32,7 @@ export async function createLoop(page: Page, title: string): Promise<string> {
   await expect(page.getByText("New loop", { exact: true })).toBeVisible({ timeout: 5_000 });
   await page.getByRole("combobox").first().selectOption("roster1");
   await page.getByPlaceholder("refactor-gateway").fill(title);
+  if (opts?.freshness) await page.getByText(opts.freshness, { exact: true }).click();
   await page.getByRole("button", { name: "create", exact: true }).click();
   const id = String((await (await createResp).json()).id ?? "").replace(/^loop_/, "");
   expect(id).toMatch(/^[a-f0-9-]+$/);
@@ -47,20 +48,50 @@ export async function bootSandbox(page: Page, loopId: string): Promise<void> {
 }
 
 /** Send a chat message and wait for a non-empty, non-error assistant reply. */
-export async function sendAndAwaitReply(page: Page, text: string): Promise<string> {
+export async function sendAndAwaitReply(page: Page, text: string, waitFor?: RegExp): Promise<string> {
   const a = page.locator('[data-role="assistant"]');
-  const before = await a.count(); // wait for a NEW assistant msg, not a stale one
+  const before = await a.count(); // only look at messages from THIS turn
   const composer = page.getByRole("textbox", { name: "Message input" });
   await expect(composer).toBeVisible({ timeout: 15_000 });
   await composer.click();
   await composer.fill(text);
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect.poll(async () => {
+  // A tool-using turn renders tool cards as assistant messages BEFORE the final
+  // text — "last non-empty" would return a Bash card. Aggregate every message
+  // of this turn and poll until the expected pattern (or any text) shows up.
+  const joined = async () => {
     const n = await a.count();
-    if (n <= before) return "";
-    return (await a.nth(n - 1).innerText()).trim() ? "ok" : "";
-  }, { timeout: 180_000, intervals: [2_000, 3_000, 5_000] }).toBe("ok");
-  const last = (await a.last().innerText()).trim();
-  expect(last, "no error event").not.toContain("⚠️");
-  return last;
+    const parts: string[] = [];
+    for (let i = before; i < n; i++) parts.push((await a.nth(i).innerText()).trim());
+    return parts.filter(Boolean).join("\n");
+  };
+  await expect.poll(joined, { timeout: 180_000, intervals: [2_000, 3_000, 5_000] })
+    .toMatch(waitFor ?? /\S/);
+  const all = await joined();
+  expect(all, "no error event").not.toContain("⚠️");
+  return all;
+}
+
+// ── fixture origin (the sshd container's bare repos) ──────────────────────
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** The fixture sshd container id, recorded by setup.ts in .test-meta.json. */
+export function fixtureContainer(): string {
+  const meta = JSON.parse(readFileSync(join(import.meta.dirname, ".test-meta.json"), "utf8"));
+  if (!meta.fixtureContainer) throw new Error("fixtureContainer missing from .test-meta.json");
+  return meta.fixtureContainer as string;
+}
+
+/** Run a git command against a fixture bare repo (origin TRUTH). Root exec on
+ *  a git-owned repo → waive "dubious ownership" with safe.directory=*. */
+export function originGit(repo: string, ...args: string[]): string {
+  return execFileSync("podman", ["exec", fixtureContainer(), "git", "-c", "safe.directory=*", "-C", `/srv/git/${repo}.git`, ...args]).toString().trim();
+}
+
+/** Push one file to the fixture notes origin from INSIDE the fixture container
+ *  (a second writer that isn't any loop) — used to advance origin externally. */
+export function originAdvanceNotes(file: string, content: string, msg: string): void {
+  const sh = `set -e; rm -rf /tmp/adv && git clone -q /srv/git/notes.git /tmp/adv && cd /tmp/adv && echo '${content}' > ${file} && git add . && git -c user.email=t@t -c user.name=t commit -qm '${msg}' && git push -q origin HEAD`;
+  execFileSync("podman", ["exec", fixtureContainer(), "su", "git", "-c", sh]);
 }

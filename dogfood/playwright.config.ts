@@ -114,7 +114,7 @@ export default defineConfig({
   // fixture provider). The preset suite boots an ALREADY-ONBOARDED stack, so
   // running first-run under it would fail (no fixture provider env). Run it via
   // `bun run dogfood:first-run` instead.
-  testIgnore: ["**/first-run/**", "**/sync/**", "**/subagent-model/**", "**/{reply,memory,tooluse,rename,twoloops,gitcommit,gitdiff,gitstage,restart,readfile,secondmsg,filestree,distill,folder,archive,multistep,interrupt,contextfiles,context,ai-extra}/**"],
+  testIgnore: ["**/first-run/**", "**/sync/**", "**/subagent-model/**", "**/{reply,memory,tooluse,rename,twoloops,gitcommit,gitdiff,gitstage,restart,readfile,secondmsg,filestree,distill,folder,archive,multistep,interrupt,contextfiles,context,ai-extra,context-latest,context-isolation,promote-absorb,structure-automerge}/**"],
   // Real AI + real container — generous timeout, no retries (each run costs
   // money and is non-deterministic).
   timeout: 300_000,
