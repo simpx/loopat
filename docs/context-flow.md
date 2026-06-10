@@ -68,12 +68,55 @@ git push origin HEAD:main   # ungated: straight into consensus
 ```
 
 Promote is **deliberate** — the loop's AI decides *when* work is worth sharing,
-not every turn. When a context is **gated**, promote opens a PR instead:
+not every turn. When a context is **gated**, promote stops short of `main`
+instead (see [Gates](#gates-protect-the-promote-edge-not-the-mount)):
 
 ```sh
-git push origin HEAD:refs/heads/loop/<id>
-gh pr create --base main --head loop/<id>   # gated: review, then merge
+git commit                  # gated: the work WAITS on the local loop/<id> ref
+                            # review & merge folds it into main — see Gates
 ```
+
+---
+
+## Gates protect the promote edge, not the mount
+
+> **Real authorization is always the key.** The ssh key / git platform decides
+> who may write an origin — loopat never invents a second permission layer on
+> top. A *gate* is a guardrail against an AI landing unreviewed work on a
+> curated layer — and a guardrail belongs on the edge where the damage would
+> happen: **② promote**, not ① pull.
+
+So a gated context (knowledge by default) works like this:
+
+- **The worktree is always rw.** A loop may read and write any of its context
+  worktrees freely — a dirty worktree is private and dies with the loop, so
+  blocking the AI's hand at the mount protects nothing and only fights the
+  driver who *does* hold the key. (No `ro` mounts, no `knowledge_rw` flag, no
+  privileged loop kinds.)
+- **The gate's one invariant: `main` is untouched.** A gated promote commits
+  onto the loop's local `loop/<id>` ref and stops. The branch ref lives in the
+  user's main clone, so the proposal survives the loop itself.
+- **Where the proposal waits depends on who reviews it:**
+  - *Self-review (solo — the default):* it stays **local**. The UI lists
+    pending proposal branches, shows the diff, and **review & merge** runs an
+    ordinary UI loop — `fetch → merge → push origin HEAD:main` with **your**
+    key. Origin stays clean; no branch pollution; no platform API needed.
+  - *Cross-review (another user / another server):* origin is the only shared
+    medium, so the proposal travels — `git push origin HEAD:loop/<id>`, and
+    where the platform supports it, a PR/MR via the integration. Platform
+    branch protection is then the real lock, for everyone including you.
+- **Enforcement is layered, strongest available wins:** platform branch
+  protection → server-side hook (self-hosted bare) → prompt convention. The
+  prompt layer is part of the contract: every loop's composed CLAUDE.md states,
+  per context layer, what promote means there — for knowledge: *"curated layer;
+  commit your distillation and stop; never push `main` directly."*
+- **Distill is a workflow, not a permission.** The distill button opens a loop
+  whose CLAUDE.md carries the distill instructions and a snapshot of the
+  source — what makes it special is its prompt, not its mounts.
+
+> *Status: the current implementation still gates knowledge at the mount
+> (`knowledge_rw` + ro bind). It migrates to this model with the context-mount
+> refactor.*
 
 ---
 
@@ -122,7 +165,9 @@ the git carrier of "a loop is a directory," not a unit of sync:
 
 - **ungated** (notes · personal) — promote pushes `HEAD:main` and leaves no
   branch behind; the ref dies with the loop.
-- **gated** (knowledge · repos) — the branch is pushed as a PR's source.
+- **gated** (knowledge · repos) — the work waits on the ref for review & merge;
+  it reaches origin (as a pushed branch / PR source) only when someone else
+  must see it (see [Gates](#gates-protect-the-promote-edge-not-the-mount)).
 
 Many loops on a device share one object store via worktrees — N loops are N
 checkouts, not N clones (add `--filter=blob:none` to keep even that lean).
