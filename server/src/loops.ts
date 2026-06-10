@@ -857,20 +857,6 @@ export async function submitOnboarding(
           try { await provider.ensureRepo({ token: value, baseUrl: provider.baseUrl }, repoName, { private: true }) } catch {}
         }
       }
-      const sshDir = join(personalDir(userId), ".loopat", "vaults", vault, "mounts", "home", ".ssh")
-      const keyFile = join(sshDir, "id_ed25519")
-      try {
-        const content = await readFile(keyFile, "utf8").catch(() => "")
-        if (!content.includes("OPENSSH PRIVATE KEY")) {
-          await rm(keyFile, { force: true })
-          await rm(keyFile + ".pub", { force: true })
-          await mkdir(sshDir, { recursive: true })
-          await execFileP("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `loopat:${userId}`, "-f", keyFile])
-          console.log(`[loopat] regenerated SSH key for ${userId}`)
-        }
-      } catch (e: any) {
-        console.warn(`[loopat] SSH key fix failed for ${userId}: ${e?.message ?? e}`)
-      }
     } else if (field.action === "provider-field") {
       providerFields[field.name] = value
     }

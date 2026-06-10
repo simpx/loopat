@@ -1,7 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { useNavigate } from "react-router-dom"
-import { useWorkspace } from "../ctx"
-import { submitOnboarding, createLoop, listPersonalRepos, type OnboardingWizard as WizardData, type OnboardingStatus, type WizardStep } from "../api"
+import { submitOnboarding, listPersonalRepos, type OnboardingWizard as WizardData, type OnboardingStatus, type WizardStep } from "../api"
 
 export function OnboardingWizard({
   wizard,
@@ -10,8 +8,6 @@ export function OnboardingWizard({
   wizard: WizardData
   onAdvance: (next: OnboardingStatus) => void
 }) {
-  const navigate = useNavigate()
-  const ws = useWorkspace()
   const [currentStep, setCurrentStep] = useState(() => {
     const first = wizard.steps.findIndex((s) => !s.completed)
     return first >= 0 ? first : wizard.steps.length - 1
@@ -62,27 +58,7 @@ export function OnboardingWizard({
         await fetch("/api/onboarding/done", { method: "POST" }).catch(() => {})
         await fetch("/api/personal/pull", { method: "POST" }).catch(() => {})
         await fetch("/api/personal/push", { method: "POST" }).catch(() => {})
-        const aiStep = steps.find((s) => s.id === "ai-provider")
-        const hasAiKey = aiStep?.completed || Object.keys(values).some((k) => k.includes("API_KEY") && values[k]?.trim())
-        if (hasAiKey) {
-          try {
-            const loop = await createLoop({ title: "环境检查", profiles: ["bailian-fe-default"] })
-            if (ws.currentUser?.id) {
-              localStorage.setItem("loopat:lastLoop:" + ws.currentUser.id, loop.id)
-            }
-            navigate("/loop/" + loop.id)
-            onAdvance(finish)
-            fetch("/api/v1/loops/loop_" + loop.id + "/messages", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ content: "/bailian-mate:check-env" }),
-            }).catch(() => {})
-          } catch {
-            onAdvance(finish)
-          }
-        } else {
-          onAdvance(finish)
-        }
+        onAdvance(finish)
       } else {
         setCurrentStep((s) => s + 1)
         setValues({})
