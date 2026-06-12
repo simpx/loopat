@@ -7,6 +7,8 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { getDefaultProfiles, getLoopStats, listProfiles, getContextRepos, listVaults, type LoopStats, type ProfileEntry, type ContextRepoSpec } from "../../api"
+import { RepoSelect } from "./RepoSelect"
+import { readNewLoopMemory, resolveStoredFreshness, resolveStoredProfiles, resolveStoredRepo, resolveStoredVault, writeNewLoopMemory } from "./newLoopMemory"
 
 export function NewLoopDialog({
   onClose,
@@ -34,21 +36,23 @@ export function NewLoopDialog({
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    getContextRepos().then((r) => setRepos(r.repos))
+    const memory = readNewLoopMemory(localStorage)
+    getContextRepos().then((r) => {
+      setRepos(r.repos)
+      setRepo(resolveStoredRepo(memory, r.repos))
+    })
     // Pre-check the user's default_profiles from personal config (diff style:
     // dialog opens with the user's typical setup, they add/remove from there).
     Promise.all([listProfiles(), getDefaultProfiles()]).then(([allProfiles, defaults]) => {
       setProfiles(allProfiles)
       setDefaultProfileNames(defaults)
-      // Only pre-check defaults that actually exist as profiles in the workspace
-      const available = new Set(allProfiles.map((p) => p.name))
-      setSelectedProfiles(new Set(defaults.filter((n) => available.has(n) && n !== "base")))
+      setSelectedProfiles(new Set(resolveStoredProfiles(memory, allProfiles, defaults)))
     })
     listVaults().then((vs) => {
       setVaults(vs)
-      if (vs.includes("default")) setVault("default")
-      else if (vs.length > 0) setVault(vs[0])
+      setVault(resolveStoredVault(memory, vs))
     })
+    setFreshness(resolveStoredFreshness(memory))
     inputRef.current?.focus()
   }, [])
 
@@ -104,6 +108,12 @@ export function NewLoopDialog({
         vault: vault || undefined,
         context,
       })
+      writeNewLoopMemory(localStorage, {
+        repo,
+        profiles: [...selectedProfiles],
+        vault,
+        freshness,
+      })
     } finally {
       setBusy(false)
     }
@@ -135,19 +145,11 @@ export function NewLoopDialog({
         <form id="new-loop-form" onSubmit={submit} className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-5 py-4 flex flex-col gap-4">
 
           <DialogField label="Repo" hint="Sets the workdir. Optional — leave (none) for an empty workdir.">
-            <select
+            <RepoSelect
               value={repo}
-              onChange={(e) => setRepo(e.target.value)}
-              className="w-full px-3 py-2.5 sm:py-1.5 text-base sm:text-sm border border-gray-300 rounded outline-none focus:border-gray-500 bg-white"
-            >
-              <option value="">(none — empty workdir)</option>
-              {repos.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {r.name}
-                  {r.git ? ` · ${r.git}` : ""}
-                </option>
-              ))}
-            </select>
+              onChange={setRepo}
+              repos={repos.map((r) => ({ name: r.name, remote: r.git || undefined }))}
+            />
             {repos.length === 0 && (
               <div className="text-[11px] text-gray-400 mt-1">
                 No repos in the roster. Add them on the Context → Repos page.
