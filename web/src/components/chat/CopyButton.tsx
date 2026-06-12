@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useClipboard } from "@/lib/useClipboard";
 
 interface CopyButtonProps {
   content: string;
@@ -11,15 +11,7 @@ interface CopyButtonProps {
 }
 
 export default function CopyButton({ content, className, iconClassName }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    if (!content || copied) return;
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
+  const { copied, copy } = useClipboard(2000);
 
   return (
     <Tooltip>
@@ -28,7 +20,7 @@ export default function CopyButton({ content, className, iconClassName }: CopyBu
           type="button"
           variant="ghost"
           size="icon-xs"
-          onClick={handleCopy}
+          onClick={() => void copy(content)}
           className={className}
           title="Copy message"
         >

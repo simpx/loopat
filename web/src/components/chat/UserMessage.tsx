@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   MessagePrimitive,
   useAuiState,
@@ -6,6 +6,7 @@ import {
 import { MarkdownBlock } from "./MarkdownBlock";
 import { ChevronDownIcon, ChevronUpIcon, FileText, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import MessageCopyButton from "./MessageCopyButton";
 
 function extractTime(messageId: string | undefined): string {
   if (!messageId) return "";
@@ -54,11 +55,22 @@ function FileCard({ filePath, content }: { filePath: string; content: string }) 
 
 export default function UserMessage() {
   const messageId = useAuiState((s) => s.message.id);
+  const textContent = useAuiState((s) => {
+    const parts = s.message.content;
+    if (!Array.isArray(parts)) return "";
+    return parts
+      .filter((p: { type: string }) => p.type === "text")
+      .map((p: { text?: string }) => p.text ?? "")
+      .join("");
+  });
   const time = extractTime(messageId);
   const [expanded, setExpanded] = useState(false);
   const [needsTruncation, setNeedsTruncation] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const getPlainText = useCallback(() => textContent, [textContent]);
 
   const measureRef = (el: HTMLDivElement | null) => {
+    contentRef.current = el;
     if (!el) return;
     setNeedsTruncation(el.scrollHeight > 72);
   };
@@ -111,7 +123,17 @@ export default function UserMessage() {
         </button>
       )}
 
-      {time && <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-gray-400"><span>{time}</span></div>}
+      {(time || textContent) && (
+        <div data-copy-ignore className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-gray-400">
+          {textContent && (
+            <MessageCopyButton
+              contentRef={contentRef}
+              getPlainText={getPlainText}
+            />
+          )}
+          {time && <span>{time}</span>}
+        </div>
+      )}
     </MessagePrimitive.Root>
   );
 }
