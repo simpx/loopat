@@ -319,7 +319,7 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
     }
   }, [pickedPath, searchParams, setSearchParams])
   const [reloadKey, setReloadKey] = useState(0)
-  const [showNewFile, setShowNewFile] = useState(false)
+  const [showNewFile, setShowNewFile] = useState<{ initialPath: string } | null>(null)
   const [query, setQuery] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [creating, setCreating] = useState<{ type: "file" | "folder"; path: string } | null>(null)
@@ -393,13 +393,17 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
   const onCreate = async (path: string) => {
     const r = await vaultCreateFile(vault, path)
     if (r.ok) {
-      setShowNewFile(false)
+      setShowNewFile(null)
       setReloadKey((k) => k + 1)
       setPickedPath(path)
     } else {
       alert(`failed: ${r.error}`)
     }
   }
+
+  const handleAddInDir = useCallback((node: TreeNodeData) => {
+    setShowNewFile({ initialPath: node.path ? node.path + "/" : "" })
+  }, [])
 
   const handleCreate = async () => {
     if (!creating || !newName.trim()) { setCreating(null); return }
@@ -501,7 +505,7 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
           className="flex-1 min-w-0 bg-transparent outline-none text-[12px] text-gray-700 placeholder:text-gray-400"
         />
         <button
-          onClick={() => setShowNewFile(true)}
+          onClick={() => setShowNewFile({ initialPath: "" })}
           className="text-gray-500 hover:text-gray-900 px-1.5 rounded hover:bg-gray-100 text-xs"
           title="new file"
         >
@@ -552,6 +556,7 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
               onLoadChildren={handleLoadChildren}
               getContextActions={getContextActions}
               onAction={handleAction}
+              onAddInDir={handleAddInDir}
               nodeClassName={getNodeClassName}
               reloadKey={reloadKey}
             />
@@ -615,7 +620,14 @@ function VaultPane({ vault, initialFile, initialEditing }: { vault: VaultId; ini
           </div>
         )}
       </main>
-      {showNewFile && <NewFileDialog vault={vault} onClose={() => setShowNewFile(false)} onCreate={onCreate} />}
+      {showNewFile && (
+        <NewFileDialog
+          vault={vault}
+          initialPath={showNewFile.initialPath}
+          onClose={() => setShowNewFile(null)}
+          onCreate={onCreate}
+        />
+      )}
       {creating && (
         <CreateItemDialog
           type={creating.type}
@@ -1194,14 +1206,26 @@ function DocView({
 
 function NewFileDialog({
   vault,
+  initialPath = "",
   onClose,
   onCreate,
 }: {
   vault: VaultId
+  initialPath?: string
   onClose: () => void
   onCreate: (path: string) => void
 }) {
-  const [path, setPath] = useState("")
+  const [path, setPath] = useState(initialPath)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    const input = inputRef.current
+    if (!input) return
+    input.focus()
+    const end = input.value.length
+    input.setSelectionRange(end, end)
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center" onClick={onClose}>
       <div
@@ -1210,10 +1234,14 @@ function NewFileDialog({
       >
         <div className="text-base font-semibold text-gray-900 mb-3">new file in {vault}/</div>
         <input
-          autoFocus
+          ref={inputRef}
           type="text"
           value={path}
           onChange={(e) => setPath(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && path.trim()) onCreate(path.trim())
+            if (e.key === "Escape") onClose()
+          }}
           placeholder="loopat/new-doc.md"
           className="w-full px-3 py-2 text-sm border border-gray-300 rounded outline-none focus:border-gray-500 font-mono"
         />

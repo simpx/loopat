@@ -64,6 +64,8 @@ export type TreeProps = {
   nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
   /** Bump to force re-fetch children for all nodes */
   reloadKey?: number
+  /** Called when the inline add button on a directory row is clicked */
+  onAddInDir?: (node: TreeNodeData) => void
 }
 
 export function Tree({
@@ -78,6 +80,7 @@ export function Tree({
   renderNode,
   nodeClassName,
   reloadKey,
+  onAddInDir,
 }: TreeProps) {
   return (
     <>
@@ -95,6 +98,7 @@ export function Tree({
           renderNode={renderNode}
           nodeClassName={nodeClassName}
           reloadKey={reloadKey}
+          onAddInDir={onAddInDir}
         />
       ))}
     </>
@@ -113,6 +117,7 @@ function TreeNode({
   renderNode,
   nodeClassName,
   reloadKey,
+  onAddInDir,
 }: {
   treeId: string
   entry: TreeNodeData
@@ -125,6 +130,7 @@ function TreeNode({
   renderNode?: (node: TreeNodeData, depth: number, isOpen: boolean, toggleOpen: () => void) => ReactNode
   nodeClassName?: (node: TreeNodeData, depth: number, isOpen: boolean, isPicked: boolean) => string
   reloadKey?: number
+  onAddInDir?: (node: TreeNodeData) => void
 }) {
   const [open, setOpen] = useState(() => getExpanded(treeId).has(entry.path))
   const [children, setChildren] = useState<TreeNodeData[] | null>(null)
@@ -187,6 +193,7 @@ function TreeNode({
                   renderNode={renderNode}
                   nodeClassName={nodeClassName}
                   reloadKey={reloadKey}
+                  onAddInDir={onAddInDir}
                 />
               ))}
             </>
@@ -206,7 +213,7 @@ function TreeNode({
 
     return (
       <>
-        <div onContextMenu={handleContextMenu}>
+        <div className="relative group/treerow" onContextMenu={handleContextMenu}>
           <button
             type="button"
             onClick={toggleOpen}
@@ -214,12 +221,28 @@ function TreeNode({
               ? nodeClassName(entry, depth, open, false)
               : "w-full py-1 flex items-center gap-1.5 hover:bg-gray-50 text-left group"
             }
-            style={{ paddingLeft, paddingRight: 8 }}
+            style={{ paddingLeft, paddingRight: onAddInDir ? 32 : 8 }}
           >
             <span className="text-gray-500 w-3">{open ? "▾" : "▸"}</span>
             <span className="text-gray-500">{open ? <FolderOpen size={13} /> : <Folder size={13} />}</span>
             <span className="text-[13px] text-gray-900 truncate">{entry.name}</span>
           </button>
+          {onAddInDir && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onAddInDir(entry)
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 p-1 rounded text-gray-500 hover:text-gray-900 hover:bg-gray-200 opacity-100 [@media(hover:hover)]:opacity-0 group-hover/treerow:opacity-100 focus:opacity-100 transition-opacity"
+              title="new file in this directory"
+              aria-label="new file in this directory"
+            >
+              <Plus size={14} />
+            </button>
+          )}
         </div>
         {loading && (
           <div className="text-[12px] text-gray-400 italic" style={{ paddingLeft: paddingLeft + 12 }}>
@@ -242,6 +265,7 @@ function TreeNode({
                 renderNode={renderNode}
                 nodeClassName={nodeClassName}
                 reloadKey={reloadKey}
+                onAddInDir={onAddInDir}
               />
             ))}
             {children.length === 0 && (
