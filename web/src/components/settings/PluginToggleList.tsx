@@ -9,6 +9,7 @@ import {
   type MarketplaceSource,
 } from "@/api"
 import { Switch } from "@/components/ui/switch"
+import { fuzzyMatch } from "@/lib/fuzzy"
 import { Plus, Trash2, Package, Search, RefreshCw, Store, ExternalLink, X, ChevronDown, AlertCircle } from "lucide-react"
 
 export function PluginToggleList({
@@ -225,16 +226,22 @@ function MarketplaceBrowser({
 
   const mpNames = [...new Set(plugins.map((p) => p.marketplaceName).filter(Boolean))].sort()
 
-  const filtered = plugins.filter((p) => {
-    if (filterMp !== "all" && p.marketplaceName !== filterMp) return false
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      if (!p.name.toLowerCase().includes(q) &&
-          !p.marketplaceName.toLowerCase().includes(q) &&
-          !(p.description && p.description.toLowerCase().includes(q))) return false
-    }
-    return true
-  })
+  const query = search.trim()
+  const filtered = query
+    ? plugins
+        .map((plugin, index) => {
+          if (filterMp !== "all" && plugin.marketplaceName !== filterMp) return null
+          const nameMatch = fuzzyMatch(query, plugin.name)
+          const marketplaceMatch = fuzzyMatch(query, plugin.marketplaceName)
+          const descriptionMatch = fuzzyMatch(query, plugin.description ?? "")
+          const score = Math.max(nameMatch.score, marketplaceMatch.score, descriptionMatch.score)
+          if (!nameMatch.matched && !marketplaceMatch.matched && !descriptionMatch.matched) return null
+          return { plugin, score, index }
+        })
+        .filter((result): result is { plugin: PluginWithStatus; score: number; index: number } => result !== null)
+        .sort((a, b) => b.score - a.score || a.index - b.index)
+        .map(({ plugin }) => plugin)
+    : plugins.filter((p) => filterMp === "all" || p.marketplaceName === filterMp)
 
   // Group by marketplace
   const grouped: Record<string, PluginWithStatus[]> = {}
